@@ -207,7 +207,8 @@ def _rule_7(step: Step, n: int) -> bool:
 
 
 def _plain(value: Any) -> Any:
-    """A domain value's copy in exact ``dict``, ``list`` and ``str``, as the ledger stores it."""
+    """A domain value's copy in exact ``dict``, ``list`` and ``str``, as the ledger stores it,
+    a ``-0.0`` as ``0.0``, as the record writes it."""
     t = type(cast(object, value))
     if t is dict:
         return {string_data(k): _plain(v) for k, v in cast("dict[str, Any]", value).items()}
@@ -215,6 +216,8 @@ def _plain(value: Any) -> Any:
         return [_plain(v) for v in cast("list[Any]", value)]
     if issubclass(t, str):
         return string_data(value)
+    if t is float and value == 0:
+        return 0.0
     return value
 
 

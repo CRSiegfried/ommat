@@ -80,7 +80,7 @@ A caller dispatches on `plan.kind`, never on the verdict alone: a `broken` plan 
 
 A rule, a `when` and the policy do not change a value they read. A read returns the board's own value, not a copy, so a change reaches every later reader in the turn, while the record keeps the value as it was written.
 
-A `-0.0` in a value written to the board, an answer's probability or member included, is held as `0.0`, as the record writes it, so a component reads the same value live and in replay.
+A `-0.0` in a value written to the board, an answer's probability or member included, or in a plan's literal or requirement value, is held as `0.0`, as the record writes it, so a component reads the same value live and in replay.
 
 A marker a rule returns is written with its cause when each of the cause's refs is a ref the design provides, with or without a field path, a source, rule or tool name, a parameter path, `policy`, `codec`, `rule:N` or `step:N`. Otherwise the rule's entry is `Unavailable` with `invalid-return` naming the rule, so a cause carries none of the turn's input.
 

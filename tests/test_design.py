@@ -192,7 +192,8 @@ class _ClassRaises(dict[str, Any]):
 
 
 def test_a_design_types_constructor_reads_a_field_by_its_type_not_its_class_attribute() -> None:
-    # Not a sequence by its type, so each is kept as given for check 10 to name.
+    # Not a sequence by its type, needs and refs are kept as given for check 10 to name; a
+    # mapping's provides is copied. Nothing reads __class__ on the way.
     given = _ClassRaises()
     assert Source({"t:x": t.string}, needs=given).needs is given  # pyright: ignore[reportArgumentType]
     assert Group(refs=given).refs is given  # pyright: ignore[reportArgumentType]

@@ -83,9 +83,9 @@ def axis(
     minus or plus 1, on an integer axis the nearest integer beyond it). On an integer axis a
     boundary that is not integral, or of magnitude above 2^53 - 1, is no point, but the
     integers either side of it within those bounds are, and an end past that bound is the
-    bound. A boundary outside the interval is not on the axis; an axis
-    so left with no boundary has the interval's two bounds, or on an unbounded integer axis
-    the domain's. An axis given no boundary has no points. Rounding is the caller's."""
+    bound. A boundary outside the interval is not on the axis; an axis so left with no
+    boundary has the interval's two bounds, or on an unbounded integer axis the domain's. An
+    axis given no boundary has no points. Rounding is the caller's."""
     given = set(bounds)
     on = {
         b

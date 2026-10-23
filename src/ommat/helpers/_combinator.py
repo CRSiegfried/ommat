@@ -22,7 +22,7 @@ from ommat.helpers._numbers import exact
 
 _AGGREGATES = ("sum", "min", "max", "count")
 
-# Nothing determined: the input marker of highest precedence.
+# When no input is determined, the marker chosen: Unavailable, then Unsure, then Unasked.
 _PRECEDENCE: tuple[type[Undetermined], ...] = (Unavailable, Unsure, Unasked)
 
 

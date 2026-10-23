@@ -171,7 +171,7 @@ REFUSED_BY = {
     "above one": "2 for 'a' is not in [0, 1]",
     "percent": "70 for 'no' is not in [0, 1]",
     "a huge int": "for 'a' is not in [0, 1]",
-    "a huge negative int": "is not in [0, 1]",
+    "a huge negative int": "for 'b' is not in [0, 1]",
     "a lone surrogate label": "is not a string of Unicode scalar values",
     "a lone surrogate key": "is not a string of Unicode scalar values",
     "labels a bytes": "label b'a' is not a string",

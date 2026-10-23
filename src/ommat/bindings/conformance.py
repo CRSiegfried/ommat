@@ -20,8 +20,9 @@ The checks, by name:
 - ``answers``: each ``q:`` value that is not a marker is in its kind's form, as interpret's own
   test judges it, an extraction's spans bounded by its text in ``needs``;
 - ``per-ref-cause``: a result with a ``timed-out`` or ``raised`` ref holds a ``warnings`` line
-  when the binding called a provider; a result whose provenance, ``precision``, ``usage`` and
-  ``attempts`` are all null, as a replay's are, owes none;
+  when the binding called a provider; a result whose ``truncated`` is empty and whose
+  provenance, ``precision``, ``usage`` and ``attempts`` are all null, as a replay's are, owes
+  none;
 - ``warnings`` and ``precision``: each conforms as interpret tests it;
 - ``unsupported-provenance``: a result whose every ref is ``unsupported`` holds null
   provenance, ``precision``, ``usage`` and ``attempts``, and ``truncated`` empty;

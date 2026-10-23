@@ -1121,7 +1121,7 @@ def test_a_negative_zero_a_rule_returns_is_zero_on_the_board_as_in_the_record() 
         }
     )
     record, _ = run(loaded, {})
-    assert entry(record, "d:z")["value"] == 0
+    assert math.copysign(1.0, entry(record, "d:z")["value"]) == 1.0
     assert seen == [1.0]  # +0.0 live, as replay reads it back
 
 
