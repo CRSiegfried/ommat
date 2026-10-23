@@ -180,7 +180,9 @@ class Step:
     ``Binding``, and the step's requirements in declaration order.
     ``arguments`` is a read-only copy, so a ``Step`` is not hashable. Arguments two of whose
     names share one string data are kept as given, and a plan holding them never passes: plan
-    rule 7 refuses it when no earlier rule does."""
+    rule 7 refuses it when no earlier rule does. Each requirement names a ``d:`` ref with no
+    field path (plan rule 6); one on ``d:x.f`` makes the plan ``broken``, ``invalid-return``
+    naming ``rule:6`` and the step."""
 
     tool: str
     arguments: Mapping[str, Origin | Binding]

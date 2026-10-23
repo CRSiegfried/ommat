@@ -225,7 +225,8 @@ class SourceRequirement:
 
 @dataclass(frozen=True, slots=True)
 class Requirement:
-    """A plan-level or step requirement: ``ref`` is determined with ``value``."""
+    """A plan-level or step requirement: ``ref`` is determined with ``value``. ``ref`` is a
+    ``d:`` ref with no field path."""
 
     ref: str
     value: Any

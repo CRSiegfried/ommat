@@ -87,6 +87,18 @@ The binding may also report the refs whose response was cut short as `truncated`
 
 A caller dispatches on `plan.kind`, never on the verdict alone: a `broken` plan has no steps, and the guard passes it with nothing to run.
 
+A plan the policy returns is checked against seven plan rules. One it breaks is `broken`, with cause `invalid-return` naming `rule:N`, then `step:N` when the break is in a step:
+
+1. A plan whose kind is not `execute` has no steps.
+2. A step binds only results of earlier steps, each by a path that is null or in the binding grammar.
+3. Every step names a tool the design declares, and no argument is named `idempotency_key`.
+4. A step's board-ref origin is one of the policy's declared reads and holds a value on the board.
+5. A plan carries `reply` and `reason` as its kind requires, each holding a character that is not whitespace, and its kind is not `broken`.
+6. Every step requirement names a `d:` ref with no field path, that has a provider, and whose value its type can hold.
+7. The plan's `reason` and `reply`, and every literal argument, argument name and requirement value, are in the value domain.
+
+The plan-level rules are checked first, 1, 5, then 7 over `reason` and `reply`; then each step by position against 2, 3, 4, then 7, then 6. The cause names the first break only. A requirement on part of a rule's value, such as `d:plan.execute`, breaks rule 6: give the part its own rule and require that rule's ref.
+
 A rule, a `when` and the policy do not change a value they read. A read returns the board's own value, not a copy, so a change reaches every later reader in the turn, while the record keeps the value as it was written.
 
 A `-0.0` in a value written to the board, an answer's probability or member included, or in a plan's literal or requirement value, is held as `0.0`, as the record writes it, so a component reads the same value live and in replay.
