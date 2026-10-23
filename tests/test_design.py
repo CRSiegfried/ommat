@@ -191,7 +191,7 @@ class _ClassRaises(dict[str, Any]):
         raise RuntimeError("__class__ was read")
 
 
-def test_a_design_type_reads_a_field_by_its_type_not_its_class_attribute() -> None:
+def test_a_design_types_constructor_reads_a_field_by_its_type_not_its_class_attribute() -> None:
     # Not a sequence by its type, so each is kept as given for check 10 to name.
     given = _ClassRaises()
     assert Source({"t:x": t.string}, needs=given).needs is given  # pyright: ignore[reportArgumentType]

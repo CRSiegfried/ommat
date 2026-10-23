@@ -1081,7 +1081,7 @@ def test_a_rules_returned_marker_is_written_with_whatever_cause_code_it_carries(
     assert entry(record, "d:r")["marker"] == mark("refused", *refs, kind="Unasked")
 
 
-@pytest.mark.parametrize("ref", ["x", "t:nowhere", "t:state.nofield", "rule:01", "Dana"])
+@pytest.mark.parametrize("ref", ["x", "t:nowhere", "t:state.nofield", "rule:01", "Dana", "bar/x"])
 def test_a_rules_returned_marker_with_a_ref_of_no_declared_form_is_invalid_return(
     ref: str,
 ) -> None:

@@ -159,11 +159,12 @@ _NUMBERED = re.compile(r"(?:rule|step):(?:0|[1-9][0-9]*)")
 
 def names_cause_ref(loaded: LoadedDesign, ref: str) -> bool:
     """Whether ``ref`` is of a form a cause's refs take: a provided ref,
-    with or without a field path, a declared name, a role name, ``rule:N`` or ``step:N``."""
+    with or without a field path, a declared name, parameter paths included, a role name,
+    ``rule:N`` or ``step:N``. No cause names a type definition or a group."""
     if ref in ("policy", "codec") or _NUMBERED.fullmatch(ref):
         return True
     d = loaded._design
-    declared = (d.sources, d.rules, d.tools, d.types, d.groups, loaded._leaf_types)
+    declared = (d.sources, d.rules, d.tools, loaded._leaf_types)
     return any(ref in names for names in declared) or _provided(loaded, ref)
 
 

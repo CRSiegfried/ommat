@@ -156,9 +156,12 @@ class _Walk:
         return out
 
     def requirement(self, requirement: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
-        """A requirement with its value under its ref's tree, as that ref's entry is; a ref
-        the settings item holds no tree for is digested whole."""
-        tree = classes.get(declared_ref(requirement["ref"]), "content")
+        """A requirement with its value under its ref's tree, as that ref's entry is; under a
+        ref the settings item holds no tree for, the value is digested whole."""
+        try:
+            tree = classes.get(declared_ref(requirement["ref"]), "content")
+        except ValueError:  # a ref outside the grammar names no tree
+            tree = "content"
         return {**requirement, "value": self.value(requirement["value"], tree)}
 
     def step(self, step: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:

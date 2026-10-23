@@ -492,7 +492,7 @@ class _Loader:
         return isinstance(provided, Question) and provided.kind is AnswerKind.extraction
 
     def check_4(self) -> None:
-        # A source whose provides check 10's form test refused, wholly or a ref of it, is left out.
+        # A source check 10's form test refused in any member is left out, its provides among them.
         form = [f.message for f in self.failures if f.check == 10]
         for sid, source in self.sources():
             where = f"source {_q(sid)}"
