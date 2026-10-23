@@ -36,10 +36,9 @@ This runs as it is, with no API keys: a stand-in binding answers in place of a m
 
 <!-- demo -->
 ```python
-from ommat import (
-    CallResult, Design, Origin, Plan, Policy, Question, ReadView, Requirement, Rule,
-    Source, SourceCall, Step, Text, Undetermined, decide_sync, load, replay_sync,
-)  # fmt: skip
+from ommat import CallResult, Design, Origin, Plan, Policy, Question, ReadView
+from ommat import Requirement, Rule, Source, SourceCall, Step, Text, Undetermined
+from ommat import decide_sync, load, replay_sync
 from ommat import types as t
 from ommat.helpers import pick_with_margin
 
