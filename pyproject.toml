@@ -98,4 +98,4 @@ pythonVersion = "3.11"
 typeCheckingMode = "strict"
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/docs", "/*.md", "/LICENSE"]
+include = ["/src", "/tests", "/docs", "/*.md", "/LICENSE", "/scripts"]
