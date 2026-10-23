@@ -16,7 +16,9 @@ sources sent run concurrently under one deadline, the call's ``seconds``. Each a
 the value ommat takes; a provider's refusal is ``refused``, a fault ``invalid-answer``, and each
 ref of a wire request that did not answer ``timed-out`` when its error is idia's
 ``DeadlineExceeded``, else ``raised``. A source the binding cannot send is
-``unsupported``, with its reason a line of the call's warnings.
+``unsupported``, with its reason a line of the call's warnings; so is a question alone that
+idia's ``Question`` refuses, a choice rendered with fewer than two labels among them, and the
+source's other questions are sent.
 """
 
 from __future__ import annotations
@@ -99,7 +101,7 @@ class _Binding:
         lines: list[str] = []
         requests: dict[str, idia.Request] = {}
         for source in batch:
-            reason = _refusal(self.provider, source, deadline, requests)
+            reason = _refusal(self.provider, source, deadline, requests, values, lines)
             if reason is not None:
                 refused = Unavailable(Cause("unsupported"))  # §binding-refusal
                 values.update(dict.fromkeys((*source.refs, *source.questions), refused))
@@ -117,7 +119,7 @@ class _Binding:
             outcomes += response.outcomes
             lines += _lines(source.id, response)
             failed = {key: o.error for o in response.outcomes if o.error for key in o.keys}
-            for ref in source.questions:
+            for ref in (q.key for q in requests[source.id].questions):  # the questions sent
                 error = failed.get(ref)
                 if error is None:
                     values[ref] = _value(source.id, ref, response.answers[ref], lines)
@@ -146,15 +148,26 @@ def _refusal(
     source: SourceCall,
     deadline: idia.Deadline,
     requests: dict[str, idia.Request],
+    values: dict[str, object],
+    lines: list[str],
 ) -> str | None:
     """The reason the source is not sent, or ``None`` when it is sent (its request is then
-    kept in ``requests``) or asks nothing."""
+    kept in ``requests``) or asks nothing. A question idia's ``Question`` refuses, a choice
+    of fewer than two labels among them, is ``unsupported`` alone in ``values``, its reason a
+    line, and the source's other questions are sent; a source left with none sends nothing."""
     if source.refs:
         return f"the idia binding asks q: refs only, not {', '.join(source.refs)}"
-    if not source.questions:
+    questions: list[idia.Question] = []
+    for ref, rendered in source.questions.items():
+        try:
+            questions.append(_question(ref, rendered))
+        except ValueError as refused:
+            values[ref] = Unavailable(Cause("unsupported"))  # §binding-refusal
+            lines.append(f"{source.id}: unsupported {ref}: {refused}")
+    if not questions:
         return None
     try:
-        request = _request(source, deadline)
+        request = _request(source, tuple(questions), deadline)
         provider.plan(request)
     except idia.DoesNotFit as unfit:
         return unfit.message
@@ -164,8 +177,9 @@ def _refusal(
     return None
 
 
-def _request(source: SourceCall, deadline: idia.Deadline) -> idia.Request:
-    questions = tuple(_question(ref, q) for ref, q in source.questions.items())
+def _request(
+    source: SourceCall, questions: tuple[idia.Question, ...], deadline: idia.Deadline
+) -> idia.Request:
     needs = dict(source.needs)
     images: list[idia.Part] = []
     for key in sorted(needs):
@@ -173,7 +187,8 @@ def _request(source: SourceCall, deadline: idia.Deadline) -> idia.Request:
         if image is not None:
             del needs[key]
             images.append(idia.ImagePart(data=image[1], media_type=image[0]))
-    extractions = [q for q in source.questions.values() if q.kind is AnswerKind.extraction]
+    sent = [source.questions[q.key] for q in questions]
+    extractions = [q for q in sent if q.kind is AnswerKind.extraction]
     options: dict[str, idia.JsonValue] = {}
     if extractions:
         # An extraction question's text is its needs key and its date a string or None.

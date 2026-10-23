@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -345,10 +345,6 @@ def unsendable() -> list[tuple[SourceCall, str]]:
         (source("r", two_texts, needs), "read different texts, t:state.note, t:state.report"),
         (source("r", two_dates), "different reference dates, 2026-03-10, 2026-03-11"),
         (source(needs={"t:state.blob": b"\x00"}), "a need holds bytes"),
-        (
-            source(questions={"q:triage/one": RenderedQuestion(AnswerKind.choice, "W?", ("a",))}),
-            "two labels",
-        ),
     ]
 
 
@@ -365,6 +361,41 @@ def test_a_source_one_request_cannot_hold_is_unsupported_with_its_reason(
     assert line.startswith(f"{bad.id}: unsupported: ")
     assert reason in line
     assert [c.wire_request.questions[0].key for c in leaf.calls] == ["q:good/x"]
+
+
+ONE = RenderedQuestion(AnswerKind.choice, "Who?", ("ana@x.org",))
+
+
+def test_a_choice_of_fewer_than_two_labels_is_unsupported_alone_and_its_siblings_are_asked() -> (
+    None
+):
+    binding, leaf = built()
+    result = call(binding, source("triage", {"q:triage/one": ONE, "q:triage/x": NOUL}))
+    assert code(result, "q:triage/one") == "unsupported"
+    assert result.values["q:triage/x"] == {"yes": 0.7, "no": idia.noul_complement(0.7)}
+    (line,) = result.warnings
+    assert line.startswith("triage: unsupported q:triage/one: ")
+    assert "two labels" in line
+    assert [q.key for c in leaf.calls for q in c.wire_request.questions] == ["q:triage/x"]
+
+
+def test_a_source_whose_every_question_idia_refuses_sends_no_request() -> None:
+    binding, leaf = built()
+    good = source("good", {"q:good/x": NOUL})
+    result = call(binding, source("triage", {"q:triage/one": ONE}), good)
+    assert code(result, "q:triage/one") == "unsupported"
+    assert result.values["q:good/x"] == {"yes": 0.7, "no": idia.noul_complement(0.7)}
+    assert [q.key for c in leaf.calls for q in c.wire_request.questions] == ["q:good/x"]
+
+
+def test_candidate_shaped_labels_are_sent_and_answered_by_name() -> None:
+    labels = ("none", "several", '"Ana" <a@x.org>', "]", "Zoë Ångström", "李")
+    q = RenderedQuestion(AnswerKind.choice, "Who?", labels, descriptions=(None,) * len(labels))
+    binding, leaf = built()
+    result = call(binding, source("triage", {"q:triage/who": q}))
+    (sent,) = [q for c in leaf.calls for q in c.wire_request.questions]
+    assert tuple(label.name for label in sent.labels) == labels
+    assert set(cast("dict[str, float]", result.values["q:triage/who"])) == set(labels)
 
 
 def test_a_source_fit_refuses_is_unsupported_with_fits_message() -> None:
