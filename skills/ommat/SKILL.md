@@ -56,7 +56,7 @@ A full, runnable example with its output is the [README demo](https://github.com
 
 ## Pitfalls
 
-- **load refuses what 0.4.0 leaves out:** decision tables, data rules, plan declarations and candidate sets. The list is in the [spec's intro](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md).
+- **load refuses what 0.4.0 leaves out:** decision tables, data rules, plan declarations, candidate sets of records and per-candidate questions. A `choice` over a `list<string>` candidate set loads; its question is left out with a marker of its own when the set is empty or a marker, or its labels overflow or collide. See the [spec's intro](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md) and [the candidate-valued label set](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#the-candidate-valued-label-set).
 - **Nothing carries between turns.** Each turn stands alone; the caller passes what a later turn needs, such as an earlier step's result, in its input state, in fields declared in `state`: decide drops an undeclared field without a word. See [Continuing a workflow](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#continuing-a-workflow).
 - **Declare every read.** A rule that reads a ref outside its `reads` makes its `d:` ref `Unavailable` (`undeclared-read`); the policy's makes the plan `broken`. Catching it does not help.
 - **A step with no requirement of its own refuses the plan**, unless the design sets `default_deny=False`. Give each step the `Requirement`s it rests on.

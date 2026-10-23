@@ -72,7 +72,11 @@ class RenderedQuestion:
     the ``needs`` key holding the text its spans index, and ``reference_date``, the rendered
     date the model resolves a date written without a year against, or ``None`` when the
     question declares none; a probability kind's question leaves them at ``None``, ``False``,
-    ``None`` and ``None``."""
+    ``None`` and ``None``.
+    A ``choice`` over a candidate-valued label set is rendered at each call: its labels are the
+    fixed part's names, then the set's members in order, each member's description ``None``,
+    so one ``q:`` ref's labels may differ from call to call. The set is in the source's
+    ``needs`` only when the source declares it a need."""
 
     kind: AnswerKind
     wording: str
