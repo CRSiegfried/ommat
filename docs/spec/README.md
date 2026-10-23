@@ -80,6 +80,8 @@ A caller dispatches on `plan.kind`, never on the verdict alone: a `broken` plan 
 
 A rule, a `when` and the policy do not change a value they read. A read returns the board's own value, not a copy, so a change reaches every later reader in the turn, while the record keeps the value as it was written.
 
+A marker a rule returns is written with its cause when each of the cause's refs is a ref the design provides, with or without a field path, a declared name, `policy`, `codec`, `rule:N` or `step:N`. Otherwise the rule's entry is `Unavailable` with `invalid-return` naming the rule, so a cause carries none of the turn's input.
+
 A cancellation of a running turn appends the `cause` item `cancelled`, closes the record, and propagates the `CancelledError` with the record as its `record`. To read `exc.record`, catch the `CancelledError` inside the task that awaits decide; a `CancelledError` that asyncio raises afresh carries no record. A cancellation requested from the observer takes effect at decide's next await. If the turn has none left, decide finishes, asyncio marks the finished task cancelled and raises a fresh `CancelledError`, and the decision is lost.
 
 ## Replay

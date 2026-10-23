@@ -1075,9 +1075,19 @@ def test_a_rule_returning_what_is_not_an_estimate_is_invalid_return(value: objec
     assert entry(record, "d:r")["marker"] == mark("invalid-return", "r")
 
 
-def test_a_rules_returned_marker_is_written_with_whatever_cause_it_carries() -> None:
-    record = one_rule(lambda r: Unasked(Cause("refused", ["t:state", "x"])), "t:state")
-    assert entry(record, "d:r")["marker"] == mark("refused", "t:state", "x", kind="Unasked")
+def test_a_rules_returned_marker_is_written_with_whatever_cause_code_it_carries() -> None:
+    refs = ["t:state", "r", "policy", "rule:1", "step:2"]
+    record = one_rule(lambda r: Unasked(Cause("refused", refs)), "t:state")
+    assert entry(record, "d:r")["marker"] == mark("refused", *refs, kind="Unasked")
+
+
+@pytest.mark.parametrize("ref", ["x", "t:nowhere", "t:state.nofield", "rule:01", "Dana"])
+def test_a_rules_returned_marker_with_a_ref_of_no_declared_form_is_invalid_return(
+    ref: str,
+) -> None:
+    # A cause's refs name what the design declares, so they carry none of the input's text.
+    record = one_rule(lambda r: Unsure(Cause("conflict", [ref])), "t:state")
+    assert entry(record, "d:r")["marker"] == mark("invalid-return", "r")
 
 
 def tampered_code() -> Unsure:

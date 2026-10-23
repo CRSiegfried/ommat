@@ -135,10 +135,16 @@ def names_read(loaded: LoadedDesign, stop: UndeclaredRead) -> bool:
     parameter path."""
     if not stop.string:
         return False
+    return _provided(loaded, stop.read) or stop.read in loaded._leaf_types
+
+
+def _provided(loaded: LoadedDesign, ref: str) -> bool:
+    """Whether ``ref`` is a provided ref, ``t:state`` included, with no bracket and a field
+    path naming a field at each depth."""
     try:
-        p = parse_ref(stop.read)
+        p = parse_ref(ref)
     except ValueError:  # not a ref under the grammar
-        return stop.read in loaded._leaf_types
+        return False
     base = f"{p.level}:{p.name}"
     if p.candidate is not None or (base != _STATE and base not in loaded._providers):
         return False
@@ -146,6 +152,19 @@ def names_read(loaded: LoadedDesign, stop: UndeclaredRead) -> bool:
         return True
     t = loaded._types.get(base)  # a q: ref has no fields
     return t is not None and not isinstance(read_type(t, p.fields, {}), TypeFailure)
+
+
+_NUMBERED = re.compile(r"(?:rule|step):(?:0|[1-9][0-9]*)")
+
+
+def names_cause_ref(loaded: LoadedDesign, ref: str) -> bool:
+    """Whether ``ref`` is of a form a cause's refs take: a provided ref,
+    with or without a field path, a declared name, a role name, ``rule:N`` or ``step:N``."""
+    if ref in ("policy", "codec") or _NUMBERED.fullmatch(ref):
+        return True
+    d = loaded._design
+    declared = (d.sources, d.rules, d.tools, d.types, d.groups, loaded._leaf_types)
+    return any(ref in names for names in declared) or _provided(loaded, ref)
 
 
 def exception_record(exc: BaseException) -> dict[str, str]:

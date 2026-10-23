@@ -44,7 +44,16 @@ from ommat._answer import (
 )
 from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
 from ommat._canonical import decode, encode, hash_value
-from ommat._component import Called, at, base, call, exception_record, names_read, now
+from ommat._component import (
+    Called,
+    at,
+    base,
+    call,
+    exception_record,
+    names_cause_ref,
+    names_read,
+    now,
+)
 from ommat._design import LoadedDesign, Question, Rule, Source
 from ommat._ledger import Ledger
 from ommat._markers import Cause, CauseCode, Failed, Unasked, Unavailable, Undetermined, Unsure
@@ -521,9 +530,9 @@ def _attempts(value: object, invalid: dict[str, str]) -> int | None:
     return None
 
 
-def _rule_marker(value: object) -> Undetermined | None:
-    """A returned marker that is exactly one of the three, holding a well-formed ``Cause``,
-    rebuilt; else ``None``."""
+def _rule_marker(value: object, loaded: LoadedDesign) -> Undetermined | None:
+    """A returned marker that is exactly one of the three, holding a well-formed ``Cause``
+    whose refs each take a form a cause's refs take, rebuilt; else ``None``."""
     kind = cast("type[Undetermined]", type(value))
     if kind not in _MARKER_KINDS:
         return None
@@ -537,6 +546,8 @@ def _rule_marker(value: object) -> Undetermined | None:
     members = cast("tuple[object, ...]", refs)
     if not all(type(r) is str and is_scalar_string(r) for r in members):
         return None
+    if not all(names_cause_ref(loaded, cast(str, r)) for r in members):
+        return None  # a ref of no declared form could carry the input's text
     return kind(Cause(code, cast("tuple[str, ...]", members)))
 
 
@@ -714,7 +725,7 @@ class _Turn:
         else:
             # Never a truth test on what a rule returned: a marker's `__bool__` raises.
             if is_a(returned, Undetermined):
-                value: Written | None = _rule_marker(returned)
+                value: Written | None = _rule_marker(returned, self.loaded)
             else:
                 value = typed(returned, self.loaded._types[r.provides])
             written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value
