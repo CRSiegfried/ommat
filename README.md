@@ -11,6 +11,21 @@ New to ommat? Start with the tutorial, [Write your first design](docs/tutorials/
 
 **The name.** Ommat and Idia come from *ommatidia*, the thousands of small hexagonal eyes that make up a compound eye and combine into one picture: *ommat-* is the Greek stem for "eye", *-idia* "little ones". Many small, cheap questions add up to one full picture. Ommat is the engine that asks them; Idia puts them to the models.
 
+```text
+                .--.       .--.
+            _.-'    `-.__.-'    `-._
+          .'      (o)     (o)        `.
+         /   (o)                  (o) \
+        /              .------.        \
+       |     (o)      /        \   (o)  |
+       |              |   @    |        |
+       |  (o)         \        /   (o)  |
+        \       (o)    `------'        /
+         \                   (o)      /
+          `-.    _       _         .-'
+             `--' `-----' `-------'
+```
+
 ## Install
 
 ommat is installed from its git tag until it is on a package index:
