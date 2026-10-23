@@ -201,7 +201,7 @@ answers, so no model is needed.
    of offsets into it.
 
 2. A binding receives a source's questions in the code-point order of their refs, so
-   `q:triage/topic` comes first, since that order is part of what ran.
+   `q:triage/topic` comes first; that order is part of what ran.
 
 3. Read `main`. It loads the design, binds both oracle names, and decides each message:
 
