@@ -226,7 +226,10 @@ def _question(ref: str, rendered: RenderedQuestion) -> idia.Question:
         key=ref,
         kind=cast(idia.Kind, rendered.kind.value),
         instruction=rendered.wording,
-        labels=() if rendered.kind is AnswerKind.noul else labels,
+        # A noul sends its yes and no only when one is described, as idia takes them.
+        labels=()
+        if rendered.kind is AnswerKind.noul and all(d is None for d in rendered.descriptions)
+        else labels,
         value_type=None if rendered.value_type is None else rendered.value_type.value,
         is_list=rendered.is_list,
     )

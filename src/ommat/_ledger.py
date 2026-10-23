@@ -30,6 +30,7 @@ from ommat._values import (
     MAX_DOCUMENT_DEPTH,
     MAX_INTEGER,
     MISSING,
+    NOUL_DESCRIPTION_FORMAT,
     PER_REF_FORMAT,
     PRECISION_FORMAT,
     UNSUPPORTED_FORMAT,
@@ -330,8 +331,13 @@ def _questions(value: Any, where: str) -> None:
             if q["value_type"] not in _VALUE_TYPES:
                 raise _LedgerError(f"{at}'s value_type {q['value_type']!r} is not one of the six")
         elif kind == AnswerKind.noul:
-            if labels is not None:
-                raise _LedgerError(f"{at}'s labels are not null, as noul's are")
+            if labels is not None:  # from format 4, which the format check holds
+                _LABELS(labels, f"{at}'s labels")
+                named = [m if type(m) is str else m["name"] for m in cast("list[Any]", labels)]
+                if named != ["yes", "no"] or all(type(m) is str for m in labels):
+                    raise _LedgerError(
+                        f"{at}'s labels are not null or yes then no with one described"
+                    )
         elif type(cast(object, labels)) is dict and kind == AnswerKind.choice:
             # ``at`` from format 4 on, which the format check holds.
             members = {"fixed": _LABELS, "candidates": _STR}
@@ -1026,6 +1032,14 @@ class Ledger:
             raise _LedgerError(f"{where} has no 'precision' member")
         if fmt < PRECISION_FORMAT and "precision" in item:
             raise _LedgerError(f"{where} holds precision, which a format-{fmt} record does not")
+        if fmt < NOUL_DESCRIPTION_FORMAT and any(
+            q["kind"] == AnswerKind.noul and q["labels"] is not None
+            for q in cast("dict[str, Any]", item["questions"]).values()
+        ):
+            raise _LedgerError(
+                f"{where}: its questions declare a noul's labels, which a format-{fmt} record "
+                "does not"
+            )
         label_sets = [
             q["labels"]
             for q in cast("dict[str, Any]", item["questions"]).values()

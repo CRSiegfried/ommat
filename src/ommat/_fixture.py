@@ -276,11 +276,13 @@ def _differing(
         return "its kind, labels, value type and list flag differ from the stored question's"
     kind = AnswerKind(asked.kind)
     labels: object = None
-    if kind not in (AnswerKind.noul, AnswerKind.extraction):
+    if kind is not AnswerKind.extraction:
         labels = [
             name if description is None else {"name": name, "description": description}
             for name, description in zip(asked.labels, asked.descriptions, strict=True)
         ]
+    if kind is AnswerKind.noul and all(d is None for d in asked.descriptions):
+        labels = None  # an undescribed noul declares no labels
     recorded: object = stored["labels"]
     if type(recorded) is dict:  # a candidate-valued set, as declared: {fixed, candidates}
         declared = cast("dict[str, Any]", recorded)

@@ -348,15 +348,16 @@ def test_check_10_bounds_names_and_descriptions_together(monkeypatch: pytest.Mon
     assert failure.message.endswith("labels hold more than 2^3 code points")
 
 
-@pytest.mark.parametrize("kind", ["noul", "extraction"])
-def test_a_noul_or_extraction_question_with_object_labels_still_declares_labels(kind: str) -> None:
-    q = Question(kind, Text("Is it?"), [WARM])
+def test_an_extraction_question_with_object_labels_still_declares_labels() -> None:
+    q = Question("extraction", Text("Is it?"), [WARM])
     found = refused(with_source(minimal(), "s", Source({"q:x": q})))
-    assert any(
-        f"is a{'n' if kind == 'extraction' else ''} {kind} question and declares labels"
-        in f.message
-        for f in found
-    )
+    assert any("is an extraction question and declares labels" in f.message for f in found)
+
+
+def test_a_noul_question_whose_labels_are_not_yes_then_no_is_refused() -> None:
+    q = Question("noul", Text("Is it?"), [WARM])
+    found = refused(with_source(minimal(), "s", Source({"q:x": q})))
+    assert [f.check for f in found] == [10], found
 
 
 def test_a_candidate_valued_sets_fixed_part_takes_the_described_form() -> None:

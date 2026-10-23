@@ -627,7 +627,11 @@ def question(**members: Any) -> dict[str, Any]:
                 "not noul, choice, score or extraction",
             ),
             (R1_DONE, call(2, "s", questions=question(identity=1)), "'identity' is not a string"),
-            (R1_DONE, call(2, "s", questions=question(labels=["yes"])), "not null, as noul's"),
+            (
+                R1_DONE,
+                call(2, "s", questions=question(labels=["yes"])),
+                "not null or yes then no with one described",
+            ),
             (
                 R1_DONE,
                 call(2, "s", questions=question(kind="choice", labels=None)),

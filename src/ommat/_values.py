@@ -55,6 +55,12 @@ UNSUPPORTED_FORMAT = 3
 LABEL_OVERFLOW_FORMAT = 4
 """The first format with the ``label-overflow`` cause code."""
 
+NOUL_DESCRIPTION_FORMAT = 4
+"""The first format whose design document and call item hold a noul's described labels."""
+
+STRUCTURED_WORDING_FORMAT = 4
+"""The first format whose design document holds a structured wording."""
+
 CANDIDATE_FORMAT = 4
 """The first format whose design document holds a candidate set or a candidate-valued label
 set."""

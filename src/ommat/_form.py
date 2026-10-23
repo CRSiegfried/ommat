@@ -343,8 +343,7 @@ class _Form:
             ok = False
         if q.kind is AnswerKind.noul:
             if labels is not None:
-                self.fail(names, f"{where} is a noul question and declares labels")
-                ok = False
+                ok = self.noul_labels(labels, where, names) and ok
         elif q.kind is AnswerKind.extraction:
             if labels is not None:
                 self.fail(names, f"{where} is an extraction question and declares labels")
@@ -408,6 +407,24 @@ class _Form:
             )
             ok = False
         return ok
+
+    def noul_labels(self, value: object, where: str, names: tuple[str, ...]) -> bool:
+        """A noul's declared labels: exactly ``yes`` then ``no``, each a name or a described
+        label, at least one described; an undescribed noul declares none."""
+        listed = self.labels(value, f"{where}'s labels", names, 2)
+        if listed is None:
+            return False
+        if listed != ("yes", "no"):
+            self.fail(names, f"{where} is a noul question whose labels are not yes then no")
+            return False
+        if not any(isinstance(m, Mapping) for m in cast("Sequence[object]", value)):
+            self.fail(
+                names,
+                f"{where} is a noul question that declares yes and no with no description; "
+                "an undescribed noul declares no labels",
+            )
+            return False
+        return True
 
     def labels(
         self, value: object, where: str, names: tuple[str, ...], least: int

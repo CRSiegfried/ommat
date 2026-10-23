@@ -90,6 +90,7 @@ from ommat._values import (
     FORMATS,
     MAX_DOCUMENT_DEPTH,
     MISSING,
+    NOUL_DESCRIPTION_FORMAT,
     domain_error,
     in_domain,
     member_named,
@@ -1357,8 +1358,10 @@ class _Loader:
             for ref, provided in source.provides.items():
                 if not isinstance(provided, Question):
                     continue
-                if provided.kind is AnswerKind.noul:
+                if provided.kind is AnswerKind.noul and provided.labels is None:
                     parts[ref] = (_NOUL_LABELS, (None, None))
+                elif provided.kind is AnswerKind.noul:  # yes then no, described
+                    parts[ref] = label_parts(_fixed(provided.labels))
                 elif provided.kind is AnswerKind.extraction:
                     parts[ref] = ((), ())
                 else:  # a candidate-valued label set's fixed part
@@ -2148,6 +2151,10 @@ def _source_failures(
             yield from _text_failures(provided["wording"], f"{shown}'s wording", at)
         declared: object = provided.get("labels")
         listed = declared
+        noul = provided.get("kind") == AnswerKind.noul
+        if noul and declared is not None and fmt < NOUL_DESCRIPTION_FORMAT:
+            yield at, f"{shown} is a noul question with labels, which format {fmt} does not have"
+            continue
         if isinstance(declared, dict) and fmt < CANDIDATE_FORMAT:
             yield at, f"{shown} is a candidate-valued label set, which format {fmt} does not have"
         if isinstance(declared, dict):
