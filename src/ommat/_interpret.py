@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, cast
 
+from ommat import _form
 from ommat._answer import (
     EXTRACTION_MEMBERS,
     Answer,
@@ -263,6 +264,8 @@ class _Batch:
     """The labels each ``q:`` ref was passed with."""
     texts: dict[str, int]
     """Each extraction ``q:`` ref's text length in code points, which its spans index."""
+    sets: frozenset[str]
+    """The batch's ``t:`` refs declared candidate sets, whose members must be distinct."""
     call: tuple[SourceCall, ...]
     timeout: float
     cost: Fraction
@@ -388,7 +391,15 @@ def _returned_value(ref: str, value: object, batch: _Batch, types: Mapping[str, 
             batch.texts.get(ref, 0),
         )
     forms = typed(value, types[ref])
-    return Unavailable(Cause(_C.invalid_return, [ref])) if forms is None else forms
+    if forms is None or (ref in batch.sets and not _distinct(forms[0])):
+        return Unavailable(Cause(_C.invalid_return, [ref]))
+    return forms
+
+
+def _distinct(members: object) -> bool:
+    """Whether a candidate set's record-form members are distinct by canonical bytes."""
+    listed = cast("list[object]", members)
+    return len({encode(m) for m in listed}) == len(listed)
 
 
 def answer_written(
@@ -657,6 +668,8 @@ class _Turn:
         self.board: dict[str, object] = {_STATE: state}
         self.sorter = TurnSorter(loaded._graph, carried)
         self.ran: set[str] = set()
+        self.left_out: dict[str, Undetermined] = {}
+        """Each candidate-valued question left out of its batch, with its own marker."""
         self.spent = Fraction(0)
         self.document = cast("dict[str, Any]", decode(loaded.document))["sources"]
 
@@ -728,6 +741,8 @@ class _Turn:
                 value: Written | None = _rule_marker(returned, self.loaded)
             else:
                 value = typed(returned, self.loaded._types[r.provides])
+                if value is not None and r.candidates and not _distinct(value[0]):
+                    value = None  # a candidate set's members are distinct, never merged
             written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value
         index = self.write(r.provides, n, None, written, called.derivation)
         if called.text is not None:  # whatever the outcome, a stop's included
@@ -746,6 +761,8 @@ class _Turn:
         marked: dict[str, Undetermined] = {}
         texts: dict[str, _WhenText] = {}
         ready: list[str] = []
+        left: dict[str, dict[str, Undetermined]] = {}
+        labels: dict[str, tuple[tuple[str, ...], tuple[str | None, ...]]] = {}
         # Readiness in source id order, before the TaskGroup, so a function `when` that
         # raises a cancellation falls at a fixed place. A source that
         # is not ready gets its own markers before the budget and the deadline are tested.
@@ -755,11 +772,17 @@ class _Turn:
                 marker = self.requirement_marker(sid)
             if marker is None:
                 marker = self.when_marker(sid, texts)
-            if marker is None:
-                ready.append(sid)
-            else:
+            if marker is not None:
                 marked[sid] = marker
-        batches = self.batches(ready)
+                continue
+            out = self.label_markers(sid, labels)
+            if out:
+                left[sid] = out
+                self.left_out.update(out)
+            # A source with no ref left to ask is not called, and is outside the frontier.
+            if len(out) < len(self.sources[sid].provides):
+                ready.append(sid)
+        batches = self.batches(ready, left, labels)
         cut = self.cut_before(batches, n)
         if cut is not None:
             batches = []  # the frontier is not asked, whole
@@ -794,13 +817,17 @@ class _Turn:
                 calls[sid] = (index, judged)
             cost += batch.cost
         for sid in order:
-            if sid not in marked and sid not in calls:
+            provided = self.sources[sid].provides
+            whole = len(left.get(sid, ())) == len(provided)
+            if sid not in marked and sid not in calls and not whole:
                 continue  # in a frontier the cut left unasked: the end marks it
-            for i, ref in enumerate(code_point_sorted(self.sources[sid].provides)):
+            for i, ref in enumerate(code_point_sorted(provided)):
                 if sid in marked:
                     index = self.write(ref, n, None, marked[sid])
                     if i == 0 and sid in texts:  # keyed under the lowest ref
                         self.write_when_text(texts[sid], index)
+                elif ref in left.get(sid, {}):
+                    self.write(ref, n, None, left[sid][ref])
                 else:
                     index, judged = calls[sid]
                     self.write(ref, n, index, judged.written[ref])
@@ -915,7 +942,12 @@ class _Turn:
         if text.unnamed is not None:
             self.ledger.write_unhashed("reads", text.unnamed, index)
 
-    def batches(self, ready: list[str]) -> list[_Batch]:
+    def batches(
+        self,
+        ready: list[str],
+        left: Mapping[str, Mapping[str, Undetermined]],
+        labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]],
+    ) -> list[_Batch]:
         """The live frontier's batches: the ready sources naming one oracle form one, each
         source with no oracle one of its own, in order of their first source id. ``ready`` is in
         source id order."""
@@ -930,17 +962,62 @@ class _Turn:
             else:
                 keyed[key] = [sid]
                 groups.append(keyed[key])
-        return [self.batch(tuple(group)) for group in groups]
+        return [self.batch(tuple(group), left, labels) for group in groups]
 
-    def batch(self, sids: tuple[str, ...]) -> _Batch:
+    def label_markers(
+        self, sid: str, labels: dict[str, tuple[tuple[str, ...], tuple[str | None, ...]]]
+    ) -> dict[str, Undetermined]:
+        """Each of a ready source's candidate-valued questions left out of its batch, with its
+        marker, the first that applies: a marker on the set, an empty set, labels beyond
+        check 10's bounds, a candidate equal to a fixed name; each names the set's ref. A
+        question asked has its rendered labels put in ``labels``."""
+        out: dict[str, Undetermined] = {}
+        for ref in code_point_sorted(self.sources[sid].provides):
+            set_ref = self.loaded._label_sets.get(ref)
+            if set_ref is None:
+                continue
+            value = self.board[set_ref]
+            # Never a truth test on the set's value: a marker's `__bool__` raises.
+            if is_a(value, Unavailable):
+                out[ref] = Unavailable(Cause(_C.need_unavailable, [set_ref]))
+                continue
+            if is_a(value, Undetermined):
+                out[ref] = Unasked(Cause(_C.need_undetermined, [set_ref]))
+                continue
+            candidates = tuple(cast("Sequence[str]", value))
+            names, descriptions = self.loaded._labels[ref]
+            if not candidates:
+                out[ref] = Unasked(Cause(_C.when_false, [set_ref]))
+            elif len(names) + len(candidates) > _form.MAX_LABELS or (
+                sum(map(len, names))
+                + sum(len(d) for d in descriptions if d is not None)
+                + sum(map(len, candidates))
+                > _form.MAX_LABEL_CODE_POINTS
+            ):
+                out[ref] = Unavailable(Cause(_C.label_overflow, [set_ref]))
+            elif not frozenset(names).isdisjoint(candidates):
+                out[ref] = Unavailable(Cause(_C.label_collision, [set_ref]))
+            else:
+                labels[ref] = (names + candidates, descriptions + (None,) * len(candidates))
+        return out
+
+    def batch(
+        self,
+        sids: tuple[str, ...],
+        left: Mapping[str, Mapping[str, Undetermined]],
+        labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]],
+    ) -> _Batch:
         refs: list[str] = []
         questions: dict[str, Question] = {}
-        labels: dict[str, tuple[str, ...]] = {}
+        passed_labels: dict[str, tuple[str, ...]] = {}
         texts: dict[str, int] = {}
+        sets: set[str] = set()
         calls: list[SourceCall] = []
         for sid in sids:
             source = self.sources[sid]
-            provided = code_point_sorted(source.provides)
+            # A question left out of the batch is neither passed nor among its refs.
+            provided = [r for r in code_point_sorted(source.provides) if r not in left.get(sid, {})]
+            sets.update(r for r in provided if r in self.loaded._candidate_sets)
             # A fresh copy per source, so no source's change reaches another's.
             needs = {
                 need: _fresh(at(self.board, need))
@@ -953,12 +1030,13 @@ class _Turn:
                     kind = AnswerKind(q.kind)
                     wording = _render(q.wording.template, self.slot_values(q, needs))
                     if kind is AnswerKind.extraction:
-                        questions[ref], labels[ref] = q, ()
+                        questions[ref], passed_labels[ref] = q, ()
                         rendered[ref] = self.extraction(ref, q, wording, needs, texts)
                         continue
-                    # The names; each description beside its name, aligned.
-                    passed, descriptions = self.loaded._labels[ref]
-                    questions[ref], labels[ref] = q, passed
+                    # The names; each description beside its name, aligned; a candidate-valued
+                    # set's rendered from the set's entry.
+                    passed, descriptions = labels.get(ref) or self.loaded._labels[ref]
+                    questions[ref], passed_labels[ref] = q, passed
                     rendered[ref] = RenderedQuestion(
                         kind, wording, passed, descriptions=descriptions
                     )
@@ -972,8 +1050,9 @@ class _Turn:
             sources=sids,
             refs=tuple(code_point_sorted(refs)),
             questions=questions,
-            labels=labels,
+            labels=passed_labels,
             texts=texts,
+            sets=frozenset(sets),
             call=tuple(calls),
             # The largest declared, else the run setting's.
             timeout=max(declared) if declared else self.timeout,
@@ -1094,7 +1173,8 @@ class _Turn:
         pending = [s for s in code_point_sorted(self.sources) if s not in asked]
         for sid in pending:
             for ref in code_point_sorted(self.sources[sid].provides):
-                self.write(ref, n, None, marker)
+                # A question left out of its batch keeps its own marker under the cut.
+                self.write(ref, n, None, self.left_out.get(ref, marker))
         for sid in held:
             self.sorter.done(sid)
         self.drain(n)
