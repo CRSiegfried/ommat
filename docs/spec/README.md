@@ -109,6 +109,10 @@ A marker a rule returns is written with its cause when each of the cause's refs 
 
 A cancellation of a running turn appends the `cause` item `cancelled`, closes the record, and propagates the `CancelledError` with the record as its `record`. To read `exc.record`, catch the `CancelledError` inside the task that awaits decide; a `CancelledError` that asyncio raises afresh carries no record. A cancellation requested from the observer takes effect at decide's next await. If the turn has none left, decide finishes, asyncio marks the finished task cancelled and raises a fresh `CancelledError`, and the decision is lost.
 
+## The choice helpers
+
+`pick_with_margin(r, ref, bar, margin)` returns the top label of the answer at `ref` when its probability is at or above `bar` and leads the next by at least `margin`, else `Unsure` with `abstained` naming `ref`; `pick_with_thresholds(r, ref, thresholds, margin)` takes a bar per label. A tie at the top abstains, even at `margin` 0: no helper breaks a tie. A marker read is returned unchanged.
+
 ## The design lints
 
 `dead_questions(loaded, *, values=None)` fills `t:state` and every ref a source provides, and runs decide at each point; `unsure_to_execute(loaded, *, values=None)` fills the policy's declared reads and calls the policy with each `d:` read set to `Unsure` in turn. Each takes `values`, a mapping from a read it fills to a list of that read's values, for a read its types and the answer grid cannot fill. `dead_questions` never takes a `d:` key, since rules compute those values, and `unsure_to_execute` never takes a `q:` key; a key naming a read the lint does not fill is a `ValueError` before any run.
