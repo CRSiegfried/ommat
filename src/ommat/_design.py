@@ -98,7 +98,8 @@ def _slot(slot: object) -> Any:
 @dataclass(frozen=True, slots=True)
 class Text:
     """A template and its slot list: each slot ``{"name": n, "origin": o}``, ``o`` one of
-    ``{"ref": r}``, ``{"param": path}`` or ``{"candidate": r}``."""
+    ``{"ref": r}``, ``{"param": path}`` or ``{"candidate": r}``. A ref may carry a field path
+    through records, ``t:state.sender.name``, but no list index."""
 
     template: str
     slots: Sequence[Mapping[str, Any]] = ()
