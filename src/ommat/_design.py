@@ -31,10 +31,10 @@ def _empty() -> Mapping[str, Any]:
 
 
 def _mapping(value: object) -> Any:
-    if not isinstance(value, Mapping):
+    if not issubclass(type(value), Mapping):
         return value
     items = list(cast("Mapping[object, Any]", value).items())
-    if all(isinstance(k, str) for k, _ in items):
+    if all(issubclass(type(k), str) for k, _ in items):
         data = {string_data(cast(str, k)): v for k, v in items}
         if len(data) == len(items):
             return MappingProxyType(data)
@@ -42,7 +42,7 @@ def _mapping(value: object) -> Any:
 
 
 def _sequence(value: object) -> Any:
-    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+    if issubclass(type(value), str | bytes | bytearray) or not issubclass(type(value), Sequence):
         return value
     return tuple(cast("Sequence[Any]", value))
 
@@ -54,9 +54,9 @@ def _string(value: object) -> Any:
 
 def _provision(value: object) -> Any:
     """A ``provides`` value: a type's string data, or a mapping whose ``type`` is."""
-    if not isinstance(value, Mapping):
+    if not issubclass(type(value), Mapping):
         return _string(value)
-    proxy = cast("Mapping[object, Any]", _mapping(cast(object, value)))
+    proxy = cast("Mapping[object, Any]", _mapping(value))
     data = dict(proxy)
     if not all(type(k) is str for k in data) or "type" not in data:
         return proxy
@@ -66,7 +66,7 @@ def _provision(value: object) -> Any:
 
 def _strings(value: object) -> Any:
     members = _sequence(value)
-    if isinstance(members, tuple):
+    if type(members) is tuple:
         return tuple(_string(v) for v in cast("tuple[object, ...]", members))
     return members
 
@@ -82,10 +82,10 @@ def _set(obj: object, **fields: object) -> None:
 
 def _slot(slot: object) -> Any:
     members = _mapping(slot)
-    if isinstance(members, MappingProxyType) and "origin" in members:
+    if type(members) is MappingProxyType and "origin" in members:
         snapshot = dict(cast("Mapping[str, Any]", members))
         origin = _mapping(snapshot["origin"])
-        if isinstance(origin, MappingProxyType):
+        if type(origin) is MappingProxyType:
             origin = MappingProxyType(
                 {k: _string(v) for k, v in cast("Mapping[str, Any]", origin).items()}
             )
@@ -105,7 +105,7 @@ class Text:
 
     def __post_init__(self) -> None:
         slots = _sequence(self.slots)
-        if isinstance(slots, tuple):
+        if type(slots) is tuple:
             slots = tuple(_slot(s) for s in cast("tuple[object, ...]", slots))
         _set(self, template=_string(self.template), slots=slots)
 
@@ -138,7 +138,7 @@ class Question:
         if isinstance(value_type, str) and string_data(value_type) in ValueType.__members__:
             value_type = ValueType(string_data(value_type))
         labels: object = self.labels
-        if isinstance(labels, Mapping):
+        if issubclass(type(labels), Mapping):
             snapshot = dict(cast("Mapping[str, Any]", _mapping(labels)))
             if "fixed" in snapshot:
                 snapshot["fixed"] = _labels(snapshot["fixed"])
@@ -161,14 +161,14 @@ def _labels(value: object) -> Any:
     """A label list as a tuple: each string its string data, each mapping, a described label's
     ``name`` and ``description``, a read-only copy of it with each string its string data."""
     members = _sequence(value)
-    if isinstance(members, tuple):
+    if type(members) is tuple:
         return tuple(_label(v) for v in cast("tuple[object, ...]", members))
     return members
 
 
 def _label(value: object) -> Any:
     members = _mapping(value)
-    if isinstance(members, MappingProxyType):
+    if type(members) is MappingProxyType:
         return MappingProxyType(
             {k: _string(v) for k, v in cast("Mapping[Any, Any]", members).items()}
         )
@@ -194,7 +194,7 @@ def label_parts(labels: Sequence[Any]) -> tuple[tuple[str, ...], tuple[str | Non
 def _origin(value: object) -> Any:
     """A board-ref origin as a read-only mapping, each string its string data."""
     members = _mapping(value)
-    if isinstance(members, MappingProxyType):
+    if type(members) is MappingProxyType:
         return MappingProxyType(
             {k: _string(v) for k, v in cast("Mapping[Any, Any]", members).items()}
         )
@@ -274,7 +274,7 @@ class Source:
 
     def __post_init__(self) -> None:
         provides = _mapping(self.provides)
-        if isinstance(provides, MappingProxyType):
+        if type(provides) is MappingProxyType:
             provides = MappingProxyType(
                 {k: _provision(v) for k, v in cast("Mapping[Any, Any]", provides).items()}
             )
@@ -403,7 +403,7 @@ class Design:
 
     def __post_init__(self) -> None:
         types = _mapping(self.types)
-        if isinstance(types, MappingProxyType):
+        if type(types) is MappingProxyType:
             types = MappingProxyType(
                 {k: _string(v) for k, v in cast("Mapping[Any, Any]", types).items()}
             )

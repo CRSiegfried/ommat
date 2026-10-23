@@ -1,7 +1,8 @@
 """The plan types: ``Plan``, ``Step``, ``Origin`` and ``Binding``.
 
-Each is a frozen dataclass whose constructor checks its fields' types and nothing else, so a
-plan that breaks a plan rule is built, and compile names the rule.
+Each is a frozen dataclass whose constructor checks its fields' types, and ``Plan``'s kind
+against the closed set, and nothing else, so a plan that breaks a plan rule is built, and
+compile names the rule.
 A ``str`` subclass is stored as its string data. Only the engine writes a plan's ``cause`` and
 ``slots`` and an origin's ``set``: the public constructors take none of them, and the engine
 sets them through the internal ``engine_plan`` and ``candidate_literal``.

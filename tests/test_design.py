@@ -183,3 +183,17 @@ def test_a_source_requirement_snapshots_its_values() -> None:
     values.append("c")
     assert requirement.values == ("a", "b")
     assert type(requirement.ref) is str
+
+
+class _ClassRaises(dict[str, Any]):
+    @property
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleMethodOverride]
+        raise RuntimeError("__class__ was read")
+
+
+def test_a_design_type_reads_a_field_by_its_type_not_its_class_attribute() -> None:
+    # Not a sequence by its type, so each is kept as given for check 10 to name.
+    given = _ClassRaises()
+    assert Source({"t:x": t.string}, needs=given).needs is given  # pyright: ignore[reportArgumentType]
+    assert Group(refs=given).refs is given  # pyright: ignore[reportArgumentType]
+    assert Source(given).provides is not given  # pyright: ignore[reportArgumentType]

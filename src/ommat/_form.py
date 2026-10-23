@@ -323,7 +323,9 @@ class _Form:
 
     def question(self, q: Question, where: str, names: tuple[str, ...]) -> Question | None:
         ok = True
-        if not isinstance(q.kind, AnswerKind):
+        # By its type, so a kind whose __class__ is overridden is read as what it is.
+        kind = cast(AnswerKind, q.kind) if issubclass(type(q.kind), AnswerKind) else None
+        if kind is None:
             self.fail(names, f"{where}'s kind is not noul, choice, score or extraction")
             ok = False
         wording = self.text(q.wording, f"{where}'s wording", names)
@@ -332,10 +334,10 @@ class _Form:
         labels: object = q.labels
         if q.kind is AnswerKind.extraction:
             ok = self.extraction(q, where, names) and ok
-        elif isinstance(q.kind, AnswerKind) and not _probability_members_unset(q):
+        elif kind is not None and not _probability_members_unset(q):
             self.fail(
                 names,
-                f"{where} is a {q.kind.value} question and declares value_type, is_list, text "
+                f"{where} is a {kind.value} question and declares value_type, is_list, text "
                 "or reference_date, which only an extraction question declares",
             )
             ok = False
@@ -358,7 +360,7 @@ class _Form:
                     members["candidates"], f"{where}'s candidates", names, optional=False
                 )
                 ok = ok and fixed is not None and ref is not None
-        elif isinstance(q.kind, AnswerKind):
+        elif kind is not None:
             ok = self.labels(labels, f"{where}'s labels", names, 1) is not None and ok
         if not ok:
             return None

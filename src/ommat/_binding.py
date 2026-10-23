@@ -5,7 +5,7 @@ A binding is an async function the caller supplies, one per oracle name and one 
 ``CallResult`` or a ``Failed`` outcome, or raises. Interpret is the one engine producer of a
 ``SourceCall`` and the one reader of a ``CallResult``. The three types are frozen.
 ``RenderedQuestion`` and ``SourceCall`` check their fields when built, raising ``TypeError`` for a
-field of the wrong type and ``ValueError`` for a wrong value, as ``Cause`` does, so a hand-built
+field of the wrong type and ``ValueError`` for a wrong value, so a hand-built
 one is refused at the line that built it and a binding reads each field as its type says.
 ``CallResult`` checks nothing: interpret tests it at the write, so a bad value fails its ref or
 the call by the fault scope rather than raising inside the binding.
