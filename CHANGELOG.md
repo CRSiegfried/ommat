@@ -18,7 +18,7 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Changed
 
-- jurat is renamed Ommat: the distribution, the package and the import are `ommat`, the extra `ommat[idia]`, and Idia is apostille renamed.
+- jurat is renamed Ommat: the distribution, the package and the import are `ommat`, and the extra `ommat[idia]`.
 - Records and design documents are format 4. Every design hash and record hash changes, so golden hashes must be updated. `read_record` reads formats 1 to 4 and `load` loads documents of formats 1 to 4 to their own hash; a record before format 4 holding a binding's `timed-out` or `raised` under a `returned` call is refused.
 - A binding is `async def binding(batch, *, seconds)`: every binding must take the keyword. The fixture binding, `from_record` and the tutorial's binding take it and ignore it.
 - The tutorial's binding, `fixed_answers`, reads a `score` by its kind and marks a `t:` ref it does not answer `unsupported`, so it passes the conformance suite's own batches; the tutorial says what `seconds` is for.
