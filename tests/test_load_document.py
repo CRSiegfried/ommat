@@ -892,3 +892,43 @@ def test_a_documents_choice_label_set_with_null_candidates_fails_check_10() -> N
     (failure,) = only(written(doc), 10)
     assert failure.names == ("q:x", "s")
     assert failure.message == 'source "s"\'s "q:x"\'s candidates is not a string'
+
+
+def label_set_doc() -> dict[str, Any]:
+    from ommat import Question, Source, Text
+    from ommat import types as t
+
+    design = designs.with_source(
+        designs.with_source(
+            minimal(),
+            "set",
+            Source({"t:s": {"type": t.list_(t.string), "candidates": True}}),
+        ),
+        "s",
+        Source({"q:x": Question("choice", Text("Who?"), {"fixed": ["none"], "candidates": "t:s"})}),
+    )
+    return doc_of(design)
+
+
+def test_a_label_set_document_loads_at_format_4() -> None:
+    load(written(label_set_doc()))
+
+
+@pytest.mark.parametrize("fmt", [1, 2, 3])
+def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -> None:
+    doc = {**label_set_doc(), "format": fmt}
+    (failure,) = refused(written(doc))
+    assert failure.check == 11
+    assert failure.message.endswith(
+        f"is a candidate-valued label set, which format {fmt} does not have"
+    )
+    del doc["sources"]["s"]
+    (failure,) = refused(written(doc))
+    assert failure.message.endswith(f'"t:s" is a candidate set, which format {fmt} does not have')
+    rule_doc = doc_of(
+        designs.with_rule(
+            minimal(), "find", designs.rule("find", outputs="list<string>", candidates=True)
+        )
+    )
+    (failure,) = refused(written({**rule_doc, "format": fmt}))
+    assert failure.message == f'rule "find" is a candidate set, which format {fmt} does not have'

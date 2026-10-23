@@ -83,6 +83,7 @@ from ommat._types import (
     value_conforms,
 )
 from ommat._values import (
+    CANDIDATE_FORMAT,
     DESCRIPTION_FORMAT,
     EXTRACTION_FORMAT,
     FORMAT,
@@ -2059,6 +2060,8 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
         yield from _missing_or_extra(r, frozenset({"ref", "value"}), "a plan-level requirement", ())
     for rid, rule in _objects(doc["rules"]):
         yield from _function_failures(rule, f"rule {_q(rid)}", (rid,), _RULE, _TABLE, fmt)
+        if fmt < CANDIDATE_FORMAT and rule.get("candidates") is True:
+            yield (rid,), f"rule {_q(rid)} is a candidate set, which format {fmt} does not have"
     for sid, source in _objects(doc["sources"]):
         yield from _source_failures(sid, source, fmt)
     for name, tool in _objects(doc["tools"]):
@@ -2117,6 +2120,8 @@ def _source_failures(
         at, shown = (sid, ref), f"{where}'s {_q(ref)}"
         if not ref.startswith("q:"):
             yield from _missing_or_extra(provided, frozenset({"type", "candidates"}), shown, at)
+            if fmt < CANDIDATE_FORMAT and provided.get("candidates") is True:
+                yield at, f"{shown} is a candidate set, which format {fmt} does not have"
             continue
         extraction = provided.get("kind") == AnswerKind.extraction
         if extraction and fmt < EXTRACTION_FORMAT:
@@ -2128,6 +2133,8 @@ def _source_failures(
             yield from _text_failures(provided["wording"], f"{shown}'s wording", at)
         declared: object = provided.get("labels")
         listed = declared
+        if isinstance(declared, dict) and fmt < CANDIDATE_FORMAT:
+            yield at, f"{shown} is a candidate-valued label set, which format {fmt} does not have"
         if isinstance(declared, dict):
             label_set = cast("dict[str, Any]", declared)
             labels = frozenset({"fixed", "candidates"})

@@ -55,6 +55,10 @@ UNSUPPORTED_FORMAT = 3
 LABEL_OVERFLOW_FORMAT = 4
 """The first format with the ``label-overflow`` cause code."""
 
+CANDIDATE_FORMAT = 4
+"""The first format whose design document holds a candidate set or a candidate-valued label
+set."""
+
 HASH_FORMAT = 3
 """The first format whose record document holds the record hash as its ``hash`` member."""
 
