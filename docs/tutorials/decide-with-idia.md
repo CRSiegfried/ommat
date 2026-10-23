@@ -3,7 +3,9 @@
 In this tutorial you bind an ommat design to two real decision models through the idia
 binding, decide two street reports, read what the record holds about each call, replay the
 records, and answer a turn again from a stored record. You need Python 3.11 or later, an OpenAI
-API key, and a Cloudflare account id and API token with Workers AI access.
+API key, and a Cloudflare account id and API token with Workers AI access. It builds on
+[Write your first design](write-a-design.md), which introduces the answer kinds, markers and
+replay.
 
 It uses the street-reports design from the ommat repository:
 `docs/tutorials/street_reports/street_reports_design.py` holds the design, and

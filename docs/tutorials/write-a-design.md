@@ -1,7 +1,8 @@
 # Write your first design
 
 In this tutorial you build an ommat design for a shop's help desk, decide two customer
-messages offline, and replay the records. You need Python 3.11 or later and ommat 0.4.0.
+messages offline, and replay the records. You need Python 3.11 or later and ommat 0.4.0,
+installed as the [README](../../README.md#install) shows.
 
 ## The design you'll build, and where it lives
 

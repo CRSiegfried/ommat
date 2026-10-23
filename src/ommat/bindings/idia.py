@@ -4,8 +4,8 @@ an idia ``Dispatcher`` over one leaf.
 Install it with the ``idia`` extra, after idia with the extras for its providers,
 as the README shows:
 ``pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"``.
-``import ommat`` never imports it. Each oracle names one leaf, so a design that asks both label
-kinds and extractions binds a dispatcher per model under oracles of their own.
+``import ommat`` never imports it. Each oracle names one leaf, so a design that asks label kinds and
+extractions of different models binds one dispatcher per oracle.
 
 The binding is a map between the two libraries' shapes. Each source of a batch is one idia
 ``Request``: its questions in the order received, keyed by their refs, each label carrying its
@@ -147,8 +147,8 @@ def _refusal(
     deadline: idia.Deadline,
     requests: dict[str, idia.Request],
 ) -> str | None:
-    """The source's request, kept in ``requests`` when Fit plans it, or the reason it is not
-    sent."""
+    """The reason the source is not sent, or ``None`` when it is sent, its request then kept
+    in ``requests``, or asks nothing."""
     if source.refs:
         return f"the idia binding asks q: refs only, not {', '.join(source.refs)}"
     if not source.questions:
