@@ -4,6 +4,7 @@
 import dataclasses
 import enum
 import math
+import re
 from collections import OrderedDict
 from fractions import Fraction
 from types import MappingProxyType
@@ -128,7 +129,7 @@ INVALID: list[tuple[str, Any, Any, Any]] = [
     ("None value", "choice", ("a", "b"), {"a": 1, "b": None}),
     ("nan", "choice", ("a", "b"), {"a": 1, "b": math.nan}),
     ("inf", "choice", ("a", "b"), {"a": math.inf, "b": 0}),
-    ("negative", "choice", ("a", "b"), {"a": 1.1, "b": -0.1}),
+    ("negative", "choice", ("a", "b"), {"a": 1.0, "b": -0.1}),
     ("above one", "choice", ("a", "b"), {"a": 2, "b": -1}),
     ("percent", "noul", ("yes", "no"), {"yes": 0.9, "no": 70}),
     ("a huge int", "choice", ("a", "b"), {"a": 10**400, "b": 0}),
@@ -142,13 +143,51 @@ INVALID: list[tuple[str, Any, Any, Any]] = [
 ]
 
 
+# The part of each row's message that names the check it fails.
+REFUSED_BY = {
+    "unknown kind": "is not noul, choice or score",
+    "kind not a str": "is not noul, choice or score",
+    "noul labels reversed": "a noul answer's labels are",
+    "noul labels other": "a noul answer's labels are",
+    "noul one label": "a noul answer's labels are",
+    "labels a str": "are not a sequence of strings",
+    "labels not a sequence": "are not a sequence of strings",
+    "labels repeated": "repeat a label",
+    "label not a str": "label 1 is not a string",
+    "missing key": "no probability for label(s) ['b']",
+    "extra key": "probability for key(s) ['b'] not among the labels",
+    "probabilities not a mapping": "of type list are not exactly a dict",
+    "an OrderedDict": "of type OrderedDict are not exactly a dict",
+    "a mapping proxy": "of type mappingproxy are not exactly a dict",
+    "a numpy-like float": "of type FloatLike for 'a' is not a number",
+    "an int subclass": "of type IntLike for 'a' is not a number",
+    "probabilities None": "of type NoneType are not exactly a dict",
+    "bool value": "of type bool for 'yes' is not a number",
+    "str value": "of type str for 'a' is not a number",
+    "None value": "of type NoneType for 'b' is not a number",
+    "nan": "nan for 'b' is not in [0, 1]",
+    "inf": "inf for 'a' is not in [0, 1]",
+    "negative": "-0.1 for 'b' is not in [0, 1]",
+    "above one": "2 for 'a' is not in [0, 1]",
+    "percent": "70 for 'no' is not in [0, 1]",
+    "a huge int": "for 'a' is not in [0, 1]",
+    "a huge negative int": "is not in [0, 1]",
+    "a lone surrogate label": "is not a string of Unicode scalar values",
+    "a lone surrogate key": "is not a string of Unicode scalar values",
+    "labels a bytes": "label b'a' is not a string",
+    "labels repeated by string data": "repeat a label",
+    "keys repeated by string data": "two probability keys have the string data 'a'",
+    "key not a str": "probability key None is not a string",
+}
+
+
 @pytest.mark.parametrize(
     ("why", "kind", "labels", "probabilities"), INVALID, ids=[row[0] for row in INVALID]
 )
 def test_invalid_answers_raise_value_error(
     why: str, kind: Any, labels: Any, probabilities: Any
 ) -> None:
-    with pytest.raises(ValueError):  # noqa: PT011
+    with pytest.raises(ValueError, match=re.escape(REFUSED_BY[why])):
         Answer(kind, labels, probabilities)
 
 

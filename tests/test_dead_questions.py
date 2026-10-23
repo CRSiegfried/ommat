@@ -6,6 +6,7 @@ a report of plain data. The points themselves are tested in ``test_lint_points.p
 
 import copy
 import json
+import re
 from typing import Any
 
 import pytest
@@ -237,19 +238,19 @@ def test_the_state_is_the_points_t_state_live() -> None:
 
 
 @pytest.mark.parametrize(
-    "values",
+    ("values", "says"),
     [
-        None,  # t:n is unfilled
-        {"t:n": [1], "t:other": [1]},
-        {"t:n": [1], "q:go": [{"yes": 1, "no": 0}]},
-        {"t:n": ["x"]},
-        {"t:n": [1, 1]},
+        (None, 'unfilled: "t:n"'),
+        ({"t:n": [1], "t:other": [1]}, '"t:other", a read the lint does not fill'),
+        ({"t:n": [1], "q:go": [{"yes": 1, "no": 0}]}, '"q:go", which its grid points'),
+        ({"t:n": ["x"]}, 'a value for "t:n" does not conform'),
+        ({"t:n": [1, 1]}, 'values for "t:n" lists one value twice'),
     ],
 )
-def test_a_value_error_is_raised_before_any_run(values: Any) -> None:
+def test_a_value_error_is_raised_before_any_run(values: Any, says: str) -> None:
     loaded = load(design(sources={**design().sources, "look": Source({"t:n": t.integer()})}))
     CALLS.clear()
-    with pytest.raises(ValueError):  # noqa: PT011
+    with pytest.raises(ValueError, match=re.escape(says)):
         dead_questions(loaded, values=values)
     assert CALLS == []
 

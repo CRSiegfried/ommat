@@ -7,6 +7,7 @@ any call, and a report of plain data. The points are tested in ``test_lint_point
 import contextlib
 import copy
 import json
+import re
 from typing import Any
 
 import pytest
@@ -266,24 +267,26 @@ def test_each_call_gets_a_fresh_board() -> None:
 
 
 @pytest.mark.parametrize(
-    ("reads", "values"),
+    ("reads", "values", "says"),
     [
-        (("d:ok", "t:name"), None),  # t:name is unfilled
-        (("t:name",), None),  # unfilled though no d: read is set
-        (("d:ok", "t:name"), {"t:name": ["a"], "q:go": [1]}),  # not a read this lint fills
-        (("d:ok", "t:name"), {"t:name": ["a"], "d:ok": [True]}),  # its type fills it
-        (("d:ok", "t:name"), {"t:name": [1]}),
-        (("d:ok", "t:name"), {"t:name": ["a", "a"]}),
+        (("d:ok", "t:name"), None, 'unfilled: "t:name"'),
+        (("t:name",), None, 'unfilled: "t:name"'),  # though no d: read is set
+        (("d:ok", "t:name"), {"t:name": ["a"], "q:go": [1]}, '"q:go", a read the lint does not'),
+        (("d:ok", "t:name"), {"t:name": ["a"], "d:ok": [True]}, '"d:ok", which its grid points'),
+        (("d:ok", "t:name"), {"t:name": [1]}, 'a value for "t:name" does not conform'),
+        (("d:ok", "t:name"), {"t:name": ["a", "a"]}, 'values for "t:name" lists one value twice'),
     ],
 )
-def test_a_value_error_is_raised_before_any_call(reads: tuple[str, ...], values: Any) -> None:
+def test_a_value_error_is_raised_before_any_call(
+    reads: tuple[str, ...], values: Any, says: str
+) -> None:
     called: list[object] = []
 
     def counting(r: Any) -> Plan:
         called.append(1)
         return Plan("execute")
 
-    with pytest.raises(ValueError):  # noqa: PT011
+    with pytest.raises(ValueError, match=re.escape(says)):
         lint(counting, reads, values=values)
     assert called == []
 

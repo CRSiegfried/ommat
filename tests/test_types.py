@@ -22,7 +22,6 @@ from ommat._types import (
     Scalar,
     Type,
     TypeFailure,
-    _Inexact,
     _Invalid,
     b64url_decode,
     b64url_encode,
@@ -993,9 +992,9 @@ def test_t_or_null_is_not_built_over_a_nullable_type() -> None:
 
 
 def test_resolve_refuses_an_undefined_name_or_a_cycle() -> None:
-    with pytest.raises(ValueError, match="nope"):
+    with pytest.raises(ValueError, match='"nope" is undefined or in a cycle'):
         resolve(Named("nope"), {})
-    with pytest.raises(ValueError, match="a"):
+    with pytest.raises(ValueError, match='"a" is undefined or in a cycle'):
         resolve(Named("a"), {"a": Named("a")})
 
 
@@ -1030,7 +1029,6 @@ def test_an_inexact_bound_is_ill_formed_and_names_it() -> None:
     assert isinstance(failure, TypeFailure)
     assert failure.kind is FailureKind.ill_formed
     assert "9007199254740993" in failure.message
-    assert _Inexact("1") == _Inexact("1")
 
 
 def test_an_inexact_bound_does_not_hide_a_later_syntax_error() -> None:

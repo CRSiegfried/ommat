@@ -1042,7 +1042,6 @@ def test_twinned_arguments_are_read_by_position_and_string_data() -> None:
     assert 1 not in arguments
     assert two in arguments.values()
     assert Origin(literal=3) not in arguments.values()
-    assert arguments == arguments
     assert arguments != {"a": one}
     with pytest.raises(KeyError):
         arguments["b"]
