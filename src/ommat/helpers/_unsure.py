@@ -43,7 +43,8 @@ def unsure_to_execute(
     points = 0
     execute: list[dict[str, Any]] = []
     for unsure in code_point_sorted({base(r) for r in declared if r.startswith("d:")}):
-        writer = cast(Rule, loaded._design.rules[loaded._providers[unsure]])  # no table in v0.0.1
+        # load refuses a rule table, so a rule writes every d: ref
+        writer = cast(Rule, loaded._design.rules[loaded._providers[unsure]])
         marker = Unsure(Cause(CauseCode.abstained, code_point_sorted(set(writer.reads))))
         shown_marker = _marker_document(marker)  # the record's marker form, interpret's
         others = [r for r in top if base(r) != unsure]

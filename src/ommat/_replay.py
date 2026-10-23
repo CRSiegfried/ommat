@@ -19,7 +19,7 @@ The findings are plain ``dict``s in a fixed order, two items differing when thei
 canonical bytes differ. Replay reads nothing from ``unhashed``.
 
 ``question-changed``'s candidate-valued label set clause is not built: load's check 12
-refuses candidate sets in v0.0.1.
+refuses candidate sets.
 """
 
 import asyncio
@@ -170,11 +170,8 @@ def _call_findings(
 ) -> list[Finding]:
     """``not-in-record`` per fixture call, by first source id, then one ``ref-not-in-record``
     and one ``question-changed`` for the run. The replay record's call items give one per
-    fixture call, the sources it asked and their questions' identities; the fixture's log
-    gives the refs each source was asked.
-
-    ``question-changed`` compares identities only: its candidate-valued label set clause is not
-    built, since load's check 12 refuses candidate sets in v0.0.1."""
+    fixture call, the sources it asked and their questions' identities; the fixture's ``asked``
+    map gives the refs each source was asked. ``question-changed`` compares identities only."""
     missing: list[list[str]] = []
     refs: set[str] = set()
     changed: set[str] = set()

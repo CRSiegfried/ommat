@@ -127,7 +127,7 @@ class RenderedQuestion:
 class SourceCall:
     """One source of a batch: its id, its payload, its needs' values in the form a read
     returns, keyed by each need as declared, the ``t:`` refs it provides and the ``q:`` refs
-    it is asked, each in code-point order. ``needs`` is a fresh
+    it is asked, each in code-point order. Interpret passes ``needs`` as a fresh
     copy: changing it reaches nothing else. A source provides ``t:`` or ``q:`` refs, never
     both, so ``refs`` and ``questions`` are not both non-empty. ``payload`` is the design's
     and is not checked."""

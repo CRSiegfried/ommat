@@ -318,7 +318,7 @@ def _provenance(outcome: idia.Outcome) -> RequestProvenance:
     cut = any(w.code == idia.WARNING_PROVIDER_TRUNCATED for w in outcome.warnings)
     return RequestProvenance(
         snapshot=outcome.snapshot,
-        elicitation=None if outcome.elicitation is None else str(outcome.elicitation),
+        elicitation=outcome.elicitation,
         prompt=prompt_text(outcome.prompt_sent),
         usage=figures,
         attempts=outcome.attempts,

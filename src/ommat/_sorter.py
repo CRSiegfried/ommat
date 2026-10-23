@@ -5,8 +5,8 @@ removed as a key and from every predecessor set, since the constructor would add
 predecessor as a node and return it as a root. Prepared once, here, and never
 again: a sorter serves one walk.
 
-A wavefront is returned as an unordered set; interpret sorts it. Which
-returned nodes are ready, holding a source to the next round, and the drain are interpret's.
+A wavefront is returned as an unordered set; interpret sorts it. Interpret decides which
+returned nodes are ready, which sources are held to the next round, and the drain.
 ``done()`` on a node not yet returned raises ``graphlib``'s ``ValueError``; while a returned
 node is not done, ``is_active()`` stays true even when ``get_ready()`` is empty.
 """

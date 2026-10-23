@@ -11,7 +11,7 @@ returned is built from the copy the ledger stores, in exact ``dict``, ``list`` a
 each value's live type kept, so a ``1.0`` stays a ``float`` where the record's bytes read back
 as ``1``.
 
-v0.0.1 has a function policy only: a policy table and plan declarations are
+This engine has a function policy only: a policy table and plan declarations are
 refused at load, so every ``plan`` item holds ``derivation`` and none holds ``rows`` or
 ``slots``. Compile writes no board entry.
 """
@@ -162,8 +162,8 @@ def _text(value: str | None) -> bool:
 
 
 def _rule_5(plan: Plan) -> bool:
-    """``reply`` on ``clarify`` and ``inform`` only, ``reason`` on ``escalate``, each carried
-    text holding a character that is not whitespace, and the kind not ``broken``."""
+    """``reply`` on ``clarify`` and ``inform`` only, ``reason`` required on ``escalate``, each
+    carried text holding a character that is not whitespace, and the kind not ``broken``."""
     if plan.kind is PlanKind.broken:
         return False
     if (plan.reply is not None) != (plan.kind in (PlanKind.clarify, PlanKind.inform)):

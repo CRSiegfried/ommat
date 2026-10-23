@@ -9,7 +9,7 @@ root_key)`` returns the redacted view's document as canonical bytes: the record'
 open. Which value takes which class is set by the default
 classes.
 
-A v0.0.1 record holds no grounded ref and no origin carrying ``set``, since the ledger refuses
+This engine's record holds no grounded ref and no origin carrying ``set``, since the ledger refuses
 both at the write and the read: every ref passes unchanged and every literal takes
 its JSON form's default. Each view raises ``ValueError`` before reading anything when
 ``record`` is not exactly a ``Record``. The continuation record is deferred, so it has no function

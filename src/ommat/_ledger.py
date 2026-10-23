@@ -580,7 +580,7 @@ _SHAPES: dict[str, _Check] = {
 
 
 # ---------------------------------------------------------------------------------------------
-# Grounded refs, refused in v0.0.1 wherever redaction rewrites one
+# Grounded refs, refused wherever redaction rewrites one
 
 
 def _grounded(ref: Any) -> bool:
@@ -631,13 +631,13 @@ def _no_grounded_ref(kind: str, item: dict[str, Any], where: str) -> None:
     for place, ref in _ref_places(kind, item):
         if _grounded(ref):
             raise _LedgerError(
-                f"{where}: {place} {ref!r} is a grounded ref, which a v0.0.1 record holds nowhere"
+                f"{where}: {place} {ref!r} is a grounded ref, which a record holds nowhere"
             )
 
 
 def _no_set(kind: str, item: dict[str, Any], where: str) -> None:
     """No origin carrying ``set``, null included: nothing checks a candidate-value literal's
-    set in v0.0.1. The item has passed its shape check."""
+    set in this engine. The item has passed its shape check."""
     if kind != "plan":
         return
     for n, step in enumerate(cast("list[dict[str, Any]]", item["steps"]), 1):
@@ -645,7 +645,7 @@ def _no_set(kind: str, item: dict[str, Any], where: str) -> None:
             if type(origin) is dict and "set" in origin:
                 raise _LedgerError(
                     f"{where}: step {n}'s argument {name!r} carries set, "
-                    "which a v0.0.1 record holds nowhere"
+                    "which a record holds nowhere"
                 )
 
 
@@ -797,7 +797,7 @@ def _call_entry(value: Any, where: str) -> None:
 
 def _sums_keys(entry: dict[str, Any], questions: Mapping[str, str], where: str) -> None:
     """Refuse a ``sums`` key or a ``truncated`` ref that names no key of its call item's
-    ``questions``, looked up with any grounded bracket removed, and in v0.0.1 a grounded one.
+    ``questions``, looked up with any grounded bracket removed, and in this engine a grounded one.
     The entry has passed its shape check."""
     named = [("sums", key) for key in cast("dict[str, Any]", entry.get("sums", {}))]
     named += [("truncated", ref) for ref in cast("list[str]", entry.get("truncated", []))]
@@ -814,8 +814,8 @@ def _sums_keys(entry: dict[str, Any], questions: Mapping[str, str], where: str) 
             )
         if _grounded(key):
             raise _LedgerError(
-                f"{where}'s {member!r} {what} {clipped(key)} is a grounded ref, which a v0.0.1 "
-                "record holds nowhere"
+                f"{where}'s {member!r} {what} {clipped(key)} is a grounded ref, which a record "
+                "holds nowhere"
             )
 
 
@@ -917,7 +917,8 @@ _EMPTY, _DESIGNED, _SETTLED, _BODY, _PLANNED, _VERDICT, _CAUSED = range(7)
 
 
 class Ledger:
-    """The open ledger: no public name. Decide opens it and closes it."""
+    """The open ledger: no public name. Decide opens it and closes it; ``read_record`` builds one
+    to check a stored record."""
 
     def __init__(self, observer: Observer | None = None) -> None:
         self._observer = observer

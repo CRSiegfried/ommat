@@ -59,7 +59,6 @@ from ommat._values import (
 )
 from ommat.helpers._numbers import exact
 
-_STATE = "t:state"
 _ZERO, _ONE = Fraction(0), Fraction(1)
 
 

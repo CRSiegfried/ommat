@@ -36,7 +36,8 @@ _RETURNED_MARKERS = frozenset(
         _C.invalid_answer.value,
         _C.invalid_return.value,
         _C.unsupported.value,
-        _C.timed_out.value,  # under a returned call, the binding's provider request
+        # under a returned call, timed-out and raised are the binding's provider request's
+        _C.timed_out.value,
         _C.raised.value,
     }
 )

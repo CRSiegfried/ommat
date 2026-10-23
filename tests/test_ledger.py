@@ -456,7 +456,7 @@ GROUNDED_FAILURE = {"step": 1, "requirement": {"ref": GROUNDED, "value": 1}, "re
 def test_a_grounded_ref_is_refused_wherever_redaction_would_rewrite_one(
     prefix: list[dict[str, Any]], item: dict[str, Any]
 ) -> None:
-    # The v0.0.1 record does not name a grounded entry's set, so redact could not digest
+    # This engine's record does not name a grounded entry's set, so redact could not digest
     # one.
     refused(prefix, item, "is a grounded ref")
 
@@ -471,7 +471,7 @@ def test_a_grounded_ref_is_refused_wherever_redaction_would_rewrite_one(
     ids=["a literal's set", "a null set", "a ref's set"],
 )
 def test_an_origin_carrying_set_is_refused(origin: dict[str, Any]) -> None:
-    # Nothing checks a candidate-value literal's set in v0.0.1, so redact could find no tree
+    # Nothing checks a candidate-value literal's set in this engine, so redact could find no tree
     # it fits; the key is refused whatever it holds.
     refused(HEAD, grounded_plan(arguments={"x": origin}), "carries set")
 
@@ -1127,7 +1127,7 @@ def test_a_calls_entry_holds_the_sums_of_its_call_items_questions() -> None:
         (7, {"spam": 1.8}, "'spam', which names no key of its call item's questions"),
         (7, {"q:spam.f": 1.8}, "'q:spam.f', which names no key of its call item's questions"),
         (3, {"q:spam": 1.8}, "'q:spam', which names no key of its call item's questions"),
-        (7, {'q:spam["x"]': 1.8}, "is a grounded ref, which a v0.0.1 record holds nowhere"),
+        (7, {'q:spam["x"]': 1.8}, "is a grounded ref, which a record holds nowhere"),
     ],
 )
 def test_a_sums_member_of_the_wrong_shape_or_key_is_refused(
@@ -1153,7 +1153,7 @@ def test_a_long_sums_key_is_clipped_in_the_refusal() -> None:
 
 def test_a_grounded_question_key_matches_no_sums_key() -> None:
     # A grounded question key is no declared ref, so no sums key names it; a grounded sums
-    # key over a declared question is refused as grounded in v0.0.1.
+    # key over a declared question is refused as grounded.
     grounded = call(2, "s", questions={'q:spam["x"]': QUESTIONS["q:spam"]})
     ledger = ledger_of([*R1_DONE, grounded])
     with pytest.raises(_LedgerError, match="which names no key"):

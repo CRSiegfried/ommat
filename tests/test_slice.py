@@ -1,4 +1,4 @@
-"""The v0.0.1 slice end to end, through public names only: a minimal design with one function
+"""The engine end to end, through public names only: a minimal design with one function
 rule and one function policy loads; decide runs one turn against a test fixture binding; the
 record closes with its hash and reads back; replay reproduces it with no finding; and the
 reference runner runs the passed ``execute`` plan."""

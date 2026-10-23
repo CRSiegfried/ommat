@@ -137,7 +137,7 @@ async def interpret(
     under replay's internal entry, which reads no clock and passes no deadline. ``cut`` is
     then the recorded cut, the round the deadline cut and whether that round was asked, or
     ``None`` for a record with none. ``carried`` holds the ids of
-    the carried providers, empty in v0.0.1. Run settings, bindings and the
+    the carried providers, empty in this engine. Run settings, bindings and the
     carried set are decide's to check. A cancellation propagates: one
     delivered at an await with nothing of the round it interrupted appended, and a
     ``CancelledError`` a function ``when``, a rule or a method of a returned value raises with
@@ -1003,7 +1003,7 @@ class _Turn:
                 values[slot["name"]] = needs[origin]
             elif tag == "param":
                 values[slot["name"]] = self.loaded._leaf_value(origin)
-            else:  # pragma: no cover - load refuses a candidate slot in v0.0.1
+            else:  # pragma: no cover - load refuses a candidate slot
                 raise _InterpretError(f"a {tag} slot reached interpret")
         return values
 

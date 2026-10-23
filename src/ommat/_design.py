@@ -317,7 +317,7 @@ class Rule:
 
 @dataclass(frozen=True, slots=True)
 class Table:
-    """A rule table; v0.0.1 refuses it at check 12."""
+    """A rule table; load refuses it at check 12."""
 
     provides: str
     outputs: str
@@ -356,7 +356,7 @@ class Policy:
 
 @dataclass(frozen=True, slots=True)
 class PolicyTable:
-    """The policy table; v0.0.1 refuses it at check 12."""
+    """The policy table; load refuses it at check 12."""
 
     inputs: Any
     rows: Any
@@ -365,7 +365,7 @@ class PolicyTable:
 
 @dataclass(frozen=True, slots=True)
 class PlanDeclaration:
-    """A plan declaration; v0.0.1 refuses it at check 12."""
+    """A plan declaration; load refuses it at check 12."""
 
     kind: str
     steps: Sequence[Any] = ()

@@ -969,7 +969,7 @@ class _Loader:
 
     def check_9_boundaries(self) -> None:
         """Check 9's ``boundaries`` clauses. A leaf check 8 refused is left out. No table compares a
-        read in v0.0.1, since check 12 refuses tables, so the clause on a boundary a table already
+        read, since check 12 refuses tables, so the clause on a boundary a table already
         compares applies to none."""
         reads = {owner: set(r) for owner, _, _, r in self.boundary_fields()}
         for owner, key, where, entry in self.boundary_entries():
@@ -1028,7 +1028,7 @@ class _Loader:
                             f"{_q(key)}",
                         )
             if question.kind is AnswerKind.noul and entry["thresholds"]:
-                self.fail(9, names, f"{where}: a noul question's thresholds are empty")
+                self.fail(9, names, f"{where}: a noul question's thresholds are not empty")
             for m in cast("list[dict[str, list[str]]]", entry["mass"]):
                 for path in self.typed(m["bounds"]):
                     self.bound(owner, where, path, self.leaf_types[path], _UNIT, "number [0, 1]")
@@ -1442,7 +1442,7 @@ def _grid(document: Mapping[str, Any]) -> Mapping[str, Any]:
     ascending order of canonical bytes; the mass sets are in ascending order of their sorted labels'
     canonical bytes, and a set's labels are held in that order too, so a lint takes "the set's first
     label in declared order" from the question. A read whose boundaries name no leaf over
-    every component has no entry. Read-only at every depth. A v0.0.1 design has no table, so
+    every component has no entry. Read-only at every depth. A loaded design has no table, so
     the fields are all."""
     fields = [r.get("boundaries") for r in cast("dict[str, Any]", document["rules"]).values()]
     fields.append(cast("dict[str, Any]", document["policy"]).get("boundaries"))

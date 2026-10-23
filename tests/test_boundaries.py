@@ -296,7 +296,7 @@ def test_a_leaf_check_8_refuses_is_left_out_of_check_9s_boundaries_clauses() -> 
             ),
             'the key "hot"',
         ),
-        (route_with({EMAIL: roles(thresholds=["tone/thresholds"])}), "thresholds are empty"),
+        (route_with({EMAIL: roles(thresholds=["tone/thresholds"])}), "thresholds are not empty"),
         (
             route_with({EMAIL: roles(mass=[{"labels": ["maybe"], "bounds": ["unit/mass"]}])}),
             "is not a label",

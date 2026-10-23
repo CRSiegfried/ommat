@@ -11,7 +11,7 @@ A ``when``'s view is given the state's type, its definitions resolved at every d
 reads ``t:state`` by any field path that type gives: one naming a record field at each depth.
 
 Not built: reading a grounded declaration's declared ref, since candidate
-sets are outside v0.0.1 and load's check 12 refuses them; a declared read with a grounded
+sets are outside this engine and load's check 12 refuses them; a declared read with a grounded
 bracket is an engine defect here.
 """
 
@@ -212,7 +212,7 @@ class ReadView:
             except ValueError:
                 raise _ViewError(f"the declared read {ref!r} is not a ref") from None
             if p.candidate is not None:
-                raise _ViewError(f"the declared read {ref!r} is grounded, outside v0.0.1")
+                raise _ViewError(f"the declared read {ref!r} is grounded, outside this engine")
             path = _Path(f"{p.level}:{p.name}", p.fields)
             if path.base not in board:
                 raise _ViewError(f"the board holds no entry for the declared read {ref!r}")

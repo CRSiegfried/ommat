@@ -1,6 +1,6 @@
 # pyright: reportPrivateUsage=false
 """Interpret: rounds over the turn's sorter, the oracle calls, the write
-path and every component-failure case the v0.0.1 slice reaches, against a scripted fixture
+path and every component-failure case this engine reaches, against a scripted fixture
 binding."""
 
 import asyncio

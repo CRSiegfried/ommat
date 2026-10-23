@@ -429,7 +429,7 @@ def test_a_literal_takes_the_default_of_its_json_form() -> None:
 
 @pytest.mark.parametrize("set_", ["d:route", "t:mail/body", "a set", None])
 def test_read_record_refuses_an_origin_carrying_set(set_: Any) -> None:
-    # Nothing checks a candidate-value literal's set in v0.0.1, so redact could find no
+    # Nothing checks a candidate-value literal's set in this engine, so redact could find no
     # tree for it; a null set is a set key all the same.
     arguments = {"folder": {"literal": "x", "set": set_}}
     with pytest.raises(InvalidRecord, match="carries set"):

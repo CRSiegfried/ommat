@@ -34,9 +34,9 @@ class CauseCode(enum.StrEnum):
     settled = "settled"
     over_budget = "over-budget"
     invalid_return = "invalid-return"
-    design_changed = "design-changed"  # no v0.0.1 producer
+    design_changed = "design-changed"  # no producer in this engine
     cancelled = "cancelled"
-    carried = "carried"  # no v0.0.1 producer
+    carried = "carried"  # no producer in this engine
     abstained = "abstained"
     unsupported = "unsupported"
 
