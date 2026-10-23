@@ -26,9 +26,11 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 - `RenderedQuestion` and `SourceCall` check their fields when built, raising `TypeError` for a field of the wrong type and `ValueError` for a wrong value. `kind` and `value_type` take a member or its string and hold the member; a `noul` question's labels are `yes` and `no` and an extraction question's none; `descriptions` is as long as `labels`; an extraction question needs its `value_type` and `text`, and a question of another kind leaves its extraction members unset; a source call's `refs` and `questions` are not both non-empty. A string subclass is held as its string data. `CallResult` still checks nothing.
 - `from_record` bounds its `warnings` with `bounded_warnings`, and refuses with `unsupported` a source whose need is not a ref or holds a value outside the value domain, where it raised.
 - Load check 4 refuses a source that provides no ref: a source provides one or more `q:` or `t:` refs. A design with such a source loaded before and now raises `InvalidDesign`.
+- The redacted view digests a requirement's value, on a plan's step and in a refused verdict's failure, under its ref's class tree, as that ref's entry is; the value was open.
 
 ### Fixed
 
+- A marker a rule returns is `invalid-return` when a ref of its cause is not a provided ref, a declared name, a role name, `rule:N` or `step:N`, where it was written as given: free text in a cause reached the record's hashed log and stayed open in the redacted view.
 - `load` gives a function whose `__wrapped__` chain loops a null source hash, as for any function whose source cannot be read, where it raised `ValueError`.
 
 ## [0.3.0] - 2026-10-22

@@ -292,6 +292,24 @@ def test_redact_digests_by_class_and_passes_open_values() -> None:
     assert set(out) == {"log", "unhashed", "redacted"}
 
 
+def test_a_requirement_value_takes_its_refs_tree_in_the_plan_and_the_verdict() -> None:
+    log = fresh(NORMAL)
+    log[1]["classes"]["d:route"] = "content"
+    log[13] = {
+        "item": "verdict",
+        "kind": "refused",
+        "failures": [
+            {"step": 1, "requirement": {"ref": "d:route", "value": "archive"}, "ref": "d:route"}
+        ],
+    }
+    record = read(log)
+    out = view(record)["log"]
+    hidden = {"ref": "d:route", "value": digest("archive", record)}
+    assert out[12]["steps"][0]["requirements"] == [hidden]
+    assert out[13]["failures"][0]["requirement"] == hidden
+    assert out[13]["failures"][0]["ref"] == "d:route"
+
+
 def test_equal_values_show_equal_digests_within_one_record() -> None:
     log = view(read(fresh(NORMAL)))["log"]
     assert log[2]["value"]["subject"] == log[5]["value"]

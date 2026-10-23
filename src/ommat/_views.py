@@ -143,19 +143,33 @@ class _Walk:
         elif kind == "plan":
             out["reason"] = self.text(item["reason"])
             out["reply"] = self.text(item["reply"])
-            out["steps"] = [self.step(step) for step in item["steps"]]
-        # Every other member is open: markers, causes, derivation, rows, slots, the verdict,
-        # the run settings and the call item's other members.
+            out["steps"] = [self.step(step, classes) for step in item["steps"]]
+        elif kind == "verdict":
+            out["failures"] = [
+                {**f, "requirement": self.requirement(f["requirement"], classes)}
+                if f["requirement"] is not None
+                else f
+                for f in cast("list[dict[str, Any]]", item["failures"])
+            ]
+        # Every other member is open: markers, causes, derivation, rows, slots, the verdict's
+        # other members, the run settings and the call item's other members.
         return out
 
-    def step(self, step: dict[str, Any]) -> dict[str, Any]:
+    def requirement(self, requirement: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
+        """A requirement with its value under its ref's tree, as that ref's entry is; a ref
+        the settings item holds no tree for is digested whole."""
+        tree = classes.get(declared_ref(requirement["ref"]), "content")
+        return {**requirement, "value": self.value(requirement["value"], tree)}
+
+    def step(self, step: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
         arguments: dict[str, Any] = {}
         for name, origin in cast("dict[str, Any]", step["arguments"]).items():
             if type(origin) is dict and "literal" in origin:  # its JSON form's default
                 arguments[name] = {**origin, "literal": self.literal(origin["literal"])}
             else:  # a board ref or a binding: open
                 arguments[name] = origin
-        return {**step, "arguments": arguments}
+        requirements = [self.requirement(r, classes) for r in step["requirements"]]
+        return {**step, "arguments": arguments, "requirements": requirements}
 
     def literal(self, value: Any) -> Any:
         """A literal argument's default by its JSON form: a string ``content``, any other
