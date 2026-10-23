@@ -24,6 +24,7 @@ from ommat._values import (
     FORMAT,
     FORMATS,
     HASH_FORMAT,
+    LABEL_OVERFLOW_FORMAT,
     MAX_DEPTH,
     MAX_DOCUMENT_DEPTH,
     MAX_INTEGER,
@@ -270,11 +271,13 @@ def _cause(value: Any, where: str) -> None:
 _STATE = "t:state"
 _PER_REF_CODES = frozenset({CauseCode.timed_out.value, CauseCode.raised.value})
 """The codes a binding gives a ref whose provider request failed, from format 4."""
+_GATED_CODES: dict[CauseCode, int] = {
+    CauseCode.unsupported: UNSUPPORTED_FORMAT,
+    CauseCode.label_overflow: LABEL_OVERFLOW_FORMAT,
+}
+"""Each code a later format added, with the first format that holds it."""
 _CAUSE_CODES: dict[int, frozenset[str]] = {
-    fmt: frozenset(
-        c.value for c in CauseCode if fmt >= UNSUPPORTED_FORMAT or c is not CauseCode.unsupported
-    )
-    for fmt in FORMATS
+    fmt: frozenset(c.value for c in CauseCode if fmt >= _GATED_CODES.get(c, 1)) for fmt in FORMATS
 }
 """Each format's closed cause set."""
 _ANSWER_KINDS = frozenset(AnswerKind)

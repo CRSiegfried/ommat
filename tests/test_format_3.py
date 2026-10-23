@@ -1138,3 +1138,18 @@ def test_the_golden_described_record_holds_under_every_hash_seed(seed: str) -> N
         env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONIOENCODING": "utf-8"},
     )
     assert result.stdout.split() == [GOLDEN_DESIGN, GOLDEN_RECORD]
+
+
+@pytest.mark.parametrize("fmt", [1, 2, 3])
+def test_a_label_overflow_cause_in_a_format_before_4_is_refused(fmt: int) -> None:
+    doc = strip(described_doc(fmt)) if fmt < 3 else described_doc(fmt)
+    doc["log"][7]["cause"] = {"code": "label-overflow", "refs": []}
+    doc = doc if fmt < 3 else rehashed(doc)
+    with pytest.raises(InvalidRecord, match="its cause's code 'label-overflow'"):
+        read_record(doc)
+
+
+def test_a_label_overflow_cause_reads_in_a_format_4_record() -> None:
+    doc = described_doc(4)
+    doc["log"][7]["cause"] = {"code": "label-overflow", "refs": []}
+    read_record(rehashed(doc))

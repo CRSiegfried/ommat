@@ -52,6 +52,9 @@ PRECISION_FORMAT = 3
 UNSUPPORTED_FORMAT = 3
 """The first format with the ``unsupported`` cause code."""
 
+LABEL_OVERFLOW_FORMAT = 4
+"""The first format with the ``label-overflow`` cause code."""
+
 HASH_FORMAT = 3
 """The first format whose record document holds the record hash as its ``hash`` member."""
 

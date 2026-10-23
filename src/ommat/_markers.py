@@ -30,6 +30,7 @@ class CauseCode(enum.StrEnum):
     refused = "refused"
     invalid_answer = "invalid-answer"
     label_collision = "label-collision"
+    label_overflow = "label-overflow"
     conflict = "conflict"
     settled = "settled"
     over_budget = "over-budget"

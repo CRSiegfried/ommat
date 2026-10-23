@@ -28,7 +28,7 @@ from ommat._markers import (
     VerdictKind,
 )
 
-# The cause set, its 23 codes.
+# The cause set, its 25 codes.
 CAUSE_SET = {
     "need-unavailable",
     "need-undetermined",
@@ -45,6 +45,7 @@ CAUSE_SET = {
     "refused",
     "invalid-answer",
     "label-collision",
+    "label-overflow",
     "conflict",
     "settled",
     "over-budget",
@@ -59,7 +60,7 @@ CAUSE_SET = {
 
 def test_the_cause_set_is_exactly_the_decisions() -> None:
     assert {c.value for c in CauseCode} == CAUSE_SET
-    assert len(CauseCode) == 24
+    assert len(CauseCode) == 25
 
 
 @pytest.mark.parametrize(
