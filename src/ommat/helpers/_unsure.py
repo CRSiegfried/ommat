@@ -33,7 +33,9 @@ def unsure_to_execute(
 ) -> dict[str, Any]:
     """The report ``{"points": N, "execute": [{"read", "point"}]}``, by ``read`` in code-point
     order, then by point in grid order; a ``ValueError`` before any call for a read nothing
-    fills or a slip in ``values``."""
+    fills or a slip in ``values``. ``values`` maps one of the policy's declared reads, ``d:``
+    or ``t:``, to a list of its values; a read declared under another is keyed by its field
+    path, and a ``q:`` ref is never a key."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     policy = cast(Policy, loaded._design.policy)  # load refuses the policy table
