@@ -65,7 +65,8 @@ A source names the oracle that answers it, and `decide` takes one binding per or
 
    `oracle_binding` takes a `Dispatcher` over one model with its re-ask off, its overflow
    policy `Fail` and its probability decimals within 0 to 17, as `idia.provider` builds
-   these two, and refuses any other with `ValueError`.
+   these two, and refuses any other with `ValueError`. It follows idia while idia is 0.x: it
+   may change in any minor release when idia changes, and the changelog will say so.
 
 3. Each call to a binding receives `seconds`, the time the call has: the batch's timeout, 60
    seconds here since no source declares one, or the time left to the turn's deadline when

@@ -1,6 +1,9 @@
+import importlib
 import subprocess
 import sys
 from importlib.metadata import version
+
+import pytest
 
 import ommat
 
@@ -156,3 +159,17 @@ def test_plain_literals_and_lambdas_build_the_public_types() -> None:
 
     assert typing_strict.step.arguments == typing_strict.args
     assert typing_strict.source.needs == ("t:state",)
+
+
+@pytest.mark.parametrize(
+    "name", ["ommat", "ommat.types", "ommat.helpers", "ommat.evaluation", "ommat.bindings"]
+)
+def test_each_public_module_publishes_its_all(name: str) -> None:
+    module = importlib.import_module(name)
+    public: list[str] = list(getattr(module, "__all__", []))
+    assert public, f"{name} defines no __all__"
+    assert len(public) == len(set(public)), f"{name}.__all__ repeats a name"
+    for item in public:
+        dunder = item.startswith("__") and item.endswith("__")
+        assert dunder or not item.startswith("_"), f"{name}.__all__ lists {item}"
+        assert hasattr(module, item), f"{name}.__all__ lists {item}, which it does not hold"

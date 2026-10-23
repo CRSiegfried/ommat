@@ -26,6 +26,8 @@ pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v
 pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 
+`ommat.bindings.idia` and its `oracle_binding` follow idia while idia is 0.x: they may change in any minor release when idia changes, and the changelog will say so.
+
 ## Status
 
 Pre-release, at 0.4.0. `load` checks a design and refuses an invalid one. `decide` runs interpret over rounds of sources and rules, then compile with the policy and the guard, and returns the plan, the verdict and a record that `replay` reruns with no model call. Rules and the policy are written as Python functions. A question is a `noul`, `choice` or `score`, answered with a probability per label (a label may carry a description), or an `extraction`, a typed value read from a text. The record document carries its own hash, and `ommat.evaluation.use_answers` reruns one turn with another record's answers, to compare two models. The escalation and redacted views, the helpers, two design lints and the reference runner ship with it. It writes format-4 records and design documents, and reads formats 1 to 4, so the records and designs of earlier releases still load and replay. `ommat[idia]` binds an oracle to decision-model providers through idia. The core imports only the Python standard library ([ADR-0001](docs/adr/0001-write-the-core-in-python-with-no-runtime-dependencies.md)).

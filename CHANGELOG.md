@@ -27,6 +27,7 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 - `from_record` bounds its `warnings` with `bounded_warnings`, and refuses with `unsupported` a source whose need is not a ref or holds a value outside the value domain, where it raised.
 - Load check 4 refuses a source that provides no ref: a source provides one or more `q:` or `t:` refs. A design with such a source loaded before and now raises `InvalidDesign`.
 - The redacted view digests a requirement's value, on a plan's step and in a refused verdict's failure, under its ref's class tree, as that ref's entry is; the value was open.
+- The public API is what `ommat.__all__` lists and the `__all__` of `ommat.types`, `ommat.helpers`, `ommat.evaluation` and `ommat.bindings`, all under one deprecation rule. `ommat.bindings.conformance` and `ommat.bindings.idia` stay outside it and follow idia while idia is 0.x.
 
 ### Fixed
 

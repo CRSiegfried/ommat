@@ -1,5 +1,6 @@
 """The evaluation subpackage: jobs that measure a design against past turns through replay.
-Nothing here is in ``ommat.__all__``. ``use_answers`` is the one job shipped.
+The names ``__all__`` lists are public, under the same deprecation rule as
+``ommat.__all__``. ``use_answers`` is the one job shipped.
 
 ``use_answers`` answers a turn with another record's answers: it reruns one record's
 turn with another record's calls answering, and returns replay's findings. A job refuses

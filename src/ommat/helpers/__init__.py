@@ -1,8 +1,8 @@
 """The helpers subpackage: the helper library, the choice helpers and combinators that a
 function rule or the policy calls with its read view; the design-check lints,
 ``dead_questions`` and ``unsure_to_execute``, which the consumer's tests run over a loaded
-design; and the reference runner, ``run_plan``, which the caller runs after decide. None is in
-the engine's API.
+design; and the reference runner, ``run_plan``, which the caller runs after decide. The names
+``__all__`` lists are public, under the same deprecation rule as ``ommat.__all__``.
 
 ``HELPERS`` is the helper library's version, which the record's ``design`` item carries; it
 counts the choice helpers and combinators alone, never a lint or the runner.
