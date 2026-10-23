@@ -8,7 +8,9 @@ and runs ``decide_sync`` once per point with the default run settings, no codec,
 that answers each asked ref from the point. So the ``d:`` values, ``Unasked`` and ``Unsure``
 come from the rules and the ``when``s, which decide runs. Two runs differ when their ``plan``
 or ``verdict`` items' canonical bytes differ, as replay compares them. Each point
-runs once, and every question is judged from those runs.
+runs once, and every question is judged from those runs. A candidate-valued question is
+answered over the labels each run renders, each fixed label on top and then a candidate; it
+is never on the grid, and a witness shows it as that run's record wrote its entry.
 """
 
 from collections.abc import Mapping, Sequence
@@ -21,7 +23,7 @@ from ommat._design import LoadedDesign
 from ommat._ledger import _ITEM_DEPTH
 from ommat._refs import code_point_sorted
 from ommat._values import type_name
-from ommat.helpers._points import Point, filled, fresh, grid_order
+from ommat.helpers._points import OnTop, Point, filled, fresh, grid_order, labels_of
 
 _STATE = "t:state"
 _DEFAULT = "default"
@@ -42,15 +44,18 @@ def dead_questions(
     lists = [fills[r] for r in reads]
     sizes = [len(points) for points in lists]
     runs: list[tuple[bytes, bytes]] = []
+    written: list[dict[str, Any]] = []
     for point in grid_order(lists):
-        runs.append(_run(loaded, dict(zip(reads, point, strict=True)), keys))
+        run, entries = _run(loaded, dict(zip(reads, point, strict=True)), keys)
+        runs.append(run)
+        written.append(entries)
     questions: dict[str, Any] = {}
     for k, ref in enumerate(reads):
         if not ref.startswith("q:"):
             continue
         pair = _witness(runs, sizes, k)
         if pair is not None:
-            witness: Any = [_shown(reads, lists, sizes, i) for i in pair]
+            witness: Any = [{**_shown(reads, lists, sizes, i), **written[i]} for i in pair]
             status = "live"
         else:
             witness = None
@@ -59,12 +64,22 @@ def dead_questions(
     return {"points": len(runs), "questions": questions}
 
 
-def _run(loaded: LoadedDesign, point: dict[str, Point], keys: set[str]) -> tuple[bytes, bytes]:
-    """One turn at ``point``: its ``plan`` and ``verdict`` items' canonical bytes."""
+def _run(
+    loaded: LoadedDesign, point: dict[str, Point], keys: set[str]
+) -> tuple[tuple[bytes, bytes], dict[str, Any]]:
+    """One turn at ``point``: its ``plan`` and ``verdict`` items' canonical bytes, and each
+    candidate-valued question's value or marker as the run's record wrote its entry."""
 
     async def binding(batch: tuple[SourceCall, ...], *, seconds: float) -> object:
-        asked = [ref for call in batch for ref in (*call.refs, *call.questions)]
-        return CallResult({ref: fresh(point[ref].live) for ref in asked})
+        values: dict[str, object] = {ref: fresh(point[ref].live) for c in batch for ref in c.refs}
+        for call in batch:
+            for ref, q in call.questions.items():
+                live = point[ref].live
+                if isinstance(live, OnTop):
+                    values[ref] = live.over(q.labels, len(labels_of(loaded, ref)))
+                else:
+                    values[ref] = fresh(live)
+        return CallResult(values)
 
     bindings = {_DEFAULT: binding, **dict.fromkeys(keys, binding)}
     decision = _decide.decide_sync(loaded, fresh(point[_STATE].live), bindings)
@@ -74,7 +89,12 @@ def _run(loaded: LoadedDesign, point: dict[str, Point], keys: set[str]) -> tuple
     plan, verdict = _first(log, "plan"), _first(log, "verdict")
     assert plan is not None  # decide_sync returned, so the log holds both
     assert verdict is not None
-    return encode(plan, _ITEM_DEPTH), encode(verdict, _ITEM_DEPTH)
+    entries = {
+        i["ref"]: fresh(i["value"] if "value" in i else i["marker"])
+        for i in log
+        if i["item"] == "entry" and i["ref"] in loaded._label_sets
+    }
+    return (encode(plan, _ITEM_DEPTH), encode(verdict, _ITEM_DEPTH)), entries
 
 
 def _witness(

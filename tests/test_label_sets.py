@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """A candidate-valued label set: a ``choice`` whose labels are a fixed part and the members of a
 ``list<string>`` candidate set, rendered each time the question is asked (§candidate-sets)."""
 
@@ -552,3 +553,94 @@ def test_an_open_set_shows_its_candidates_in_the_set_and_the_answer() -> None:
 def test_a_question_left_out_keeps_its_marker_in_the_view() -> None:
     record = run([])
     assert redacted_entries(record)["q:sender"]["marker"]["cause"]["code"] == "when-false"
+
+
+# ---------------------------------------------------------------------------------------------
+# The lints
+
+
+def picked(r: Any) -> Any:
+    from ommat.helpers import pick_with_margin
+
+    return pick_with_margin(r, "q:sender", 0.6, 0.2)
+
+
+def mark_if_named(r: Any) -> Plan:
+    from ommat import Undetermined
+
+    sender = r.read("d:sender")
+    if isinstance(sender, Undetermined) or sender in FIXED:
+        return Plan("clarify", reply="Who?")
+    return Plan("inform", reply="named")
+
+
+def lint_design(*, pick_reads_other: bool = False) -> Design:
+    finder = Source({SET: {"type": t.list_(t.string), "candidates": True}}, needs=["t:state"])
+    return Design(
+        name="lint",
+        state=t.record(),
+        sources={"finder": finder, "pick": asks()},
+        rules={
+            "sender": Rule("d:sender", t.string, picked, version="1", reads=["q:sender"]),
+        },
+        policy=Policy(mark_if_named, version="1", reads=["d:sender"]),
+    )
+
+
+SETS = {SET: [[], ["ana@x.org"], ["none"]]}
+
+
+def test_the_dead_lint_answers_a_candidate_valued_question_over_its_rendered_labels() -> None:
+    from ommat.helpers import dead_questions
+
+    report = dead_questions(load(lint_design()), values=SETS)
+    sender = report["questions"]["q:sender"]
+    assert sender["status"] == "live"
+    witness = sender["witness"]
+    # Each side of the witness shows the answer as its run wrote it, over rendered labels.
+    labels = [w["q:sender"].get("labels") for w in witness]
+    assert ["none", "several", "ana@x.org"] in labels
+    assert report["questions"]["q:other"]["status"] == "not-on-grid"
+
+
+def test_the_dead_lint_writes_no_invalid_answer_for_a_candidate_valued_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ommat.helpers._dead as dead
+
+    seen: list[Any] = []
+    real = dead._run
+
+    def spy(loaded: Any, point: Any, keys: Any) -> Any:
+        out = real(loaded, point, keys)
+        seen.append(out[1])
+        return out
+
+    monkeypatch.setattr(dead, "_run", spy)
+    dead.dead_questions(load(lint_design()), values=SETS)
+    codes = {e["cause"]["code"] for e in (s.get("q:sender", {}) for s in seen) if "cause" in e}
+    assert "invalid-answer" not in codes
+    assert {"when-false", "label-collision"} <= codes
+
+
+def test_a_candidate_valued_question_that_changes_nothing_is_not_on_grid() -> None:
+    from ommat.helpers import dead_questions
+
+    d = lint_design()
+    d = Design(name=d.name, state=d.state, sources=d.sources, policy=Policy(inform, version="1"))
+    report = dead_questions(load(d), values=SETS)
+    assert report["questions"]["q:sender"] == {"status": "not-on-grid", "witness": None}
+
+
+def test_a_candidate_set_with_no_values_is_unfilled_before_any_run() -> None:
+    from ommat.helpers import dead_questions
+
+    with pytest.raises(ValueError, match=SET):
+        dead_questions(load(lint_design()))
+
+
+def test_the_unsure_lint_runs_over_a_candidate_valued_design() -> None:
+    from ommat.helpers import unsure_to_execute
+
+    report = unsure_to_execute(load(lint_design()), values={"d:sender": ["ana@x.org", "none"]})
+    assert report["execute"] == []

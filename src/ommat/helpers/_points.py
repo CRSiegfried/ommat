@@ -70,6 +70,19 @@ class Point:
     live: object
 
 
+@dataclass(frozen=True, slots=True)
+class OnTop:
+    """A candidate-valued question's answer point: ``label`` at 1 and every other label the
+    run renders at 0, or, for ``None``, the first candidate it renders."""
+
+    label: str | None
+
+    def over(self, labels: Sequence[str], fixed: int) -> dict[str, float]:
+        """The answer over the labels a call renders, ``fixed`` of them the fixed part's."""
+        top = labels[fixed] if self.label is None else self.label
+        return {label: 1.0 if label == top else 0.0 for label in labels}
+
+
 # ---------------------------------------------------------------------------------------------
 # An axis
 
@@ -321,6 +334,9 @@ class _Filler:
     def answers(self, ref: str, q: Question) -> list[Point]:
         """A ``q:`` read's answer points, before its marker."""
         labels = labels_of(self.loaded, ref)
+        if ref in self.loaded._label_sets:  # filled as a read with no grid entry
+            # Each fixed label on top, then a candidate, over the labels each run renders.
+            return [Point({"on_top": label}, OnTop(label)) for label in (*labels, None)]
         entry = cast("Mapping[str, Any] | None", self.loaded._grid.get(ref))
         if entry is not None:
             if len(labels) == 1:  # one distribution, so one answer point
