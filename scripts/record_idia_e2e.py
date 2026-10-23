@@ -8,10 +8,10 @@ Run it from the repository root with the credentials in the environment, and now
 It writes the street-reports design's document beside the logs, then decides under it. It reads
 ``OPENAI_API_KEY``, ``CLOUDFLARE_ACCOUNT_ID`` and ``CLOUDFLARE_API_TOKEN`` and refuses
 to run without all three. It replaces ``tests/idia_logs``' two logs and the turn's record
-document, then scans every file it wrote: in a log the account id is replaced by the placeholder;
-a record holding it, whose hash covers its bytes, and any file holding a credential, fail the run
-and every file is deleted. It prints what each call returned and
-never a credential.
+document, then scans the logs and the record: in a log the account id is replaced by the
+placeholder; a record holding it, whose hash covers its bytes, and any file holding a
+credential, fail the run and the logs and the record are deleted. A run that raises deletes
+them too. It prints what each call returned and never a credential.
 """
 
 import json
@@ -74,7 +74,13 @@ def main() -> int:
     for path in (e2e.CLASSIFIER_LOG, e2e.EXTRACTOR_LOG, e2e.RECORD):
         path.unlink(missing_ok=True)
     e2e.DESIGN.write_bytes(load(works.DESIGN).document)
-    decision = e2e.decide(credentials, "once")
+    try:
+        decision = e2e.decide(credentials, "once")
+    except Exception as exc:  # a failed run leaves no unscrubbed log behind
+        for path in (e2e.CLASSIFIER_LOG, e2e.EXTRACTOR_LOG, e2e.RECORD):
+            path.unlink(missing_ok=True)
+        print(masked(f"{type(exc).__name__}: {exc}", credentials), file=sys.stderr)
+        return 1
     e2e.RECORD.write_bytes(decision.record.document)
     problems: list[str] = []
     for path in (e2e.CLASSIFIER_LOG, e2e.EXTRACTOR_LOG, e2e.RECORD):

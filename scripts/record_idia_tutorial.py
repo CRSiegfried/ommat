@@ -8,7 +8,8 @@ Run it from the repository root with the credentials in the environment, and now
 
 It reads the three variables ``record_idia_e2e.py`` reads and refuses to run without them,
 replaces the two logs, keeps what the run printed as ``output.txt`` beside them for the
-tutorial's text, then scans the logs as that script does.
+tutorial's text, then scans the logs and ``output.txt`` as that script does; a run that
+raises deletes the logs.
 """
 
 import asyncio
@@ -43,8 +44,14 @@ def main() -> int:
     for path in (*LOGS, OUTPUT):
         path.unlink(missing_ok=True)
     printed = io.StringIO()
-    with contextlib.redirect_stdout(printed):
-        asyncio.run(decide_live.run(e2e.recorded_providers(credentials, "once")))
+    try:
+        with contextlib.redirect_stdout(printed):
+            asyncio.run(decide_live.run(e2e.recorded_providers(credentials, "once")))
+    except Exception as exc:  # a failed run leaves no unscrubbed log behind
+        for path in LOGS:
+            path.unlink(missing_ok=True)
+        print(masked(f"{type(exc).__name__}: {exc}", credentials), file=sys.stderr)
+        return 1
     text = masked(printed.getvalue(), credentials)
     OUTPUT.write_text(text, encoding="utf-8")
     print(text, end="")
