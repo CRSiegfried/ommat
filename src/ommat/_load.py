@@ -182,6 +182,7 @@ def _load_document(given: bytes | Mapping[str, Any], functions: Mapping[str, Any
 
 
 _q = quote
+_RECORD_SET = "candidate set of records"
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,7 +191,7 @@ class _Use:
 
     owner: str  # the declared name, or "policy" for the policy and "" for the plan
     where: str
-    role: str  # need, slot, candidate, text, read, boundary, policy, requirement,
+    role: str  # need, slot, candidate, label-set, text, read, boundary, policy, requirement,
     # source-requirement, group
     ref: str
     parsed: _ParsedRef
@@ -310,17 +311,16 @@ class _Loader:
                 self.grounded.add(sid)
             for ref, provided in source.provides.items():
                 if isinstance(provided, Question):
-                    if isinstance(provided.labels, Mapping):
-                        form = "candidate-valued label set"
-                        refuse(sources, (sid, ref), f"{what}'s {_q(ref)}", form)
-                elif cast("Mapping[str, Any]", provided)["candidates"]:
-                    refuse(sources, (sid, ref), f"{what}'s {_q(ref)}", "candidate set")
+                    continue
+                declared = cast("Mapping[str, Any]", provided)
+                if declared["candidates"] and self.of_records(declared["type"]):
+                    refuse(sources, (sid, ref), f"{what}'s {_q(ref)}", _RECORD_SET)
         for rid, rule in self.d.rules.items():
             what = f"rule {_q(rid)}"
             if isinstance(rule, Table):
                 refuse(rules, (rid,), what, "decision table")
-            if rule.candidates:
-                refuse(rules, (rid,), what, "candidate set")
+            elif rule.candidates and self.of_records(rule.outputs):
+                refuse(rules, (rid,), what, _RECORD_SET)
             if rule.grounded is not None:
                 refuse(rules, (rid,), what, "grounded declaration")
                 self.grounded.add(rid)
@@ -328,6 +328,32 @@ class _Loader:
             refuse(set(), ("policy",), "the policy", "policy table")
         for name in self.d.plans:
             refuse(set(), (name,), f"plan declaration {_q(name)}", "plan declaration")
+
+    def of_records(self, text: object) -> bool:
+        """Whether a candidate set's type text is a list of a record type, its definitions
+        followed by name; a text that does not parse or resolve is left to check 10."""
+        if not isinstance(text, str):
+            return False
+        t = parse_type(text, nullable=False)
+        seen: set[str] = set()
+        while True:
+            if isinstance(t, ListOf):
+                t = t.item
+                break
+            if not isinstance(t, Named) or t.name in seen:
+                return False
+            seen.add(t.name)
+            written = self.d.types.get(t.name)
+            if not isinstance(written, str):
+                return False
+            t = parse_type(written, nullable=False)
+        while isinstance(t, Named) and t.name not in seen:
+            seen.add(t.name)
+            written = self.d.types.get(t.name)
+            if not isinstance(written, str):
+                return False
+            t = parse_type(written, nullable=False)
+        return isinstance(t, RecordOf)
 
     # --- gathering, and check 7 ------------------------------------------------------------
 
@@ -388,6 +414,11 @@ class _Loader:
                     self.candidates.append((sid, f"{where}'s question {_q(ref)}", value))
                     self.use(sid, f"{where}'s question {_q(ref)}", "candidate", value)
             for ref, question in _questions(source):
+                if isinstance(question.labels, Mapping):
+                    named_set = question.labels.get("candidates")
+                    if isinstance(named_set, str):
+                        shown = f"{where}'s question {_q(ref)}'s label set"
+                        self.use(sid, shown, "label-set", named_set)
                 for member, origin in _extraction_origins(question):
                     shown = f"{where}'s question {_q(ref)}'s {member}"
                     self.use(sid, shown, "text", origin["ref"])
@@ -463,6 +494,13 @@ class _Loader:
             if not found:
                 names = (u.owner, u.ref) if u.owner else (u.ref,)
                 self.fail(3, names, f"{u.where} names {_q(u.ref)}, which has no provider")
+            elif u.role == "label-set" and u.parsed.level in ("t", "d"):
+                if u.parsed.candidate is not None or u.parsed.fields or not self.is_set(u.ref):
+                    self.fail(
+                        3,
+                        (u.owner, u.ref),
+                        f"{u.where} names {_q(u.ref)}, which is not a candidate set",
+                    )
         for gname, group in self.d.groups.items():
             refs = [r for r in group.refs if _parsed(r) is not None]
             counts = Counter(refs)
@@ -483,6 +521,21 @@ class _Loader:
                     (key,),
                     f"{where} is not t:state, a source's t: ref, a d: ref or an extraction q: ref",
                 )
+
+    def is_set(self, ref: str) -> bool:
+        """Whether a ref's provider declares it a candidate set: a source's provision with
+        ``candidates`` true, or a rule with ``candidates`` that provides it."""
+        provider = self.providers.get(ref, [None])[0]
+        if provider is None:
+            return False
+        source = self.d.sources.get(provider)
+        if source is not None:
+            provided = source.provides.get(ref)
+            return isinstance(provided, Mapping) and bool(
+                cast("Mapping[str, Any]", provided).get("candidates")
+            )
+        rule = self.d.rules.get(provider)
+        return rule is not None and bool(rule.candidates) and rule.provides == ref
 
     def extraction_ref(self, ref: str) -> bool:
         """Whether a ``q:`` ref's provider declares it an extraction question."""
@@ -534,6 +587,7 @@ class _Loader:
                 self.fail(4, (rid, rule.provides), message)
         allowed = {
             "slot": ("d", "t"),
+            "label-set": ("d", "t"),
             "text": ("d", "t"),
             "policy": ("d", "t"),
             "requirement": ("d",),
@@ -695,6 +749,19 @@ class _Loader:
             return None
         return parsed
 
+    def candidate_type(self, t: Type, where: str, names: tuple[str, ...]) -> None:
+        """Check 10: a candidate set's type is exactly ``list<string>``, its definitions
+        resolved; check 12 has refused a list of a record type."""
+        try:
+            outer = resolve(t, self.defs)
+            item = resolve(outer.item, self.defs) if isinstance(outer, ListOf) else None
+        except ValueError:  # a definition check 10 refused
+            return
+        if item != Scalar("string"):
+            self.fail(
+                10, names, f"{where} is a candidate set of type {render(t)}, not list<string>"
+            )
+
     def declared(
         self,
         text: object,
@@ -791,6 +858,8 @@ class _Loader:
                 t = self.declared(text, True, where, (sid, ref), ref if declared else None)
                 if t is not None and declared:
                     self.types[ref] = t
+                if t is not None and cast("Mapping[str, Any]", provided)["candidates"]:
+                    self.candidate_type(t, where, (sid, ref))
             if domain_error(source.payload) is not None:
                 self.fail(10, (sid,), f"source {_q(sid)}'s payload is outside the value domain")
             if source.when is not None:
@@ -807,6 +876,8 @@ class _Loader:
             t = self.declared(rule.outputs, True, f"rule {_q(rid)}'s outputs", (rid,), provides)
             if t is not None and provides is not None:
                 self.types[rule.provides] = t
+            if t is not None and rule.candidates:
+                self.candidate_type(t, f"rule {_q(rid)}", (rid,))
             self.version(rule.version, f"rule {_q(rid)}", rid)
         policy = self.policy()
         if policy is not None:
@@ -1020,8 +1091,8 @@ class _Loader:
                 continue
             if question.kind is AnswerKind.noul:
                 labels: tuple[str, ...] = _NOUL_LABELS
-            else:  # the names alone: a description is no label
-                labels = label_parts(cast("tuple[Any, ...]", question.labels))[0]
+            else:  # the names alone: a description is no label; a label set's fixed part
+                labels = label_parts(_fixed(question.labels))[0]
             for role in ("bar", "margin"):
                 for path in self.typed(entry[role]):
                     self.bound(owner, where, path, self.leaf_types[path], _UNIT, "number [0, 1]")
@@ -1155,7 +1226,7 @@ class _Loader:
         providers = self.provider_map()
         preds: dict[str, set[str]] = {n: set() for n in (*self.d.sources, *self.d.rules)}
         for u in self.uses:
-            if u.role in ("need", "slot", "text", "read", "source-requirement") and (
+            if u.role in ("need", "slot", "label-set", "text", "read", "source-requirement") and (
                 u.base != _STATE
             ):
                 preds[u.owner].add(providers[u.base])
@@ -1289,9 +1360,18 @@ class _Loader:
                     parts[ref] = (_NOUL_LABELS, (None, None))
                 elif provided.kind is AnswerKind.extraction:
                     parts[ref] = ((), ())
-                else:  # check 12 refuses a candidate-valued label set
-                    parts[ref] = label_parts(cast("tuple[Any, ...]", provided.labels))
+                else:  # a candidate-valued label set's fixed part
+                    parts[ref] = label_parts(_fixed(provided.labels))
         return parts
+
+    def label_sets(self) -> dict[str, str]:
+        """Each candidate-valued question's set ref, by ``q:`` ref in code-point order."""
+        sets: dict[str, str] = {}
+        for _, source in self.sources():
+            for ref, provided in source.provides.items():
+                if isinstance(provided, Question) and isinstance(provided.labels, Mapping):
+                    sets[ref] = cast("Mapping[str, str]", provided.labels)["candidates"]
+        return {ref: sets[ref] for ref in code_point_sorted(sets)}
 
     def loaded(self, document: bytes, graph: Mapping[str, frozenset[str]]) -> LoadedDesign:
         decoded = cast("dict[str, Any]", decode(document))
@@ -1338,6 +1418,10 @@ class _Loader:
             providers=MappingProxyType(providers),
             grid=_grid(decoded),
             labels=MappingProxyType(self.label_parts()),
+            label_sets=MappingProxyType(self.label_sets()),
+            candidate_sets=frozenset(
+                ref for ref in providers if ref[:2] in ("t:", "d:") and self.is_set(ref)
+            ),
             classes_bytes=encode(classes, MAX_DOCUMENT_DEPTH),
             payload_bytes=MappingProxyType(
                 {s: encode(v["payload"]) for s, v in decoded["sources"].items()}
@@ -1536,6 +1620,25 @@ def _text(text: Text) -> dict[str, Any]:
     }
 
 
+def _fixed(labels: object) -> tuple[Any, ...]:
+    """A question's declared labels, or a candidate-valued label set's fixed part."""
+    if isinstance(labels, Mapping):
+        return cast("tuple[Any, ...]", cast("Mapping[str, Any]", labels)["fixed"])
+    return cast("tuple[Any, ...]", labels)
+
+
+def _declared_labels(labels: object) -> Any:
+    """A question's labels as the document writes them: a list of labels, or a candidate-valued
+    label set's fixed part and set ref."""
+    if isinstance(labels, Mapping):
+        declared = cast("Mapping[str, Any]", labels)
+        return {
+            "fixed": [_label(v) for v in cast("tuple[object, ...]", declared["fixed"])],
+            "candidates": declared["candidates"],
+        }
+    return [_label(v) for v in cast("tuple[object, ...]", labels)]
+
+
 def _source(source: Source) -> dict[str, Any]:
     provides: dict[str, Any] = {}
     for ref, provided in source.provides.items():
@@ -1545,9 +1648,7 @@ def _source(source: Source) -> dict[str, Any]:
                 "kind": str(provided.kind),
                 "wording": _text(provided.wording),
                 # As declared: a described label is its object of name and description.
-                "labels": None
-                if labels is None
-                else [_label(v) for v in cast("tuple[object, ...]", labels)],
+                "labels": None if labels is None else _declared_labels(labels),
             }
             if provided.kind is AnswerKind.extraction:
                 date = provided.reference_date

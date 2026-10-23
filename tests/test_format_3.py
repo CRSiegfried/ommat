@@ -361,9 +361,10 @@ def test_a_noul_or_extraction_question_with_object_labels_still_declares_labels(
 
 def test_a_candidate_valued_sets_fixed_part_takes_the_described_form() -> None:
     labels = {"fixed": [WARM], "candidates": "t:pool"}
-    found = refused(described(tone_question(labels)))
-    assert not any(f.check == 10 for f in found)
-    assert any("candidate-valued label set" in f.message for f in found)
+    pool = Source({"t:pool": {"type": t.list_(t.string), "candidates": True}})
+    design = described(tone_question(labels))
+    loaded = load(with_source(design, "pool", pool))
+    assert loaded._labels["q:tone"] == (("warm",), (WARM["description"],))
 
 
 def described_bounded(thresholds: dict[str, float]) -> Design:
@@ -1153,3 +1154,20 @@ def test_a_label_overflow_cause_reads_in_a_format_4_record() -> None:
     doc = described_doc(4)
     doc["log"][7]["cause"] = {"code": "label-overflow", "refs": []}
     read_record(rehashed(doc))
+
+
+@pytest.mark.parametrize(("key", "fails"), [("warm", False), ("fixed", True), ("ana", True)])
+def test_a_label_sets_thresholds_are_keyed_by_its_fixed_names(key: str, fails: bool) -> None:
+    design = described_bounded({key: 0.5})
+    source = design.sources["intent"]
+    q = cast(Question, source.provides["q:intent/tone"])
+    labels = {"fixed": list(cast("tuple[Any, ...]", q.labels)), "candidates": "t:pool"}
+    q = dataclasses.replace(q, labels=labels)
+    source = dataclasses.replace(source, provides={**source.provides, "q:intent/tone": q})
+    pool = Source({"t:pool": {"type": t.list_(t.string), "candidates": True}})
+    design = dataclasses.replace(design, sources={**design.sources, "intent": source, "pool": pool})
+    if fails:
+        (failure,) = [f for f in refused(design) if f.check == 9]
+        assert repr(key) in failure.message or f'"{key}"' in failure.message
+    else:
+        load(design)

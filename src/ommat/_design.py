@@ -514,7 +514,9 @@ class LoadedDesign:
     each node's predecessors; ``_providers``, the ref-to-provider map;
     ``_grid``, the answer grid; ``_labels``, each ``q:`` ref's label names and descriptions,
     aligned, ``None`` where a label is undescribed, ``yes`` and ``no`` for ``noul`` and none for
-    ``extraction``; ``_requirement_bytes``, each source requirement's values as
+    ``extraction``, a candidate-valued label set's fixed part alone; ``_label_sets``, each
+    candidate-valued question's set ref; ``_candidate_sets``, the refs declared candidate sets;
+    ``_requirement_bytes``, each source requirement's values as
     canonical bytes, by source id. The class trees, payloads, leaf values and plan-level
     requirements are decoded afresh at each read, so nothing a caller
     changes after load reaches a turn.
@@ -522,6 +524,7 @@ class LoadedDesign:
 
     __slots__ = (
         "_callables",
+        "_candidate_sets",
         "_classes_bytes",
         "_design",
         "_document",
@@ -529,6 +532,7 @@ class LoadedDesign:
         "_grid",
         "_groups",
         "_hash",
+        "_label_sets",
         "_labels",
         "_leaf_bytes",
         "_leaf_types",
@@ -550,6 +554,8 @@ class LoadedDesign:
     _providers: Mapping[str, str]
     _grid: Mapping[str, Any]
     _labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]]
+    _label_sets: Mapping[str, str]
+    _candidate_sets: frozenset[str]
     _classes_bytes: bytes
     _payload_bytes: Mapping[str, bytes]
     _leaf_bytes: Mapping[str, bytes]

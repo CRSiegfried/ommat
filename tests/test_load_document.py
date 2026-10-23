@@ -385,14 +385,17 @@ def refused_form_docs() -> list[tuple[dict[str, Any], str]]:
     policy_table = doc_of(minimal())
     policy_table["policy"] = {"form": "table", "inputs": [], "rows": []}
     candidates = doc_of(designs.with_source(minimal(), "s", designs.lookup_source()))
-    candidates["sources"]["s"]["provides"]["t:lookup"]["candidates"] = True
+    candidates["sources"]["s"]["provides"]["t:lookup"] = {
+        "type": "list<record{name: string}>",
+        "candidates": True,
+    }
     grounded = doc_of(designs.with_source(minimal(), "s", designs.lookup_source()))
     grounded["sources"]["s"]["grounded"] = "t:set"
     return [
         (table, "decision table"),
         (policy_table, "policy table"),
         (plan_doc(), "plan declaration"),
-        (candidates, "candidate set"),
+        (candidates, "candidate set of records"),
         (grounded, "grounded declaration"),
     ]
 
@@ -732,12 +735,12 @@ def test_a_module_that_is_not_a_string_is_unresolved() -> None:
     assert failure.names == ("route",)
 
 
-def test_a_documents_candidate_valued_label_set_reaches_check_12() -> None:
+def test_a_documents_label_set_over_a_ref_that_is_no_candidate_set_fails_check_3() -> None:
     doc = doc_of(full())
     tone = doc["sources"]["intent"]["provides"]["q:intent/tone"]
     tone["labels"] = {"fixed": ["none"], "candidates": "t:lookup"}
     found = refused(written(doc))
-    assert any(f.check == 12 and "candidate-valued" in f.message for f in found), found
+    assert any(f.check == 3 and "is not a candidate set" in f.message for f in found), found
     tone["labels"] = {"fixed": ["none"]}
     assert gate_failure(written(doc)).names == ("intent", "q:intent/tone")
 

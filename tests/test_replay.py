@@ -20,7 +20,6 @@ from ommat import (
     EntryRefusal,
     Failed,
     FindingKind,
-    InvalidDesign,
     InvalidRecord,
     LoadedDesign,
     Parameter,
@@ -726,13 +725,6 @@ def test_a_dropped_t_ref_is_never_asked_so_it_is_no_ref_not_in_record() -> None:
     assert K.ref_not_in_record not in [f["kind"] for f in found]
     (body,) = [f for f in found if f.get("ref") == "t:body"]
     assert body["replayed"] is None
-
-
-def test_a_candidate_valued_label_set_is_refused_at_load_so_replay_never_meets_one() -> None:
-    q = Question("choice", Text("Which?"), labels={"fixed": ["none"], "candidates": "t:set"})
-    with pytest.raises(InvalidDesign) as raised:
-        slice_design(sources={"ask": Source({"q:which": q}), "look": LOOK})
-    assert 12 in {f.check for f in raised.value.failures}
 
 
 def test_a_when_reading_a_state_path_gates_its_source_and_replay_agrees() -> None:

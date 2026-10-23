@@ -15,7 +15,7 @@ from collections.abc import Callable
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -34,6 +34,7 @@ from ommat import (
     PolicyTable,
     Question,
     Requirement,
+    Rule,
     Source,
     SourceRequirement,
     Table,
@@ -1063,9 +1064,14 @@ def test_a_function_without_a_qualified_name_fails_check_10() -> None:
     only(minimal(policy=Policy(NoName(), version="1")), 10)
 
 
+SET = Source({"t:s": {"type": t.list_(t.string), "candidates": True}})
+
+
 def test_a_choice_label_sets_fixed_part_may_be_empty() -> None:
     design = asks("choice", Text("Which?"), labels={"fixed": [], "candidates": "t:s"})
-    assert checks(design) == {12}
+    loaded = load(with_source(design, "set", SET))
+    assert loaded._labels["q:x"] == ((), ())
+    assert loaded._label_sets == {"q:x": "t:s"}
 
 
 def test_a_non_canonical_type_names_its_spelling() -> None:
@@ -1135,29 +1141,25 @@ REFUSED: list[tuple[Design, str]] = [
     (minimal(plans={"ask": PlanDeclaration("clarify")}), "plan declaration"),
     (
         with_source(
-            minimal(), "s", Source({"t:set": {"type": t.list_(t.string), "candidates": True}})
+            minimal(),
+            "s",
+            Source({"t:set": {"type": t.list_(t.record(name=t.string)), "candidates": True}}),
         ),
-        "candidate set",
+        "candidate set of records",
     ),
     (
-        with_rule(minimal(), "r", rule("r", outputs=t.list_(t.string), candidates=True)),
-        "candidate set",
+        with_rule(
+            minimal(),
+            "r",
+            rule("r", outputs=t.list_(t.record(name=t.string)), candidates=True),
+        ),
+        "candidate set of records",
     ),
     (
         with_source(minimal(), "s", Source({"q:x": question()}, grounded="t:set")),
         "grounded declaration",
     ),
     (with_rule(minimal(), "r", rule("r", grounded="t:set")), "grounded declaration"),
-    (
-        with_source(
-            minimal(),
-            "s",
-            Source(
-                {"q:x": question(kind="choice", labels={"fixed": ["none"], "candidates": "t:set"})}
-            ),
-        ),
-        "candidate-valued label set",
-    ),
 ]
 
 
@@ -2181,3 +2183,125 @@ def test_a_provides_mappings_type_is_loaded_as_its_string_data() -> None:
 def test_check_10_a_type_refusal_names_the_type_as_written(design: Design, says: str) -> None:
     found = only(design, 10)
     assert any(says in f.message for f in found), found
+
+
+# ---------------------------------------------------------------------------------------------
+# A candidate-valued label set
+
+
+def over(set_ref: str, *sources: tuple[str, Source], **rules: Rule) -> Design:
+    """``minimal`` with a choice ``q:x`` over ``set_ref`` beside the given providers."""
+    design = asks("choice", Text("Which?"), labels={"fixed": ["none"], "candidates": set_ref})
+    for sid, source in sources:
+        design = with_source(design, sid, source)
+    for rid, r in rules.items():
+        design = with_rule(design, rid, r)
+    return design
+
+
+def test_a_label_set_over_a_sources_set_loads_with_an_edge_and_no_need() -> None:
+    loaded = load(over("t:s", ("set", SET)))
+    assert loaded._labels["q:x"] == (("none",), (None,))
+    assert loaded._label_sets == {"q:x": "t:s"}
+    assert loaded._candidate_sets == frozenset({"t:s"})
+    assert loaded._needs["s"] == frozenset()
+    assert loaded._graph["s"] == frozenset({"set"})
+
+
+def test_a_label_set_over_a_rules_set_loads() -> None:
+    finder = rule("find", outputs=t.list_(t.string), candidates=True)
+    loaded = load(over("d:find", find=finder))
+    assert loaded._label_sets == {"q:x": "d:find"}
+    assert loaded._graph["s"] == frozenset({"find"})
+
+
+def test_a_source_that_declares_its_label_set_as_a_need_has_it_among_its_needs() -> None:
+    design = with_source(
+        over("t:s", ("set", SET)),
+        "s",
+        Source(
+            {"q:x": Question("choice", Text("Which?"), {"fixed": [], "candidates": "t:s"})},
+            needs=["t:s"],
+        ),
+    )
+    assert load(design)._needs["s"] == frozenset({"t:s"})
+
+
+def test_a_label_sets_document_holds_its_fixed_part_and_set_and_loads_to_its_hash() -> None:
+    loaded = load(over("t:s", ("set", SET)))
+    doc = cast("dict[str, Any]", decode(loaded.document))
+    assert doc["sources"]["s"]["provides"]["q:x"]["labels"] == {
+        "candidates": "t:s",
+        "fixed": ["none"],
+    }
+    functions = {"policy": cast(Policy, loaded._design.policy).function}
+    assert load(loaded.document, functions=functions).design_hash == loaded.design_hash
+
+
+@pytest.mark.parametrize(
+    ("design", "says"),
+    [
+        (over("t:s"), 'names "t:s", which has no provider'),
+        (over("t:state"), 'names "t:state", which is not a candidate set'),
+        (over("t:s", ("set", Source({"t:s": t.list_(t.string)}))), "is not a candidate set"),
+        (over("d:find", find=rule("find", outputs=t.list_(t.string))), "is not a candidate set"),
+        (over("t:s.f", ("set", SET)), 'names "t:s.f", which is not a candidate set'),
+        (over('t:s["a"]', ("set", SET)), "which has no provider"),
+    ],
+)
+def test_a_label_set_naming_no_candidate_set_fails_check_3(design: Design, says: str) -> None:
+    (failure,) = only(design, 3)
+    assert says in failure.message
+
+
+def test_a_label_set_at_q_fails_check_4() -> None:
+    design = over("q:y", ("y", Source({"q:y": question()})))
+    (failure,) = only(design, 4)
+    assert "which is not at level d: or t:" in failure.message
+
+
+@pytest.mark.parametrize(
+    "type_",
+    [t.list_(t.number()), t.string, "list<string> or null"],
+)
+def test_a_candidate_set_not_of_list_string_fails_check_10(type_: str) -> None:
+    source = Source({"t:s": {"type": type_, "candidates": True}})
+    (failure,) = only(with_source(minimal(), "set", source), 10)
+    assert f"is a candidate set of type {type_}, not list<string>" in failure.message
+    finder = rule("find", outputs=type_, candidates=True)
+    (failure,) = only(with_rule(minimal(), "find", finder), 10)
+    assert "not list<string>" in failure.message
+
+
+def test_a_candidate_set_through_a_definition_of_list_string_loads() -> None:
+    source = Source({"t:s": {"type": "names", "candidates": True}})
+    load(minimal(types={"names": t.list_(t.string)}, sources={"set": source}))
+
+
+@pytest.mark.parametrize(
+    "design",
+    [
+        minimal(
+            types={"person": t.record(name=t.string)},
+            sources={"set": Source({"t:s": {"type": "list<person>", "candidates": True}})},
+        ),
+        minimal(
+            types={"people": t.list_(t.record(name=t.string))},
+            sources={"set": Source({"t:s": {"type": "people", "candidates": True}})},
+        ),
+    ],
+)
+def test_a_candidate_set_of_records_through_a_definition_fails_check_12(design: Design) -> None:
+    (failure,) = only(design, 12)
+    assert "candidate set of records, which this engine does not implement" in failure.message
+
+
+def test_a_question_over_a_set_of_records_reports_check_12_alone() -> None:
+    source = Source({"t:s": {"type": t.list_(t.record(name=t.string)), "candidates": True}})
+    only(over("t:s", ("set", source)), 12)
+
+
+def test_a_cycle_through_a_label_set_edge_fails_check_5() -> None:
+    finder = rule("find", outputs=t.list_(t.string), candidates=True, reads=("q:x",))
+    (failure,) = only(over("d:find", find=finder), 5)
+    assert "cycle" in failure.message
