@@ -110,7 +110,10 @@ def test_every_batch_interpret_builds_over_the_example_designs_passes() -> None:
 
 def test_the_suites_batches_hold_each_kind_alone_and_then_together() -> None:
     batches = _default_batches()
-    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 5]
+    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 1, 1, 5]
+    first, second = (b[0].questions["q:pick/sender"].labels for b in batches[5:7])
+    assert first[:2] == second[:2] == ("none", "several")
+    assert first != second
     together = batches[-1]
     assert [s.id for s in together] == sorted(s.id for s in together)
     kinds = [q.kind for s in together for q in s.questions.values()]
@@ -422,3 +425,19 @@ def test_the_suites_batches_hold_an_image_need() -> None:
     assert photo["media_type"] == "image/png"
     assert type(photo["data"]) is bytes
     assert image_need(photo) is not None
+
+
+def test_a_binding_that_keeps_labels_by_ref_fails_answers() -> None:
+    kept: dict[str, tuple[str, ...]] = {}
+
+    async def keeping(batch: Batch, *, seconds: float) -> CallResult:
+        values: dict[str, object] = {}
+        for call in batch:
+            values.update(dict.fromkeys(call.refs, "x"))
+            for ref, q in call.questions.items():
+                labels = kept.setdefault(ref, q.labels)
+                values[ref] = {label: 1 / len(labels) for label in labels}
+        return CallResult(values)
+
+    found = check(keeping, batches=_default_batches()[5:7])
+    assert found == ["answers: batch 1: q:pick/sender is not in its kind's form"]

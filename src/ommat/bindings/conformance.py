@@ -3,7 +3,8 @@
 ``check(binding, *, batches=None, deterministic=False)`` calls the binding with each batch, as
 interpret does, ``binding(batch, seconds=s)``, or with the suite's own when ``batches`` is
 ``None``: a source of each answer kind, one of them needing an image, and a ``t:`` source, each
-as its own batch and all of them in one, built through the checked constructors and shaped as
+as its own batch, then one question asked over two label sets as a candidate-valued question
+is rendered, then all of the sources in one, built through the checked constructors and shaped as
 interpret builds them. It returns the failures as a list of strings, each
 ``<check>: batch <n>: <what>`` but for ``seconds``, which names no batch, and an empty list
 passes. It needs no test runner.
@@ -135,10 +136,42 @@ def _sources() -> tuple[SourceCall, ...]:
     )
 
 
+_LABEL_SETS = (
+    ("none", "several", "ana@example.com", '"Ana" <a@x.org>'),
+    ("none", "several", "]", "Zo\u00eb \u00c5ngstr\u00f6m", "\u674e"),
+)
+"""Two renderings of one candidate-valued question: its fixed part, then each set's members."""
+
+
+def _label_sets() -> list[Batch]:
+    """One ``q:`` ref asked over two label sets, as a candidate-valued question is rendered
+    from two turns' sets: a binding that keeps labels by ref fails ``answers``."""
+    return [
+        (
+            SourceCall(
+                "pick",
+                None,
+                {"t:state.text": _TEXT},
+                (),
+                {
+                    "q:pick/sender": RenderedQuestion(
+                        AnswerKind.choice,
+                        "Who sent the report?",
+                        labels,
+                        descriptions=(None,) * len(labels),
+                    )
+                },
+            ),
+        )
+        for labels in _LABEL_SETS
+    ]
+
+
 def _default_batches() -> list[Batch]:
-    """The suite's own batches: each source alone, then all of them in one batch."""
+    """The suite's own batches: each source alone, then one question over two label sets,
+    then all of the sources in one batch."""
     sources = _sources()
-    return [*((s,) for s in sources), sources]
+    return [*((s,) for s in sources), *_label_sets(), sources]
 
 
 def check(

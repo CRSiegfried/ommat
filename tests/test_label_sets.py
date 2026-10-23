@@ -644,3 +644,24 @@ def test_the_unsure_lint_runs_over_a_candidate_valued_design() -> None:
 
     report = unsure_to_execute(load(lint_design()), values={"d:sender": ["ana@x.org", "none"]})
     assert report["execute"] == []
+
+
+# ---------------------------------------------------------------------------------------------
+# The binding conformance suite over a candidate-valued turn's batches
+
+
+@pytest.mark.parametrize("candidates", [["ana@example.com", '"Ana" <a@x.org>'], ["]", "李"]])
+def test_from_record_and_the_fixture_pass_the_suite_on_the_batches_their_record_answers(
+    candidates: list[str],
+) -> None:
+    from ommat._fixture import FixtureBinding, RecordedCalls
+    from ommat.bindings.conformance import check
+
+    model = Model()
+    loaded = load(design())
+    record = decide_sync(
+        loaded, {"candidates": candidates}, {"default": model, "tools": finder}
+    ).record
+    seen = list(model.batches)
+    assert check(from_record(record, loaded), batches=seen) == []
+    assert check(FixtureBinding(RecordedCalls(record.log), loaded), batches=seen) == []
