@@ -17,9 +17,6 @@ record's log as both, and the evaluation subpackage's ``use_answers`` another re
 
 The findings are plain ``dict``s in a fixed order, two items differing when their
 canonical bytes differ. Replay reads nothing from ``unhashed``.
-
-``question-changed``'s candidate-valued label set clause is not built: load's check 12
-refuses candidate sets.
 """
 
 import asyncio
@@ -108,7 +105,7 @@ async def _replay_with(
         loaded, value, bindings, run, codec=None, clock=None, cut=_cut(log), observer=observer
     )
     rerun = decision.record
-    return rerun, _findings(log, rerun.log, loaded, calls, fixture.asked)
+    return rerun, _findings(log, rerun.log, loaded, calls, fixture.asked, answers)
 
 
 def _cut(log: list[dict[str, Any]]) -> tuple[int, bool] | None:
@@ -145,6 +142,7 @@ def _findings(
     loaded: LoadedDesign,
     calls: RecordedCalls,
     asked: dict[str, tuple[str, ...]],
+    answers: list[dict[str, Any]],
 ) -> list[Finding]:
     found: list[Finding] = []
     design = log[0]
@@ -156,7 +154,7 @@ def _findings(
         found.append(
             {"kind": _K.helpers_mismatch, "recorded": design["helpers"], "replayed": HELPERS}
         )
-    found += _call_findings(rerun, asked, calls)
+    found += _call_findings(rerun, asked, calls, _by_ref(answers), _by_ref(rerun))
     found += _entry_findings(log, rerun, loaded)
     for kind in (_K.plan, _K.verdict):
         mine, theirs = _first(log, kind.value), _first(rerun, kind.value)
@@ -165,13 +163,32 @@ def _findings(
     return found
 
 
+def _by_ref(log: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """A log's entries by ref; one write per ref makes each unique."""
+    return {item["ref"]: item for item in log if item["item"] == "entry"}
+
+
+def _candidates_differ(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    """Whether two entries of a candidate set hold different members, in order, by canonical
+    bytes; a missing entry or a marker on either side differs."""
+    if a is None or b is None or "value" not in a or "value" not in b:
+        return True
+    return encode(a["value"], _ITEM_DEPTH) != encode(b["value"], _ITEM_DEPTH)
+
+
 def _call_findings(
-    rerun: list[dict[str, Any]], asked: dict[str, tuple[str, ...]], calls: RecordedCalls
+    rerun: list[dict[str, Any]],
+    asked: dict[str, tuple[str, ...]],
+    calls: RecordedCalls,
+    answered: dict[str, dict[str, Any]],
+    replayed: dict[str, dict[str, Any]],
 ) -> list[Finding]:
     """``not-in-record`` per fixture call, by first source id, then one ``ref-not-in-record``
     and one ``question-changed`` for the run. The replay record's call items give one per
     fixture call, the sources it asked and their questions' identities; the fixture's ``asked``
-    map gives the refs each source was asked. ``question-changed`` compares identities only."""
+    map gives the refs each source was asked. ``question-changed`` compares identities, and for
+    a candidate-valued label set the set's entry in the replay record against the answering
+    log's, over which the recorded answer was given."""
     missing: list[list[str]] = []
     refs: set[str] = set()
     changed: set[str] = set()
@@ -193,7 +210,17 @@ def _call_findings(
             before = cast("dict[str, Any]", recorded["questions"])
             now = cast("dict[str, Any]", item["questions"])
             for ref, question in now.items():
-                if ref in before and before[ref]["identity"] != question["identity"]:
+                if ref not in before:
+                    continue
+                labels: object = question["labels"]
+                named = (
+                    cast("dict[str, str]", labels)["candidates"] if type(labels) is dict else None
+                )
+                # Equal identities name one set: the identity hashes the set's ref.
+                if before[ref]["identity"] != question["identity"] or (
+                    named is not None
+                    and _candidates_differ(replayed.get(named), answered.get(named))
+                ):
                     changed.add(ref)
     found: list[Finding] = [
         {"kind": _K.not_in_record, "sources": s} for s in sorted(missing, key=lambda s: s[0])

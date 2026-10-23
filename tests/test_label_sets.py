@@ -411,3 +411,75 @@ def test_a_candidate_valued_turn_replays_with_no_finding(candidates: list[str]) 
         loaded, {"candidates": candidates}, {"default": Model(), "tools": finder}
     ).record
     assert replay_sync(record, loaded)[1] == []
+
+
+# ---------------------------------------------------------------------------------------------
+# Replay
+
+
+def found_v1(r: Any) -> Any:
+    return ["ana@x.org", "bob@y.org"]
+
+
+def found_v2(r: Any) -> Any:
+    return ["ana@x.org", "cy@z.org"]
+
+
+def found_reversed(r: Any) -> Any:
+    return ["bob@y.org", "ana@x.org"]
+
+
+def versioned(function: Any, version: str) -> Design:
+    d = rule_set(function)
+    rule = d.rules["find"]
+    assert isinstance(rule, Rule)
+    return Design(
+        name=d.name,
+        state=d.state,
+        sources=d.sources,
+        rules={
+            "find": Rule(
+                rule.provides,
+                rule.outputs,
+                function,
+                version=version,
+                reads=list(rule.reads),
+                candidates=True,
+            )
+        },
+        policy=d.policy,
+    )
+
+
+@pytest.mark.parametrize("changed", [found_v2, found_reversed])
+def test_a_recomputed_set_that_differs_is_question_changed(changed: Any) -> None:
+    recorded = run(["x"], Model(top="ana@x.org"), versioned(found_v1, "1"))
+    _, found = replay_sync(recorded, load(versioned(changed, "2")))
+    kinds = [f["kind"] for f in found]
+    assert kinds[:2] == ["design-mismatch", "question-changed"]
+    assert found[1]["refs"] == ["q:sender"]
+    (entry,) = [f for f in found if f["kind"] == "entry" and f["ref"] == "d:find"]
+    assert entry["rule"]["version"] == "2"
+
+
+def test_a_recomputed_set_alike_is_no_question_changed() -> None:
+    recorded = run(["x"], Model(), versioned(found_v1, "1"))
+    _, found = replay_sync(recorded, load(versioned(found_v1, "2")))
+    assert "question-changed" not in [f["kind"] for f in found]
+
+
+def test_another_records_set_answering_is_no_question_changed() -> None:
+    from ommat.evaluation import use_answers_sync
+
+    loaded = load(design())
+    first = run(["ana@x.org", "bob@y.org"], Model(top="ana@x.org"))
+
+    async def other_set(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+        return CallResult({SET: ["bob@y.org", "cy@z.org"]})
+
+    second = run(["ana@x.org", "bob@y.org"], Model(top="bob@y.org"), tools=other_set)
+    report = use_answers_sync(first, loaded, second)
+    kinds = [f["kind"] for f in report["findings"]]
+    assert "question-changed" not in kinds
+    refs = [f["ref"] for f in report["findings"] if f["kind"] == "entry"]
+    assert SET in refs
