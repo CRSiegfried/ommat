@@ -1,13 +1,106 @@
 # ommat
 
-A blackboard engine that turns a decision model's answers into one checked plan. Its one operation is **decide**, which runs two stages:
+Turn many small model answers into one checked, replayable plan.
 
-- **Interpret.** Sources fetch model answers and other outside values onto a blackboard in rounds, through bindings the caller supplies; rules, which are functions with declared reads, turn them into estimates. An unknown stays unknown, as a marker (`Unsure`, `Unavailable` or `Unasked`), never a quiet no or a `None`.
-- **Compile.** One policy reads the estimates and writes the plan: execute these steps, clarify, inform, or escalate. The guard then checks every requirement the design declares for the plan and every requirement each step declares, refuses a step that declares none unless the design turns that off, and passes or refuses the plan.
+Ask an LLM to make a workflow's decision directly and you get a choice with no probability, nothing checked before a tool runs, and no way to show later why it chose.
 
-Decide returns the plan, the guard's verdict and a record of the turn, and calls no tool. The caller runs the plan's steps with its own workflow engine, or with the small reference runner ommat ships. Nothing after decide consults the model, and the record replays the turn with no model call.
+ommat splits the decision. A model answers many small closed questions, such as yes or no, which of these labels, or a value read from a text, each with probabilities, or with a confidence where the model gives one; your own rules and policy, written as Python functions, turn the answers into a plan; a guard checks the plan before any tool runs; and each decision comes with a record that replays the turn with no model call. [idia](https://github.com/CRSiegfried/idia) puts the questions to the models; ommat decides.
 
-New to ommat? Start with the tutorial, [Write your first design](docs/tutorials/write-a-design.md). Then [Decide with real models through idia](docs/tutorials/decide-with-idia.md) binds a design to model providers.
+## How a turn runs
+
+```mermaid
+flowchart TD
+  S["State"] --> Bd
+  subgraph I["Interpret, in rounds"]
+    Src["Sources"] --> B["Bindings: yours, or ommat[idia]"] -->|answers| Bd["Board"]
+    Bd --> Ru["Rules"] -->|"estimates or markers"| Bd
+    Bd -->|"needs, next round"| Src
+  end
+  subgraph C["Compile"]
+    P["Policy"] --> Pl["Plan: execute / clarify / inform / escalate"] --> G["Guard: requirements"]
+  end
+  Bd --> P
+  G --> D["Decision: plan, verdict, record"] --> Rp["Replay the record: no model call"]
+```
+
+ommat's one operation is **decide**, which runs two stages:
+
+- **Interpret.** Sources fetch model answers and other outside values onto a shared board, a blackboard, in rounds, through bindings the caller supplies; rules, which are functions with declared reads, turn them into estimates. An unknown stays unknown, as a marker (`Unsure`, `Unavailable` or `Unasked`), never a quiet no or a `None`.
+- **Compile.** One policy reads the estimates and writes the plan: execute these steps, clarify, inform, or escalate. If the policy raises, reads what it did not declare, or returns a plan that breaks ommat's plan rules, compile puts a `broken` plan in its place that names the cause. The guard then checks an `execute` plan: every requirement the design declares for the plan and every requirement each step declares must hold, and a step that declares none refuses the plan unless the design turns that off. Every other plan passes.
+
+Decide returns the plan, the guard's verdict and a record of the turn, and calls no tool. The caller runs the steps of a passed `execute` plan with its own workflow engine, or with the small reference runner ommat ships. Nothing after decide consults the model.
+
+## A first decision
+
+This runs as it is, with no API keys: a stand-in binding answers in place of a model. The design asks one choice question, turns its answer into a topic with one rule, and routes on the topic with a policy:
+
+<!-- demo -->
+```python
+from ommat import (
+    CallResult, Design, Origin, Plan, Policy, Question, ReadView, Requirement, Rule,
+    Source, SourceCall, Step, Text, Undetermined, decide_sync, load, replay_sync,
+)  # fmt: skip
+from ommat import types as t
+from ommat.helpers import pick_with_margin
+
+topics = ["billing", "shipping", "other"]
+ask = Question("choice", Text("What is the message about?"), topics)
+
+
+def topic(r: ReadView) -> str | Undetermined:
+    return pick_with_margin(r, "q:topic", 0.6, 0.2)
+
+
+def route(r: ReadView) -> Plan:
+    value = r.read("d:topic")
+    if isinstance(value, Undetermined):
+        return Plan("clarify", reply="Is this about billing or shipping?")
+    needs = [Requirement("d:topic", value)]
+    return Plan("execute", [Step("open_ticket", {"queue": Origin(ref="d:topic")}, needs)])
+
+
+DESIGN = Design(
+    name="helpdesk",
+    state=t.record(message=t.string),
+    sources={"triage": Source({"q:topic": ask}, needs=["t:state"])},
+    rules={"topic": Rule("d:topic", t.label(*topics), topic, version="1", reads=["q:topic"])},
+    policy=Policy(route, version="1", reads=["d:topic"]),
+    tools=["open_ticket"],
+)
+```
+
+The binding is a plain async function. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds one over a real provider. A binding receives each source's questions together, and `ommat[idia]` sends them to the provider as one request, split in order only where the provider's limits require:
+
+```python
+async def classifier(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+    answer = {"billing": 0.8, "shipping": 0.1, "other": 0.1}
+    return CallResult({ref: answer for call in batch for ref in call.questions})
+```
+
+Decide, print the plan and the verdict, then replay the turn from its record:
+
+```python
+loaded = load(DESIGN)
+message = {"message": "The invoice is overdue and I want a refund."}
+decision = decide_sync(loaded, message, {"default": classifier})
+print(decision.plan.kind, decision.verdict.kind)
+for step in decision.plan.steps:
+    args = {k: v.ref for k, v in step.arguments.items()}
+    print(step.tool, args, [(q.ref, q.value) for q in step.requirements])
+rerun, findings = replay_sync(decision.record, loaded)
+print("replay findings:", findings)
+```
+
+It prints:
+
+```text
+execute passed
+open_ticket {'queue': 'd:topic'} [('d:topic', 'billing')]
+replay findings: []
+```
+<!-- /demo -->
+
+`billing` is at 0.8, at or above the bar of 0.6 and 0.7 ahead of the next label, so the rule picks it. Had `billing` been under 0.6, or less than 0.2 ahead, the rule would have returned `Unsure` and the policy would ask to clarify. The step's `queue` argument names `d:topic` rather than copying its value; whoever runs the step reads the value from the record. The step requires `d:topic` to be `billing`, the board holds `billing`, so the guard passes the plan. Replay reruns the turn from the record, under the same loaded design, with no model call, and finds no difference.
 
 **The name.** Ommat and Idia come from *ommatidia*, the thousands of small hexagonal eyes that make up a compound eye and combine into one picture: *ommat-* is the Greek stem for "eye", *-idia* "little ones". Many small, cheap questions add up to one full picture. Ommat is the engine that asks them; Idia puts them to the models.
 
@@ -34,7 +127,7 @@ ommat is installed from its git tag until it is on a package index:
 pip install "ommat @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 
-`ommat[idia]` is the binding ommat ships to decision-model providers, through the [idia](https://github.com/CRSiegfried/idia) library; install idia from its tag first, with the extras for the providers you use, as the [tutorial](docs/tutorials/decide-with-idia.md) shows:
+The core imports only the Python standard library ([ADR-0001](docs/adr/0001-write-the-core-in-python-with-no-runtime-dependencies.md)). `ommat[idia]` is the binding ommat ships to decision-model providers, through the [idia](https://github.com/CRSiegfried/idia) library; install idia from its tag first, with the extras for the providers you use, as the [tutorial](docs/tutorials/decide-with-idia.md) shows:
 
 ```sh
 pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
@@ -43,11 +136,19 @@ pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 
 `ommat.bindings.idia` and its `oracle_binding` follow idia while idia is 0.x: they may change in any minor release when idia changes, and the changelog will say so.
 
+## Where next
+
+- [Write your first design](docs/tutorials/write-a-design.md), the tutorial to start with.
+- [Decide with real models through idia](docs/tutorials/decide-with-idia.md), which binds a design to model providers.
+- [The spec](docs/spec/README.md), what ommat does and leaves out.
+- [CHANGELOG.md](CHANGELOG.md), each release.
+- [idia](https://github.com/CRSiegfried/idia), the library that puts the questions to the models.
+
 ## Status
 
-Pre-release, at 0.4.0. `load` checks a design and refuses an invalid one. `decide` runs interpret over rounds of sources and rules, then compile with the policy and the guard, and returns the plan, the verdict and a record that `replay` reruns with no model call. Rules and the policy are written as Python functions. A question is a `noul`, `choice` or `score`, answered with a probability per label (a label may carry a description), or an `extraction`, a typed value read from a text. The record document carries its own hash, and `ommat.evaluation.use_answers` reruns one turn with another record's answers, to compare two models. The escalation and redacted views, the helpers, two design lints and the reference runner ship with it. It writes format-4 records and design documents, and reads formats 1 to 4, so the records and designs of earlier releases still load and replay. `ommat[idia]` binds an oracle to decision-model providers through idia. The core imports only the Python standard library ([ADR-0001](docs/adr/0001-write-the-core-in-python-with-no-runtime-dependencies.md)).
+Pre-release, at 0.4.0. It writes format-4 records and design documents and reads formats 1 to 4, so the records and designs of earlier releases still load and replay, given each design's stored document and the functions it names.
 
-0.4.0 leaves out decision tables, policy tables, data rules, plan declarations, candidate sets, candidate-valued label sets, and grounded declarations on a source or rule; `load` refuses a design that uses one. No state carries from one turn to the next: each turn stands alone. The written spec is partial, and its conformance fixtures come later ([docs/spec](docs/spec/README.md)). [CHANGELOG.md](CHANGELOG.md) lists each release.
+0.4.0 leaves out decision tables, data rules, plan declarations and candidate sets, which `load` refuses in a design, among other things the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
 
 ## Contributing
 
