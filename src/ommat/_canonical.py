@@ -69,6 +69,14 @@ def encode(value: object, max_depth: int | None = None) -> bytes:
     return "".join(parts).encode("utf-8")
 
 
+def encode_checked(value: object) -> bytes:
+    """The canonical bytes of a value its caller has just held to the domain, as ``encode``
+    gives them, with no second walk: the ledger's stored copy of an item it checked."""
+    parts: list[str] = []
+    _encode_into(value, parts)
+    return "".join(parts).encode("utf-8")
+
+
 def _encode_into(value: object, out: list[str]) -> None:
     # The value is in the domain: domain_error has checked its types, cycles and depth, so
     # this recursion is at most max_depth deep.

@@ -842,3 +842,22 @@ def test_turn_key_reads_a_bytes_subclass_root_key_by_bytes_own_methods() -> None
     assert turn_key(_LoudBytes(bytes(32)), rh) == turn_key(bytes(32), rh)
     with pytest.raises(ValueError, match="root key"):
         turn_key(_LoudBytes(bytes(31)), rh)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        True,
+        0,
+        -0.0,
+        1e21,
+        'a"b\u2028\n',
+        [1, [2, {"z": 1, "a": [None]}]],
+        {"é": 1, "\U0001f600": 2, "\ue000": 3},
+    ],
+)
+def test_encode_checked_gives_encodes_bytes(value: object) -> None:
+    from ommat._canonical import encode_checked
+
+    assert encode_checked(value) == encode(value)

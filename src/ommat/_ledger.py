@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ommat._answer import PROBABILITY_KINDS, AnswerKind, ValueType
-from ommat._canonical import decode, encode, record_hash
+from ommat._canonical import decode, encode, encode_checked, record_hash
 from ommat._markers import CauseCode, MarkerKind, OutcomeKind, PlanKind, VerdictKind
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import (
@@ -983,7 +983,8 @@ class Ledger:
         _no_grounded_ref(cast(str, kind), stored, where)
         _no_set(cast(str, kind), stored, where)
         commit = self._check_order(cast(str, kind), stored, index, where)
-        data = encode(stored, _ITEM_DEPTH)
+        # The copy is the checked item in exact types, so it is encoded with no second walk.
+        data = encode_checked(stored)
         try:
             self._items.append(stored)
             self._bytes.append(data)
