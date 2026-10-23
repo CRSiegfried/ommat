@@ -707,3 +707,11 @@ def test_a_combinator_compares_extraction_answers_whole_by_canonical_bytes() -> 
     assert agree(r, "q:amount", "q:other") == Unsure(
         Cause(CauseCode.conflict, ["q:amount", "q:other"])
     )
+
+
+def test_a_negative_zero_is_held_as_zero_in_every_number_member() -> None:
+    a = answer(value=-0.0, guess=-0.0, p_null=-0.0, confidence=-0.0)
+    held = (a.value, a.guess, a.p_null, a.confidence)
+    assert [math.copysign(1.0, cast(float, v)) for v in held] == [1.0] * 4
+    listed = answer(is_list=True, value=[-0.0], guess=None, span=[[4, 7]])
+    assert math.copysign(1.0, cast("tuple[float]", listed.value)[0]) == 1.0

@@ -30,6 +30,7 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Fixed
 
+- A `-0.0` a binding or a rule returns is held as `0.0` on the board, in an answer and in the record's stored copy, where it stayed `-0.0` live while the record wrote `0` and replay read back `0.0`, so a rule that told them apart diverged in replay.
 - The design lints probe both integers either side of a boundary that is not integral on an integer read, where they dropped it and could miss the values below or above it, so `dead_questions` could call a live question `no-change-found`.
 - `t.list_`, `t.mapping` and `t.record` raise `ValueError` for a type nesting past the depth bound, where they returned a string load refused.
 - `run_plan` runs a decision whose record holds a marker entry, where it raised `KeyError` before the first tool call.

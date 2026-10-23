@@ -8,6 +8,7 @@ import contextlib
 import enum
 import gc
 import inspect
+import math
 import random
 import time
 import warnings
@@ -1104,6 +1105,24 @@ def test_a_cause_names_a_parameter_or_a_tool_but_no_type_definition(ref: str, ke
     record, _ = run(loaded, {})
     expected = mark("conflict", ref, kind="Unsure") if kept else mark("invalid-return", "r")
     assert entry(record, "d:r")["marker"] == expected
+
+
+def test_a_negative_zero_a_rule_returns_is_zero_on_the_board_as_in_the_record() -> None:
+    seen: list[float] = []
+
+    def reading(r: Any) -> bool:
+        seen.append(math.copysign(1.0, r.read("d:z")))
+        return True
+
+    loaded = make(
+        rules={
+            "z": rule("z", lambda r: -0.0, "t:state", outputs=t.number()),
+            "w": rule("w", reading, "d:z"),
+        }
+    )
+    record, _ = run(loaded, {})
+    assert entry(record, "d:z")["value"] == 0
+    assert seen == [1.0]  # +0.0 live, as replay reads it back
 
 
 def tampered_code() -> Unsure:

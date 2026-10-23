@@ -123,6 +123,8 @@ def forms(value: object, t: Type, count: Count) -> tuple[object, object] | None:
         # The stored copy and the board hold a float, as replay makes an integral number;
         # the bytes are the same. Exact: the domain bounds an int by 2^53 - 1.
         plain = float(plain)
+    elif type(plain) is float and plain == 0:
+        plain = 0.0  # -0.0 is 0 in the bytes, so the board holds what replay reads back
     return plain, plain
 
 

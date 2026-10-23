@@ -373,3 +373,8 @@ def test_an_answer_kind_that_is_no_string_is_refused_before_any_hash() -> None:
     with pytest.raises(ValueError, match="is not noul, choice or score"):
         Answer(Unhashed(), ["yes", "no"], {"yes": 1, "no": 0})  # type: ignore[arg-type]
     assert Answer(AnswerKind.score, ["lo", "hi"], {"lo": 1, "hi": 0}).kind is AnswerKind.score
+
+
+def test_a_negative_zero_probability_is_held_as_zero() -> None:
+    a = Answer("noul", ("yes", "no"), {"yes": -0.0, "no": 1.0})
+    assert math.copysign(1.0, a.probabilities["yes"]) == 1.0

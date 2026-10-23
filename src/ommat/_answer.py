@@ -49,7 +49,7 @@ class Answer:
     ``probabilities`` is exactly a ``dict`` mapping exactly those labels to values whose type
     is exactly ``int`` or ``float``, a ``bool`` not, finite and in [0, 1]. The constructor
     checks each value alone and raises ``ValueError``; no sum is required, and the values are
-    held as given.
+    held as given, but ``-0.0`` as ``0.0``, as the record writes it.
 
     A label, and a key of ``probabilities``, is a ``str`` or an instance of a subclass of
     ``str`` whose data are Unicode scalar values; it is read and compared by its string data,
@@ -143,7 +143,7 @@ def _probabilities(probabilities: object, labels: tuple[str, ...]) -> dict[str, 
         number = cast(float, p)
         if (type(p) is float and not math.isfinite(number)) or not 0 <= number <= 1:
             raise ValueError(f"probability {described(p)} for {label!r} is not in [0, 1]")
-        out[label] = number
+        out[label] = 0.0 if type(p) is float and number == 0 else number  # -0.0 is 0 in bytes
     return out
 
 
@@ -246,7 +246,7 @@ def _item(value_type: ValueType, value: object, member: str) -> object:
                 raise ValueError(f"{member} {described(value)} is past 2^53 - 1 in magnitude")
             return float(value)
         if type(value) is float and math.isfinite(value):
-            return value
+            return 0.0 if value == 0 else value  # -0.0 is 0 in the bytes
         raise ValueError(f"{member} {guarded_repr(value)} is not a finite number")
     if not is_scalar_string(value):
         raise ValueError(f"{member} {guarded_repr(value)} is not a string of Unicode scalar values")
@@ -281,7 +281,7 @@ def _probability(value: object, member: str) -> float | None:
     number = cast(float, value)
     if (type(value) is float and not math.isfinite(number)) or not 0 <= number <= 1:
         raise ValueError(f"{member} {described(value)} is not in [0, 1]")
-    return number
+    return 0.0 if type(value) is float and number == 0 else number  # -0.0 is 0 in the bytes
 
 
 def _pair(value: object, member: str) -> tuple[int, int]:
@@ -325,7 +325,8 @@ class ExtractionAnswer:
     ``number`` exactly an ``int`` of magnitude at most 2^53 - 1 or a finite ``float``, never a
     ``bool``, held as a ``float``; a ``date``, ``time``, ``datetime`` or ``duration`` a string of
     ommat's own grammar, kept as given. ``p_null`` and ``confidence`` are each ``None`` or
-    exactly an ``int`` or ``float``, finite and in [0, 1], kept as given.
+    exactly an ``int`` or ``float``, finite and in [0, 1], kept as given. A ``-0.0`` is held as
+    ``0.0``, as the record writes it.
 
     ``span`` is ``None``, or for a scalar exactly a ``list`` ``[start, end]`` of exact ``int``
     values with 0 <= start <= end, ``end`` exclusive, or for a list one such pair per item. It
