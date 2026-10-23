@@ -935,8 +935,6 @@ class Ledger:
         self.observer_error: BaseException | None = None
         """The exception the observer call raised: the observer's mark. Set once,
         never cleared; decide tells the observer's exception from another by identity."""
-        self.drifted_copies: tuple[int, ...] = ()
-        """At close, the indices of stored copies that no longer encode to their bytes."""
         # Check state, taken off each copy before the observer sees it.
         self._phase = _EMPTY
         self._providers: dict[str, bytes] = {}
@@ -1337,6 +1335,16 @@ class Ledger:
         """The record hash over the log's first ``n`` items."""
         return _prefix_hash(self._bytes, n)
 
+    @property
+    def drifted_copies(self) -> tuple[int, ...]:
+        """The indices of stored copies that no longer encode to their bytes, re-encoded each
+        time it is read: the test of §ledger that a component changes no value it reads."""
+        return tuple(
+            i
+            for i, (copy, data) in enumerate(zip(self._items, self._bytes, strict=True))
+            if not _encodes_to(copy, data)
+        )
+
     def close(self) -> "Record":
         """Close the ledger and return its ``Record``; closing ends no round. A later close
         returns the same record."""
@@ -1344,11 +1352,6 @@ class Ledger:
             return self._record
         if not self._items:
             raise _LedgerError("the ledger closes from its design item on: it holds no item")
-        self.drifted_copies = tuple(
-            i
-            for i, (copy, data) in enumerate(zip(self._items, self._bytes, strict=True))
-            if not _encodes_to(copy, data)
-        )
         unhashed = encode(self._unhashed, _UNHASHED_DEPTH)
         self._record = Record(_BUILT_BY_LEDGER, tuple(self._bytes), unhashed)
         return self._record
