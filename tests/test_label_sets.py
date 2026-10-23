@@ -157,7 +157,7 @@ def test_the_call_item_holds_the_labels_as_declared_and_one_identity_for_two_set
     first, second = run(["ana@x.org"]), run(["bob@y.org", "cy@z.org"])
     (one,) = [c for c in calls(first) if c["sources"] == ["pick"]]
     (two,) = [c for c in calls(second) if c["sources"] == ["pick"]]
-    assert one["questions"]["q:sender"]["labels"] == {"fixed": FIXED, "candidates": SET}
+    assert one["questions"]["q:sender"]["labels"] == {"fixed": FIXED, "candidates": SET, "at": 2}
     assert one["questions"]["q:sender"]["identity"] == two["questions"]["q:sender"]["identity"]
 
 
@@ -700,3 +700,80 @@ def test_acceptance_decide_and_replay(
     else:
         assert marker(decision.record, "q:sender") == expected
     assert replay_sync(decision.record, loaded)[1] == []
+
+
+# ---------------------------------------------------------------------------------------------
+# Where the candidates go: `at`, the owner's decision for jev's measured order
+
+
+def at(k: int, fixed: list[Any] | None = None) -> Design:
+    labels = {"fixed": FIXED if fixed is None else fixed, "candidates": SET, "at": k}
+    return design(asks(labels))
+
+
+def rendered(record: Record) -> list[str]:
+    return entries(record)["q:sender"]["value"]["labels"]
+
+
+def test_at_0_puts_the_candidates_first_as_jev_measured() -> None:
+    record = run(["ana@x.org", "bob@y.org"], Model(top="ana@x.org"), at(0))
+    assert rendered(record) == ["ana@x.org", "bob@y.org", "none", "several"]
+    assert replay_sync(record, load(at(0)))[1] == []
+
+
+def test_at_between_the_fixed_labels_splits_them_and_their_descriptions() -> None:
+    fixed = [{"name": "none", "description": "No sender is named"}, "several"]
+    model = Model()
+    run(["ana@x.org"], model, at(1, fixed))
+    (asked,) = [c for b in model.batches for c in b if c.id == "pick"]
+    q = asked.questions["q:sender"]
+    assert q.labels == ("none", "ana@x.org", "several")
+    assert q.descriptions == ("No sender is named", None, None)
+
+
+def test_at_defaults_to_after_the_fixed_part_and_is_always_written() -> None:
+    doc = json.loads(load(design()).document)
+    assert doc["sources"]["pick"]["provides"]["q:sender"]["labels"]["at"] == 2
+
+
+def test_at_is_part_of_the_question_identity() -> None:
+    def identity(d: Design) -> str:
+        (call,) = [c for c in calls(run(["ana@x.org"], d=d)) if c["sources"] == ["pick"]]
+        return call["questions"]["q:sender"]["identity"]
+
+    assert identity(at(0)) != identity(at(2))
+    assert identity(design()) == identity(at(2))
+
+
+@pytest.mark.parametrize("k", [-1, 3, True, "0", 1.0])
+def test_an_at_outside_the_fixed_part_fails_check_10(k: Any) -> None:
+    from ommat import InvalidDesign
+
+    with pytest.raises(InvalidDesign) as raised:
+        load(at(k))
+    (failure,) = raised.value.failures
+    assert failure.check == 10
+    assert "at is not an integer from 0 to its 2 fixed labels" in failure.message
+
+
+def test_from_record_rebuilds_the_labels_at_their_position() -> None:
+    stored = run(["ana@x.org", "bob@y.org"], Model(top="bob@y.org"), at(0))
+    live = answered_from(stored, ["ana@x.org", "bob@y.org"], at(0))
+    assert entries(live)["q:sender"]["value"] == entries(stored)["q:sender"]["value"]
+
+
+def test_the_dead_lint_takes_the_first_candidate_at_its_position() -> None:
+    from ommat.helpers import dead_questions
+
+    d = lint_design()
+    pick = d.sources["pick"]
+    labels = {"fixed": FIXED, "candidates": SET, "at": 0}
+    q = Question("choice", Text("Who sent it?"), labels)
+    d = Design(
+        name=d.name,
+        state=d.state,
+        sources={**d.sources, "pick": Source({**pick.provides, "q:sender": q})},
+        rules=d.rules,
+        policy=d.policy,
+    )
+    assert dead_questions(load(d), values=SETS)["questions"]["q:sender"]["status"] == "live"

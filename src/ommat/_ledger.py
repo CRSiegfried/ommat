@@ -19,6 +19,7 @@ from ommat._canonical import decode, decode_written, encode, encode_checked, rec
 from ommat._markers import CauseCode, MarkerKind, OutcomeKind, PlanKind, VerdictKind
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import (
+    CANDIDATE_FORMAT,
     DESCRIPTION_FORMAT,
     EXTRACTION_FORMAT,
     FORMAT,
@@ -332,7 +333,11 @@ def _questions(value: Any, where: str) -> None:
             if labels is not None:
                 raise _LedgerError(f"{at}'s labels are not null, as noul's are")
         elif type(cast(object, labels)) is dict and kind == AnswerKind.choice:
-            _members(labels, f"{at}'s labels", {"fixed": _LABELS, "candidates": _STR})
+            # ``at`` from format 4 on, which the format check holds.
+            members = {"fixed": _LABELS, "candidates": _STR}
+            if "at" in cast("dict[str, Any]", labels):
+                members["at"] = _INT
+            _members(labels, f"{at}'s labels", members)
         elif type(cast(object, labels)) is dict:
             raise _LedgerError(f"{at}'s labels are an object, which only a choice's may be")
         else:
@@ -1021,6 +1026,18 @@ class Ledger:
             raise _LedgerError(f"{where} has no 'precision' member")
         if fmt < PRECISION_FORMAT and "precision" in item:
             raise _LedgerError(f"{where} holds precision, which a format-{fmt} record does not")
+        label_sets = [
+            q["labels"]
+            for q in cast("dict[str, Any]", item["questions"]).values()
+            if type(q["labels"]) is dict
+        ]
+        if label_sets and fmt < CANDIDATE_FORMAT:
+            raise _LedgerError(
+                f"{where}: its questions declare a candidate-valued label set, which a "
+                f"format-{fmt} record does not"
+            )
+        if any("at" not in s for s in label_sets):
+            raise _LedgerError(f"{where}: a candidate-valued label set has no 'at' member")
         if fmt < DESCRIPTION_FORMAT and _described(item["questions"]):
             raise _LedgerError(
                 f"{where}: its questions declare a described label, which a format-{fmt} "

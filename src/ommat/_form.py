@@ -351,8 +351,11 @@ class _Form:
                 ok = False
         elif isinstance(labels, Mapping) and q.kind is AnswerKind.choice:
             members = cast("Mapping[object, Any]", labels)
-            if set(members) != {"fixed", "candidates"}:
-                self.fail(names, f"{where}'s label set is not a mapping of fixed and candidates")
+            keys = set(members)
+            if not {"fixed", "candidates"} <= keys or not keys <= {"fixed", "candidates", "at"}:
+                self.fail(
+                    names, f"{where}'s label set is not a mapping of fixed, candidates and at"
+                )
                 ok = False
             else:
                 fixed = self.labels(members["fixed"], f"{where}'s fixed labels", names, 0)
@@ -360,6 +363,13 @@ class _Form:
                     members["candidates"], f"{where}'s candidates", names, optional=False
                 )
                 ok = ok and fixed is not None and ref is not None
+                at = members.get("at", None if fixed is None else len(fixed))
+                if fixed is not None and (type(at) is not int or not 0 <= at <= len(fixed)):
+                    self.fail(
+                        names,
+                        f"{where}'s at is not an integer from 0 to its {len(fixed)} fixed labels",
+                    )
+                    ok = False
         elif kind is not None:
             ok = self.labels(labels, f"{where}'s labels", names, 1) is not None and ok
         if not ok:

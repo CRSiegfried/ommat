@@ -738,7 +738,7 @@ def test_a_module_that_is_not_a_string_is_unresolved() -> None:
 def test_a_documents_label_set_over_a_ref_that_is_no_candidate_set_fails_check_3() -> None:
     doc = doc_of(full())
     tone = doc["sources"]["intent"]["provides"]["q:intent/tone"]
-    tone["labels"] = {"fixed": ["none"], "candidates": "t:lookup"}
+    tone["labels"] = {"fixed": ["none"], "candidates": "t:lookup", "at": 1}
     found = refused(written(doc))
     assert any(f.check == 3 and "is not a candidate set" in f.message for f in found), found
     tone["labels"] = {"fixed": ["none"]}
@@ -888,7 +888,7 @@ def test_a_key_whose_comparison_raises_is_check_11s_failure(name: str) -> None:
 def test_a_documents_choice_label_set_with_null_candidates_fails_check_10() -> None:
     design = with_source(minimal(), "s", Source({"q:x": question(kind="choice", labels=["a"])}))
     doc = doc_of(design)
-    doc["sources"]["s"]["provides"]["q:x"]["labels"] = {"fixed": [], "candidates": None}
+    doc["sources"]["s"]["provides"]["q:x"]["labels"] = {"fixed": [], "candidates": None, "at": 0}
     (failure,) = only(written(doc), 10)
     assert failure.names == ("q:x", "s")
     assert failure.message == 'source "s"\'s "q:x"\'s candidates is not a string'
@@ -932,3 +932,11 @@ def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -
     )
     (failure,) = refused(written({**rule_doc, "format": fmt}))
     assert failure.message == f'rule "find" is a candidate set, which format {fmt} does not have'
+
+
+def test_a_label_set_document_without_at_fails_check_11() -> None:
+    doc = label_set_doc()
+    del doc["sources"]["s"]["provides"]["q:x"]["labels"]["at"]
+    (failure,) = refused(written(doc))
+    assert failure.check == 11
+    assert 'labels has no member "at"' in failure.message

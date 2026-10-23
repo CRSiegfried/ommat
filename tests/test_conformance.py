@@ -110,8 +110,9 @@ def test_every_batch_interpret_builds_over_the_example_designs_passes() -> None:
 
 def test_the_suites_batches_hold_each_kind_alone_and_then_together() -> None:
     batches = _default_batches()
-    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 1, 1, 5]
+    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 1, 1, 1, 5]
     first, second = (b[0].questions["q:pick/sender"].labels for b in batches[5:7])
+    assert batches[7][0].questions["q:pick/sender"].labels[-2:] == ("none", "several")
     assert first[:2] == second[:2] == ("none", "several")
     assert first != second
     together = batches[-1]

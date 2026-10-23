@@ -1374,6 +1374,17 @@ class _Loader:
                     sets[ref] = cast("Mapping[str, str]", provided.labels)["candidates"]
         return {ref: sets[ref] for ref in code_point_sorted(sets)}
 
+    def label_at(self) -> dict[str, int]:
+        """Each candidate-valued question's position for its candidates: how many fixed labels
+        come before them."""
+        at: dict[str, int] = {}
+        for _, source in self.sources():
+            for ref, provided in source.provides.items():
+                if isinstance(provided, Question) and isinstance(provided.labels, Mapping):
+                    declared = provided.labels
+                    at[ref] = cast(int, declared.get("at", len(declared["fixed"])))
+        return {ref: at[ref] for ref in code_point_sorted(at)}
+
     def loaded(self, document: bytes, graph: Mapping[str, frozenset[str]]) -> LoadedDesign:
         decoded = cast("dict[str, Any]", decode(document))
         providers = self.provider_map()
@@ -1420,6 +1431,7 @@ class _Loader:
             grid=_grid(decoded),
             labels=MappingProxyType(self.label_parts()),
             label_sets=MappingProxyType(self.label_sets()),
+            label_at=MappingProxyType(self.label_at()),
             candidate_sets=frozenset(
                 ref for ref in providers if ref[:2] in ("t:", "d:") and self.is_set(ref)
             ),
@@ -1633,9 +1645,12 @@ def _declared_labels(labels: object) -> Any:
     label set's fixed part and set ref."""
     if isinstance(labels, Mapping):
         declared = cast("Mapping[str, Any]", labels)
+        fixed = cast("tuple[object, ...]", declared["fixed"])
         return {
-            "fixed": [_label(v) for v in cast("tuple[object, ...]", declared["fixed"])],
+            "fixed": [_label(v) for v in fixed],
             "candidates": declared["candidates"],
+            # Always written: where the candidates go among the fixed labels, by default last.
+            "at": declared.get("at", len(fixed)),
         }
     return [_label(v) for v in cast("tuple[object, ...]", labels)]
 
@@ -2137,7 +2152,7 @@ def _source_failures(
             yield at, f"{shown} is a candidate-valued label set, which format {fmt} does not have"
         if isinstance(declared, dict):
             label_set = cast("dict[str, Any]", declared)
-            labels = frozenset({"fixed", "candidates"})
+            labels = frozenset({"fixed", "candidates", "at"})
             yield from _missing_or_extra(label_set, labels, f"{shown}'s labels", at)
             listed = label_set.get("fixed")
         described = _items(cast(object, listed))

@@ -77,9 +77,9 @@ class OnTop:
 
     label: str | None
 
-    def over(self, labels: Sequence[str], fixed: int) -> dict[str, float]:
-        """The answer over the labels a call renders, ``fixed`` of them the fixed part's."""
-        top = labels[fixed] if self.label is None else self.label
+    def over(self, labels: Sequence[str], at: int) -> dict[str, float]:
+        """The answer over the labels a call renders, its first candidate at index ``at``."""
+        top = labels[at] if self.label is None else self.label
         return {label: 1.0 if label == top else 0.0 for label in labels}
 
 

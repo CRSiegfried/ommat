@@ -795,7 +795,6 @@ def test_members_that_do_not_fit_their_kind_are_refused(
     "item",
     [
         call(2, "s", questions=question(kind="choice", labels=["a", "b"])),
-        call(2, "s", questions=question(kind="choice", labels={"fixed": [], "candidates": "d:c"})),
         call(2, "s", questions=question(kind="score", labels=["low", "high"])),
         call(2, "s", questions={'q:spam["x"]': {"identity": "i", "kind": "noul", "labels": None}}),
         call(2, "s", outcome={"failed": {"code": "timed-out", "refs": []}}),

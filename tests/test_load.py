@@ -2231,6 +2231,7 @@ def test_a_label_sets_document_holds_its_fixed_part_and_set_and_loads_to_its_has
     loaded = load(over("t:s", ("set", SET)))
     doc = cast("dict[str, Any]", decode(loaded.document))
     assert doc["sources"]["s"]["provides"]["q:x"]["labels"] == {
+        "at": 1,
         "candidates": "t:s",
         "fixed": ["none"],
     }

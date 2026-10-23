@@ -3,7 +3,7 @@
 ``check(binding, *, batches=None, deterministic=False)`` calls the binding with each batch, as
 interpret does, ``binding(batch, seconds=s)``, or with the suite's own when ``batches`` is
 ``None``: a source of each answer kind, one of them needing an image, and a ``t:`` source, each
-as its own batch, then one question asked over two label sets as a candidate-valued question
+as its own batch, then one question asked over three label sets as a candidate-valued question
 is rendered, then all of the sources in one, built through the checked constructors and shaped as
 interpret builds them. It returns the failures as a list of strings, each
 ``<check>: batch <n>: <what>`` but for ``seconds``, which names no batch, and an empty list
@@ -139,12 +139,14 @@ def _sources() -> tuple[SourceCall, ...]:
 _LABEL_SETS = (
     ("none", "several", "ana@example.com", '"Ana" <a@x.org>'),
     ("none", "several", "]", "Zo\u00eb \u00c5ngstr\u00f6m", "\u674e"),
+    ("ana@example.com", "bob@example.com", "none", "several"),
 )
-"""Two renderings of one candidate-valued question: its fixed part, then each set's members."""
+"""Three renderings of one candidate-valued question: its fixed part, then two sets' members,
+and a set's members before its fixed part."""
 
 
 def _label_sets() -> list[Batch]:
-    """One ``q:`` ref asked over two label sets, as a candidate-valued question is rendered
+    """One ``q:`` ref asked over three label sets, as a candidate-valued question is rendered
     from two turns' sets: a binding that keeps labels by ref fails ``answers``."""
     return [
         (
@@ -168,7 +170,7 @@ def _label_sets() -> list[Batch]:
 
 
 def _default_batches() -> list[Batch]:
-    """The suite's own batches: each source alone, then one question over two label sets,
+    """The suite's own batches: each source alone, then one question over three label sets,
     then all of the sources in one batch."""
     sources = _sources()
     return [*((s,) for s in sources), *_label_sets(), sources]

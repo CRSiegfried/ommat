@@ -23,7 +23,7 @@ from ommat._design import LoadedDesign
 from ommat._ledger import _ITEM_DEPTH
 from ommat._refs import code_point_sorted
 from ommat._values import type_name
-from ommat.helpers._points import OnTop, Point, filled, fresh, grid_order, labels_of
+from ommat.helpers._points import OnTop, Point, filled, fresh, grid_order
 
 _STATE = "t:state"
 _DEFAULT = "default"
@@ -78,7 +78,7 @@ def _run(
             for ref, q in call.questions.items():
                 live = point[ref].live
                 if isinstance(live, OnTop):
-                    values[ref] = live.over(q.labels, len(labels_of(loaded, ref)))
+                    values[ref] = live.over(q.labels, loaded._label_at[ref])
                 else:
                     values[ref] = fresh(live)
         return CallResult(values)

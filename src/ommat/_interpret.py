@@ -1001,7 +1001,13 @@ class _Turn:
             elif not frozenset(names).isdisjoint(candidates):
                 out[ref] = Unavailable(Cause(_C.label_collision, [set_ref]))
             else:
-                labels[ref] = (names + candidates, descriptions + (None,) * len(candidates))
+                # The candidates go after the first ``at`` fixed labels, each undescribed.
+                k = self.loaded._label_at[ref]
+                none = (None,) * len(candidates)
+                labels[ref] = (
+                    names[:k] + candidates + names[k:],
+                    descriptions[:k] + none + descriptions[k:],
+                )
         return out
 
     def batch(

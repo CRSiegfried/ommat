@@ -297,7 +297,9 @@ def _differing(
         value = entry["value"]
         # Anything but a list gives no labels: they differ, and nothing raises.
         listed = cast("list[object]", value)
-        recorded = [*declared["fixed"], *listed] if type(value) is list else None
+        k = cast(int, declared["at"])
+        fixed = cast("list[object]", declared["fixed"])
+        recorded = [*fixed[:k], *listed, *fixed[k:]] if type(value) is list else None
     found: list[str] = []
     if stored["kind"] != kind.value:
         found.append("kind")

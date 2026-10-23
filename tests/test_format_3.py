@@ -920,14 +920,22 @@ def test_the_warnings_are_size_tested_as_one_value_at_the_read(small_bounds: Sma
         read_record(doc)
 
 
-def test_a_described_fixed_part_reads_in_a_format_3_call_item() -> None:
-    doc = described_doc(3)
+@pytest.mark.parametrize("fmt", [2, 3])
+def test_a_label_set_in_a_call_item_before_format_4_is_refused(fmt: int) -> None:
+    doc = described_doc(fmt) if fmt == 3 else strip(described_doc(fmt))
     doc["log"][3]["questions"]["q:tone"]["labels"] = {"fixed": [WARM], "candidates": "t:pool"}
+    with pytest.raises(InvalidRecord, match="candidate-valued label set"):
+        read_record(rehashed(doc) if fmt == 3 else doc)
+
+
+def test_a_label_set_in_a_format_4_call_item_holds_at() -> None:
+    doc = described_doc(4)
+    labels: dict[str, Any] = {"fixed": [WARM], "candidates": "t:pool"}
+    doc["log"][3]["questions"]["q:tone"]["labels"] = labels
+    with pytest.raises(InvalidRecord, match="has no 'at' member"):
+        read_record(rehashed(doc))
+    labels["at"] = 0
     read_record(rehashed(doc))
-    doc = strip(described_doc(2))
-    doc["log"][3]["questions"]["q:tone"]["labels"] = {"fixed": [WARM], "candidates": "t:pool"}
-    with pytest.raises(InvalidRecord, match="described label"):
-        read_record(doc)
 
 
 # ---------------------------------------------------------------------------------------------
