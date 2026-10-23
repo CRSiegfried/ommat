@@ -168,13 +168,16 @@ def from_record(record: object, loaded: LoadedDesign) -> OracleBinding:
     each refusal a line of ``warnings``: every ref of a source the record holds no returned
     call for, or whose ``needs`` differ from the record's entries by canonical bytes; a
     question whose kind, labels as declared, value type or list flag differ from the call
-    item's; a ref with no recorded entry naming its call; and a ref whose recorded marker is
-    neither ``invalid-answer`` nor ``invalid-return``, which come back as recorded. Its
-    provenance is null and its first warnings line names the record's hash.
+    item's, a candidate-valued set's labels as its fixed part and its set's stored entry give
+    them, or whose set's stored entry is missing or a marker; a ref with no recorded entry
+    naming its call; and a ref whose recorded marker is neither ``invalid-answer`` nor
+    ``invalid-return``, which come back as recorded. Its provenance is null and its first
+    warnings line names the record's hash.
 
     The binding cannot check a question's identity or wording: a ``SourceCall`` carries no
     identity and the call item holds no wording. Under the record's own design neither can
-    differ. Under another design the caller compares, after the turn, each new call item's
+    differ; nor can it see a label set's ref, so a set named otherwise holding the same members
+    is answered. Under another design the caller compares, after the turn, each new call item's
     ``questions`` identities with the stored call item's, by ``q:`` ref."""
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
@@ -223,10 +226,10 @@ class _FromRecord:
         stored = cast("dict[str, Any]", item["questions"])
         for ref in refs:
             if ref in source.questions:
-                members = _differing(source.questions[ref], stored.get(ref))
-                if members:
+                why = _differing(source.questions[ref], stored.get(ref), self._entries)
+                if why:
                     values[ref] = unsupported
-                    lines.append(f"{clipped(ref)}: its {members} differ from the stored question's")
+                    lines.append(f"{clipped(ref)}: {why}")
                     continue
             entry = self._recorded.entries.get((index, ref))
             if entry is None:
@@ -261,11 +264,16 @@ class _FromRecord:
             return True
 
 
-def _differing(asked: RenderedQuestion, stored: dict[str, Any] | None) -> str:
-    """The members of the asked question that differ from the call item's ``questions``
-    entry, joined; all four when the call item asked no such question; empty when none."""
+def _differing(
+    asked: RenderedQuestion,
+    stored: dict[str, Any] | None,
+    entries: Mapping[str, Mapping[str, Any]],
+) -> str:
+    """Why the asked question is not the call item's ``questions`` entry, or empty when it is.
+    A candidate-valued set's stored labels are its fixed part, then the members of its set's
+    entry in the same record, in order; a set with no stored value refuses the question."""
     if stored is None:
-        return "kind, labels, value type and list flag"
+        return "its kind, labels, value type and list flag differ from the stored question's"
     kind = AnswerKind(asked.kind)
     labels: object = None
     if kind not in (AnswerKind.noul, AnswerKind.extraction):
@@ -273,14 +281,31 @@ def _differing(asked: RenderedQuestion, stored: dict[str, Any] | None) -> str:
             name if description is None else {"name": name, "description": description}
             for name, description in zip(asked.labels, asked.descriptions, strict=True)
         ]
+    recorded: object = stored["labels"]
+    if type(recorded) is dict:  # a candidate-valued set, as declared: {fixed, candidates}
+        declared = cast("dict[str, Any]", recorded)
+        set_ref = cast(str, declared["candidates"])
+        entry = entries.get(set_ref)
+        if entry is None:
+            return f"its candidate set {clipped(set_ref)} has no stored entry"
+        if "value" not in entry:
+            marker = cast("dict[str, Any]", entry["marker"])
+            return (
+                f"its candidate set {clipped(set_ref)} is stored as "
+                f"{marker['kind']} {marker['cause']['code']}"
+            )
+        value = entry["value"]
+        # Anything but a list gives no labels: they differ, and nothing raises.
+        listed = cast("list[object]", value)
+        recorded = [*declared["fixed"], *listed] if type(value) is list else None
     found: list[str] = []
     if stored["kind"] != kind.value:
         found.append("kind")
-    if stored["labels"] != labels:
+    if recorded != labels:
         found.append("labels")
     value_type = None if asked.value_type is None else ValueType(asked.value_type).value
     if stored.get("value_type") != value_type:
         found.append("value type")
     if stored.get("is_list", False) != asked.is_list:
         found.append("list flag")
-    return ", ".join(found)
+    return f"its {', '.join(found)} differ from the stored question's" if found else ""

@@ -1,10 +1,12 @@
 """A candidate-valued label set: a ``choice`` whose labels are a fixed part and the members of a
 ``list<string>`` candidate set, rendered each time the question is asked (§candidate-sets)."""
 
+import json
 from typing import Any
 
 import pytest
 
+from ledger_logs import rehashed
 from ommat import (
     CallResult,
     Cause,
@@ -23,7 +25,10 @@ from ommat import (
     Unsure,
     _form,
     decide_sync,
+    from_record,
     load,
+    read_record,
+    replay_sync,
 )
 from ommat import types as t
 
@@ -338,3 +343,71 @@ def test_a_returned_key_for_a_left_out_question_is_an_unexpected_ref() -> None:
 def test_a_binding_that_returns_an_engine_label_code_is_invalid_return(code: CauseCode) -> None:
     record = run(["ana@x.org"], Model(answers={"q:sender": Unavailable(Cause(code))}))
     assert marker(record, "q:sender")[1] == "invalid-return"
+
+
+# ---------------------------------------------------------------------------------------------
+# from_record and the fixture binding
+
+
+def answered_from(record: Record, candidates: list[str], d: Design | None = None) -> Record:
+    """A live turn over ``candidates`` whose questions ``from_record`` answers from ``record``."""
+    d = d or design()
+    loaded = load(d)
+    bindings: dict[str, Any] = {"default": from_record(record, loaded)}
+    if "finder" in d.sources:
+        bindings["tools"] = finder
+    return decide_sync(loaded, {"candidates": candidates}, bindings).record
+
+
+def warnings_of(record: Record) -> list[str]:
+    (pick,) = [
+        i for i, c in enumerate(record.log) if c["item"] == "call" and "pick" in c["sources"]
+    ]
+    calls = json.loads(record.document)["unhashed"]["calls"]
+    return list(calls[str(pick)].get("warnings", []))
+
+
+def test_from_record_answers_a_candidate_valued_question_over_the_stored_set() -> None:
+    stored = run(["ana@x.org", "bob@y.org"], Model(top="bob@y.org"))
+    live = answered_from(stored, ["ana@x.org", "bob@y.org"])
+    assert entries(live)["q:sender"]["value"] == entries(stored)["q:sender"]["value"]
+
+
+@pytest.mark.parametrize(
+    "candidates", [["bob@y.org", "ana@x.org"], ["ana@x.org"], ["ana@x.org", "bob@y.org", "cy"]]
+)
+def test_from_record_refuses_a_question_over_another_set(candidates: list[str]) -> None:
+    stored = run(["ana@x.org", "bob@y.org"])
+    live = answered_from(stored, candidates)
+    assert marker(live, "q:sender") == ("Unavailable", "unsupported", ["q:sender"])
+    assert "value" in entries(live)["q:other"]
+    assert "'q:sender': its labels differ from the stored question's" in warnings_of(live)
+
+
+def test_from_record_answers_over_a_rules_recomputed_set() -> None:
+    d = rule_set(found)
+    stored = run(["ana@x.org"], d=d)
+    live = answered_from(stored, ["ana@x.org"], d)
+    assert entries(live)["q:sender"]["value"] == entries(stored)["q:sender"]["value"]
+
+
+def test_from_record_refuses_a_question_whose_stored_set_is_a_marker() -> None:
+    stored = run(["ana@x.org"])
+    doc = json.loads(stored.document)
+    (at,) = [n for n, i in enumerate(doc["log"]) if i.get("ref") == SET]
+    item = {k: v for k, v in doc["log"][at].items() if k != "value"}
+    item["marker"] = {"kind": "Unavailable", "cause": {"code": "refused", "refs": [SET]}}
+    doc["log"][at] = item
+    live = answered_from(read_record(rehashed(doc)), ["ana@x.org"])
+    assert marker(live, "q:sender") == ("Unavailable", "unsupported", ["q:sender"])
+    line = f"'q:sender': its candidate set '{SET}' is stored as Unavailable refused"
+    assert line in warnings_of(live)
+
+
+@pytest.mark.parametrize("candidates", [["ana@x.org"], [], ["none"]])
+def test_a_candidate_valued_turn_replays_with_no_finding(candidates: list[str]) -> None:
+    loaded = load(design())
+    record = decide_sync(
+        loaded, {"candidates": candidates}, {"default": Model(), "tools": finder}
+    ).record
+    assert replay_sync(record, loaded)[1] == []
