@@ -11,7 +11,10 @@ Thanks for your interest in ommat. The design and the spec are still young, so c
 
 ## Development
 
+The `idia` extra's development source is a checkout of idia beside this one, at `../idia`, so clone it first:
+
 ```sh
+git clone https://github.com/CRSiegfried/idia.git ../idia
 uv sync
 uv run ruff check
 uv run ruff format --check

@@ -1,6 +1,6 @@
 # Spec
 
-The normative description of ommat's behavior, and the JSON conformance fixtures that any implementation, in any language, must pass. The Python package is one implementation of it. The spec carries its own version, separate from the package version.
+The normative description of ommat's behavior. The Python package is one implementation of it. JSON conformance fixtures that any implementation, in any language, must pass come later, and the spec will then carry its own version, separate from the package version.
 
 The spec covers what format 4 holds and the engine does:
 
@@ -58,7 +58,7 @@ A need whose value is a `dict` of exactly `media_type`, a `str` naming an image 
 
 ## The idia binding
 
-`ommat.bindings.idia`, installed by the `idia` extra and never imported by `import ommat`, binds an oracle to a provider through the idia library. `oracle_binding(provider)` takes an idia `Dispatcher` over one leaf and refuses, with `ValueError`, any other provider, a dispatcher whose re-ask is on and one whose overflow policy is not `Fail`, since a second answer or a trimmed state is not what the call item records. A design that asks label kinds and extractions of different models binds one dispatcher per oracle.
+`ommat.bindings.idia`, installed by the `idia` extra and never imported by `import ommat`, binds an oracle to a provider through the idia library. `oracle_binding(provider)` takes an idia `Dispatcher` over one leaf and refuses, with `ValueError`, any other provider, a dispatcher whose re-ask is on and one whose overflow policy is not `Fail`, since a second answer or a trimmed state is not what the call item records, and a leaf whose declared probability decimals fall outside 0 to 17. A design that asks label kinds and extractions of different models binds one dispatcher per oracle.
 
 Each call sets one idia deadline from `seconds`; seconds idia's deadline cannot hold send nothing, and every ref is `unsupported` with the reason as a line. Each source is one idia request, its questions in the order received, keyed by their refs, each label carrying its description. A source that asks an extraction sends the text its spans index as the state's first part, so a span indexes part 0, with its reference date in the request's options and its other needs not sent; a source that asks only label kinds sends its needs as one JSON part keyed by ommat's refs, never renamed. A source that asks both sends the extraction's state, so its label questions see the text alone. An image need follows as an image part. These are `unsupported`, each with its reason as a line: a `t:` ref; a source whose extractions read different texts or name different reference dates; a need a JSON part cannot carry; a question idia cannot build; and a request idia's preflight refuses. The sources sent run concurrently.
 

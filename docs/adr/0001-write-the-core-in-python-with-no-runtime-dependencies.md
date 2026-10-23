@@ -24,4 +24,4 @@ The core package imports only the Python standard library and makes no network c
 
 - A test checks that `import ommat` loads no module outside the standard library.
 - Python 3.11 is the minimum, the first with `enum.StrEnum` and `asyncio.TaskGroup`; the supported versions are those CI tests.
-- Another-language implementation is a port that passes the conformance fixtures, so the spec has to be complete enough to port from.
+- An implementation in another language is a port that passes the conformance fixtures, so the spec has to be complete enough to port from.

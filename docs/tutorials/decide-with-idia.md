@@ -1,6 +1,6 @@
 # Decide with real models through idia
 
-In this tutorial you bind a ommat design to two real decision models through the idia
+In this tutorial you bind an ommat design to two real decision models through the idia
 binding, decide two street reports, read what the record holds about each call, replay the
 records, and answer a turn again from a stored record. You need Python 3.11 or later, an OpenAI
 API key, and a Cloudflare account id and API token with Workers AI access.
@@ -29,8 +29,9 @@ A source names the oracle that answers it, and `decide` takes one binding per or
 
 1. Open `street_reports_design.py`. The `triage` source asks a `noul`, a `choice` and a `score`
    and names `oracle="classifier"`. The `details` and `timing` sources ask extractions and
-   both name `oracle="extractor"` and are ready in the same round, so one call answers them. The `registry` source provides a
-   `t:` ref, a value your own code fetches, under `oracle="registry"`.
+   both name `oracle="extractor"` and are ready in the same round, so one call answers them.
+   The `registry` source provides a `t:` ref, a value your own code fetches, under
+   `oracle="registry"`.
 
 2. Each model oracle gets one model: OpenAI's Decisions answers label kinds and Cloudflare's
    Clairic answers extractions. The registry is a plain function in `decide_live.py`, which
@@ -66,8 +67,8 @@ A source names the oracle that answers it, and `decide` takes one binding per or
 
 3. Each call to a binding receives `seconds`, the time the call has: the batch's timeout, 60
    seconds here since no source declares one, or the time left to the turn's deadline when
-   one is set and that is smaller. The binding makes it the deadline of every request and retry the call sends, and
-   ommat's own timeout ends the call at that same instant.
+   one is set and that is smaller. The binding makes it the deadline of every request and
+   retry the call sends, and ommat's own timeout ends the call at that same instant.
 
 ## Decide two reports
 
