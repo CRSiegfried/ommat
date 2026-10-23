@@ -665,3 +665,38 @@ def test_from_record_and_the_fixture_pass_the_suite_on_the_batches_their_record_
     seen = list(model.batches)
     assert check(from_record(record, loaded), batches=seen) == []
     assert check(FixtureBinding(RecordedCalls(record.log), loaded), batches=seen) == []
+
+
+# ---------------------------------------------------------------------------------------------
+# Acceptance: the list-then-mark shape through decide and replay with a stand-in binding
+
+
+@pytest.mark.parametrize(
+    ("candidates", "answers", "expected"),
+    [
+        (["ana@x.org", "bob@y.org"], {}, None),
+        ([], {}, ("Unasked", "when-false", [SET])),
+        (["ana@x.org", "several"], {}, ("Unavailable", "label-collision", [SET])),
+        (["a", "b", "c"], {}, ("Unavailable", "label-overflow", [SET])),
+        (
+            ["ana@x.org"],
+            {"q:sender": {"none": 0.5, "several": 0.5}},
+            ("Unavailable", "invalid-answer", ["q:sender"]),
+        ),
+    ],
+    ids=["a set", "an empty set", "a collision", "an overflow", "a missing label"],
+)
+@pytest.mark.usefixtures("small")
+def test_acceptance_decide_and_replay(
+    candidates: list[str], answers: dict[str, Any], expected: Any
+) -> None:
+    loaded = load(design())
+    decision = decide_sync(
+        loaded, {"candidates": candidates}, {"default": Model(answers=answers), "tools": finder}
+    )
+    entry = entries(decision.record)["q:sender"]
+    if expected is None:
+        assert entry["value"]["labels"] == [*FIXED, *candidates]
+    else:
+        assert marker(decision.record, "q:sender") == expected
+    assert replay_sync(decision.record, loaded)[1] == []
