@@ -174,7 +174,7 @@ def test_a_question_changing_only_the_verdict_is_live() -> None:
     assert second["q:go"]["probabilities"] == {"yes": 0.8, "no": 0.2}
 
 
-def test_the_points_count_every_run_in_grid_order() -> None:
+def test_the_points_count_every_run() -> None:
     CALLS.clear()
     report = dead_questions(LOADED)
     # q:go: nine axis points and the marker; q:tone: two labels and the marker; t:state: {}.
@@ -182,7 +182,7 @@ def test_the_points_count_every_run_in_grid_order() -> None:
     assert CALLS.count("policy") == 30
 
 
-def test_the_binding_answers_under_default_and_every_declared_batch_key() -> None:
+def test_the_binding_answers_under_default_and_every_declared_oracle_name() -> None:
     sources = {
         "ask": Source({"q:go": QUESTIONS["q:go"]}, oracle="model"),
         "look": Source({"t:n": t.integer()}),

@@ -1371,7 +1371,7 @@ def test_check_5s_failure_is_alike_under_every_hash_seed() -> None:
         )
         outputs.add(result.stdout)
     assert len(outputs) == 1, outputs
-    # The probe printed each design's failures, as this process finds them.
+    # The subprocess printed each design's failures, as this process finds them.
     expected = [
         repr([(f.check, f.names, f.message) for f in refused(build())])
         for build in (three_cycle, two_cycles)

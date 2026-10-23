@@ -88,8 +88,8 @@ def items(r: ReadView) -> list[tuple[str, tuple[object, ...], tuple[object, ...]
 
 
 def test_the_helper_version_is_2() -> None:
-    # 2 since the extract helper was added: a record calling it under 1 would replay with
-    # nothing to say why.
+    # Version 2 covers the extract helper: a record that calls it under version 1 would replay
+    # with nothing to say why.
     assert ommat.helpers.HELPERS == 2
     assert type(ommat.helpers.HELPERS) is int
 
