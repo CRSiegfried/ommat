@@ -444,6 +444,15 @@ def test_a_constructor_renders_the_canonical_string(built: str, expected: str) -
     assert render(p(built)) == built
 
 
+@pytest.mark.parametrize("build", [t.list_, t.mapping, lambda x: t.record(f=x)])  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+def test_a_constructor_refuses_a_type_past_the_depth_bound(build: Callable[[str], str]) -> None:
+    deep = t.string
+    for _ in range(64):
+        deep = t.list_(deep)
+    with pytest.raises(ValueError, match="nests more than 64 deep"):
+        build(deep)
+
+
 @pytest.mark.parametrize(
     "build",
     [

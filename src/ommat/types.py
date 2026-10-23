@@ -72,24 +72,34 @@ def _argument(t: str, *, nullable: bool) -> _types.Type:
     return parsed
 
 
+def _spelled(built: _types.Type, *, nullable: bool) -> str:
+    """The built type's canonical string, refused as the notation refuses it: past the depth
+    bound, say, which no argument alone passes."""
+    text = _types.render(built)
+    parsed = _types.parse_type(text, nullable=nullable)
+    if isinstance(parsed, _types.TypeFailure):
+        raise ValueError(parsed.message)
+    return text
+
+
 def list_(t: str) -> str:
     """``list<T>``; ``T`` is any type but ``answer`` and does not admit null."""
-    return _types.render(_types.make_list(_argument(t, nullable=False)))
+    return _spelled(_types.make_list(_argument(t, nullable=False)), nullable=False)
 
 
 def mapping(t: str) -> str:
     """``mapping<string, T>``; ``T`` is any type but ``answer`` and does not admit null."""
-    return _types.render(_types.make_mapping(_argument(t, nullable=False)))
+    return _spelled(_types.make_mapping(_argument(t, nullable=False)), nullable=False)
 
 
 def record(**fields: str) -> str:
     """``record{f: T, ...}``, field names in the segment grammar; a field may admit null."""
     built = [(name, _argument(ft, nullable=True)) for name, ft in fields.items()]
-    return _types.render(_types.make_record(built))
+    return _spelled(_types.make_record(built), nullable=False)
 
 
 def nullable(t: str) -> str:
     """``T or null``, for a ``t:`` ref's type, an ``outputs`` type, a record field's type or a
     type definition's body; ``T`` is neither nullable nor ``answer``. Whether a name in ``T``
     resolves to a nullable type is checked at load."""
-    return _types.render(_types.make_nullable(_argument(t, nullable=False)))
+    return _spelled(_types.make_nullable(_argument(t, nullable=False)), nullable=True)
