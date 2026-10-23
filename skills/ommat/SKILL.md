@@ -53,7 +53,7 @@ A full, runnable example with its output is the [README demo](https://github.com
 
 - Bind a stand-in: an `async def binding(batch, *, seconds) -> CallResult` giving a fixed answer for each `q:` ref in each `SourceCall`'s `questions`, probabilities keyed by label name, an extraction's answer through `ommat.bindings.extraction_value`. The README demo has one. A binding without the `seconds` keyword fails every call.
 - `ommat.bindings.conformance.check(binding)`, outside the compatibility promise, holds a binding of your own to a provider to the protocol: it returns the failures, `[]` on a pass, and must be called outside a running event loop.
-- Assert on `decision.plan.kind`, `decision.verdict.kind` and the replay findings.
+- Assert on `decision.plan.kind`, `decision.verdict.kind` and the replay findings. To read an estimate a turn wrote, an `escalate` plan's working among them, take its entry from the record: `{i["ref"]: i for i in decision.record.log if i["item"] == "entry"}`; each ref is written once.
 - Two design lints run the design with no model: `ommat.helpers.dead_questions(loaded)` reports, per question, whether its answer changed the plan or the verdict at any point it tried (`live`, `no-change-found` or `not-on-grid`), and `ommat.helpers.unsure_to_execute(loaded)` reports each point where the policy, given a `d:` read set to `Unsure`, returns an `execute` plan. Each takes `values`, a mapping from ref to a list of values, for a read its types and grid cannot fill: `dead_questions` fills `t:state` and what sources provide, `unsure_to_execute` the policy's declared reads, `d:` included.
 
 ## Pitfalls
