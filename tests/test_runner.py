@@ -30,7 +30,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat.helpers import BindingNotFound, RunRefusal, run_plan
-from scripted import Scripted, returns
+from scripted import Scripted, raising, returns
 
 STATE_T = t.record(
     subject=t.string,
@@ -74,6 +74,24 @@ def decision(
     )
     binding = Scripted({"s": returns({"t:n": 4})})
     return decide_sync(load(design), state, {"default": binding})
+
+
+def test_a_record_holding_a_marker_entry_runs_its_plan() -> None:
+    # The source fails, so t:n's entry is a marker; no step names it, so the plan runs.
+    design = minimal(
+        state=STATE_T,
+        sources={"s": Source({"t:n": t.integer()}, needs=["t:state"])},
+        rules={"ok": Rule("d:ok", t.label("no", "yes"), yes, version="1", reads=["t:n"])},
+        policy=Policy(plan_of(Step("list", {})), version="1", reads=READS),
+        tools=TOOLS,
+        default_deny=False,
+    )
+    binding = Scripted({"s": raising(RuntimeError("down"))})
+    d = decide_sync(load(design), STATE, {"default": binding})
+    assert (d.plan.kind, d.verdict.kind) == (PlanKind.execute, VerdictKind.passed)
+    calls = Calls()
+    run(d, calls.tools("list"))
+    assert [name for name, _ in calls.log] == ["list"]
 
 
 def plan_of(*steps: Step) -> Callable[[Any], Plan]:

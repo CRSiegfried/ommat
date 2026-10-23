@@ -81,10 +81,11 @@ def _gate(
 
 
 def _entries(log: list[dict[str, Any]]) -> dict[str, object]:
-    """Each board ref's entry value, first by log position."""
+    """Each board ref's entry value, first by log position; a marker entry holds none, and
+    plan rule 4 keeps a step from naming one."""
     out: dict[str, object] = {}
     for i in log:
-        if i["item"] == "entry":
+        if i["item"] == "entry" and "value" in i:
             out.setdefault(i["ref"], i["value"])
     return out
 

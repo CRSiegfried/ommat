@@ -30,6 +30,7 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Fixed
 
+- `run_plan` runs a decision whose record holds a marker entry, where it raised `KeyError` before the first tool call.
 - A marker a rule returns is `invalid-return` when a ref of its cause is not a ref the design provides, a source, rule or tool name, a parameter path, `policy`, `codec`, `rule:N` or `step:N`, where it was written as given: free text in a cause reached the record's hashed log and stayed open in the redacted view.
 - `load` gives a function whose `__wrapped__` chain loops a null source hash, as for any function whose source cannot be read, where it raised `ValueError`.
 
