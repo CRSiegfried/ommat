@@ -147,8 +147,8 @@ def _refusal(
     deadline: idia.Deadline,
     requests: dict[str, idia.Request],
 ) -> str | None:
-    """The reason the source is not sent, or ``None`` when it is sent, its request then kept
-    in ``requests``, or asks nothing."""
+    """The reason the source is not sent, or ``None`` when it is sent (its request is then
+    kept in ``requests``) or asks nothing."""
     if source.refs:
         return f"the idia binding asks q: refs only, not {', '.join(source.refs)}"
     if not source.questions:

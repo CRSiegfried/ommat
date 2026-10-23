@@ -71,8 +71,8 @@ class FixtureBinding:
         self._recorded = recorded
         self._types = loaded._types
         self.asked: dict[str, tuple[str, ...]] = {}
-        """Each asked source's refs, its ``refs`` and its question keys, as passed; a source
-        is asked at most once in a turn."""
+        """Each asked source's ``refs`` followed by its question keys, as passed; a source is
+        asked at most once in a turn."""
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> object:
         # The fixture waits for nothing, so the call's seconds are not read.

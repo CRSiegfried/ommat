@@ -1,9 +1,9 @@
 """The read view: what a function ``when``, a rule or the policy reads, and nothing else.
 
 One type for the three. The component gets ``read``, ``require`` and ``param``.
-Interpret and compile build the view and read back its ``role``, its ``stops`` and
-``deciding_stop()``, and its ``helper_log()``; the helper library writes the log through
-``open_call`` and ``close_call``. The outcome a stop record gives,
+Interpret, compile and the ``Unsure``-to-execute lint build the view and read back its
+``role``, its ``stops`` and ``deciding_stop()``, and its ``helper_log()``; the helper library
+writes the log through ``open_call`` and ``close_call``. The outcome a stop record gives,
 weighed against a raise, an invalid return and the returned value, is interpret's and
 compile's, not the view's.
 
@@ -234,7 +234,8 @@ class ReadView:
 
     def read(self, ref: str) -> Any:
         """The value or marker of a ref of the read set, whole or by field path. A marker at
-        the path's base is returned; a null on the path makes the read null."""
+        the path's base is returned; a null on the path makes the read null. The value is the
+        board's own, not a copy: a component does not change a value it reads."""
         self._open()
         key = string_data(ref) if issubclass(type(ref), str) else None  # pyright: ignore[reportUnnecessaryIsInstance]
         path = None if key is None else self._reads.get(key)

@@ -493,9 +493,10 @@ class _Loader:
 
     def check_4(self) -> None:
         # A source whose provides check 10's form test refused, wholly or a ref of it, is left out.
-        form_refused = {name for f in self.failures if f.check == 10 for name in f.names}
+        form = [f.message for f in self.failures if f.check == 10]
         for sid, source in self.sources():
-            if not source.provides and sid not in form_refused:
+            where = f"source {_q(sid)}"
+            if not source.provides and not any(m.startswith(where) for m in form):
                 self.fail(
                     4,
                     (sid,),

@@ -222,8 +222,7 @@ class _Walk:
 
     def call(self, entry: dict[str, Any]) -> dict[str, Any]:
         # ``sums`` and ``truncated`` pass open: their refs are declared refs, as the record
-        # refuses a grounded one. Once grounded declarations land, a grounded ref's candidate
-        # needs its digest.
+        # refuses a grounded one.
         out = dict(entry)
         if "unexpected" in entry:
             out["unexpected"] = self.digest(entry["unexpected"])
