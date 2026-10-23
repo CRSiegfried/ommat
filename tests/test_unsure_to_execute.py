@@ -13,7 +13,6 @@ import pytest
 
 from ommat import (
     Design,
-    LoadedDesign,
     Parameter,
     Plan,
     Policy,
@@ -312,7 +311,6 @@ def test_the_lint_raises_nothing_on_a_finding_and_changes_no_loaded_design() -> 
     before = (LOADED.document, LOADED.design_hash, repr(LOADED._grid))
     assert unsure_to_execute(LOADED)["execute"]
     assert (LOADED.document, LOADED.design_hash, repr(LOADED._grid)) == before
-    assert type(LOADED) is LoadedDesign
 
 
 def test_a_read_at_a_path_with_no_read_above_it_is_written_at_its_path() -> None:

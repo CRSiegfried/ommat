@@ -376,9 +376,10 @@ def test_a_value_nesting_64_deep_encodes_and_65_is_refused() -> None:
         encode(_nest(65))
 
 
-def test_a_document_nesting_more_than_128_deep_is_a_value_error() -> None:
-    with pytest.raises(ValueError, match="deep"):
-        encode(_nest(129))
+def test_a_document_nesting_128_deep_encodes_and_129_is_refused() -> None:
+    assert decode(encode(_nest(128), 128)) == _nest(128)
+    with pytest.raises(_CanonicalError, match="more than 128 deep"):
+        encode(_nest(129), 128)
 
 
 def test_a_strenum_encodes_by_its_string_data() -> None:

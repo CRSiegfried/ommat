@@ -265,7 +265,7 @@ def test_a_failures_string_members_are_stored_as_their_string_data() -> None:
     assert (type(failure.step), type(failure.ref)) == (str, str)
 
 
-def test_a_passed_plan_kind_is_not_the_verdicts() -> None:
+def test_a_plan_kind_is_not_a_verdict_kind() -> None:
     # The kinds are closed sets of their own.
     with pytest.raises(ValueError, match="not passed or refused"):
         Verdict(PlanKind.execute)

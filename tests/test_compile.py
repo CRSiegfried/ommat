@@ -2,7 +2,7 @@
 """Compile: the policy's one call over its read view, the
 order of outcomes, what only the engine writes, the seven plan rules in their fixed order, the
 ``plan`` and ``verdict`` items and what ``unhashed`` keeps of the policy, run after interpret on
-an open ledger as decide will. Probes a, e and f2 are ported here."""
+an open ledger as decide will."""
 
 import asyncio
 import contextlib
@@ -197,11 +197,10 @@ GOOD = execute(
 
 
 # ---------------------------------------------------------------------------------------------
-# The defect probes
+# Plans a rule breaks, and a policy returning None
 
 
-def test_probe_a_an_escalate_plan_with_a_step_is_broken_under_rule_1() -> None:
-    # The reference let an escalate plan's irreversible step past its guard.
+def test_an_escalate_plan_with_a_step_is_broken_under_rule_1() -> None:
     plan = Plan("escalate", [Step("archive", {}, [R])], reason="hand on")
     record, returned, verdict = returning(plan)
     assert cause_of(record) == invalid("rule:1")
@@ -210,11 +209,11 @@ def test_probe_a_an_escalate_plan_with_a_step_is_broken_under_rule_1() -> None:
     assert verdict.kind is VerdictKind.passed
 
 
-def test_probe_e_a_binding_to_a_later_step_is_broken_under_rule_2() -> None:
+def test_a_binding_to_a_later_step_is_broken_under_rule_2() -> None:
     assert rule_break(execute(archive(x=Binding(5)))) == ["rule:2", "step:1"]
 
 
-def test_probe_f2_a_policy_returning_none_is_invalid_return_naming_the_policy() -> None:
+def test_a_policy_returning_none_is_invalid_return_naming_the_policy() -> None:
     record, returned, _ = returning(None)
     assert cause_of(record) == invalid("policy")
     assert returned.cause == Cause(CauseCode.invalid_return, ["policy"])
@@ -960,7 +959,7 @@ def test_the_returned_plan_keeps_live_types_where_the_records_bytes_do_not() -> 
 
 
 # ---------------------------------------------------------------------------------------------
-# Caller code compile meets: no stop and no raise escapes it (probe6)
+# Caller code compile meets: no stop and no raise escapes it
 
 
 class Flip:
@@ -1002,8 +1001,8 @@ def test_two_argument_names_of_one_string_data_break_rule_7() -> None:
 
 
 class Evil(str):
-    """A name whose hash is ``idempotency_key``'s and whose hash and comparison raise once
-    armed: compile reads it by its type and string data alone."""
+    """A name whose hash is ``idempotency_key``'s, whose comparison always raises and whose hash
+    raises once armed: compile reads it by its type and string data alone."""
 
     __slots__ = ()
     armed = False

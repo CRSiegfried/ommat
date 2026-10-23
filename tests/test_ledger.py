@@ -1543,7 +1543,7 @@ def test_the_engines_marker_under_a_failed_call_is_kept_at_every_format(code: st
     outcome = {"failed": {"code": code, "refs": ["q:spam"]}}
     failed = call(2, "ask_spam", questions=QUESTIONS, outcome=outcome)
     marked = entry("q:spam", 2, 7, marker=per_ref_marker(code))
-    for fmt in (1, 3, 4):
+    for fmt in (1, 2, 3, 4):
         ledger_of(at_format(fmt, [*R1_DONE, failed, marked]))
 
 

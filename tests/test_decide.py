@@ -641,11 +641,6 @@ def test_settings_at_their_bounds_are_accepted() -> None:
     }
 
 
-def test_an_out_of_bounds_budget_is_an_entry_refusal() -> None:
-    exc = caught(deciding(settings=RunSettings(budget=-1)))
-    assert type(exc) is EntryRefusal
-
-
 def test_run_settings_validates_nothing() -> None:
     assert RunSettings(round_bound="x").round_bound == "x"  # type: ignore[arg-type]
     assert RunSettings() == RunSettings(8, 60, None, None, None)

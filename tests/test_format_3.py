@@ -106,7 +106,7 @@ def test_a_format_2_record_replays_under_its_format_2_design_with_no_finding() -
     assert decode(again.document)["hash"] == again.record_hash
 
 
-def test_a_format_2_record_under_the_format_3_design_is_design_mismatch_alone() -> None:
+def test_a_format_2_record_under_the_current_design_is_design_mismatch_alone() -> None:
     from test_decide import LOADED
 
     _, findings = replay_sync(format_2_record(), LOADED)
@@ -1104,7 +1104,7 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# The golden format-3 record
+# The golden described record
 
 GOLDEN_DESIGN = "sha256:70b8c7680c10f64265fbfd76e4d073044c3c26069bb3ce738cf24ea4a0756796"
 GOLDEN_RECORD = "sha256:120537eb3e7d6210fd71c6b2d92af7da367f4b9a14aa7981638020be69998def"

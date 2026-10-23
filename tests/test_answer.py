@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""The Answer type and its validation, and probe defect h."""
+"""The Answer type and its validation."""
 
 import dataclasses
 import enum
@@ -264,21 +264,21 @@ def test_an_answer_round_trips_through_its_canonical_object() -> None:
     assert Answer(back["kind"], back["labels"], back["probabilities"]) == a
 
 
-# --- probe defect h: an answer with a missing probability --------------------------------
+# --- an answer with a missing probability ------------------------------------------------
 
 
-def test_probe_h_an_answer_needs_its_labels_and_probabilities() -> None:
+def test_an_answer_needs_its_labels_and_probabilities() -> None:
     with pytest.raises(TypeError):
         Answer("noul")  # type: ignore[call-arg]  # pyright: ignore[reportCallIssue]
 
 
-def test_probe_h_a_missing_probability_is_not_zero() -> None:
+def test_a_missing_probability_is_not_zero() -> None:
     with pytest.raises(ValueError, match=r"\['no'\]"):
         Answer("noul", ("yes", "no"), {"yes": 1.0})
 
 
 @pytest.mark.parametrize("name", ["p", "p_top", "margin", "top", "expected", "confidence"])
-def test_probe_h_no_derived_accessors(name: str) -> None:
+def test_an_answer_has_no_derived_accessors(name: str) -> None:
     a = Answer("noul", ("yes", "no"), {"yes": 0.9, "no": 0.1})
     assert not hasattr(a, name)
 

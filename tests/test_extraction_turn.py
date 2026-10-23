@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
 """The extraction kind through a turn: what the binding is passed, each value fault and each
 temporal grammar at the write, ``truncated``, the ledger's shape and kind checks and its read of
-formats 1 and 2, a golden format-2 record, replay and the fixture's form, a format-1 record and
-design, the lint's points over an extraction read, and redaction field by field."""
+earlier formats, a golden extraction record, replay and the fixture's form, a format-1 record
+and design, the lint's points over an extraction read, and redaction field by field."""
 
 import copy
 import hashlib
@@ -571,7 +571,7 @@ def test_the_ledger_refuses_a_truncated_off_its_shape(truncated: Any, says: str)
 
 
 def format_1(doc: dict[str, Any]) -> None:
-    """A format-3 document made format 1, its call items without format 3's precision."""
+    """A current document made format 1, its call items without the precision format 3 added."""
     doc["log"][0]["format"] = 1
     for item in doc["log"]:
         if item["item"] == "call":
@@ -581,7 +581,7 @@ def format_1(doc: dict[str, Any]) -> None:
 def test_a_format_1_record_holds_only_format_1s_rules() -> None:
     with pytest.raises(InvalidRecord, match="extraction question, which a format-1 record"):
         read_record(edited(format_1))
-    # Without the precision each call item of a format-3 log holds, it is refused first.
+    # Without the precision each call item of a format-3 or later log holds, it is refused first.
     doc = stored(ran(truncated=("q:amount",)))
     doc["log"][0]["format"] = 2
     with pytest.raises(InvalidRecord, match="holds precision, which a format-2 record does not"):
@@ -648,7 +648,7 @@ def test_a_record_of_an_unknown_format_is_refused() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# The golden format-2 record
+# The golden extraction record
 
 GOLDEN_X_DESIGN = "sha256:a324ac404479c665f1c6601567ec7d7fcd0d4ccbdff16582ad813a9092d64578"
 GOLDEN_X_RECORD = "sha256:8b48ce872ab9ee11b2bfe8fae87ef059f33fe168b5d9b18f747bc721aaa8d1e4"

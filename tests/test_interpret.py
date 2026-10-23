@@ -245,7 +245,7 @@ def test_round_0_fires_rule_wavefronts_each_sorted_by_id() -> None:
 
 
 def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item() -> None:
-    # Probe n: one working round is one numbered round.
+    # One working round is one numbered round.
     loaded = make(asking(), {"route": ROUTE})
     record, _ = run(loaded, {"ask": ok()})
     questions = {
@@ -417,11 +417,11 @@ def test_a_round_writes_asked_and_marked_sources_interleaved_by_source_id() -> N
 
 
 # ---------------------------------------------------------------------------------------------
-# The needs mapping and the board (probe i)
+# The needs mapping and the board
 
 
 def test_a_source_with_no_needs_is_passed_none_of_the_board() -> None:
-    # Probe i: a fetch could read an undeclared ref off the board.
+    # A fetch must not read an undeclared ref off the board.
     sources = {**asking(), "nosy": Source({"t:nosy": t.string})}
     _, binding = run(make(sources), {"ask": ok(), "nosy": returns({"t:nosy": "n"})})
     (nosy,) = [b[0] for b in binding.batches if b[0].id == "nosy"]
@@ -542,7 +542,7 @@ class DictSub(dict[str, Any]):
 @pytest.mark.parametrize(
     "reply",
     [
-        ["q:spam"],  # probe l: a fetch returns a list
+        ["q:spam"],  # a fetch returns a list
         dict(OK),  # a mapping, not a call result
         None,
         Answer("noul", ("yes", "no"), NOUL),
@@ -904,7 +904,7 @@ def test_a_rule_that_raises_is_unavailable_raised_naming_the_rule() -> None:
 
 
 def test_a_rule_returning_a_value_its_outputs_do_not_allow_is_invalid_return() -> None:
-    # Probe f: a rule returns a bool where its outputs field is a label type.
+    # A rule returns a bool where its outputs field is a label type.
     record = one_rule(lambda r: True, "t:state", outputs=t.label("no", "yes"))
     assert entry(record, "d:r")["marker"] == mark("invalid-return", "r")
     assert "exceptions" not in record.unhashed
@@ -1405,7 +1405,7 @@ def cancelling_turn(replies: Mapping[str, object]) -> list[dict[str, Any]]:
 
 
 def test_a_task_that_cancels_itself_is_re_raised_before_its_rounds_first_append() -> None:
-    # Probe g: a CancelledError inside a fetch.
+    # A CancelledError inside a fetch.
     log = cancelling_turn(
         {"alpha": raising(asyncio.CancelledError()), "zeta": returns({"t:z": "z"})}
     )
@@ -1756,7 +1756,7 @@ def test_a_failed_whose_cause_is_not_exactly_a_cause_is_invalid_return() -> None
     failed(record, "invalid-return")
 
 
-def test_a_carried_provider_is_refused_at_entry_in_v0_0_1() -> None:
+def test_a_carried_provider_is_refused_at_entry() -> None:
     from ommat._interpret import _InterpretError, interpret
 
     loaded = make(asking())

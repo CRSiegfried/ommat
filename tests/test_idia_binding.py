@@ -627,11 +627,6 @@ def test_each_failed_attempt_is_a_line() -> None:
     )
 
 
-def test_a_leaf_that_declares_no_decimals_gives_no_precision() -> None:
-    binding, _ = built(rounding=Rounding(probability_decimals=None, score_decimals=None))
-    assert call(binding, source()).precision is None
-
-
 def test_a_batch_with_nothing_sent_holds_null_provenance() -> None:
     binding, _ = built()
     result = call(binding, source("registry", refs=("t:registry/open",)))

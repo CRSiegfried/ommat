@@ -1,7 +1,7 @@
-"""Synthetic record logs for the ledger's tests: a normal turn, a broken entry, a cancelled
-turn, a turn whose codec raised a cancellation, a format-2 extraction turn and a format-3 turn
-with a described label, a call's precision and warnings and an ``unsupported`` marker, built
-item by item so a test can take any prefix or swap one item."""
+"""Synthetic record logs for the ledger, record and view tests: a normal turn, a broken entry,
+a cancelled turn, a turn whose codec raised a cancellation, a format-2 extraction turn and a
+format-3 turn with a described label, a call's precision and warnings and an ``unsupported``
+marker, built item by item so a test can take any prefix or swap one item."""
 
 import copy
 from typing import Any

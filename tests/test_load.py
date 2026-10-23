@@ -1843,7 +1843,7 @@ def test_a_refused_when_or_requirement_leaves_its_source_standing() -> None:
     assert checks(gate(requirement=SourceRequirement("d:none", "x"))) == {10}  # type: ignore[arg-type]
 
 
-def test_the_held_back_probe_fails_only_check_9_and_check_10s_tree_test() -> None:
+def test_the_held_back_design_fails_only_check_9_and_check_10s_tree_test() -> None:
     found = refused(designs.held_back())
     assert {f.check for f in found} == {9, 10}
     assert all(f.message.startswith('the class tree of "t:state"') for f in found if f.check == 10)

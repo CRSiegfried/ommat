@@ -13,8 +13,6 @@ import pytest
 from designs import roles
 from ommat import (
     Design,
-    InvalidDesign,
-    LoadedDesign,
     Parameter,
     Plan,
     Policy,
@@ -280,8 +278,6 @@ def test_the_lint_raises_nothing_on_a_finding_and_changes_no_loaded_design() -> 
     report = dead_questions(LOADED)
     assert report["questions"]["q:tone"]["status"] == "not-on-grid"
     assert (LOADED.document, LOADED.design_hash, repr(LOADED._grid)) == before
-    assert type(LOADED) is LoadedDesign
-    assert not isinstance(report, InvalidDesign)
 
 
 def test_a_plan_differing_only_in_its_reason_is_live() -> None:

@@ -146,7 +146,6 @@ def test_a_read_two_components_name_takes_the_union_without_repeats() -> None:
 def test_mass_bounds_over_one_label_set_share_one_entry_across_components() -> None:
     design = bounded()
     leaves = {"p": Parameter(t.number(0, 1), 0.3), "q": Parameter(t.number(0, 1), 0.4)}
-    policy = dataclasses.replace(design.policy, reads=[*design.policy.reads])  # type: ignore[union-attr]
     rule = designs.rule(
         "extra",
         reads=("q:intent/tone",),
@@ -161,7 +160,6 @@ def test_mass_bounds_over_one_label_set_share_one_entry_across_components() -> N
     )
     design = dataclasses.replace(
         design,
-        policy=policy,
         rules={**design.rules, "extra": rule},
         parameters={**design.parameters, **leaves},
     )

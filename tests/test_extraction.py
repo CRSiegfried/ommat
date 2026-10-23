@@ -569,7 +569,7 @@ def test_the_question_identity_hashes_the_extraction_members_origins() -> None:
 # The design document
 
 
-def test_a_format_2_document_round_trips_to_its_own_hash() -> None:
+def test_an_extraction_design_document_round_trips_to_its_own_hash() -> None:
     loaded = x.loaded()
     again = load(loaded.document)
     assert again.design_hash == loaded.design_hash

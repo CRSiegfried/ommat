@@ -29,15 +29,15 @@ class Kind(enum.StrEnum):
 
 
 # ---------------------------------------------------------------------------------------------
-# Plans that break a plan rule are built (probes a and e)
+# Plans that break a plan rule are built
 
 
 @pytest.mark.parametrize(
     "build",
     [
-        # probe a: an escalate plan carrying a step (rule 1)
+        # an escalate plan carrying a step (rule 1)
         lambda: Plan("escalate", [Step("delete_all")], reason="hand on"),
-        # probe e: a step binding a later step (rule 2)
+        # a step binding a later step (rule 2)
         lambda: Plan("execute", [Step("t", {"x": Binding(5)})]),
         lambda: Plan("execute", [Step("t", {"x": Binding(1, "a..b")})]),
         lambda: Plan("execute", [Step("nope", {"idempotency_key": Origin(literal=1)})]),
@@ -145,7 +145,7 @@ def test_a_plan_is_frozen() -> None:
 
 def test_a_steps_fields_and_defaults() -> None:
     step = Step("archive")
-    # probes b and m: no gate and no compensate field
+    # no gate and no compensate field
     assert tuple(f.name for f in dataclasses.fields(step)) == ("tool", "arguments", "requirements")
     assert (step.tool, dict(step.arguments), step.requirements) == ("archive", {}, ())
     req = Requirement("d:route", "yes")
@@ -338,7 +338,7 @@ def test_the_public_origin_takes_no_set_and_compile_writes_one() -> None:
 
 
 def test_a_binding_is_a_step_and_an_optional_path() -> None:
-    # probes c and e: no select and no depends_on field
+    # no select and no depends_on field
     assert tuple(f.name for f in dataclasses.fields(Binding(2))) == ("step", "path")
     assert (Binding(2).step, Binding(2).path) == (2, None)
     bound = Binding(1, Name("items.name"))

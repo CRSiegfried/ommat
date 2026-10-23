@@ -1,8 +1,6 @@
 """The reference runner: the gate before any call, the walk over steps by
 position with each argument from its declared origin, the key, the stop and
-the return. Decisions come from ``decide`` over small designs and a scripted fixture binding.
-
-The defect probes ported here are a, b, c, d, j, k and m."""
+the return. Decisions come from ``decide`` over small designs and a scripted fixture binding."""
 
 import asyncio
 import inspect
@@ -203,7 +201,7 @@ def test_two_tool_keys_of_one_string_data_are_refused() -> None:
 
 
 def test_a_refused_verdict_calls_no_tool() -> None:
-    # Probe b: gates are gone, so a refused verdict is what keeps every tool uncalled.
+    # A step has no gate: a refused verdict is what keeps every tool uncalled.
     calls = Calls()
     d = decision(plan_of(Step("list", {}, [Requirement("d:ok", "yes")])), rule=no)
     assert d.plan.kind is PlanKind.execute
@@ -213,7 +211,7 @@ def test_a_refused_verdict_calls_no_tool() -> None:
 
 
 def test_a_step_on_an_escalate_plan_is_refused_on_kind() -> None:
-    # Probe a: a step on an escalate plan is broken under plan rule 1.
+    # A step on an escalate plan is broken under plan rule 1.
     def policy(r: Any) -> Plan:
         return Plan("escalate", [Step("send")], reason="hand on")
 
@@ -291,7 +289,7 @@ def test_the_return_is_a_plain_dict_of_results_and_raised() -> None:
 
 
 def test_a_path_reads_into_a_mapping_result() -> None:
-    # Probe c: selectors are gone, so a path into a mapping result stands in for one.
+    # A step has no selector: a path reads into a mapping result.
     result = {"id": "x", "items": [{"id": 1}], "a": {"b": 2}}
     calls = Calls(list=result)
     policy = plan_of(Step("list"), Step("mark", {"x": Binding(1, "items"), "y": Binding(1, "a.b")}))
@@ -301,7 +299,7 @@ def test_a_path_reads_into_a_mapping_result() -> None:
 
 
 def test_a_whole_none_result_is_passed_on() -> None:
-    # Probe k: a whole result, None included, is bound as it is.
+    # A whole result, None included, is bound as it is.
     calls = Calls(list=None)
     policy = plan_of(Step("list"), Step("mark", {"x": Binding(1)}))
     out = run(decision(policy), calls.tools("list", "mark"))
@@ -340,7 +338,7 @@ class Obj:
     ids=["object", "string", "list", "number"],
 )
 def test_a_path_over_a_non_mapping_is_returned_as_binding_not_found(result: object) -> None:
-    # Probe j: a non-mapping has no keys; no attribute or index is read.
+    # A non-mapping has no keys; no attribute or index is read.
     out, calls = missed(result, "nope")
     raised = out["raised"]
     assert type(raised) is BindingNotFound
@@ -429,7 +427,7 @@ def test_a_literal_is_the_recorded_value_not_the_policys_object() -> None:
 
 
 def test_a_raising_tool_stops_the_run_and_is_raised_with_no_pair() -> None:
-    # Probe d: the exception is returned in raised, and its step has no result.
+    # The exception is returned in raised, and its step has no result.
     error = RuntimeError("timeout after commit")
     calls = Calls(send=error)
     out = run(decision(plan_of(Step("send"))), calls.tools("send"))
@@ -437,7 +435,7 @@ def test_a_raising_tool_stops_the_run_and_is_raised_with_no_pair() -> None:
 
 
 def test_no_later_tool_is_called_and_nothing_is_compensated() -> None:
-    # Probe m: there is no compensation; the first step's result is kept.
+    # There is no compensation; the first step's result is kept.
     error = RuntimeError("boom")
     calls = Calls(list={"id": "x"}, mark=error)
     policy = plan_of(Step("list"), Step("mark"), Step("undo"))
