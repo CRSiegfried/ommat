@@ -646,7 +646,7 @@ class _Loader:
 
     def boundary_entries(self) -> Iterator[tuple[str, str, str, Any]]:
         """Each entry of a ``boundaries`` field whose key check 7 passed: its owner, its key,
-        where it is and the entry, a list of leaf paths or an object of the four roles."""
+        where it is and the entry, a list of leaf paths or an object of its roles."""
         for owner, where, boundaries, _ in self.boundary_fields():
             for key, entry in boundaries.items():
                 if _parsed(key) is not None:

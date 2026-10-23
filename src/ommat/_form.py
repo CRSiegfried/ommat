@@ -513,10 +513,11 @@ class _Form:
     # --- boundaries --------------------------------------------------------------------------
 
     def boundaries(self, value: object, where: str, names: tuple[str, ...]) -> Any:
-        """A ``boundaries`` field as plain data, or ``None``: keyed by read,
-        a ``d:`` or ``t:`` read's entry a list of leaf paths and a ``q:`` read's an object of
-        its four roles. An entry of the wrong form is dropped; a key that is not a ref is kept
-        with ``None``, for check 7 alone, since a ref check 7 refuses is left out of check 10."""
+        """A ``boundaries`` field as plain data, or ``None``: keyed by read, a ``d:`` or ``t:``
+        read's entry a list of leaf paths and a ``q:`` read's an object of its roles, four for a
+        probability kind and three for an extraction. An entry of the wrong form is dropped; a
+        key that is not a ref is kept with ``None``, for check 7 alone, since a ref check 7
+        refuses is left out of check 10."""
         if value is None:
             return None
         where = f"{where}'s boundaries"

@@ -120,7 +120,7 @@ class Undetermined:
         _check_cause(self, self.cause)
 
     def __bool__(self) -> NoReturn:
-        raise TypeError(f"a {self.kind} marker has no truth value; test its type instead")
+        raise TypeError(f"an {self.kind} marker has no truth value; test its type instead")
 
 
 @dataclass(frozen=True, slots=True)

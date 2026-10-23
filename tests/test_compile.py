@@ -118,11 +118,12 @@ def make(
     params: Sequence[str] = ("folder",),
     requirements: Sequence[Requirement] = (),
     default_deny: bool = True,
+    rules: Mapping[str, Rule] = RULES,
 ) -> LoadedDesign:
     return load(
         minimal(
             state=STATE_T,
-            rules=RULES,
+            rules=rules,
             policy=Policy(policy, version="1", reads=reads, params=params),
             requirements=requirements,
             default_deny=default_deny,
@@ -215,12 +216,18 @@ def test_a_binding_to_a_later_step_is_broken_under_rule_2() -> None:
 
 
 def test_a_negative_zero_literal_is_zero_in_the_plan_as_in_the_record() -> None:
-    record, returned, _ = returning(execute(archive(x=Origin(literal={"k": [-0.0]}))))
+    step = Step("archive", {"x": Origin(literal={"k": [-0.0]})}, [Requirement("d:num", -0.0)])
+    numbered = {**RULES, "num": _rule("d:num", t.number(), 0.0)}
+    record, returned, _ = returning(execute(step), rules=numbered)
     held = returned.steps[0].arguments["x"]
     assert type(held) is Origin
     literal = cast("dict[str, list[float]]", held.literal)["k"][0]
     assert math.copysign(1.0, literal) == 1.0
-    assert plan_item(record)["steps"][0]["arguments"]["x"] == {"literal": {"k": [0.0]}}
+    value = cast(float, returned.steps[0].requirements[0].value)
+    assert math.copysign(1.0, value) == 1.0
+    stored = plan_item(record)["steps"][0]
+    assert math.copysign(1.0, stored["arguments"]["x"]["literal"]["k"][0]) == 1.0
+    assert math.copysign(1.0, stored["requirements"][0]["value"]) == 1.0
 
 
 def test_a_policy_returning_none_is_invalid_return_naming_the_policy() -> None:
