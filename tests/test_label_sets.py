@@ -483,3 +483,72 @@ def test_another_records_set_answering_is_no_question_changed() -> None:
     assert "question-changed" not in kinds
     refs = [f["ref"] for f in report["findings"] if f["kind"] == "entry"]
     assert SET in refs
+
+
+# ---------------------------------------------------------------------------------------------
+# The redacted view
+
+ROOT = bytes(range(32))
+
+
+def digest_of(record: Record, value: Any) -> str:
+    """The keyed digest a verifier recomputes: HMAC-SHA-256 under the record's per-turn key
+    over the value's RFC 8785 bytes."""
+    import hashlib
+    import hmac
+
+    import rfc8785
+
+    from ommat._canonical import turn_key
+
+    key = turn_key(ROOT, record.record_hash)
+    return "hmac-sha256:" + hmac.new(key, rfc8785.dumps(value), hashlib.sha256).hexdigest()
+
+
+def redacted_entries(record: Record) -> dict[str, Any]:
+    from ommat import redact
+
+    view = json.loads(redact(record, ROOT))
+    return {i["ref"]: i for i in view["log"] if i["item"] == "entry"}
+
+
+CANDIDATES = ["ana@x.org", "Zoë Ångström"]
+
+
+def test_a_digested_set_digests_its_candidates_in_the_answer_too() -> None:
+    record = run(CANDIDATES, Model(top="ana@x.org"))
+    view = redacted_entries(record)
+    assert view[SET]["value"] == digest_of(record, CANDIDATES)
+    answer = view["q:sender"]["value"]
+    digests = [digest_of(record, c) for c in CANDIDATES]
+    assert answer["labels"] == [*FIXED, *digests]
+    original = entries(record)["q:sender"]["value"]["probabilities"]
+    assert answer["probabilities"] == {
+        **{f: original[f] for f in FIXED},
+        **{digest_of(record, c): original[c] for c in CANDIDATES},
+    }
+    from ommat import redact
+
+    text = redact(record, ROOT).decode("utf-8")
+    for c in CANDIDATES:
+        assert json.dumps(c, ensure_ascii=False)[1:-1] not in text
+
+
+def test_an_open_set_shows_its_candidates_in_the_set_and_the_answer() -> None:
+    d = design()
+    d = Design(
+        name=d.name,
+        state=d.state,
+        sources=d.sources,
+        policy=d.policy,
+        classes={SET: "open"},
+    )
+    record = run(CANDIDATES, Model(), d)
+    view = redacted_entries(record)
+    assert view[SET]["value"] == CANDIDATES
+    assert view["q:sender"]["value"]["labels"] == [*FIXED, *CANDIDATES]
+
+
+def test_a_question_left_out_keeps_its_marker_in_the_view() -> None:
+    record = run([])
+    assert redacted_entries(record)["q:sender"]["marker"]["cause"]["code"] == "when-false"

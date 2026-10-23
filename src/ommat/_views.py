@@ -6,7 +6,9 @@ holds none, reading only the ``plan`` and ``verdict`` items and the record hash.
 root_key)`` returns the redacted view's document as canonical bytes: the record's ``log`` and
 ``unhashed`` with a keyed digest where each ``content`` or ``identifier`` value was,
 ``redacted``, the record hash its key came from, and from format 3 on the document's ``hash``,
-open. Each value's class is read from the ``settings`` item's class tree for its ref.
+open. Each value's class is read from the ``settings`` item's class tree for its ref. In an
+answer to a candidate-valued choice, each label and ``probabilities`` key that is not a fixed
+name takes its set's class, found through the call item the answer's entry names.
 
 This engine's record holds no grounded ref and no origin carrying ``set``, since the ledger refuses
 both at the write and the read: every ref passes unchanged and every literal takes
@@ -96,6 +98,7 @@ def redact(record: Record, root_key: bytes) -> bytes:
     for item in log:
         if item["item"] == "settings":
             classes = cast("dict[str, Any]", item["classes"])
+    walk.sets = _candidate_sets(log, classes)
     view = {
         "log": [walk.item(item, classes) for item in log],
         "unhashed": walk.unhashed(closed.unhashed),
@@ -115,11 +118,39 @@ def _root_key(root_key: object) -> bytes:
     return key
 
 
+def _candidate_sets(
+    log: list[dict[str, Any]], classes: dict[str, Any]
+) -> dict[tuple[int, str], tuple[frozenset[str], Any]]:
+    """Each candidate-valued choice a call item asked, keyed by the call's log index and its
+    ``q:`` ref: its fixed names and its set's class, the class name a ``list<string>`` set's
+    tree is; under a set the settings item holds no tree for, ``content``."""
+    found: dict[tuple[int, str], tuple[frozenset[str], Any]] = {}
+    for index, item in enumerate(log):
+        if item["item"] != "call":
+            continue
+        for ref, question in cast("dict[str, Any]", item["questions"]).items():
+            labels: object = cast("dict[str, Any]", question)["labels"]
+            if type(labels) is not dict:  # the ledger admits an object only for a choice's
+                continue
+            declared = cast("dict[str, Any]", labels)
+            fixed = frozenset(
+                label if type(label) is str else cast("dict[str, str]", label)["name"]
+                for label in cast("list[Any]", declared["fixed"])
+            )
+            try:
+                tree = classes.get(declared_ref(cast(str, declared["candidates"])), "content")
+            except ValueError:  # a ref outside the grammar names no tree
+                tree = "content"
+            found[(index, ref)] = (fixed, tree if type(tree) is str else "content")
+    return found
+
+
 class _Walk:
     """The digests of one record, all under its per-turn key."""
 
     def __init__(self, key: bytes) -> None:
         self.key = key
+        self.sets: dict[tuple[int, str], tuple[frozenset[str], Any]] = {}
 
     def digest(self, value: Any) -> str:
         """A keyed digest of the canonical bytes of a value or of text ``unhashed`` holds,
@@ -137,7 +168,12 @@ class _Walk:
         kind = item["item"]
         out = dict(item)
         if kind == "entry" and "value" in item:
-            out["value"] = self.value(item["value"], classes[declared_ref(item["ref"])])
+            tree = classes[declared_ref(item["ref"])]
+            asked = self.sets.get((cast(int, item["call"]), item["ref"]))  # a null call: none
+            if asked is None:
+                out["value"] = self.value(item["value"], tree)
+            else:
+                out["value"] = self.answer(item["value"], tree, *asked)
         elif kind == "call":
             out["prompt"] = self.text(item["prompt"])
         elif kind == "plan":
@@ -154,6 +190,26 @@ class _Walk:
         # Every other member is open: markers, causes, derivation, rows, slots, the verdict's
         # other members, the run settings and the call item's other members.
         return out
+
+    def answer(self, value: Any, tree: Any, fixed: frozenset[str], set_tree: Any) -> Any:
+        """A candidate-valued choice's answer: each label and ``probabilities`` key that is not
+        a fixed name takes its set's class, the rest the answer's own tree."""
+        if tree != _OPEN:  # an answer under a class of its own is digested whole
+            return self.value(value, tree)
+        if set_tree == _OPEN:
+            return value
+        answer = cast("dict[str, Any]", value)
+
+        def label(name: str) -> str:
+            return name if name in fixed else self.digest(name)
+
+        return {
+            **answer,
+            "labels": [label(n) for n in cast("list[str]", answer["labels"])],
+            "probabilities": {
+                label(n): p for n, p in cast("dict[str, Any]", answer["probabilities"]).items()
+            },
+        }
 
     def requirement(self, requirement: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
         """A requirement with its value under its ref's tree, as that ref's entry is; under a
