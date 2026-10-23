@@ -590,6 +590,19 @@ def _fresh(value: object) -> object:
     return value
 
 
+def _render_wording(template: object, values: Mapping[str, object]) -> Any:
+    """A wording rendered: a template string by ``_render``; a structured one into fresh
+    containers, each string value rendered and each key and other value as written."""
+    if isinstance(template, str):
+        return _render(template, values)
+    if type(template) is dict:
+        members = cast("dict[str, object]", template).items()
+        return {k: _render_wording(v, values) for k, v in members}
+    if type(template) is list:
+        return [_render_wording(v, values) for v in cast("list[object]", template)]
+    return template
+
+
 def _render(template: str, values: Mapping[str, object]) -> str:
     """A wording rendered in one left-to-right pass: each escape as its brace and each
     placeholder as its slot's value rendered, never read for braces. Load
@@ -1037,7 +1050,10 @@ class _Turn:
                 q = source.provides[ref]
                 if isinstance(q, Question):
                     kind = AnswerKind(q.kind)
-                    wording = _render(q.wording.template, self.slot_values(q, needs))
+                    # A structured wording renders from the document, its keys in canonical
+                    # order, so a design and its document ask alike.
+                    declared = self.document[sid]["provides"][ref]["wording"]["template"]
+                    wording = _render_wording(declared, self.slot_values(q, needs))
                     if kind is AnswerKind.extraction:
                         questions[ref], passed_labels[ref] = q, ()
                         rendered[ref] = self.extraction(ref, q, wording, needs, texts)

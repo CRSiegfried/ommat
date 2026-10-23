@@ -112,6 +112,23 @@ class Text:
 
 
 @dataclass(frozen=True, slots=True)
+class Structured:
+    """A question's wording as a JSON object or array: each string value a template, rendered
+    as a ``Text`` template is from one slot list; keys and other values literal, never
+    rendered. An object's members are written, rendered and sent in the canonical order of
+    their keys. Slots as ``Text``'s."""
+
+    template: Any
+    slots: Sequence[Mapping[str, Any]] = ()
+
+    def __post_init__(self) -> None:
+        slots = _sequence(self.slots)
+        if type(slots) is tuple:
+            slots = tuple(_slot(s) for s in cast("tuple[object, ...]", slots))
+        _set(self, slots=slots)
+
+
+@dataclass(frozen=True, slots=True)
 class Question:
     """A ``q:`` ref's question: its kind, wording and labels. ``labels``
     is ``None``, a sequence of labels, or a mapping of ``fixed`` and ``candidates`` for a
@@ -124,7 +141,7 @@ class Question:
 
     kind: AnswerKind | str
     """An ``AnswerKind`` member or its string, held as the member."""
-    wording: Text
+    wording: "Text | Structured"
     labels: Sequence[str | Mapping[str, str]] | Mapping[str, Any] | None = None
     value_type: ValueType | str | None = None
     is_list: bool = False

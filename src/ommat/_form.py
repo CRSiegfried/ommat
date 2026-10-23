@@ -31,6 +31,7 @@ from ommat._design import (
     Rule,
     Source,
     SourceRequirement,
+    Structured,
     Table,
     Text,
     When,
@@ -42,6 +43,7 @@ from ommat._values import (
     MAX_INTEGER,
     Count,
     SizeExceeded,
+    domain_error,
     in_domain,
     is_scalar_string,
     power,
@@ -328,7 +330,7 @@ class _Form:
         if kind is None:
             self.fail(names, f"{where}'s kind is not noul, choice, score or extraction")
             ok = False
-        wording = self.text(q.wording, f"{where}'s wording", names)
+        wording = self.wording(q.wording, f"{where}'s wording", names)
         if wording is None:
             ok = False
         labels: object = q.labels
@@ -483,24 +485,46 @@ class _Form:
             return None
         return tuple(data)
 
+    def wording(
+        self, wording: object, where: str, names: tuple[str, ...]
+    ) -> Text | Structured | None:
+        """A question's wording: a ``Text``, or a ``Structured`` whose template is a JSON
+        object or array in the value domain, held as load's own plain copy."""
+        if not isinstance(wording, Structured):
+            return self.text(wording, where, names)
+        template: object = wording.template
+        if type(template) not in (dict, list, tuple):
+            self.fail(names, f"{where}'s template is not a JSON object or array")
+            return None
+        err = domain_error(template)
+        if err is not None:
+            self.fail(names, f"{where}'s template is outside the value domain: {err}")
+            return None
+        if not self.slots(wording.slots, where, names):
+            return None
+        # A plain copy: nothing the caller changes after load reaches a turn.
+        return Structured(decode(encode(template)), wording.slots)
+
     def text(self, text: object, where: str, names: tuple[str, ...]) -> Text | None:
         if not isinstance(text, Text):
             self.fail(names, f"{where} is not a Text")
             return None
         if self.string(text.template, f"{where}'s template", names, optional=False) is None:
             return None
-        slots = text.slots
+        return text if self.slots(text.slots, where, names) else None
+
+    def slots(self, slots: object, where: str, names: tuple[str, ...]) -> bool:
         if isinstance(slots, str | bytes | bytearray) or not isinstance(slots, Sequence):
             self.fail(names, f"{where}'s slots are not a list")
-            return None
+            return False
         for slot in cast("Sequence[object]", slots):
             if not _slot_form(slot):
                 self.fail(
                     names,
                     f"{where} has a slot that is not a name and one ref, param or candidate origin",
                 )
-                return None
-        return text
+                return False
+        return True
 
     def rule(self, rid: str, r: object) -> Rule | Table | None:
         where, names = f"rule {quote(rid)}", (rid,)

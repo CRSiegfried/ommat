@@ -68,7 +68,8 @@ _NEEDS = {"t:state.filed_on": "2026-03-10", "t:state.text": _TEXT}
 
 
 def _sources() -> tuple[SourceCall, ...]:
-    """One source of each answer kind and a ``t:`` source, in source id order."""
+    """One source of each answer kind, a ``t:`` source, and one asking a described noul and a
+    structured wording, in source id order."""
     return (
         SourceCall(
             "choice",
@@ -133,6 +134,25 @@ def _sources() -> tuple[SourceCall, ...]:
             },
         ),
         SourceCall("tool", None, {"t:state.text": _TEXT}, ("t:tool/open_orders",), {}),
+        SourceCall(
+            "wording",
+            None,
+            {"t:state.text": _TEXT},
+            (),
+            {
+                "q:wording/hazard": RenderedQuestion(
+                    AnswerKind.noul,
+                    "Does the report describe a danger to people?",
+                    ("yes", "no"),
+                    descriptions=("Someone could be hurt", None),
+                ),
+                "q:wording/kind": RenderedQuestion(
+                    AnswerKind.choice,
+                    {"task": "What kind of report is it?", "examples": ["a lamp out", None]},
+                    ("lighting", "other"),
+                ),
+            },
+        ),
     )
 
 

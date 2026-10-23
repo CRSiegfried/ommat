@@ -43,6 +43,7 @@ PUBLIC = {
     "SourceRequirement",
     "When",
     "Table",
+    "Structured",
     "Text",
     "load",
     "Answer",

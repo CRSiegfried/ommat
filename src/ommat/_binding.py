@@ -11,6 +11,7 @@ one is refused at the line that built it and a binding reads each field as its t
 the call by the fault scope rather than raising inside the binding.
 """
 
+import math
 from collections.abc import Awaitable
 from dataclasses import KW_ONLY, dataclass
 from typing import Any, Protocol, TypeVar, cast
@@ -61,6 +62,34 @@ def _strings(value: object, field: str) -> tuple[str, ...]:
     return tuple(_string(m, f"a member of {field}") for m in cast("tuple[object, ...]", value))
 
 
+def _wording(value: object) -> "str | dict[str, Any] | list[Any]":
+    """A rendered wording: a string, or a structured one of exact JSON types, rebuilt with
+    each key and string as its string data."""
+    if isinstance(value, str):
+        return _string(value, "wording")
+    if type(value) not in (dict, list):
+        raise TypeError(f"wording {described(value)} is not a string, an object or an array")
+    return cast("dict[str, Any] | list[Any]", _json(value))
+
+
+def _json(value: object) -> object:
+    t = type(value)
+    if t is dict:
+        out: dict[str, object] = {}
+        for k, v in cast("dict[object, object]", value).items():
+            if not isinstance(k, str):
+                raise TypeError(f"wording holds a key {described(k)} that is not a string")
+            out[_string(k, "a wording key")] = _json(v)
+        return out
+    if t is list:
+        return [_json(v) for v in cast("list[object]", value)]
+    if isinstance(value, str):
+        return _string(value, "a wording value")
+    if value is None or t in (bool, int) or (t is float and math.isfinite(cast(float, value))):
+        return value
+    raise TypeError(f"wording holds {described(value)}, which is no JSON value")
+
+
 @dataclass(frozen=True, slots=True)
 class RenderedQuestion:
     """A ``q:`` ref's question as asked: its kind, the filled wording and its labels' names in
@@ -79,7 +108,7 @@ class RenderedQuestion:
     ``needs`` only when the source declares it a need."""
 
     kind: AnswerKind
-    wording: str
+    wording: "str | dict[str, Any] | list[Any]"
     labels: tuple[str, ...]
     _: KW_ONLY
     descriptions: tuple[str | None, ...] = ()
@@ -90,7 +119,7 @@ class RenderedQuestion:
 
     def __post_init__(self) -> None:
         kind = _member(AnswerKind, self.kind, "kind")
-        wording = _string(self.wording, "wording")
+        wording = _wording(self.wording)
         labels = _strings(self.labels, "labels")
         if kind is AnswerKind.noul and labels != ("yes", "no"):
             raise ValueError("a noul question's labels are not yes and no")

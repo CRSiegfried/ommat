@@ -41,6 +41,7 @@ from ommat._design import (
     Rule,
     Source,
     SourceRequirement,
+    Structured,
     Table,
     Text,
     When,
@@ -91,6 +92,7 @@ from ommat._values import (
     MAX_DOCUMENT_DEPTH,
     MISSING,
     NOUL_DESCRIPTION_FORMAT,
+    STRUCTURED_WORDING_FORMAT,
     domain_error,
     in_domain,
     member_named,
@@ -1184,12 +1186,15 @@ class _Loader:
             base = self.types[u.base]
         return read_type(base, u.parsed.fields, self.defs)
 
-    def text(self, text: Text, where: str, names: tuple[str, ...]) -> None:
-        parsed = _template(text.template)
-        if isinstance(parsed, str):
-            self.fail(9, names, f"{where}'s template {parsed}")
+    def text(self, text: Text | Structured, where: str, names: tuple[str, ...]) -> None:
+        if isinstance(text, Structured):
+            found = _structured_template(text.template)
+        else:
+            found = _template(text.template)
+        if isinstance(found, str):
+            self.fail(9, names, f"{where}'s template {found}")
             return
-        placeholders, has_text = parsed
+        placeholders, has_text = found
         slot_names = [cast(str, s["name"]) for s in text.slots]
         counts = Counter(slot_names)
         for name in code_point_sorted({n for n, k in counts.items() if k > 1}):
@@ -1629,7 +1634,42 @@ def _label(label: object) -> object:
     return label if isinstance(label, str) else dict(cast("Mapping[str, str]", label))
 
 
-def _text(text: Text) -> dict[str, Any]:
+def _structured_template(template: object, at: str = "") -> tuple[list[str], bool] | str:
+    """A structured template's placeholders over its string values, and whether a key or a
+    value holds a character that is not whitespace outside them, or why a string value is
+    malformed, naming its path. Keys and other values are literal."""
+    names: list[str] = []
+    has_text = False
+    members: list[tuple[str, object]]
+    if type(template) is dict:
+        members = list(cast("dict[str, object]", template).items())
+    elif type(template) is list:
+        members = [(f"[{i}]", v) for i, v in enumerate(cast("list[object]", template))]
+    else:
+        return [], False
+    is_object = type(cast(object, template)) is dict
+    for key, value in members:
+        path = f"{at}[{_q(key)}]" if is_object else f"{at}{key}"
+        if is_object:
+            has_text = has_text or any(not c.isspace() for c in key)
+        if isinstance(value, str):
+            parsed = _template(value)
+            if isinstance(parsed, str):
+                return f"at {path} {parsed}"
+            leaf_names, leaf_text = parsed
+        elif type(value) in (dict, list):
+            nested = _structured_template(value, path)
+            if isinstance(nested, str):
+                return nested
+            leaf_names, leaf_text = nested
+        else:
+            leaf_names, leaf_text = [], value is not None
+        names += leaf_names
+        has_text = has_text or leaf_text
+    return names, has_text
+
+
+def _text(text: Text | Structured) -> dict[str, Any]:
     return {
         "template": text.template,
         "slots": [{"name": s["name"], "origin": dict(s["origin"])} for s in text.slots],
@@ -2151,6 +2191,11 @@ def _source_failures(
             yield from _text_failures(provided["wording"], f"{shown}'s wording", at)
         declared: object = provided.get("labels")
         listed = declared
+        template = _object(provided.get("wording"))
+        structured = template is not None and type(template.get("template")) in (dict, list)
+        if structured and fmt < STRUCTURED_WORDING_FORMAT:
+            yield at, f"{shown} has a structured wording, which format {fmt} does not have"
+            continue
         noul = provided.get("kind") == AnswerKind.noul
         if noul and declared is not None and fmt < NOUL_DESCRIPTION_FORMAT:
             yield at, f"{shown} is a noul question with labels, which format {fmt} does not have"
@@ -2300,6 +2345,8 @@ def _text_of(value: object) -> Any:
     if not isinstance(value, dict):
         return value
     text = cast("dict[str, Any]", value)
+    if type(text.get("template")) in (dict, list):  # a structured wording
+        return Structured(text["template"], text["slots"])
     return Text(text["template"], text["slots"])
 
 

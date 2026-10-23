@@ -110,15 +110,26 @@ def test_every_batch_interpret_builds_over_the_example_designs_passes() -> None:
 
 def test_the_suites_batches_hold_each_kind_alone_and_then_together() -> None:
     batches = _default_batches()
-    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 1, 1, 1, 5]
-    first, second = (b[0].questions["q:pick/sender"].labels for b in batches[5:7])
-    assert batches[7][0].questions["q:pick/sender"].labels[-2:] == ("none", "several")
+    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 1, 1, 1, 1, 6]
+    first, second = (b[0].questions["q:pick/sender"].labels for b in batches[6:8])
+    assert batches[8][0].questions["q:pick/sender"].labels[-2:] == ("none", "several")
+    (wording,) = batches[5]
+    assert wording.questions["q:wording/hazard"].descriptions == ("Someone could be hurt", None)
+    assert isinstance(wording.questions["q:wording/kind"].wording, dict)
     assert first[:2] == second[:2] == ("none", "several")
     assert first != second
     together = batches[-1]
     assert [s.id for s in together] == sorted(s.id for s in together)
     kinds = [q.kind for s in together for q in s.questions.values()]
-    assert sorted(kinds) == ["choice", "extraction", "extraction", "noul", "score"]
+    assert sorted(kinds) == [
+        "choice",
+        "choice",
+        "extraction",
+        "extraction",
+        "noul",
+        "noul",
+        "score",
+    ]
     for source in together:
         assert list(source.questions) == sorted(source.questions)
         for question in source.questions.values():
@@ -415,6 +426,8 @@ def test_a_value_not_in_its_kinds_form_fails_answers() -> None:
             "q:extraction/places",
             "q:noul/hazard",
             "q:score/severity",
+            "q:wording/hazard",
+            "q:wording/kind",
         ]
     ]
 
@@ -440,5 +453,5 @@ def test_a_binding_that_keeps_labels_by_ref_fails_answers() -> None:
                 values[ref] = {label: 1 / len(labels) for label in labels}
         return CallResult(values)
 
-    found = check(keeping, batches=_default_batches()[5:7])
+    found = check(keeping, batches=_default_batches()[6:8])
     assert found == ["answers: batch 1: q:pick/sender is not in its kind's form"]

@@ -118,6 +118,8 @@ def caps(**overrides: Any) -> Capabilities:
         "enabled_features": frozenset(),
         "feature_kinds": {},
         "feature_modalities": {},
+        "carries_noul_descriptions": True,
+        "carries_structured_instructions": True,
     }
     fields.update(overrides)
     return Capabilities(**fields)
@@ -724,3 +726,71 @@ def test_the_module_ignores_no_type_check() -> None:
     text = MODULE.read_text(encoding="utf-8")
     assert "pyright: ignore" not in text
     assert "type: ignore" not in text
+
+
+# ---------------------------------------------------------------------------------------------
+# A noul's described yes and no, and a structured instruction
+
+
+DESCRIBED_NOUL = RenderedQuestion(
+    AnswerKind.noul,
+    "Is anyone in danger?",
+    ("yes", "no"),
+    descriptions=("Someone could be hurt", None),
+)
+STRUCTURED = RenderedQuestion(
+    AnswerKind.noul,
+    {"task": "Is anyone in danger?", "criteria": ["a person nearby", "traffic"]},
+    ("yes", "no"),
+)
+
+
+def sent(leaf: Scripted) -> list[Any]:
+    return [q for c in leaf.calls for q in c.wire_request.questions]
+
+
+def test_a_described_noul_is_sent_with_idias_yes_and_no_labels() -> None:
+    binding, leaf = built()
+    result = call(binding, source(questions={"q:triage/hazard": DESCRIBED_NOUL}))
+    assert set(cast("dict[str, float]", result.values["q:triage/hazard"])) == {"yes", "no"}
+    (q,) = sent(leaf)
+    assert [(label.name, label.description) for label in q.labels] == [
+        ("yes", "Someone could be hurt"),
+        ("no", None),
+    ]
+
+
+def test_an_undescribed_noul_is_sent_with_no_labels() -> None:
+    binding, leaf = built()
+    call(binding, source())
+    (q,) = sent(leaf)
+    assert q.labels == ()
+
+
+def test_a_structured_instruction_is_sent_as_idias_json() -> None:
+    binding, leaf = built()
+    call(binding, source(questions={"q:triage/hazard": STRUCTURED}))
+    (q,) = sent(leaf)
+    assert dict(q.instruction) == {
+        "task": "Is anyone in danger?",
+        "criteria": ("a person nearby", "traffic"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("question", "flag", "says"),
+    [
+        (DESCRIBED_NOUL, "carries_noul_descriptions", "a noul's yes and no descriptions"),
+        (STRUCTURED, "carries_structured_instructions", "a structured instruction"),
+    ],
+)
+def test_a_form_the_provider_does_not_carry_is_unsupported_alone(
+    question: RenderedQuestion, flag: str, says: str
+) -> None:
+    binding, leaf = built(**{flag: False})
+    result = call(binding, source(questions={"q:triage/a": question, "q:triage/b": NOUL}))
+    assert code(result, "q:triage/a") == "unsupported"
+    assert result.values["q:triage/b"] == {"yes": 0.7, "no": idia.noul_complement(0.7)}
+    (line,) = result.warnings
+    assert line == f"triage: unsupported q:triage/a: the provider does not carry {says}"
+    assert [q.key for q in sent(leaf)] == ["q:triage/b"]

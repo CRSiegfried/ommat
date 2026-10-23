@@ -158,7 +158,13 @@ def _refusal(
     if source.refs:
         return f"the idia binding asks q: refs only, not {', '.join(source.refs)}"
     questions: list[idia.Question] = []
+    capabilities = provider.capabilities
     for ref, rendered in source.questions.items():
+        uncarried = _uncarried(rendered, capabilities)
+        if uncarried is not None:
+            values[ref] = Unavailable(Cause("unsupported"))  # §binding-refusal
+            lines.append(f"{source.id}: unsupported {ref}: the provider does not carry {uncarried}")
+            continue
         try:
             questions.append(_question(ref, rendered))
         except ValueError as refused:
@@ -216,6 +222,19 @@ def _request(
     return idia.Request(state=state, questions=questions, deadline=deadline, options=options)
 
 
+def _uncarried(rendered: RenderedQuestion, capabilities: idia.Capabilities) -> str | None:
+    """What the provider's declared capabilities do not carry of a question: a noul's
+    described yes and no, or a structured instruction; ``None`` when it carries both."""
+    described = rendered.kind is AnswerKind.noul and any(
+        d is not None for d in rendered.descriptions
+    )
+    if described and not capabilities.carries_noul_descriptions:
+        return "a noul's yes and no descriptions"
+    if not isinstance(rendered.wording, str) and not capabilities.carries_structured_instructions:
+        return "a structured instruction"
+    return None
+
+
 def _question(ref: str, rendered: RenderedQuestion) -> idia.Question:
     """The question as idia asks it, keyed by its ref, in the order received."""
     labels = tuple(
@@ -225,7 +244,9 @@ def _question(ref: str, rendered: RenderedQuestion) -> idia.Question:
     return idia.Question(
         key=ref,
         kind=cast(idia.Kind, rendered.kind.value),
-        instruction=rendered.wording,
+        instruction=rendered.wording
+        if isinstance(rendered.wording, str)
+        else _tuples(rendered.wording),
         # A noul sends its yes and no only when one is described, as idia takes them.
         labels=()
         if rendered.kind is AnswerKind.noul and all(d is None for d in rendered.descriptions)
