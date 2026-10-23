@@ -126,9 +126,10 @@ def test_an_integer_axis_ends_at_the_nearest_integer_beyond_each_end() -> None:
     assert axis([F(4)], None, None, integer=True) == [3, 4, 5]
 
 
-def test_an_integer_axis_drops_a_boundary_that_is_not_integral() -> None:
-    assert axis([F(7, 2), F(5)], None, None, integer=True) == [4, 5, 6]
-    assert axis([F(7, 2)], F(0), F(10), integer=True) == [0, 10]
+def test_an_integer_axis_puts_each_side_of_a_boundary_that_is_not_integral() -> None:
+    # 3.5 is no integer, so 3 and 4 stand for it, and the end below reaches 2.
+    assert axis([F(7, 2), F(5)], None, None, integer=True) == [2, 3, 4, 5, 6]
+    assert axis([F(7, 2)], F(0), F(10), integer=True) == [0, 3, 4, 10]
 
 
 def test_a_boundary_outside_the_interval_is_not_on_the_axis() -> None:
@@ -177,7 +178,7 @@ def test_an_integer_reads_points_lie_within_its_interval() -> None:
             "n/c": Parameter(t.integer(), -5),
         },
     )
-    assert [p.record for p in fill(loaded, ["t:n"], None)["t:n"]] == [0, 10]
+    assert [p.record for p in fill(loaded, ["t:n"], None)["t:n"]] == [0, 2, 3, 10]
 
 
 MAX = 2**53 - 1
@@ -573,6 +574,7 @@ def test_values_that_is_not_a_mapping_of_lists_is_a_type_error() -> None:
 
 
 def test_an_unbounded_integer_axis_left_with_no_boundary_takes_the_domains_bounds() -> None:
-    assert axis([F(7, 2)], None, None, integer=True) == [-MAX, MAX]  # none integral
-    assert numbers(t.integer(), Parameter(t.number(), 2.5)) == [-MAX, MAX]
-    assert numbers(t.integer(0, 10), Parameter(t.number(), 2.5)) == [0, 10]  # its interval's
+    assert axis([F(2**60)], None, None, integer=True) == [-MAX, MAX]  # past the domain
+    assert axis([F(7, 2)], None, None, integer=True) == [2, 3, 4, 5]  # each side of it
+    assert numbers(t.integer(), Parameter(t.number(), 2.5)) == [1, 2, 3, 4]
+    assert numbers(t.integer(0, 10), Parameter(t.number(), 2.5)) == [0, 2, 3, 10]
