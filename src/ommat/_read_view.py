@@ -108,7 +108,7 @@ class DerivationItem:
 
 class _Stop(BaseException):
     """A view's stop; not an ``Exception``, so ``except Exception`` cannot catch it.
-    Interpret and compile catch this class around each call."""
+    The component call, ``_component.call``, catches this class around each call."""
 
     def __init__(self, stop: Stop) -> None:
         super().__init__(stop)

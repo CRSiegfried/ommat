@@ -67,7 +67,8 @@ class Origin:
 
     ``literal`` is ``None`` for a board ref and ``ref`` ``None`` for a literal, so an origin is
     a board ref exactly when ``ref`` is not ``None``. ``set`` is a candidate-value literal's set
-    ref, written only by compile, and otherwise ``None``.
+    ref, written only through ``candidate_literal``, which this engine never calls, and
+    otherwise ``None``.
     """
 
     literal: Any
@@ -230,8 +231,8 @@ _NO_SLOTS: Mapping[str, Any] = MappingProxyType({})
 @dataclass(frozen=True, slots=True, init=False)
 class Plan:
     """The turn's plan: its kind, its steps in order, the policy's
-    ``reason`` and ``reply``, the engine's ``cause``, and ``slots``, ``{}`` unless declared text
-    wrote them. The public constructor takes neither ``cause`` nor ``slots``."""
+    ``reason`` and ``reply``, the engine's ``cause``, and ``slots``, ``{}`` in this engine, which
+    refuses plan declarations. The public constructor takes neither ``cause`` nor ``slots``."""
 
     kind: PlanKind
     steps: tuple[Step, ...]

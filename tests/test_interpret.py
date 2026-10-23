@@ -1090,6 +1090,22 @@ def test_a_rules_returned_marker_with_a_ref_of_no_declared_form_is_invalid_retur
     assert entry(record, "d:r")["marker"] == mark("invalid-return", "r")
 
 
+@pytest.mark.parametrize(("ref", "kept"), [("bar", True), ("archive", True), ("verdict", False)])
+def test_a_cause_names_a_parameter_or_a_tool_but_no_type_definition(ref: str, kept: bool) -> None:
+    def returning(r: Any) -> Any:
+        return Unsure(Cause("conflict", [ref]))
+
+    loaded = make(
+        rules={"r": rule("r", returning, "t:state")},
+        parameters={"bar": Parameter(t.number(), 0.5)},
+        tools=["archive"],
+        types={"verdict": t.label("no", "yes")},
+    )
+    record, _ = run(loaded, {})
+    expected = mark("conflict", ref, kind="Unsure") if kept else mark("invalid-return", "r")
+    assert entry(record, "d:r")["marker"] == expected
+
+
 def tampered_code() -> Unsure:
     m = Unsure(Cause("abstained"))
     object.__setattr__(m.cause, "code", "abstained")
@@ -1772,7 +1788,7 @@ def test_a_carried_provider_is_refused_at_entry() -> None:
     loaded = make(asking())
     run_ = settings()
     ledger = open_ledger(loaded, STATE, run_)
-    with pytest.raises(_InterpretError, match=r"^carried providers arrive"):
+    with pytest.raises(_InterpretError, match=r"^carried providers are not supported"):
         asyncio.run(
             interpret(
                 ledger,

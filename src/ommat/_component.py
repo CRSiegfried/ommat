@@ -164,7 +164,7 @@ def names_cause_ref(loaded: LoadedDesign, ref: str) -> bool:
     if ref in ("policy", "codec") or _NUMBERED.fullmatch(ref):
         return True
     d = loaded._design
-    declared = (d.sources, d.rules, d.tools, loaded._leaf_types)
+    declared = (d.sources, d.rules, d.tools, d.plans, loaded._leaf_types)
     return any(ref in names for names in declared) or _provided(loaded, ref)
 
 

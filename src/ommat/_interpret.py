@@ -153,7 +153,7 @@ async def interpret(
     every item appended before it.
     """
     if carried:
-        raise _InterpretError("carried providers arrive with the continuation record")
+        raise _InterpretError("carried providers are not supported in this engine")
     if deadline is not None and clock is None:
         raise _InterpretError("a deadline runs from decide's clock reading")
     if cut is not None and clock is not None:

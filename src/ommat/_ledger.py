@@ -372,7 +372,9 @@ def _sources(value: Any, where: str) -> None:
         raise _LedgerError(f"{where} is empty; a call item lists the sources it asked")
     for before, after in itertools.pairwise(ids):
         if before >= after:
-            raise _LedgerError(f"{where}: {before!r}, {after!r} are not in code-point order")
+            raise _LedgerError(
+                f"{where}: {clipped(before)}, {clipped(after)} are not in code-point order"
+            )
 
 
 def _answer(value: Any, where: str) -> None:
