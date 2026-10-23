@@ -22,7 +22,7 @@ The core imports only the standard library.
 A `Design` holds:
 
 - `state`: the type of the turn's input, read as `t:state`.
-- `sources`: each asks an oracle `Question`s (`noul`, `choice`, `score` or `extraction`) about its `needs`, its answers landing at `q:` refs, or provides typed `t:` values.
+- `sources`: each asks an oracle `Question`s (`noul`, `choice`, `score` or `extraction`) about its `needs`, its answers landing at `q:` refs, or provides typed `t:` values. A question is worded by a `Text` template, or a `Structured` JSON object or array whose string values are templates; a `noul` may describe its `yes` and `no`.
 - `rules`: each keyed by its name and providing `d:<name>`, a function from a read view to one estimate, with its `reads` declared. Source ids, rule ids, parameter paths and tool names share one namespace, so a rule and a source cannot share a name.
 - `policy`: one function that reads estimates and returns a `Plan`: `execute`, `clarify`, `inform` or `escalate`.
 - `Step`s in an `execute` plan: a tool from `tools`, arguments, and the `Requirement`s that must hold.
