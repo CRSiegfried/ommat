@@ -916,7 +916,7 @@ def test_a_label_set_document_loads_at_format_4() -> None:
 
 @pytest.mark.parametrize("fmt", [1, 2, 3])
 def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -> None:
-    doc = {**label_set_doc(), "format": fmt}
+    doc: dict[str, Any] = {**label_set_doc(), "format": fmt}
     (failure,) = refused(written(doc))
     assert failure.check == 11
     assert failure.message.endswith(
