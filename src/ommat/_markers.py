@@ -147,7 +147,10 @@ class Unasked(Undetermined):
 
 @dataclass(frozen=True, slots=True)
 class Failed:
-    """A call's outcome when it did not return."""
+    """A call's outcome when it did not return. A binding may fail a call with ``raised``,
+    ``timed-out``, ``invalid-return`` or ``unexpected-ref``; any other code makes the call
+    ``invalid-return``. A provider's refusal is ``Unavailable`` with ``refused`` on each
+    ref, not a ``Failed``."""
 
     kind: OutcomeKind = field(default=OutcomeKind.failed, init=False)
     cause: Cause

@@ -570,8 +570,22 @@ def test_a_returned_failed_names_every_ref_of_the_batch_whatever_it_listed(code:
 def test_a_returned_failed_with_another_code_is_invalid_return_its_code_in_unhashed() -> None:
     record, _ = run(make(asking()), {"ask": Failed(Cause("refused"))})
     failed(record, "invalid-return")
-    # A StrEnum member is no exact str: its type is named.
-    assert record.unhashed["calls"]["3"]["invalid"] == {"code": "<ommat._markers.CauseCode>"}
+    # The engine's own code is shown by its string.
+    assert record.unhashed["calls"]["3"]["invalid"] == {"code": "'refused'"}
+
+
+def test_a_failed_whose_cause_holds_a_foreign_code_shows_its_type() -> None:
+    outcome = Failed(Cause("refused"))
+
+    class Code(str):
+        pass
+
+    object.__setattr__(outcome.cause, "code", Code("refused"))
+    record, _ = run(make(asking()), {"ask": outcome})
+    failed(record, "invalid-return")
+    shown = record.unhashed["calls"]["3"]["invalid"]["code"]
+    assert shown.startswith("<test_interpret.")
+    assert shown.endswith(".Code>")
 
 
 @pytest.mark.parametrize("cls", [CallResult, Failed])

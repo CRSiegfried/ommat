@@ -309,7 +309,10 @@ def _judge(batch: _Batch, returned: _Returned, types: Mapping[str, Type]) -> _Ju
             codes.append(code)
         else:
             codes.append(_C.invalid_return)
-            judged.invalid["code"] = guarded_repr(code if type(cause) is Cause else cause)
+            # A code the engine built is shown by its string; anything else by its repr's
+            # guarded form, so no caller code runs.
+            shown = code.value if type(code) is CauseCode else code
+            judged.invalid["code"] = guarded_repr(shown if type(cause) is Cause else cause)
     elif type(result) is CallResult:
         values = cast(object, getattr(result, "values", None))
         if type(values) is not dict:
