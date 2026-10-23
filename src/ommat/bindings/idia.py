@@ -1,0 +1,326 @@
+"""The binding to idia: an oracle binding that puts a batch's questions to a provider through
+an idia ``Dispatcher`` over one leaf.
+
+Install it with the ``idia`` extra, after idia with the extras for its providers,
+as the README shows:
+``pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"``.
+``import ommat`` never imports it. Each oracle names one leaf, so a design that asks both label
+kinds and extractions binds a dispatcher per model under oracles of their own.
+
+The binding is a map between the two libraries' shapes. Each source of a batch is one idia
+``Request``: its questions in the order received, keyed by their refs, each label carrying its
+description; a source asking an extraction sends the text its spans index as the state's first
+part, its reference date in the request's options, and a source asking only label kinds sends its
+needs as one JSON part keyed by ommat's refs. An image need is an image part after either. The
+sources sent run concurrently under one deadline, the call's ``seconds``. Each answer is mapped to
+the value ommat takes; a provider's refusal is ``refused``, a fault ``invalid-answer``, and each
+ref of a wire request that did not answer ``timed-out`` when its error is idia's
+``DeadlineExceeded``, else ``raised``. A source the binding cannot send is
+``unsupported``, with its reason a line of the call's warnings.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from typing import cast
+
+try:
+    import idia
+except ModuleNotFoundError as error:
+    if error.name != "idia":
+        raise  # §idia-binding: any other import failure propagates
+    raise ModuleNotFoundError(  # §idia-binding: a missing extra is named
+        'ommat.bindings.idia needs the "idia" extra: pip install "ommat[idia]"',
+        name=error.name,
+    ) from error
+
+from ommat import AnswerKind, CallResult, Cause, RenderedQuestion, SourceCall, Unavailable
+from ommat.bindings import (
+    RequestProvenance,
+    bounded_warnings,
+    call_result,
+    extraction_value,
+    image_need,
+    json_value,
+    prompt_text,
+)
+
+__all__ = ["oracle_binding"]
+
+_MAX_DECIMALS = 17
+"""The most decimal places a call's ``precision`` names."""
+
+
+def oracle_binding(provider: object) -> _Binding:
+    """An oracle binding over ``provider``, an idia ``Dispatcher`` over one leaf.
+
+    It refuses, with ``ValueError``, any other provider, whose policies idia does not show;
+    a dispatcher whose re-ask is on, which would give a question a second answer; one whose
+    overflow policy is not ``Fail``, which could trim the state the model saw; and one whose leaf
+    declares probability decimals outside 0 to 17, which no call's ``precision`` can hold."""
+    if not isinstance(provider, idia.Dispatcher):
+        raise ValueError(  # §idia-binding: one leaf per oracle, its policies shown
+            f"the idia binding takes a Dispatcher over one leaf, not a {type(provider).__name__}"
+        )
+    if provider.reask:
+        raise ValueError(  # §idia-binding: a re-ask is a second answer to one question
+            "the idia binding takes a Dispatcher with the re-ask off"
+        )
+    if not isinstance(provider.overflow, idia.Fail):
+        raise ValueError(  # §idia-binding: a trimmed state is not what the record holds
+            "the idia binding takes a Dispatcher whose overflow policy is Fail"
+        )
+    decimals = provider.capabilities.rounding.probability_decimals
+    if decimals is not None and not 0 <= decimals <= _MAX_DECIMALS:
+        raise ValueError(  # §call-precision: a precision past 0 to 17 fails every call
+            f"the idia binding takes a leaf whose probability decimals are 0 to "
+            f"{_MAX_DECIMALS}, not {decimals}"
+        )
+    return _Binding(provider)
+
+
+@dataclass(frozen=True, slots=True)
+class _Binding:
+    """The oracle binding ``oracle_binding`` returns: ``await binding(batch, seconds=s)``. Built
+    only by ``oracle_binding``, which makes its refusals."""
+
+    provider: idia.Dispatcher
+
+    async def __call__(self, batch: tuple[SourceCall, ...], /, *, seconds: float) -> CallResult:
+        try:
+            deadline = idia.Deadline.after(seconds)
+        except ValueError as error:
+            # §binding-refusal: a deadline idia cannot hold sends nothing
+            refused = Unavailable(Cause("unsupported"))
+            refs = (ref for source in batch for ref in (*source.refs, *source.questions))
+            return CallResult(dict.fromkeys(refs, refused), warnings=bounded_warnings([str(error)]))
+        values: dict[str, object] = {}
+        lines: list[str] = []
+        requests: dict[str, idia.Request] = {}
+        for source in batch:
+            reason = _refusal(self.provider, source, deadline, requests)
+            if reason is not None:
+                refused = Unavailable(Cause("unsupported"))  # §binding-refusal
+                values.update(dict.fromkeys((*source.refs, *source.questions), refused))
+                lines.append(f"{source.id}: unsupported: {reason}")
+        async with asyncio.TaskGroup() as group:
+            tasks = {
+                sid: group.create_task(_answer(self.provider, request))
+                for sid, request in requests.items()
+            }
+        outcomes: list[idia.Outcome] = []
+        for source in batch:
+            if source.id not in tasks:
+                continue
+            response = tasks[source.id].result()
+            outcomes += response.outcomes
+            lines += _lines(source.id, response)
+            failed = {key: o.error for o in response.outcomes if o.error for key in o.keys}
+            for ref in source.questions:
+                error = failed.get(ref)
+                if error is None:
+                    values[ref] = _value(source.id, ref, response.answers[ref], lines)
+                elif isinstance(error, idia.DeadlineExceeded):
+                    values[ref] = Unavailable(Cause("timed-out"))  # §per-ref-cause
+                else:
+                    values[ref] = Unavailable(Cause("raised"))  # §per-ref-cause
+        return call_result(
+            values,
+            [_provenance(o) for o in outcomes],
+            precision=self.provider.capabilities.rounding.probability_decimals,
+            warnings=bounded_warnings(lines),
+        )
+
+
+# ---------------------------------------------------------------------------------------------
+# Mapping in
+
+
+class _Unsendable(Exception):
+    """A source one idia request cannot hold; the message is the reason."""
+
+
+def _refusal(
+    provider: idia.Dispatcher,
+    source: SourceCall,
+    deadline: idia.Deadline,
+    requests: dict[str, idia.Request],
+) -> str | None:
+    """The source's request, kept in ``requests`` when Fit plans it, or the reason it is not
+    sent."""
+    if source.refs:
+        return f"the idia binding asks q: refs only, not {', '.join(source.refs)}"
+    if not source.questions:
+        return None
+    try:
+        request = _request(source, deadline)
+        provider.plan(request)
+    except idia.DoesNotFit as unfit:
+        return unfit.message
+    except (_Unsendable, ValueError) as unsendable:
+        return str(unsendable)
+    requests[source.id] = request
+    return None
+
+
+def _request(source: SourceCall, deadline: idia.Deadline) -> idia.Request:
+    questions = tuple(_question(ref, q) for ref, q in source.questions.items())
+    needs = dict(source.needs)
+    images: list[idia.Part] = []
+    for key in sorted(needs):
+        image = image_need(needs[key])
+        if image is not None:
+            del needs[key]
+            images.append(idia.ImagePart(data=image[1], media_type=image[0]))
+    extractions = [q for q in source.questions.values() if q.kind is AnswerKind.extraction]
+    options: dict[str, idia.JsonValue] = {}
+    if extractions:
+        # An extraction question's text is its needs key and its date a string or None.
+        texts = sorted({cast(str, q.text) for q in extractions})
+        dates = sorted({q.reference_date for q in extractions if q.reference_date is not None})
+        if len(texts) > 1:
+            raise _Unsendable(  # §binding-refusal: one request holds one text its spans index
+                f"its extractions read different texts, {', '.join(texts)}"
+            )
+        if len(dates) > 1:
+            raise _Unsendable(  # §binding-refusal: one request takes one reference date
+                f"its extractions name different reference dates, {', '.join(dates)}"
+            )
+        if dates:
+            options["reference_date"] = dates[0]
+        # §extraction-kind: the spans index the text, the state's part 0
+        first: idia.Part = idia.TextPart(text=source.needs[texts[0]])
+    else:
+        try:
+            written = json_value(needs)
+        except TypeError as unwritable:
+            raise _Unsendable(str(unwritable)) from None  # §binding-refusal: no bytes in JSON
+        first = idia.JsonPart(value=_tuples(written))
+    state = idia.State(parts=(first, *images))
+    return idia.Request(state=state, questions=questions, deadline=deadline, options=options)
+
+
+def _question(ref: str, rendered: RenderedQuestion) -> idia.Question:
+    """The question as idia asks it, keyed by its ref, in the order received."""
+    labels = tuple(
+        idia.Label(name=name, description=rendered.descriptions[i])
+        for i, name in enumerate(rendered.labels)
+    )
+    return idia.Question(
+        key=ref,
+        kind=cast(idia.Kind, rendered.kind.value),
+        instruction=rendered.wording,
+        labels=() if rendered.kind is AnswerKind.noul else labels,
+        value_type=None if rendered.value_type is None else rendered.value_type.value,
+        is_list=rendered.is_list,
+    )
+
+
+def _tuples(value: object) -> idia.JsonValue:
+    """JSON data with each list a tuple, as idia's JSON part holds it."""
+    if isinstance(value, dict):
+        return {k: _tuples(v) for k, v in cast("dict[str, object]", value).items()}
+    if isinstance(value, list):
+        return tuple(_tuples(v) for v in cast("list[object]", value))
+    return cast(idia.JsonValue, value)
+
+
+async def _answer(provider: idia.Dispatcher, request: idia.Request) -> idia.Response:
+    """The source's response, or the response a ``RequestFailed`` carries."""
+    try:
+        return await provider.answer(request)
+    except idia.RequestFailed as failure:
+        return failure.response
+
+
+# ---------------------------------------------------------------------------------------------
+# Mapping out
+
+
+def _value(sid: str, ref: str, answer: idia.Answer, lines: list[str]) -> object:
+    """An answer as ommat takes it, or its marker."""
+    if isinstance(answer, idia.Refusal):
+        return Unavailable(Cause("refused"))  # §provider-refusal
+    if isinstance(answer, idia.Fault):
+        rules = ", ".join(dict.fromkeys(str(f.rule) for f in answer.failures))
+        lines.append(f"{sid}: invalid-answer {ref}: {rules}")
+        # §split-faults-between-answers-and-request-outcomes: a fault is its question's alone
+        # §oracle-binding-protocol: a value the binding found unusable
+        return Unavailable(Cause("invalid-answer"))
+    if isinstance(answer, idia.NoulAnswer):
+        # §call-precision: no is idia's complement (§carry-one-probability-for-a-noul)
+        return {"yes": answer.probability, "no": idia.noul_complement(answer.probability)}
+    if isinstance(answer, idia.ExtractionAnswer):
+        try:
+            return extraction_value(
+                answer.value, answer.guess, answer.p_null, answer.confidence, _spans(answer.span)
+            )
+        except ValueError as unwritable:
+            lines.append(f"{sid}: invalid-answer {ref}: {unwritable}")
+            # §binding-kit, §extraction-kind: a value or span the text cannot hold
+            return Unavailable(Cause("invalid-answer"))
+    return dict(cast(idia.LabelAnswer, answer).probabilities)
+
+
+def _spans(span: idia.Span | tuple[idia.Span, ...] | None) -> object:
+    """The span as offsets into the text, the state's part 0."""
+    if span is None:
+        return None
+    if isinstance(span, tuple):
+        return [_pair(s) for s in span]
+    return _pair(span)
+
+
+def _pair(span: idia.Span) -> tuple[int, int]:
+    if span.part != 0:
+        raise ValueError(  # §extraction-kind: a span indexes the text, part 0
+            f"a span into part {span.part}, not the text"
+        )
+    return (span.start, span.end)
+
+
+def _lines(sid: str, response: idia.Response) -> list[str]:
+    """The source's lines: each failed attempt, each failed wire request with its status and
+    message, then each warning, in the order idia gives them."""
+    lines: list[str] = []
+    for outcome in response.outcomes:
+        for attempt in outcome.failed_attempts:
+            lines.append(f"{sid}: failed-attempt: {_error(attempt.error)}")
+        if outcome.error is not None:
+            keys = ", ".join(outcome.keys)
+            lines.append(f"{sid}: no answer for {keys}: {_error(outcome.error)}")
+    for warning in (*response.warnings, *(w for o in response.outcomes for w in o.warnings)):
+        field = "" if warning.field is None else f" {warning.field}"
+        lines.append(f"{sid}: {warning.code}{field}: {warning.message}")
+    return lines
+
+
+def _error(error: idia.ProviderError) -> str:
+    status = "" if error.status_code is None else f" status {error.status_code}"
+    request = "" if error.request_id is None else f" request {error.request_id}"
+    return f"{type(error).__name__}{status}{request}: {error.message}"
+
+
+def _provenance(outcome: idia.Outcome) -> RequestProvenance:
+    """One wire request's provenance: its prompt as text, the usage figures it reports, and
+    its keys when idia warns the provider cut it short."""
+    usage = outcome.usage
+    figures = (
+        None
+        if usage is None
+        else {
+            name: getattr(usage, name)
+            for name in ("input_tokens", "output_tokens", "passes")
+            if getattr(usage, name) is not None
+        }
+    )
+    cut = any(w.code == idia.WARNING_PROVIDER_TRUNCATED for w in outcome.warnings)
+    return RequestProvenance(
+        snapshot=outcome.snapshot,
+        elicitation=None if outcome.elicitation is None else str(outcome.elicitation),
+        prompt=prompt_text(outcome.prompt_sent),
+        usage=figures,
+        attempts=outcome.attempts,
+        truncated=tuple(outcome.keys) if cut else (),
+    )

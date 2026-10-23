@@ -1,0 +1,502 @@
+{
+  "calls": {
+    "afe0aedebf474a105432ba7d0c68637dde8e54972c8421728afd3fda496d2fbf": [
+      {
+        "response": {
+          "answers": {
+            "q:triage/asset": {
+              "chosen": "road",
+              "confidence": 1.0,
+              "derived": [],
+              "echo": null,
+              "echo_of": null,
+              "expected_level": null,
+              "off_label_mass": null,
+              "probabilities": [
+                [
+                  "road",
+                  1.0
+                ],
+                [
+                  "lighting",
+                  0.0
+                ],
+                [
+                  "drainage",
+                  0.0
+                ],
+                [
+                  "signage",
+                  0.0
+                ],
+                [
+                  "other",
+                  0.0
+                ]
+              ],
+              "type": "LabelAnswer"
+            },
+            "q:triage/hazard": {
+              "confidence": null,
+              "derived": [],
+              "off_label_mass": null,
+              "probability": 0.79,
+              "type": "NoulAnswer"
+            },
+            "q:triage/severity": {
+              "chosen": null,
+              "confidence": 0.24,
+              "derived": [],
+              "echo": [
+                "minor",
+                "moderate",
+                "serious"
+              ],
+              "echo_of": "names",
+              "expected_level": 1.49,
+              "off_label_mass": null,
+              "probabilities": [
+                [
+                  "minor",
+                  0.02
+                ],
+                [
+                  "moderate",
+                  0.47
+                ],
+                [
+                  "serious",
+                  0.51
+                ]
+              ],
+              "type": "LabelAnswer"
+            }
+          },
+          "calibrated": false,
+          "elicitation": "passthrough",
+          "model_reported": "gpt-6-luna",
+          "prompt_sent": {
+            "input": [
+              {
+                "content": [
+                  {
+                    "text": "{\"t:state.report\":\"There is a deep pothole on Station Road near the library; I first saw it on 2 March.\"}",
+                    "type": "input_text"
+                  }
+                ],
+                "role": "user"
+              }
+            ],
+            "model": "gpt-6-luna",
+            "questions": [
+              {
+                "choices": [
+                  {
+                    "description": "The road surface, kerbs or a footpath",
+                    "value": "road"
+                  },
+                  {
+                    "description": "A street light or a lit sign",
+                    "value": "lighting"
+                  },
+                  {
+                    "description": "A drain, gully or flooding from one",
+                    "value": "drainage"
+                  },
+                  {
+                    "description": "A road sign, marking or bollard",
+                    "value": "signage"
+                  },
+                  {
+                    "value": "other"
+                  }
+                ],
+                "instructions": "Which street asset is the report about?",
+                "name": "q0",
+                "type": "choice"
+              },
+              {
+                "instructions": "Does the report describe a danger to people right now?",
+                "name": "q1",
+                "type": "predicate"
+              },
+              {
+                "instructions": "How serious is the problem the report describes?",
+                "levels": [
+                  {
+                    "description": "Cosmetic; it can wait for the next scheduled round",
+                    "label": "minor"
+                  },
+                  {
+                    "description": "Gets in the way; worth fixing within a few weeks",
+                    "label": "moderate"
+                  },
+                  {
+                    "description": "Stops people using the street as they should",
+                    "label": "serious"
+                  }
+                ],
+                "name": "q2",
+                "type": "score"
+              }
+            ]
+          },
+          "raw_body": {
+            "json": {
+              "answers": [
+                {
+                  "choice": "road",
+                  "confidence": 1.0,
+                  "name": "q0",
+                  "probabilities": [
+                    {
+                      "probability": 1.0,
+                      "value": "road"
+                    },
+                    {
+                      "probability": 0.0,
+                      "value": "lighting"
+                    },
+                    {
+                      "probability": 0.0,
+                      "value": "drainage"
+                    },
+                    {
+                      "probability": 0.0,
+                      "value": "signage"
+                    },
+                    {
+                      "probability": 0.0,
+                      "value": "other"
+                    }
+                  ],
+                  "type": "choice"
+                },
+                {
+                  "name": "q1",
+                  "probability": 0.79,
+                  "type": "predicate"
+                },
+                {
+                  "confidence": 0.24,
+                  "name": "q2",
+                  "probabilities": [
+                    {
+                      "label": "minor",
+                      "probability": 0.02,
+                      "value": 0
+                    },
+                    {
+                      "label": "moderate",
+                      "probability": 0.47,
+                      "value": 1
+                    },
+                    {
+                      "label": "serious",
+                      "probability": 0.51,
+                      "value": 2
+                    }
+                  ],
+                  "score": 1.49,
+                  "type": "score"
+                }
+              ],
+              "model": "gpt-6-luna",
+              "usage": {
+                "input_tokens": 485,
+                "input_tokens_details": {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0
+                },
+                "output_tokens": 0,
+                "output_tokens_details": {
+                  "reasoning_tokens": 0
+                },
+                "total_tokens": 485
+              }
+            }
+          },
+          "request_id": "req_c32121ae065242e2b1f9a8bdab8da183",
+          "snapshot": null,
+          "type": "WireResponse",
+          "usage": {
+            "input_tokens": 485,
+            "output_tokens": 0,
+            "raw_usage": {
+              "input_tokens": 485,
+              "input_tokens_details": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0
+              },
+              "output_tokens": 0,
+              "output_tokens_details": {
+                "reasoning_tokens": 0
+              },
+              "total_tokens": 485
+            },
+            "type": "Usage"
+          },
+          "warnings": [
+            {
+              "code": "no-snapshot",
+              "field": "snapshot",
+              "message": "the wire reported 'gpt-6-luna', an alias with no snapshot; drift behind it cannot be detected from the response",
+              "type": "Warning"
+            }
+          ]
+        }
+      }
+    ],
+    "b1df4ccf1a57b54f1259a6d44fd323772581ebd32dd7a6cb8987a55f23a503c8": [
+      {
+        "response": {
+          "answers": {
+            "q:triage/asset": {
+              "chosen": "lighting",
+              "confidence": 1.0,
+              "derived": [],
+              "echo": null,
+              "echo_of": null,
+              "expected_level": null,
+              "off_label_mass": null,
+              "probabilities": [
+                [
+                  "road",
+                  0.0
+                ],
+                [
+                  "lighting",
+                  1.0
+                ],
+                [
+                  "drainage",
+                  0.0
+                ],
+                [
+                  "signage",
+                  0.0
+                ],
+                [
+                  "other",
+                  0.0
+                ]
+              ],
+              "type": "LabelAnswer"
+            },
+            "q:triage/hazard": {
+              "confidence": null,
+              "derived": [],
+              "off_label_mass": null,
+              "probability": 0.58,
+              "type": "NoulAnswer"
+            },
+            "q:triage/severity": {
+              "chosen": null,
+              "confidence": 0.87,
+              "derived": [],
+              "echo": [
+                "minor",
+                "moderate",
+                "serious"
+              ],
+              "echo_of": "names",
+              "expected_level": 0.97,
+              "off_label_mass": null,
+              "probabilities": [
+                [
+                  "minor",
+                  0.06
+                ],
+                [
+                  "moderate",
+                  0.91
+                ],
+                [
+                  "serious",
+                  0.03
+                ]
+              ],
+              "type": "LabelAnswer"
+            }
+          },
+          "calibrated": false,
+          "elicitation": "passthrough",
+          "model_reported": "gpt-6-luna",
+          "prompt_sent": {
+            "input": [
+              {
+                "content": [
+                  {
+                    "text": "{\"t:state.report\":\"The street light outside 14 Alder Lane has flickered since 3 March and is dark by 9 pm.\"}",
+                    "type": "input_text"
+                  }
+                ],
+                "role": "user"
+              }
+            ],
+            "model": "gpt-6-luna",
+            "questions": [
+              {
+                "choices": [
+                  {
+                    "description": "The road surface, kerbs or a footpath",
+                    "value": "road"
+                  },
+                  {
+                    "description": "A street light or a lit sign",
+                    "value": "lighting"
+                  },
+                  {
+                    "description": "A drain, gully or flooding from one",
+                    "value": "drainage"
+                  },
+                  {
+                    "description": "A road sign, marking or bollard",
+                    "value": "signage"
+                  },
+                  {
+                    "value": "other"
+                  }
+                ],
+                "instructions": "Which street asset is the report about?",
+                "name": "q0",
+                "type": "choice"
+              },
+              {
+                "instructions": "Does the report describe a danger to people right now?",
+                "name": "q1",
+                "type": "predicate"
+              },
+              {
+                "instructions": "How serious is the problem the report describes?",
+                "levels": [
+                  {
+                    "description": "Cosmetic; it can wait for the next scheduled round",
+                    "label": "minor"
+                  },
+                  {
+                    "description": "Gets in the way; worth fixing within a few weeks",
+                    "label": "moderate"
+                  },
+                  {
+                    "description": "Stops people using the street as they should",
+                    "label": "serious"
+                  }
+                ],
+                "name": "q2",
+                "type": "score"
+              }
+            ]
+          },
+          "raw_body": {
+            "json": {
+              "answers": [
+                {
+                  "choice": "lighting",
+                  "confidence": 1.0,
+                  "name": "q0",
+                  "probabilities": [
+                    {
+                      "probability": 0.0,
+                      "value": "road"
+                    },
+                    {
+                      "probability": 1.0,
+                      "value": "lighting"
+                    },
+                    {
+                      "probability": 0.0,
+                      "value": "drainage"
+                    },
+                    {
+                      "probability": 0.0,
+                      "value": "signage"
+                    },
+                    {
+                      "probability": 0.0,
+                      "value": "other"
+                    }
+                  ],
+                  "type": "choice"
+                },
+                {
+                  "name": "q1",
+                  "probability": 0.58,
+                  "type": "predicate"
+                },
+                {
+                  "confidence": 0.87,
+                  "name": "q2",
+                  "probabilities": [
+                    {
+                      "label": "minor",
+                      "probability": 0.06,
+                      "value": 0
+                    },
+                    {
+                      "label": "moderate",
+                      "probability": 0.91,
+                      "value": 1
+                    },
+                    {
+                      "label": "serious",
+                      "probability": 0.03,
+                      "value": 2
+                    }
+                  ],
+                  "score": 0.97,
+                  "type": "score"
+                }
+              ],
+              "model": "gpt-6-luna",
+              "usage": {
+                "input_tokens": 486,
+                "input_tokens_details": {
+                  "cache_write_tokens": 0,
+                  "cached_tokens": 0
+                },
+                "output_tokens": 0,
+                "output_tokens_details": {
+                  "reasoning_tokens": 0
+                },
+                "total_tokens": 486
+              }
+            }
+          },
+          "request_id": "req_75dc3ce36be74f9b80bdc4854f0aa666",
+          "snapshot": null,
+          "type": "WireResponse",
+          "usage": {
+            "input_tokens": 486,
+            "output_tokens": 0,
+            "raw_usage": {
+              "input_tokens": 486,
+              "input_tokens_details": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0
+              },
+              "output_tokens": 0,
+              "output_tokens_details": {
+                "reasoning_tokens": 0
+              },
+              "total_tokens": 486
+            },
+            "type": "Usage"
+          },
+          "warnings": [
+            {
+              "code": "no-snapshot",
+              "field": "snapshot",
+              "message": "the wire reported 'gpt-6-luna', an alias with no snapshot; drift behind it cannot be detected from the response",
+              "type": "Warning"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "enabled_features": [],
+  "format": 1,
+  "model": "gpt-6-luna",
+  "name": "openai-decisions"
+}

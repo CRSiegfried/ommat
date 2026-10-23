@@ -1,0 +1,220 @@
+{
+  "calls": {
+    "0194f28c51c0f6c1f450fdb53eb6e977a72a19b02ecaab81583d8f9f2188b022": [
+      {
+        "response": {
+          "answers": {
+            "q:details/noticed": {
+              "confidence": 0.9931603852777421,
+              "guess": {
+                "type": "date",
+                "value": "2026-03-03"
+              },
+              "p_null": 0.0011564051965251565,
+              "span": null,
+              "type": "ExtractionAnswer",
+              "value": {
+                "type": "date",
+                "value": "2026-03-03"
+              }
+            },
+            "q:details/places": {
+              "confidence": 0.9792704067059035,
+              "guess": null,
+              "p_null": null,
+              "span": [
+                {
+                  "end": 38,
+                  "part": 0,
+                  "start": 25,
+                  "type": "Span"
+                }
+              ],
+              "type": "ExtractionAnswer",
+              "value": [
+                "14 Alder Lane"
+              ]
+            }
+          },
+          "calibrated": false,
+          "elicitation": "passthrough",
+          "model_reported": "clairic",
+          "prompt_sent": {
+            "fields": {
+              "f0": {
+                "instructions": "The date the resident first noticed the problem",
+                "type": "date"
+              },
+              "f1": {
+                "instructions": "Each street or place the report names",
+                "items": "text",
+                "type": "list"
+              }
+            },
+            "model": "clairic",
+            "reference_date": "2026-03-10",
+            "state": "The street light outside 14 Alder Lane has flickered since 3 March and is dark by 9 pm."
+          },
+          "raw_body": {
+            "json": {
+              "errors": [],
+              "messages": [],
+              "result": {
+                "answers": {
+                  "f0": {
+                    "confidence": 0.9931603852777421,
+                    "guess": "2026-03-03",
+                    "p_null": 0.0011564051965251565,
+                    "type": "date",
+                    "value": "2026-03-03"
+                  },
+                  "f1": {
+                    "confidence": 0.9792704067059035,
+                    "spans": [
+                      [
+                        25,
+                        38
+                      ]
+                    ],
+                    "type": "list",
+                    "value": [
+                      "14 Alder Lane"
+                    ]
+                  }
+                },
+                "model": "clairic",
+                "truncated": false,
+                "usage": {
+                  "image_tokens": 0,
+                  "input_tokens": 202,
+                  "output_tokens": 0,
+                  "passes": 1,
+                  "schema_tokens": 177,
+                  "state_tokens": 25
+                }
+              },
+              "success": true
+            }
+          },
+          "request_id": "9be937ee-c3e4-4db6-9a4e-cb0ef7f030ab",
+          "snapshot": null,
+          "type": "WireResponse",
+          "usage": {
+            "input_tokens": 202,
+            "output_tokens": 0,
+            "passes": 1,
+            "raw_usage": {
+              "image_tokens": 0,
+              "input_tokens": 202,
+              "output_tokens": 0,
+              "passes": 1,
+              "schema_tokens": 177,
+              "state_tokens": 25
+            },
+            "type": "Usage"
+          },
+          "warnings": [
+            {
+              "code": "no-snapshot",
+              "field": "snapshot",
+              "message": "the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response",
+              "type": "Warning"
+            }
+          ]
+        }
+      }
+    ],
+    "7c55b8bdc18cdf8d3274432694852427f769cb270646ed3ff6c21e2068b38d19": [
+      {
+        "response": {
+          "answers": {
+            "q:timing/seen_at": {
+              "confidence": 0.9175741590371699,
+              "guess": {
+                "type": "time",
+                "value": "21:00:00"
+              },
+              "p_null": 0.0365113839507103,
+              "span": null,
+              "type": "ExtractionAnswer",
+              "value": {
+                "type": "time",
+                "value": "21:00:00"
+              }
+            }
+          },
+          "calibrated": false,
+          "elicitation": "passthrough",
+          "model_reported": "clairic",
+          "prompt_sent": {
+            "fields": {
+              "f0": {
+                "instructions": "The time of day the resident saw the problem",
+                "type": "time"
+              }
+            },
+            "model": "clairic",
+            "state": "The street light outside 14 Alder Lane has flickered since 3 March and is dark by 9 pm."
+          },
+          "raw_body": {
+            "json": {
+              "errors": [],
+              "messages": [],
+              "result": {
+                "answers": {
+                  "f0": {
+                    "confidence": 0.9175741590371699,
+                    "guess": "21:00:00",
+                    "p_null": 0.0365113839507103,
+                    "type": "time",
+                    "value": "21:00:00"
+                  }
+                },
+                "model": "clairic",
+                "truncated": false,
+                "usage": {
+                  "image_tokens": 0,
+                  "input_tokens": 155,
+                  "output_tokens": 0,
+                  "passes": 1,
+                  "schema_tokens": 130,
+                  "state_tokens": 25
+                }
+              },
+              "success": true
+            }
+          },
+          "request_id": "35d40d13-6a97-4bcb-909f-359a9fb11454",
+          "snapshot": null,
+          "type": "WireResponse",
+          "usage": {
+            "input_tokens": 155,
+            "output_tokens": 0,
+            "passes": 1,
+            "raw_usage": {
+              "image_tokens": 0,
+              "input_tokens": 155,
+              "output_tokens": 0,
+              "passes": 1,
+              "schema_tokens": 130,
+              "state_tokens": 25
+            },
+            "type": "Usage"
+          },
+          "warnings": [
+            {
+              "code": "no-snapshot",
+              "field": "snapshot",
+              "message": "the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response",
+              "type": "Warning"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "enabled_features": [],
+  "format": 1,
+  "model": "clairic",
+  "name": "cloudflare-clairic"
+}

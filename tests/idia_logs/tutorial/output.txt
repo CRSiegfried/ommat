@@ -1,0 +1,35 @@
+escalate | d:hazard Unsure: abstained on q:triage/hazard | passed
+  call 3: ['details', 'timing'], precision None, attempts 2
+    details: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
+    timing: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
+  call 4: ['registry'], precision None, attempts None
+  call 5: ['triage'], precision 2, attempts 1
+    triage: no-snapshot snapshot: the wire reported 'gpt-6-luna', an alias with no snapshot; drift behind it cannot be detected from the response
+    triage: unchecked-limit max_input_tokens: max_input_tokens is unknown, so it was not checked
+    triage: unchecked-limit max_question_tokens: max_question_tokens is unknown, so it was not checked
+    triage: unchecked-limit max_body_bytes: max_body_bytes is unknown, so it was not checked
+    triage: unchecked-limit max_levels: max_levels is unknown, so it was not checked
+    triage: unchecked-limit min_levels: min_levels is unknown, so it was not checked
+    triage: unchecked-limit max_total_options: max_total_options is unknown, so it was not checked
+  replay findings: []
+escalate | a hazard to people: send a crew now | passed
+  call 3: ['details', 'timing'], precision None, attempts 2
+    details: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
+    timing: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
+  call 4: ['registry'], precision None, attempts None
+  call 5: ['triage'], precision 2, attempts 1
+    triage: no-snapshot snapshot: the wire reported 'gpt-6-luna', an alias with no snapshot; drift behind it cannot be detected from the response
+    triage: unchecked-limit max_input_tokens: max_input_tokens is unknown, so it was not checked
+    triage: unchecked-limit max_question_tokens: max_question_tokens is unknown, so it was not checked
+    triage: unchecked-limit max_body_bytes: max_body_bytes is unknown, so it was not checked
+    triage: unchecked-limit max_levels: max_levels is unknown, so it was not checked
+    triage: unchecked-limit min_levels: min_levels is unknown, so it was not checked
+    triage: unchecked-limit max_total_options: max_total_options is unknown, so it was not checked
+  replay findings: []
+escalate | d:hazard Unsure: abstained on q:triage/hazard | passed
+  call 3: ['details', 'timing'], precision None, attempts None
+    answered from record sha256:b2526811ca71bb7d97d67712fa0f5425534c01be7cd77ca041035dadfaef7fae
+  call 4: ['registry'], precision None, attempts None
+    registry: unsupported: the idia binding asks q: refs only, not t:open_orders
+  call 5: ['triage'], precision None, attempts None
+    answered from record sha256:b2526811ca71bb7d97d67712fa0f5425534c01be7cd77ca041035dadfaef7fae

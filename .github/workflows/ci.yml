@@ -1,0 +1,94 @@
+# Lint, type-check and test on every push to main and every pull request.
+# Actions are pinned to full commit SHAs; Dependabot keeps them current.
+#
+# The idia extra resolves through [tool.uv.sources] to the sibling checkout ../idia,
+# so each job that syncs checks this repository out at ommat/ and idia's public repository
+# at idia/, at its release tag v0.1.0. No job makes a live call.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: ommat
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ommat
+          persist-credentials: false
+          fetch-depth: 0  # the subjects check reads the commits the push or PR adds
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CRSiegfried/idia
+          ref: v0.1.0
+          path: idia
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.11"
+          working-directory: ommat
+      - run: uv sync --locked --all-extras
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pyright
+      - name: Commit subjects in library terms
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # A new branch's push has no earlier commit: check the pushed commit alone.
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then BASE="$HEAD~1"; fi
+          git log --format=%s "$BASE..$HEAD" | uv run python scripts/check_subjects.py
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ommat
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CRSiegfried/idia
+          ref: v0.1.0
+          path: idia
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+          working-directory: ommat
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest --cov -m "not slow"
+      - run: uv run pytest -m slow
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ommat
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          working-directory: ommat
+      - run: uv build
+      - run: uvx twine check --strict dist/*
