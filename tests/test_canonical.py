@@ -861,3 +861,15 @@ def test_encode_checked_gives_encodes_bytes(value: object) -> None:
     from ommat._canonical import encode_checked
 
     assert encode_checked(value) == encode(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, 1, 2**53 - 1, 0.1, 1e21, [1.0, {"a": "\u2028"}], {"é": [True, None]}],
+)
+def test_decode_written_reads_encodes_bytes_as_decode_does(value: object) -> None:
+    from ommat._canonical import decode_written
+
+    data = encode(value)
+    assert decode_written(data) == decode(data)
+    assert [type(x) for x in [decode_written(data)]] == [type(decode(data))]

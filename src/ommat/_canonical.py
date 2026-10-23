@@ -180,6 +180,13 @@ def decode(data: bytes) -> Any:
         raise _DecodeError(str(exc)) from exc
 
 
+def decode_written(data: bytes) -> Any:
+    """Bytes ``encode`` wrote, parsed as ``decode`` parses them, with numbers read alike: no
+    depth count and no duplicate-key hook, since such bytes can fail neither. Only for a
+    ``Record``'s own bytes; anything read from outside goes through ``decode``."""
+    return json.loads(data.decode("utf-8"), parse_int=_parse_int, parse_float=_parse_float)
+
+
 _JSON_STRING = re.compile(rb'"[^"\\]*(?:\\.[^"\\]*)*"', re.DOTALL)
 _STRUCTURE = re.compile(rb'["\[\]{}]')
 

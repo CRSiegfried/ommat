@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ommat._answer import PROBABILITY_KINDS, AnswerKind, ValueType
-from ommat._canonical import decode, encode, encode_checked, record_hash
+from ommat._canonical import decode, decode_written, encode, encode_checked, record_hash
 from ommat._markers import CauseCode, MarkerKind, OutcomeKind, PlanKind, VerdictKind
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import (
@@ -1396,7 +1396,7 @@ class Record:
     @property
     def _format(self) -> int:
         """The design item's format."""
-        return cast(int, decode(self._items[0])["format"])
+        return cast(int, decode_written(self._items[0])["format"])
 
     @property
     def record_hash(self) -> str:
@@ -1406,7 +1406,7 @@ class Record:
     @property
     def design_hash(self) -> str:
         """The ``design`` item's ``hash``."""
-        return cast(str, decode(self._items[0])["hash"])
+        return cast(str, decode_written(self._items[0])["hash"])
 
     @property
     def cause(self) -> dict[str, Any] | None:
@@ -1423,12 +1423,12 @@ class Record:
     @property
     def log(self) -> list[dict[str, Any]]:
         """The log's items as plain objects, decoded afresh at each read."""
-        return [cast("dict[str, Any]", decode(data)) for data in self._items]
+        return [cast("dict[str, Any]", decode_written(data)) for data in self._items]
 
     @property
     def unhashed(self) -> dict[str, Any]:
         """``unhashed`` as a plain object, decoded afresh at each read."""
-        return cast("dict[str, Any]", decode(self._unhashed))
+        return cast("dict[str, Any]", decode_written(self._unhashed))
 
     def __repr__(self) -> str:
         return f"Record(record_hash={self.record_hash!r}, items={len(self._items)})"
