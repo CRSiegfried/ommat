@@ -492,7 +492,16 @@ class _Loader:
         return isinstance(provided, Question) and provided.kind is AnswerKind.extraction
 
     def check_4(self) -> None:
+        # A source whose provides check 10's form test refused, wholly or a ref of it, is left out.
+        form_refused = {name for f in self.failures if f.check == 10 for name in f.names}
         for sid, source in self.sources():
+            if not source.provides and sid not in form_refused:
+                self.fail(
+                    4,
+                    (sid,),
+                    f"source {_q(sid)} provides no ref; "
+                    "a source provides one or more q: or t: refs",
+                )
             provided: set[str] = set()
             for ref in source.provides:
                 parsed = _declared(ref)
@@ -1504,7 +1513,7 @@ def _ascending(members: Mapping[bytes, str]) -> tuple[str, ...]:
 def _function(fn: Callable[..., Any], version: str | None) -> dict[str, Any]:
     try:
         source: str | None = sha256_ref(inspect.getsource(fn).encode("utf-8"))
-    except (OSError, TypeError):
+    except (OSError, TypeError, ValueError):  # ValueError: a __wrapped__ loop or overlong chain
         source = None
     return {
         "module": fn.__module__,

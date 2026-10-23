@@ -538,6 +538,23 @@ def test_a_source_hash_where_load_cannot_read_the_source() -> None:
     assert "cannot read its source" in failure.message
 
 
+def looped(r: Any) -> int:
+    return 0
+
+
+looped.__wrapped__ = looped  # type: ignore[attr-defined]
+
+
+def test_a_source_hash_where_a_wrapper_chain_loops() -> None:
+    design = with_rule(minimal(), "size", rule("size", outputs=t.integer(), function=looped))
+    doc = doc_of(design)
+    assert doc["rules"]["size"]["source"] is None
+    load(written(doc), functions={"size": looped})
+    doc["rules"]["size"]["source"] = sha256_ref(b"looped")
+    (failure,) = only(written(doc), 11, size=looped)
+    assert "cannot read its source" in failure.message
+
+
 def test_a_whens_source_names_the_source() -> None:
     doc = doc_of(gated())
     doc["sources"]["gate"]["when"]["source"] = None

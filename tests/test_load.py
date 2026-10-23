@@ -199,6 +199,18 @@ def test_a_function_whose_source_cannot_be_read_has_a_null_source() -> None:
     )
 
 
+def looped(r: Any) -> int:
+    return 0
+
+
+looped.__wrapped__ = looped  # type: ignore[attr-defined]
+
+
+def test_a_function_whose_wrapper_chain_loops_has_a_null_source() -> None:
+    design = with_rule(minimal(), "size", rule("size", outputs=t.integer(), function=looped))
+    assert decode(load(design).document)["rules"]["size"]["source"] is None
+
+
 def test_requirements_default_deny_tools_parameters_types_and_groups() -> None:
     doc = decode(load(full()).document)
     assert doc["requirements"] == [{"ref": "d:route", "value": "yes"}]
@@ -628,6 +640,14 @@ def test_check_4_a_source_provides_refs_of_one_level() -> None:
     assert failure.names == ("s",)
     assert (
         failure.message == 'source "s" provides q: and t: refs; a source provides refs of one level'
+    )
+
+
+def test_check_4_a_source_provides_at_least_one_ref() -> None:
+    (failure,) = only(with_source(minimal(), "s", Source({}, oracle="m")), 4)
+    assert failure.names == ("s",)
+    assert failure.message == (
+        'source "s" provides no ref; a source provides one or more q: or t: refs'
     )
 
 
