@@ -44,6 +44,7 @@ A full, runnable example with its output is the [README demo](https://github.com
 ## Rules of the engine
 
 - An unknown is a marker, `Unsure`, `Unavailable` or `Unasked` (all `Undetermined`), never `None` or a quiet no. Test reads with `isinstance(value, Undetermined)` before using them, in rules and in the policy; `if value:` on a marker raises.
+- A rule reads a `q:` answer as an `Answer`, its `labels` and `probabilities`, not the mapping a binding returns. A rule that raises makes its ref `Unavailable` with `raised` and the turn goes on; the traceback is in the record's `unhashed["exceptions"]`, keyed by the entry's log index. In a test, assert that it is empty.
 - `decide` calls no tool. The caller runs the steps of a plan whose verdict passed and whose kind is `execute`, on its own engine or with `ommat.helpers.run_plan`. Dispatch on `plan.kind`, never on the verdict alone: the guard passes a `broken` plan, which has no steps. See the [spec's Decide section](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#decide).
 - Define the design's rules, `when`s and policy in an importable module, not in `__main__`, so a record replays under it in another process with no `design-mismatch`. The [spec's Replay section](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#replay) says how.
 

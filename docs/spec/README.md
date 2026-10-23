@@ -99,6 +99,8 @@ A plan the policy returns is checked against seven plan rules. One it breaks is 
 
 The plan-level rules are checked first, 1, 5, then 7 over `reason` and `reply`; then each step by position against 2, 3, 4, then 7, then 6. The cause names the first break only. A requirement on part of a rule's value, such as `d:plan.execute`, breaks rule 6: give the part its own rule and require that rule's ref.
 
+A component that raises, a rule, a `when`, the policy or the codec, does not end the turn: its ref, or its source's refs, is `Unavailable` with `raised`, or the plan `broken`, and its exception's type, message and traceback are in `unhashed["exceptions"]`, keyed by the log index of the item it wrote.
+
 A rule, a `when` and the policy do not change a value they read. A read returns the board's own value, not a copy, so a change reaches every later reader in the turn, while the record keeps the value as it was written.
 
 A `-0.0` in a value written to the board, an answer's probability or member included, or in a plan's literal or requirement value, is held as `0.0`, as the record writes it, so a component reads the same value live and in replay.
