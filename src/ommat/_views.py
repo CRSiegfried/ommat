@@ -6,8 +6,7 @@ holds none, reading only the ``plan`` and ``verdict`` items and the record hash.
 root_key)`` returns the redacted view's document as canonical bytes: the record's ``log`` and
 ``unhashed`` with a keyed digest where each ``content`` or ``identifier`` value was,
 ``redacted``, the record hash its key came from, and from format 3 on the document's ``hash``,
-open. Which value takes which class is set by the default
-classes.
+open. Each value's class is read from the ``settings`` item's class tree for its ref.
 
 This engine's record holds no grounded ref and no origin carrying ``set``, since the ledger refuses
 both at the write and the read: every ref passes unchanged and every literal takes

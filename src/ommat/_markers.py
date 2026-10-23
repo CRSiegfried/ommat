@@ -42,6 +42,8 @@ class CauseCode(enum.StrEnum):
 
 
 class PlanKind(enum.StrEnum):
+    """What a plan is: execute, clarify, inform, escalate or broken."""
+
     execute = "execute"
     clarify = "clarify"
     inform = "inform"
@@ -61,6 +63,8 @@ class MarkerKind(enum.StrEnum):
 
 
 class VerdictKind(enum.StrEnum):
+    """A guard verdict's kind: passed or refused."""
+
     passed = "passed"
     refused = "refused"
 

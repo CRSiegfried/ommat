@@ -88,7 +88,8 @@ class Origin:
 
 
 def candidate_literal(value: object, set_ref: str) -> Origin:
-    """A grounded step's candidate-value literal, carrying its set's ref; compile's alone."""
+    """A grounded step's candidate-value literal, carrying its set's ref. Load refuses candidate
+    sets, so this engine's compile never builds one."""
     origin = Origin(literal=value)
     object.__setattr__(origin, "set", string_data(set_ref))
     return origin

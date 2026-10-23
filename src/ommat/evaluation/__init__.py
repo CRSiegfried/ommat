@@ -1,7 +1,7 @@
 """The evaluation subpackage: jobs that measure a design against past turns through replay.
-None is in the engine's API. ``use_answers`` is the one job shipped.
+Nothing here is in ``ommat.__all__``. ``use_answers`` is the one job shipped.
 
-``use_answers`` is do-and-diff's fifth form, another record's answers: it reruns one record's
+``use_answers`` answers a turn with another record's answers: it reruns one record's
 turn with another record's calls answering, and returns replay's findings. A job refuses
 with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
 

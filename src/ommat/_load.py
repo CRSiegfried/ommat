@@ -190,7 +190,8 @@ class _Use:
 
     owner: str  # the declared name, or "policy" for the policy and "" for the plan
     where: str
-    role: str  # need, slot, text, read, policy, requirement, source-requirement, group
+    role: str  # need, slot, candidate, text, read, boundary, policy, requirement,
+    # source-requirement, group
     ref: str
     parsed: _ParsedRef
 

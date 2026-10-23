@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""Do-and-diff's fifth form, another record's answers: rerun ``record``'s turn under
+"""Another record's answers: rerun ``record``'s turn under
 ``loaded`` with ``other``'s call items and entries answering, ``q:`` and ``t:`` refs alike.
 
 Both records are read first, then refused in order, each before any replay: ``unfinished``,
