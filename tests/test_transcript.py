@@ -23,7 +23,7 @@ from ommat import (
     replay_sync,
     transcript,
 )
-from ommat.conversation import to_chat_completions
+from ommat.conversation import drop_earlier_bookkeeping, is_bookkeeping, to_chat_completions
 from transcript_turns import PATHS, SOURCES, STATE, YES, confirming, design, model, turn
 
 ID = re.compile(r"om_[0-9a-f]{24}_(c[1-9][0-9]*|d|s[1-9][0-9]*)")
@@ -386,3 +386,62 @@ def test_a_source_s_slash_becomes_a_hyphen_and_a_long_name_within_64_passes() ->
     name = "a/" + "b" * 62
     messages = to_chat_completions(_renamed(view("clear"), source=name))
     assert messages[0]["tool_calls"][0]["function"]["name"] == "a-" + "b" * 62
+
+
+# ---------------------------------------------------------------------------------------------
+# Chat Completions bookkeeping
+
+
+def test_chat_bookkeeping_is_the_source_calls_and_decide_and_never_the_pending_calls() -> None:
+    messages = to_chat_completions(view("clear"))
+    assert [is_bookkeeping(m) for m in messages] == [True] * 8 + [False]
+
+
+def test_a_message_of_the_caller_s_or_the_model_s_is_not_bookkeeping() -> None:
+    assert not is_bookkeeping({"role": "user", "content": "hi"})
+    assert not is_bookkeeping({"role": "assistant", "content": "ok"})
+    assert not is_bookkeeping({"role": "tool", "tool_call_id": "call_1", "content": "{}"})
+    step = to_chat_completions(view("clear"))[-1]["tool_calls"][0]
+    mixed = {"role": "assistant", "content": None, "tool_calls": [step]}
+    assert not is_bookkeeping(mixed)
+
+
+def _chat_paired(messages: list[dict[str, Any]]) -> bool:
+    called = [c["id"] for m in messages for c in m.get("tool_calls", [])]
+    return sorted(called) == sorted(m["tool_call_id"] for m in messages if m["role"] == "tool")
+
+
+def _first_turn() -> list[dict[str, Any]]:
+    first: list[dict[str, Any]] = [{"role": "user", "content": "Archive the newsletters"}]
+    first += to_chat_completions(view("clear"))
+    step_ids = [c["id"] for c in first[-1]["tool_calls"]]
+    first += [{"role": "tool", "tool_call_id": i, "content": "{}"} for i in step_ids]
+    first += [{"role": "assistant", "content": "Archived."}]
+    return first
+
+
+def test_dropping_earlier_bookkeeping_over_two_turns_keeps_calls_paired() -> None:
+    first = _first_turn()
+    second = [*first, {"role": "user", "content": "Are you sure?"}]
+    current = to_chat_completions(view("unsure"))
+    kept = drop_earlier_bookkeeping(second + current)
+    assert kept == [first[0], *first[-4:], second[-1], *current]
+    assert _chat_paired(kept)
+
+
+def test_chat_keeps_the_latest_record_wherever_the_prompt_stands() -> None:
+    current = to_chat_completions(view("unsure"))
+    late = [*current, {"role": "user", "content": "late"}]
+    assert drop_earlier_bookkeeping(late) == late
+
+
+def test_chat_takes_empty_content_as_none_and_keeps_a_result_with_a_kept_call() -> None:
+    first = _first_turn()
+    first[1] = {**first[1], "content": ""}
+    assert is_bookkeeping(first[1])
+    first[5] = {**first[5], "content": "thinking"}  # decide's call, no longer bookkeeping
+    current = to_chat_completions(view("unsure"))
+    kept = drop_earlier_bookkeeping([*first, *current])
+    assert first[5] in kept
+    assert first[6] in kept  # its result stays with it
+    assert _chat_paired(kept)

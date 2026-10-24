@@ -8,6 +8,9 @@ from typing import Any, cast
 
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _DECIDE = "decide"
+BOOKKEEPING = "bookkeeping"
+BOOKKEEPING_ID = re.compile(r"om_[0-9a-f]{24}_(?:c[1-9][0-9]*|d)")
+"""A source call's or decide's id, never a pending step's, by the transcript's id form."""
 
 
 @dataclass(frozen=True, slots=True)

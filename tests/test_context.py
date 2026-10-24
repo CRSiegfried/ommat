@@ -617,7 +617,7 @@ def test_handoff_text_gives_the_view_s_lines_in_order() -> None:
 
 
 def test_handoff_text_gives_a_marker_by_its_ref_kind_and_cause() -> None:
-    assert "d:refund: unsure (abstained)" in handoff_text(handoff(run(UNSURE).record)).splitlines()
+    assert "d:refund: Unsure (abstained)" in handoff_text(handoff(run(UNSURE).record)).splitlines()
 
 
 def test_handoff_text_gives_a_refused_verdict_by_its_kind_and_no_steps() -> None:

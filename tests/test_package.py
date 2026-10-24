@@ -158,14 +158,23 @@ def test_ommat_conversation_exports_exactly_its_renderers() -> None:
     import ommat.conversation
 
     assert "conversation" not in ommat.__all__
-    assert ommat.conversation.__all__ == ["handoff_text", "to_chat_completions"]
+    assert ommat.conversation.__all__ == [
+        "drop_earlier_bookkeeping",
+        "handoff_text",
+        "is_bookkeeping",
+        "to_chat_completions",
+    ]
 
 
 def test_ommat_conversation_pydantic_ai_exports_exactly_its_renderer() -> None:
     pytest.importorskip("pydantic_ai")
     import ommat.conversation.pydantic_ai
 
-    assert ommat.conversation.pydantic_ai.__all__ == ["to_model_messages"]
+    assert ommat.conversation.pydantic_ai.__all__ == [
+        "drop_earlier_bookkeeping",
+        "is_bookkeeping",
+        "to_model_messages",
+    ]
 
 
 def test_the_pydantic_ai_extra_names_its_floor_and_the_conversation_extra_is_gone() -> None:

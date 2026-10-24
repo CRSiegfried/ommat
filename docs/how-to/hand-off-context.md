@@ -20,6 +20,15 @@ and `agent_run.py` a Pydantic AI agent driven by a stand-in function. Run each f
 with `python handoff_run.py`, in an environment where ommat is installed; `agent_run.py` needs
 `ommat[pydantic-ai]`.
 
+## Choose what to hand off
+
+The two overlap: the handoff's plan and entries are also in the transcript's decide result.
+For an LLM that carries on the conversation, give it the transcript: it sees the calls as its
+own tool calls, and the steps it should run as calls it made. Use the handoff when the next
+reader takes instructions rather than a tool history, or beside the transcript as short
+instructions: declare the block with `plan=False` and `record=False`, so it adds only your
+entries' words to what the transcript already holds.
+
 ## Declare the context block
 
 A design hands nothing off until it declares a context block. Each entry flags one ref,
@@ -113,8 +122,14 @@ is its name with each `/` as `-`. A step's tool name is its name in the design, 
 the name of your tool: the renderers raise `ValueError` for one a provider would refuse.
 
 The last message calls the plan's steps, and your code runs them and appends their results. A
-plan with a step that binds an earlier step's result leaves no pending calls; run it with
-`ommat.helpers.run_plan`, which passes each step its idempotency key.
+tool run this way gets no idempotency key; when a repeated call would do harm, run the plan with
+`ommat.helpers.run_plan`, which passes each step its key, and append its results instead. A
+plan with a step that binds an earlier step's result leaves no pending calls, so run it with
+`run_plan` too.
+
+When the plan is `clarify` or `inform`, the turn ends in decide's result, and the reply is the
+design's own words. Send it to the user and append it as the assistant's message, so the next
+turn's history holds what was said; no model call words it again.
 
 ## Hand the calls to a Pydantic AI agent
 
@@ -128,9 +143,42 @@ its own tools before it answers:
     result = asyncio.run(agent.run(None, message_history=history))
 ```
 
-Every `ModelResponse` it gives carries the `model_name` and `provider_name` you pass, so code
-that later reads the conversation can tell ommat's messages from the model's, and keep them out
-of the state a later turn reads.
+Run it with `asyncio.run(agent.run(...))` rather than `agent.run_sync`, which leaves an event
+loop open. With pydantic-ai-slim 2.49, pin `anthropic<2` beside `pydantic-ai-slim[anthropic]`:
+a fresh install takes anthropic 2.x, whose first request fails.
+
+The source calls and decide are ommat's bookkeeping, and the messages that hold them are marked
+so in their `metadata`, which Pydantic AI keeps and never sends to a model. The pending calls
+are not: the agent ran them. The agent drops an earlier turn's bookkeeping through
+`drop_earlier_bookkeeping`, a history processor, while the latest record's stays for the model
+to answer from:
+
+```python
+agent = Agent(FunctionModel(front), capabilities=[ProcessHistory(drop_earlier_bookkeeping)])
+```
+
+A return leaves only with its call, even where Pydantic AI has merged it into the next turn's
+request, so the history the model sees never holds one without the other. `is_bookkeeping(message)` tells a marked message, for code that reads the
+conversation back, such as a later turn's state. `ommat.conversation` has the same pair for
+Chat Completions messages, which it tells by their ids.
+
+In the second turn the plan clarifies, and the caller appends the reply itself:
+
+```python
+    reply = unsure.plan.reply
+    if unsure.plan.kind in ("clarify", "inform") and reply is not None:
+        history.append(ModelResponse(parts=[TextPart(reply)], model_name="ommat"))
+        print(reply)
+```
+
+The example prints:
+
+```console
+refunding A-1001
+Your refund is on its way.
+Would you like a refund for this order?
+8 bookkeeping messages, 4 kept
+```
 
 ## When an estimate is not settled
 
@@ -161,7 +209,7 @@ call om_5013f8d89a2ec632c8f1431c_s1 refund_order {"order":"A-1001"}
 Plan: clarify
 Verdict: passed
 Reply: Would you like a refund for this order?
-d:refund: unsure (abstained)
+d:refund: Unsure (abstained)
 Order A-1001 is delivered
 Design: support sha256:b4c10170984a81abc3bd88c5f7192120e135a178bd9e31805161bdc4dfa5ac16
 Record: sha256:c34897f04fd5b52643c488c6daddb172f5a1e3f2f0fff4f7a859e97de7329b85

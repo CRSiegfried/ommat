@@ -49,4 +49,5 @@ def test_the_agent_runs_the_pending_refund_with_its_own_tool(
     import agent_run
 
     agent_run.main()
-    assert capsys.readouterr().out == "refunding A-1001\nYour refund is on its way.\n"
+    (shown,) = _blocks("console")
+    assert capsys.readouterr().out == shown
