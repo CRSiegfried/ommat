@@ -1,10 +1,18 @@
 # ommat
 
-Turn many small model answers into one checked, replayable plan.
+Write each question and rule on its own. ommat composes them into the decision.
 
-Ask an LLM to make a workflow's decision directly and you get a choice with no probability, nothing checked before a tool runs, and no way to show later why it chose.
+A workflow's decision is rarely one question. Ask about this; the answer decides whether you ask about that; once that is known, a rule can settle something else. Each piece is simple. The web of them is not, and the web is what you end up holding in your head and in the order of your code.
 
-ommat splits the decision. A model answers many small closed questions, such as yes or no, which of these labels, or a value read from a text, each with probabilities, or with a confidence where the model gives one; your own rules and policy, written as Python functions, turn the answers into a plan; a guard checks the plan before any tool runs; and each decision comes with a record that replays the turn with no model call. [idia](https://github.com/CRSiegfried/idia) puts the questions to the models; ommat decides.
+With ommat you write only the pieces, each declaring what it reads, and ommat works out the order:
+
+- **A source** asks a model closed questions, yes or no, which label, a score or a value read from a text, each answer with probabilities, or with a confidence where the model gives one. A `when` asks it only if earlier answers call for it.
+- **A rule** reads answers and settles an estimate, or returns a marker such as `Unsure`, never a `None` standing in for no answer.
+- **The policy** reads the estimates it needs and writes the plan: execute tool steps, clarify, inform or escalate.
+- **ommat** builds the dependency graph from those declarations and runs it in rounds, and `load` checks the whole design before any turn: every read has a provider, nothing depends on itself, and the types agree. Get each piece right and `load` makes sure the pieces fit, whether you have a dozen questions or a few hundred.
+- **Each decision** is checked by a guard before any tool runs, and comes with a record that replays the turn with no model call.
+
+[idia](https://github.com/CRSiegfried/idia) puts the questions to the models; ommat decides.
 
 ## How a turn runs
 
