@@ -3,7 +3,9 @@ answers the classifier oracle, Cloudflare's Clairic the extractor, each leaf wra
 ``Recorded`` leaf over a log in ``tests/idia_logs``.
 
 ``scripts/record_idia_e2e.py`` records one turn live, with the credentials it reads from the
-environment, and keeps the turn's record document beside the logs. ``tests/test_idia_e2e.py``
+environment, and keeps the turn's record document beside the logs;
+``scripts/regenerate_idia_fixtures.py`` rebuilds that document offline from the logs when only
+ommat's record changes. ``tests/test_idia_e2e.py``
 replays the turn from the logs, with placeholder credentials and no network.
 """
 

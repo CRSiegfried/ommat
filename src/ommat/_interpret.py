@@ -521,7 +521,9 @@ def _held(name: str, result: object) -> bool:
     if name.startswith("usage."):
         usage = cast(object, getattr(result, "usage", None))
         key = name.removeprefix("usage.")
-        return type(usage) is dict and key in cast("dict[object, object]", usage)
+        # Compared key by key, each an exact str: no hash or __eq__ of the binding's key runs.
+        keys = cast("dict[object, object]", usage) if type(usage) is dict else {}
+        return any(type(k) is str and k == key for k in keys)
     return cast(object, getattr(result, name, None)) is not None
 
 

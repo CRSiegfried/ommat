@@ -120,7 +120,7 @@ def _value_places(item: Any, where: str) -> list[tuple[str, Any]]:
         for i, tree in enumerate(members_of(member_named(item, "classes"))):
             places.append((f"{where}'s class tree {i}", tree))
     elif type(kind) is str and kind == "call":
-        put(item, ("snapshot", *STRING_DETAILS, "runtime"), where)
+        put(item, ("snapshot", *STRING_DETAILS, "runtime", "claimed", "precision"), where)
     elif type(kind) is str and kind == "verdict":
         for i, failure in enumerate(_listed(member_named(item, "failures"))):
             at = f"{where}'s 'failures'[{i}]['requirement']"

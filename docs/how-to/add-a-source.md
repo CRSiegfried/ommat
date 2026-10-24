@@ -14,8 +14,11 @@ your own process, such as a named-entity model on torch.
 The example's files are in `docs/how-to/add_a_source/`: `street_spotter.py` is a small
 stand-in for a local span model, so the example runs with no model to download,
 `span_binding.py` is the binding over it, `reports_design.py` the design that asks it and
-`reports_run.py` the driver. Run the driver from that folder with
-`python reports_run.py`.
+`reports_run.py` the driver; `idia_path.py` and `idia_run.py` are Path A's, and need
+`ommat[idia]`. The design sits in a module of its own because a component's module is part of
+the design's hash, and one defined in the running script, `__main__`, replays with
+`design-mismatch`. Run the driver from that folder with `python reports_run.py`, in an
+environment where ommat is installed.
 
 ## Declare the source
 
@@ -63,8 +66,9 @@ four members of its own:
 
 - `value_type`: `text`, `number`, `date`, `time`, `datetime` or `duration`;
 - `is_list`: whether the answer is a list of such values;
-- `text`: the board ref of the string the answer's spans index;
-- `reference_date`: the board ref of the date a date written without a year is read
+- `text`: an origin, `{"ref": r}`, naming the board ref of the string the answer's spans
+  index;
+- `reference_date`: such an origin, naming the date a date written without a year is read
   against, or `None`.
 
 Both refs name values of type exactly `string`. The
@@ -277,8 +281,9 @@ async def provider(leaf: Any) -> Dispatcher:
 ```
 
 It loads on one event loop, `asyncio.run(provider(leaf))`, and each `decide_sync` then runs on
-a loop of its own. idia's [dispatch spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/dispatch.md) holds that one `Dispatcher` serves
-successive `asyncio.run` calls, and its providers spec that a client a leaf creates follows the
+a loop of its own. idia's
+[dispatch spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/dispatch.md) holds
+that one `Dispatcher` serves successive `asyncio.run` calls, and its providers spec that a client a leaf creates follows the
 running loop. A leaf given a client of your own refuses a call on any other loop: let the leaf
 create its client, or load and decide on one loop with `decide`. Close the dispatcher when you
 are done, as the driver does, to release the leaf.
@@ -328,8 +333,9 @@ The second report is longer than that window, so idia refuses it before any call
 Path A writes what idia's outcome reports under ommat's names: the provider, the models
 requested and reported, idia's `snapshot` as the revision, the leaf's runtime versions, the
 client libraries' versions, and idia's own reasons for each detail it leaves null and the
-details it claims. A local leaf's model id and revision are its own word, so idia claims them;
-a wire alias has no revision, with `not-pinned` and a `no-snapshot` line in `warnings`.
+details it claims. A local leaf's model id is its own word, so idia claims it, and its
+revision too when the leaf was given a model rather than loading one; a wire alias has no
+revision, with `not-pinned` and a `no-snapshot` line in `warnings`.
 
 ## Path B: write a binding over a local model
 
@@ -438,7 +444,7 @@ bar a lock freed in the instant between ommat's end and the binding's own deadli
 from `_predict` comes at the call's end, when ommat has already timed out the whole call, so
 its `timed-out` marker is a guard that is never read.
 `decide_sync` and `check` wait for such a thread to end: on Python 3.11 for as long as it
-runs, on 3.12 and later for up to 300 seconds.
+runs, on 3.12 and later for up to 300 seconds, and the process waits for it again at exit.
 
 ### Refuse what the model cannot answer
 

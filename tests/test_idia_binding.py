@@ -872,3 +872,18 @@ def test_a_call_whose_requests_name_one_package_at_two_versions_is_invalid_retur
     other = source("second", {"q:second/hazard": NOUL})
     result = asyncio.run(binding((source(), other), seconds=60.0))
     assert result == Failed(Cause("invalid-return"))
+
+
+def test_a_call_of_an_answered_and_a_failed_request_keeps_the_answered_ones_details() -> None:
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        if any(q.key.startswith("q:second/") for q in wire_request.questions):
+            raise ProviderError("HTTP 500: busy", status_code=500, is_retryable=False)
+        return Reply(answers=answer_all(wire_request, deadline), claimed=frozenset({"snapshot"}))
+
+    binding, _ = built(script)
+    other = source("second", {"q:second/hazard": NOUL})
+    result = asyncio.run(binding((source(), other), seconds=60.0))
+    assert code(result, "q:second/hazard") == "raised"
+    assert result.revision == "scripted-1"  # the answered request's
+    assert result.claimed == ("revision",)
+    assert result.missing is None or "revision" not in result.missing

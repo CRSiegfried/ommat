@@ -7,6 +7,7 @@ streets, a capitalised word or two before Street, Road, Lane or Row, so the exam
 model to download.
 """
 
+import platform
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -22,7 +23,8 @@ class StreetSpotter:
     provider = "street_spotter"
     model_id = "example/street-spotter"
     revision = "1"
-    runtime: Mapping[str, str] = {"python": "3.11", "street_spotter": "1"}
+    # A real model reads its packages' versions, as importlib.metadata.version("torch").
+    runtime: Mapping[str, str] = {"python": platform.python_version(), "street_spotter": "1"}
 
     def __init__(self) -> None:
         pass  # a real model loads its weights here, which takes seconds

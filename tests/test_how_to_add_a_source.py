@@ -42,6 +42,12 @@ def test_each_python_block_is_a_passage_of_the_example() -> None:
         assert any(_contiguous(block, text) for text in files), block
 
 
+def _output(marker: str) -> str:
+    """The guide's one ``text`` block holding ``marker``, a line only that driver prints."""
+    (block,) = [b for b in _blocks("text") if marker in b]
+    return block
+
+
 def _contiguous(block: str, text: str) -> bool:
     """Whether the block's lines stand together in ``text``, at any one indent."""
     lines = [line for line in block.splitlines() if line.strip()]
@@ -55,7 +61,7 @@ def _contiguous(block: str, text: str) -> bool:
 
 def test_the_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixture[str]) -> None:
     results = reports_run.main()
-    assert capsys.readouterr().out == _blocks("text")[1]
+    assert capsys.readouterr().out == _output("own batches: []")
     assert [plan.kind for plan, _ in results] == [
         PlanKind.inform,
         PlanKind.inform,
@@ -69,7 +75,7 @@ def test_the_idia_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixtu
     import idia_run
 
     assert idia_run.main() == [PlanKind.inform, PlanKind.escalate]
-    assert capsys.readouterr().out == _blocks("text")[0]
+    assert capsys.readouterr().out == _output("leaf calls: 0")
 
 
 class _Failing(StreetSpotter):

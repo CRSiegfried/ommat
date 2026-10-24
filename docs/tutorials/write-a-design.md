@@ -243,12 +243,14 @@ outside every hash.
 1. Find the call items in the log. A call item holds `item`, `round`, `sources`,
    `questions` and `outcome`, and the call's provenance: `provider`, `model_requested`,
    `model_reported`, `revision`, `runtime`, `elicitation`, `precision`, `prompt` and
-   `claimed`, all hashed. A binding that sends no request, as this one, leaves them null.
+   `claimed`, all hashed. A binding that sends no request, as this one, leaves them null and
+   `claimed` empty.
 
 2. `start`, `latency`, `usage`, `attempts`, `warnings`, `truncated`, `sums`, `unexpected`
    and `invalid` sit under `unhashed["calls"]`, keyed by the call item's log index as a
    string, with `request_id`, `calibrated`, `missing`, the reason for each provenance detail
-   a binding that sent a request leaves null, and `clients` when a binding gives them.
+   a binding that sent a request leaves null, and `clients`, each present only when a binding
+   that sent a request gives it.
 
 3. Name each call's oracle. A call item names no oracle or provider, so look up each of its
    `sources` in the design: the source's `oracle`, or `default` when it declares none. The

@@ -10,6 +10,8 @@ It reads the three variables ``record_idia_e2e.py`` reads and refuses to run wit
 replaces the two logs, keeps what the run printed as ``output.txt`` beside them for the
 tutorial's text, then scans the logs and ``output.txt`` as that script does; a run that
 raises deletes the logs.
+When only ommat's record or printing changes, run ``scripts/regenerate_idia_fixtures.py``
+instead: it rebuilds the derived files offline, with no credential.
 """
 
 import asyncio

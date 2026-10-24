@@ -254,7 +254,7 @@ def call_result(
     ``missing`` are ``None``, as a binding that called no model returns them. A package at two
     versions in ``runtime`` or ``clients`` is a ``ValueError``."""
     given = list(requests)
-    sent = [r for r in given if r.attempts]
+    sent = [r for r in given if type(r.attempts) is int and r.attempts > 0]
     usage: dict[str, float] = {}
     for request in sent:
         for key, figure in (request.usage or {}).items():
@@ -310,7 +310,7 @@ def _missing(result: CallResult, sent: list[RequestProvenance]) -> dict[str, str
         given = [(r.missing or {}).get(detail) for r in sent]
         if any(g is None for g in given) or _holds(result, detail):
             continue
-        codes = [cast(str, g) for g in given]
+        codes = [g for g in given if type(g) is str]
         reasons[detail] = next((c for c in codes if c != "not-sent"), "not-sent")
     return dict(sorted(reasons.items())) or None
 
@@ -322,7 +322,7 @@ def _holds(result: CallResult, detail: str) -> bool:
 
 
 def _joined(values: Iterable[str | None]) -> str | None:
-    """The distinct values in the order first given, one per line; ``None`` when there are
-    none."""
+    """The distinct values in the order first given, one per line, a newline within a value
+    kept as given; ``None`` when there are none."""
     distinct = list(dict.fromkeys(v for v in values if v is not None))
     return "\n".join(distinct) if distinct else None

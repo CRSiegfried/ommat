@@ -24,9 +24,11 @@ The checks, by name:
   when the binding sent a request, its ``attempts`` above 0; a result that sent none, as a
   replay's, owes none;
 - ``warnings`` and ``precision``: each conforms as interpret tests it;
-- ``provenance``: each detail of the provenance profile is in its form, ``claimed`` names only
-  details holding a value, ``missing`` only details and reasons of the profile, and a result
-  that sent a request gives each detail a value or a reason, never both;
+- ``provenance``: each detail of the provenance profile, ``request_id``, ``calibrated``,
+  ``usage`` and ``clients`` in its form, ``claimed`` naming only details holding a value,
+  ``missing`` only details and reasons of the profile and never a detail holding a value; a
+  result that sent a request gives each detail a value or a reason, and one that sent none has
+  no provenance;
 - ``unsupported-provenance``: a result whose every ref is ``unsupported`` has no provenance,
   ``usage``, ``attempts``, ``request_id``, ``calibrated``, ``missing`` or ``clients``, and
   ``truncated`` empty;
@@ -60,10 +62,11 @@ from ommat._provenance import (
     STRING_DETAILS,
     precision_conforms,
     string_conforms,
+    usage_conforms,
     versions_conform,
 )
 from ommat._typed import is_a
-from ommat._values import described, string_data
+from ommat._values import MAX_INTEGER, described, string_data
 
 __all__ = ["check"]
 
@@ -336,9 +339,10 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
 
 
 def _sent(result: CallResult) -> bool:
-    """Whether the binding says it sent a request: ``attempts`` above 0."""
+    """Whether the binding says it sent a request: ``attempts`` above 0, an integer of the value
+    domain as interpret keeps one."""
     attempts = cast(object, result.attempts)
-    return type(attempts) is int and attempts > 0
+    return type(attempts) is int and 0 < attempts <= MAX_INTEGER
 
 
 def _holds(result: CallResult, detail: str) -> bool:
@@ -361,6 +365,16 @@ def _provenance_problems(result: CallResult) -> list[str]:
         problems.append("runtime is not null or a non-empty dict of strings")
     if not versions_conform(cast(object, result.clients), exact=True):
         problems.append("clients is not null or a non-empty dict of exact strings")
+    if not string_conforms(cast(object, result.request_id), exact=True):
+        problems.append("request_id is not null or an exact string")
+    calibrated = cast(object, result.calibrated)
+    if not (calibrated is None or type(calibrated) is bool):
+        problems.append("calibrated is not null or a bool")
+    usage = cast(object, result.usage)
+    if usage is not None and not (
+        type(usage) is dict and usage_conforms(cast("dict[object, object]", usage))
+    ):
+        problems.append("usage is not null or a dict of strings to numbers")
     claimed = cast(object, result.claimed)
     names = cast("tuple[object, ...]", claimed) if type(claimed) is tuple else None
     if names is None or len(set(names)) != len(names):
@@ -381,13 +395,19 @@ def _provenance_problems(result: CallResult) -> list[str]:
                     problems.append(f"missing names {described(name)}, no detail")
                 elif not (type(reason) is str and reason in REASONS):
                     problems.append(f"missing gives {name} {described(reason)}, no reason")
-    if _sent(result):
-        for name in sorted(DETAILS):
-            held, given = _holds(result, name), name in reasons
-            if held and given:
-                problems.append(f"{name} holds a value and a reason")
-            elif not held and not given:
-                problems.append(f"{name} holds no value and no reason")
+    sent = _sent(result)
+    for name in sorted(DETAILS):
+        held, given = _holds(result, name), name in reasons
+        if held and given:
+            problems.append(f"{name} holds a value and a reason")
+        elif sent and not held and not given:
+            problems.append(f"{name} holds no value and no reason")
+    if not sent:
+        set_ = [n for n in HASHED_DETAILS if cast(object, getattr(result, n)) is not None]
+        if result.claimed != ():
+            set_.append("claimed")
+        if set_:
+            problems.append(f"no request was sent, yet {', '.join(set_)} set")
     return problems
 
 

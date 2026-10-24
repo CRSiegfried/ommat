@@ -158,7 +158,7 @@ To use ommat with idia, add idia's own skill too, from its [skills/idia](https:/
 
 ## Status
 
-Pre-release, at 0.4.0. It writes format-4 records and design documents and reads formats 1 to 4, so the records and designs of earlier releases still load and replay, given each design's stored document and the functions it names.
+Pre-release, at 0.4.0. It writes format-5 records and format-4 design documents, and reads record formats 1 to 5 and design formats 1 to 4, so the records and designs of earlier releases still load and replay, given each design's stored document and the functions it names.
 
 0.4.0 asks a `choice` over a candidate set of strings, but leaves out decision tables, data rules, plan declarations, candidate sets of records and per-candidate questions, which `load` refuses in a design, among other things the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
 

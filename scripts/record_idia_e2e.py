@@ -12,6 +12,8 @@ document, then scans the logs and the record: in a log the account id is replace
 placeholder; a record holding it, whose hash covers its bytes, and any file holding a
 credential, fail the run and the logs and the record are deleted. A run that raises deletes
 them too. It prints what each call returned and never a credential.
+When only ommat's record or printing changes, run ``scripts/regenerate_idia_fixtures.py``
+instead: it rebuilds the derived files offline, with no credential.
 """
 
 import json

@@ -9,7 +9,10 @@ It replays each turn from the logs in ``tests/idia_logs`` with idia's ``Recorded
 ``none``, under placeholder credentials that are never sent, so it makes no wire call and reads
 no credential. Run it when ommat's record format or the tutorial's printing changes. When the
 wire input changes, the design, a prompt's form or the leaf, the logs themselves are recorded
-again live, with ``scripts/record_idia_e2e.py`` and ``scripts/record_idia_tutorial.py``.
+again live, with ``scripts/record_idia_e2e.py`` and ``scripts/record_idia_tutorial.py``. The
+record document is rewritten only when its hash or log changed, so a run with nothing to change
+keeps the live run's timings. A changed record hash changes the ``answered from record`` lines,
+so copy the new output into the tutorial page's printed blocks.
 """
 
 import asyncio
@@ -27,11 +30,14 @@ sys.path[:0] = [
 
 import decide_live  # noqa: E402
 import idia_e2e as e2e  # noqa: E402
+from ommat import read_record  # noqa: E402
 
 
 def main() -> None:
     record = e2e.decide(e2e.PLACEHOLDER, "none").record
-    e2e.RECORD.write_bytes(record.document)
+    kept = read_record(e2e.RECORD.read_bytes()) if e2e.RECORD.exists() else None
+    if kept is None or (kept.record_hash, kept.log) != (record.record_hash, record.log):
+        e2e.RECORD.write_bytes(record.document)
     printed = io.StringIO()
     with contextlib.redirect_stdout(printed):
         asyncio.run(decide_live.run(e2e.recorded_providers(e2e.PLACEHOLDER, "none")))

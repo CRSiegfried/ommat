@@ -158,7 +158,10 @@ async def answering(batch: Batch, *, seconds: float) -> object:
             else:
                 share = 1 / len(question.labels)
                 values[ref] = dict.fromkeys(question.labels, share)
-    return CallResult(values, warnings=("answered by a test",), precision=2)
+    reasons = dict.fromkeys(sorted(DETAILS - {"precision"}), "not-reported")
+    return CallResult(
+        values, warnings=("answered by a test",), precision=2, attempts=1, missing=reasons
+    )
 
 
 def test_a_conforming_binding_passes() -> None:
@@ -281,8 +284,9 @@ class Counter:
         (
             unsupported_with_a_revision,
             [
+                "provenance: batch 0: no request was sent, yet revision set",
                 "unsupported-provenance: batch 0: every ref is unsupported, yet revision, "
-                "truncated set"
+                "truncated set",
             ],
         ),
     ],

@@ -7,11 +7,12 @@ request leaves null, and ``clients``, the versions of the libraries that made th
 is no detail.
 """
 
+import math
 import re
 from typing import cast
 
 from ommat._typed import is_a
-from ommat._values import domain_error, string_data
+from ommat._values import MAX_INTEGER, domain_error, string_data
 
 STRING_DETAILS = (
     "provider",
@@ -106,3 +107,20 @@ def versions(value: object) -> dict[str, str] | None:
         return None
     members = cast("dict[str, str]", value)
     return {string_data(k): string_data(v) for k, v in members.items()}
+
+
+def usage_conforms(value: dict[object, object]) -> bool:
+    """Whether a ``usage`` dict conforms as interpret keeps one: in the value domain, each key
+    an exact ``str`` and each figure exactly an ``int`` of magnitude at most 2^53 - 1 or a
+    finite ``float``."""
+    if domain_error(value) is not None:
+        return False
+    for key, figure in value.items():
+        if type(key) is not str:
+            return False
+        if type(figure) is int:
+            if abs(figure) > MAX_INTEGER:
+                return False
+        elif not (type(figure) is float and math.isfinite(figure)):
+            return False
+    return True

@@ -139,7 +139,8 @@ def test_a_call_that_sent_no_request_holds_no_provenance() -> None:
 
 
 @pytest.mark.parametrize(
-    "precision", [0, 17, "unrounded", {"step": "0.05"}, {"step": "0.25"}, {"step": "0.5"}]
+    "precision",
+    [0, 17, "unrounded", {"step": "0.05"}, {"step": "0.5"}, {"step": "0." + "5" * 17}],
 )
 def test_each_form_of_precision_is_written(precision: object) -> None:
     assert call_item(turn(precision=precision))["precision"] == precision
@@ -158,6 +159,11 @@ def test_each_form_of_precision_is_written(precision: object) -> None:
         ("precision", {"step": 0.05}),
         ("precision", {"step": "0.05", "of": "p"}),
         ("precision", 18),
+        ("precision", True),
+        ("precision", {"step": "0.10"}),
+        ("precision", {"step": "0.0"}),
+        ("precision", {"step": "0.00000000000000001"}),
+        ("precision", {"step": "0." + "5" * 18}),
         ("claimed", ("nothing",)),
         ("claimed", ("provider",)),  # names a detail that holds no value
         ("claimed", ["revision"]),
@@ -207,6 +213,24 @@ def test_a_string_subclass_detail_is_written_by_its_string_data() -> None:
     assert type(call["provider"]) is str
     assert call["provider"] == "gliner"
     assert call["runtime"] == {"gliner": "1"}
+
+
+class Colliding(str):
+    """A key whose hash is a usage figure's and whose __eq__ raises: binding code."""
+
+    __slots__ = ()
+
+    def __hash__(self) -> int:
+        return hash("input_tokens")
+
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("ran")
+
+
+def test_a_usage_key_of_the_bindings_runs_no_code_when_a_claim_reads_it() -> None:
+    record = turn(usage={Colliding("x"): 3}, claimed=("usage.input_tokens",))
+    assert call_item(record)["outcome"]["failed"]["code"] == "invalid-return"
+    assert "claimed" in calls_entry(record)["invalid"]
 
 
 def test_a_claim_on_a_malformed_unhashed_detail_fails_nothing() -> None:
@@ -474,6 +498,22 @@ def test_a_request_id_is_digested_and_the_other_new_members_are_open() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("member", "value"), [("request_id", b"x"), ("calibrated", "y"), ("missing", 5)]
+)
+def test_an_invalid_new_member_is_digested_under_invalid(member: str, value: object) -> None:
+    record = turn(**{member: value})
+    view = json.loads(redact(record, ROOT))
+    entry = next(iter(view["unhashed"]["calls"].values()))
+    assert entry["invalid"][member] == digest(repr(value), record)
+
+
+def test_the_fold_reads_no_request_whose_attempts_is_not_above_0() -> None:
+    for attempts in (-1, 0):
+        result = call_result({}, [RequestProvenance(provider="p", attempts=attempts)], precision=2)
+        assert (result.provider, result.precision, result.attempts) == (None, None, None)
+
+
 def test_a_format_4_record_redacts_with_its_snapshot_open_and_replays_at_format_5() -> None:
     old = read_record(rehashed(before_profile(doc_of(turn(**PROFILE)), 4)))
     view = json.loads(redact(old, ROOT))
@@ -529,3 +569,29 @@ def test_a_stored_format_4_design_loads_to_its_own_hash_and_its_record_replays()
 
 def call_item_of(view: dict[str, Any]) -> dict[str, Any]:
     return next(i for i in view["log"] if i["item"] == "call")
+
+
+def test_the_provenance_check_judges_the_unhashed_details_as_interpret_keeps_them() -> None:
+    every: dict[str, str] = dict.fromkeys(sorted(DETAILS), "not-reported")
+    for members, says in (
+        ({"request_id": cast(Any, 5)}, "request_id is not null or an exact string"),
+        ({"calibrated": cast(Any, 1)}, "calibrated is not null or a bool"),
+        ({"usage": {"input_tokens": float("nan")}}, "usage is not null or a dict"),
+    ):
+        failures = check(answering(attempts=1, missing=every, **members), batches=ONE)
+        assert any(says in f for f in failures), failures
+
+
+def test_the_provenance_check_refuses_a_reason_for_a_held_detail_on_any_call() -> None:
+    failures = check(answering(revision="r", missing={"revision": "not-sent"}), batches=ONE)
+    assert "provenance: batch 0: revision holds a value and a reason" in failures
+
+
+def test_a_claimed_list_or_a_step_past_the_size_bounds_is_refused_at_the_read(
+    small_bounds: SmallBounds,
+) -> None:
+    for name, big in (("claimed", ["x" * 300]), ("precision", {"step": "0" * 300})):
+        doc = doc_of(turn(**PROFILE))
+        doc["log"][3][name] = big
+        with pytest.raises(InvalidRecord, match=name):
+            read_record(rehashed(doc))
