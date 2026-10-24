@@ -12,6 +12,7 @@ package never imports. The names in ``__all__`` are public under the same deprec
 none of this package.
 """
 
+from ommat._binding import OracleBinding
 from ommat._binding_kit import (
     RequestProvenance,
     bounded_warnings,
@@ -23,6 +24,7 @@ from ommat._binding_kit import (
 )
 
 __all__ = [
+    "OracleBinding",
     "RequestProvenance",
     "bounded_warnings",
     "call_result",

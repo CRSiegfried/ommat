@@ -41,6 +41,40 @@ rerun, findings = replay_sync(decision.record, loaded)
 
 A full, runnable example with its output is the [README demo](https://github.com/CRSiegfried/ommat/blob/v0.4.0/README.md#a-first-decision). Build a design step by step with the tutorial [Write your first design](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/tutorials/write-a-design.md).
 
+## Beyond the basics
+
+Three question shapes from format 4, as literals:
+
+```python
+from ommat import Question, Source, Structured, Text
+from ommat import types as t
+
+# A choice over candidates a source finds: none and several first, then the candidates.
+finder = Source({"t:senders": {"type": t.list_(t.string), "candidates": True}}, needs=["t:state"])
+sender = Question(
+    "choice",
+    Text("Who sent this message?"),
+    {"fixed": ["none", "several"], "candidates": "t:senders", "at": 2},
+)
+
+# A noul with described yes and no; at least one carries a description.
+hazard = Question(
+    "noul",
+    Text("Does the report describe a danger to people?"),
+    [{"name": "yes", "description": "Someone could be hurt"}, "no"],
+)
+
+# A structured wording: each string value is a template from the one slot list.
+kind = Question(
+    "choice",
+    Structured(
+        {"task": "What kind of report is {body}?", "examples": ["a lamp out", "a pothole"]},
+        [{"name": "body", "origin": {"ref": "t:state.body"}}],
+    ),
+    ["lighting", "road", "other"],
+)
+```
+
 ## Rules of the engine
 
 - An unknown is a marker, `Unsure`, `Unavailable` or `Unasked` (all `Undetermined`), never `None` or a quiet no. Test reads with `isinstance(value, Undetermined)` before using them, in rules and in the policy; `if value:` on a marker raises. A rule passes a read's marker on with its own cause by returning it; `r.require(ref)` stops instead, with cause `required` naming the read.
@@ -59,6 +93,7 @@ A full, runnable example with its output is the [README demo](https://github.com
 ## Pitfalls
 
 - **load refuses what 0.4.0 leaves out:** decision tables, data rules, plan declarations, candidate sets of records and per-candidate questions. A `choice` over a `list<string>` candidate set loads, `{"fixed": [...], "candidates": ref, "at": k}` with `at` placing the candidates after the first `k` fixed labels; its question is left out with a marker of its own when the set is empty or a marker, or its labels overflow or collide. See the [spec's intro](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md) and [the candidate-valued label set](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#the-candidate-valued-label-set).
+- **A `noul` declares no labels, or `yes` then `no` with a description.** A plain `["yes", "no"]` is refused at load: an undescribed `noul` leaves `labels` unset.
 - **Nothing carries between turns.** Each turn stands alone; the caller passes what a later turn needs, such as an earlier step's result, in its input state, in fields declared in `state`: decide drops an undeclared field without a word. See [Continuing a workflow](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#continuing-a-workflow).
 - **Declare every read.** A rule that reads a ref outside its `reads` makes its `d:` ref `Unavailable` (`undeclared-read`); the policy's makes the plan `broken`. Catching it does not help.
 - **A step with no requirement of its own refuses the plan**, unless the design sets `default_deny=False`. Give each step the `Requirement`s it rests on.

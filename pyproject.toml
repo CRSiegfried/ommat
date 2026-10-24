@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 dependencies = []
 keywords = ["blackboard", "decision model", "planning", "llm", "agents", "rules engine"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",

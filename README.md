@@ -68,6 +68,8 @@ DESIGN = Design(
 )
 ```
 
+The demo keeps everything in one script; in a real project keep the design in a module (see the tutorial [Write a design](docs/tutorials/write-a-design.md)).
+
 The binding is a plain async function. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds one over a real provider. A binding receives each source's questions together, and `ommat[idia]` sends them to the provider as one request, split only where the provider's limits require:
 
 ```python

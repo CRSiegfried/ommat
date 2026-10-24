@@ -107,6 +107,7 @@ def test_the_public_names_are_exactly_the_decisions() -> None:
 
 
 BINDINGS = {
+    "OracleBinding",
     "RequestProvenance",
     "bounded_warnings",
     "call_result",

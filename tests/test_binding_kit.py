@@ -32,6 +32,7 @@ WEST = dt.timezone(dt.timedelta(hours=-5, minutes=-30))
 
 def test_the_package_re_exports_the_core_functions() -> None:
     assert ommat.bindings.__all__ == [
+        "OracleBinding",
         "RequestProvenance",
         "bounded_warnings",
         "call_result",
@@ -41,8 +42,11 @@ def test_the_package_re_exports_the_core_functions() -> None:
         "prompt_text",
     ]
     assert ommat.bindings.__all__ == sorted(ommat.bindings.__all__)
+    from ommat import _binding
+
     for name in ommat.bindings.__all__:
-        assert getattr(ommat.bindings, name) is getattr(core, name)
+        home = _binding if name == "OracleBinding" else core
+        assert getattr(ommat.bindings, name) is getattr(home, name)
 
 
 def test_extraction_value_returns_the_five_members_in_order() -> None:

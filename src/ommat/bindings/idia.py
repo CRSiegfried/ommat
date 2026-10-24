@@ -40,6 +40,7 @@ except ModuleNotFoundError as error:
 
 from ommat import AnswerKind, CallResult, Cause, RenderedQuestion, SourceCall, Unavailable
 from ommat.bindings import (
+    OracleBinding,
     RequestProvenance,
     bounded_warnings,
     call_result,
@@ -55,7 +56,7 @@ _MAX_DECIMALS = 17
 """The most decimal places a call's ``precision`` names."""
 
 
-def oracle_binding(provider: object) -> _Binding:
+def oracle_binding(provider: object) -> OracleBinding:
     """An oracle binding over ``provider``, an idia ``Dispatcher`` over one leaf.
 
     It refuses, with ``ValueError``, any other provider, whose policies idia does not show;

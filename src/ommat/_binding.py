@@ -103,7 +103,8 @@ class RenderedQuestion:
     question declares none; a probability kind's question leaves them at ``None``, ``False``,
     ``None`` and ``None``.
     A ``choice`` over a candidate-valued label set is rendered at each call: its labels are the
-    fixed part's names, then the set's members in order, each member's description ``None``,
+    fixed part's first ``at`` names, then the set's members in order, then the rest of the
+    fixed part, each member's description ``None``,
     so one ``q:`` ref's labels may differ from call to call. The set is in the source's
     ``needs`` only when the source declares it a need."""
 

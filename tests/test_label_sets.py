@@ -777,3 +777,18 @@ def test_the_dead_lint_takes_the_first_candidate_at_its_position() -> None:
         policy=d.policy,
     )
     assert dead_questions(load(d), values=SETS)["questions"]["q:sender"]["status"] == "live"
+
+
+@pytest.mark.parametrize("kind", ["score", "noul"])
+def test_only_a_choice_may_be_candidate_valued(kind: str) -> None:
+    from ommat import InvalidDesign, Plan, Policy, Text
+
+    q = Question(kind, Text("Which?"), {"fixed": ["a", "b"], "candidates": SET})
+    d = Design(
+        name="kinds",
+        state=t.record(),
+        sources={"ask": Source({"q:which": q})},
+        policy=Policy(lambda r: Plan("inform", reply="ok"), version="1"),
+    )
+    with pytest.raises(InvalidDesign, match="only a choice may have"):
+        load(d)

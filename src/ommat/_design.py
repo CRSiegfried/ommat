@@ -131,10 +131,11 @@ class Structured:
 @dataclass(frozen=True, slots=True)
 class Question:
     """A ``q:`` ref's question: its kind, wording and labels. ``labels``
-    is ``None``, a sequence of labels, or a mapping of ``fixed`` and ``candidates`` for a
-    candidate-valued label set. A label is its name, a string, or a mapping of exactly ``name``
-    and ``description``, both strings, held as a read-only copy. An extraction question also
-    declares ``value_type``, a ``ValueType`` member or its string, held as the member;
+    is ``None``, a sequence of labels, or a mapping of ``fixed``, ``candidates`` and, optionally,
+    ``at`` for a candidate-valued label set, ``at`` the number of fixed labels before the
+    candidates, by default all of them. A label is its name, a string, or a mapping of exactly
+    ``name`` and ``description``, both strings, held as a read-only copy. An extraction question
+    also declares ``value_type``, a ``ValueType`` member or its string, held as the member;
     ``is_list``, a boolean; ``text``, a board-ref origin ``{"ref": r}`` naming the string its
     spans index; and ``reference_date``, such an origin or ``None``. A probability kind's
     question leaves those four at ``None``, ``False``, ``None`` and ``None``."""

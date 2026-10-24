@@ -343,7 +343,7 @@ class _Form:
                 "or reference_date, which only an extraction question declares",
             )
             ok = False
-        if q.kind is AnswerKind.noul:
+        if q.kind is AnswerKind.noul and not isinstance(labels, Mapping):
             if labels is not None:
                 ok = self.noul_labels(labels, where, names) and ok
         elif q.kind is AnswerKind.extraction:
@@ -371,6 +371,13 @@ class _Form:
                         f"{where}'s at is not an integer from 0 to its {len(fixed)} fixed labels",
                     )
                     ok = False
+        elif kind is not None and isinstance(labels, Mapping):
+            self.fail(
+                names,
+                f"{where} is a {kind.value} question with a candidate-valued label set, which "
+                "only a choice may have",
+            )
+            ok = False
         elif kind is not None:
             ok = self.labels(labels, f"{where}'s labels", names, 1) is not None and ok
         if not ok:
