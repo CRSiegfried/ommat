@@ -25,6 +25,7 @@ from idia import (  # noqa: E402
     ImagePart,
     JsonPart,
     LabelAnswer,
+    Notice,
     NoulAnswer,
     ProviderError,
     Refusal,
@@ -36,7 +37,6 @@ from idia import (  # noqa: E402
     Span,
     TextPart,
     Usage,
-    Warning,
     WireRequest,
 )
 from idia.providers.scripted import Reply, Scripted  # noqa: E402
@@ -635,7 +635,7 @@ def test_the_sources_run_concurrently_and_their_provenance_is_joined_and_summed(
 
 
 def test_a_truncated_outcomes_refs_are_truncated() -> None:
-    warning = Warning(code=idia.WARNING_PROVIDER_TRUNCATED, message="cut short")
+    warning = Notice(code=idia.WARNING_PROVIDER_TRUNCATED, message="cut short")
 
     def script(wire_request: WireRequest, deadline: Deadline) -> Any:
         return Reply(answers=answer_all(wire_request, deadline), warnings=(warning,))

@@ -241,7 +241,7 @@
               "code": "no-snapshot",
               "field": "snapshot",
               "message": "the wire reported 'gpt-6-luna', an alias with no snapshot; drift behind it cannot be detected from the response",
-              "type": "Warning"
+              "type": "Notice"
             }
           ]
         }
@@ -249,7 +249,7 @@
     ]
   },
   "enabled_features": [],
-  "format": 1,
+  "format": 2,
   "model": "gpt-6-luna",
   "name": "openai-decisions"
 }

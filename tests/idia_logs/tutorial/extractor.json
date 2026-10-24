@@ -118,7 +118,7 @@
               "code": "no-snapshot",
               "field": "snapshot",
               "message": "the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response",
-              "type": "Warning"
+              "type": "Notice"
             }
           ]
         }
@@ -203,7 +203,7 @@
               "code": "no-snapshot",
               "field": "snapshot",
               "message": "the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response",
-              "type": "Warning"
+              "type": "Notice"
             }
           ]
         }
@@ -291,7 +291,7 @@
               "code": "no-snapshot",
               "field": "snapshot",
               "message": "the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response",
-              "type": "Warning"
+              "type": "Notice"
             }
           ]
         }
@@ -415,7 +415,7 @@
               "code": "no-snapshot",
               "field": "snapshot",
               "message": "the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response",
-              "type": "Warning"
+              "type": "Notice"
             }
           ]
         }
@@ -423,7 +423,7 @@
     ]
   },
   "enabled_features": [],
-  "format": 1,
+  "format": 2,
   "model": "clairic",
   "name": "cloudflare-clairic"
 }
