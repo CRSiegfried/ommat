@@ -9,6 +9,7 @@ import asyncio
 import copy
 import functools
 import json
+import types
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
@@ -428,6 +429,9 @@ def _drop_context(item: dict[str, Any]) -> None:
     item.pop("context")
 
 
+_UNSURE: dict[str, Any] = {"kind": "Unsure", "cause": {"code": "abstained", "refs": ["q:refund"]}}
+
+
 def _entry(**members: Any) -> Change:
     def change(item: dict[str, Any]) -> None:
         item["context"]["entries"][0].update(members)
@@ -452,6 +456,17 @@ def _block(**members: Any) -> Change:
         (_entry(ref="t:state.nofield"), "names a field"),
         (_block(plan="yes"), "boolean"),
         (_block(design=3), "a string or null"),
+        (_entry(marker=_UNSURE), "neither or both"),
+        (_entry(ref='d:refund["x"]'), "is not t:state or a d: ref"),
+        (_entry(ref='t:state["x"]'), "is not t:state or a d: ref"),
+        (_entry(text=None, marker={**_UNSURE, "cause": {"code": "nope", "refs": []}}), "closed"),
+        (
+            _entry(
+                text=None,
+                marker={**_UNSURE, "cause": {"code": "abstained", "refs": ['q:refund["x"]']}},
+            ),
+            "is a grounded ref",
+        ),
     ],
 )
 def test_the_ledger_refuses_a_misfit_context_at_the_read(change: Change, message: str) -> None:
@@ -670,6 +685,29 @@ class SyncCall:
         return None
 
 
+def sync_observer(index: int, item: Any) -> None:
+    return None
+
+
+class PartialCall:
+    """A sync callable whose ``__call__`` is no plain function: a partial, never bound."""
+
+    __call__ = functools.partial(sync_observer)
+
+
+def _deep(depth: int) -> Any:
+    """A sync observer behind ``depth`` bound methods; nested partials flatten, so they cannot
+    make a chain."""
+
+    def ignore(*args: object) -> None:
+        return None
+
+    observer: Any = ignore
+    for _ in range(depth):
+        observer = types.MethodType(observer, object())
+    return observer
+
+
 @pytest.mark.parametrize(
     "observer",
     [
@@ -679,6 +717,7 @@ class SyncCall:
         functools.partial(functools.partial(async_observer)),
         AsyncCall(),
         AsyncCall().method,
+        _deep(33),  # a chain past the bound counts as async
     ],
 )
 def test_an_async_observer_is_refused_by_decide_and_replay(observer: Any) -> None:
@@ -690,10 +729,6 @@ def test_an_async_observer_is_refused_by_decide_and_replay(observer: Any) -> Non
         replay_sync(record, ld, observer=observer)
 
 
-def sync_observer(index: int, item: Any) -> None:
-    return None
-
-
-@pytest.mark.parametrize("observer", [sync_observer, SyncCall()])
+@pytest.mark.parametrize("observer", [sync_observer, SyncCall(), PartialCall(), _deep(31)])
 def test_a_sync_observer_is_accepted(observer: Any) -> None:
     assert run(observer=observer).plan.kind == "execute"

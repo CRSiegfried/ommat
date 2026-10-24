@@ -2,9 +2,12 @@
 calls and their results, then decide's call and result, then the pending steps' calls with
 no result. Each tool name is checked here, so the renderers refuse the same names."""
 
+import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
+
+from ommat._canonical import encode
 
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _DECIDE = "decide"
@@ -26,7 +29,7 @@ class Call:
     decide: bool = False
 
 
-def exchanges(view: dict[str, Any]) -> list[list[Call]]:
+def exchanges(view: dict[str, Any], turn: object = None) -> list[list[Call]]:
     """The view's calls in groups, each group one assistant turn: a round's calls, decide,
     then the pending steps when there are any."""
     groups: list[list[Call]] = []
@@ -52,7 +55,23 @@ def exchanges(view: dict[str, Any]) -> list[list[Call]]:
         groups.append(
             [Call(s["id"], _step_name(cast(str, s["tool"])), s["arguments"], None) for s in pending]
         )
-    return groups
+    if turn is None:
+        return groups
+    stem = turn_stem(cast(str, view["record_hash"]), turn)
+    return [[replace(call, id=stem + call.id[_STEM:]) for call in group] for group in groups]
+
+
+_STEM = 27  # "om_" and 24 hex digits
+
+
+def turn_stem(record_hash: str, turn: object) -> str:
+    """The id stem for a record rendered under ``turn``, a ``str`` or an ``int``: ``om_`` and
+    the first 24 hex digits of SHA-256 over the canonical JSON of the record hash and the turn,
+    so an id keeps its form and its bound whatever the turn holds."""
+    if type(turn) is not str and type(turn) is not int:
+        raise ValueError(f"turn must be a str or an int, not {type(turn).__name__}")
+    digest = hashlib.sha256(encode([record_hash, turn])).hexdigest()
+    return "om_" + digest[:24]
 
 
 def _source_name(source: str) -> str:

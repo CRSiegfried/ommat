@@ -34,20 +34,22 @@ def to_model_messages(
     *,
     model_name: str | None = None,
     provider_name: str | None = None,
+    turn: str | int | None = None,
 ) -> list[ModelMessage]:
     """A ``transcript`` view as Pydantic AI messages, ``[]`` for ``None``: per group of calls a
     ``ModelResponse`` of ``ToolCallPart``s, then a ``ModelRequest`` of a ``ToolReturnPart`` per
     call with a result, a failed source call's with ``outcome="failed"`` and decide's with
     ``metadata`` ``{"record_hash", "design_hash"}``. The source calls' and decide's messages
-    carry ``metadata`` ``{"ommat": "bookkeeping", "record_hash"}``; the pending calls' response
-    carries none.
-    Every response carries ``model_name`` and ``provider_name``. Raises ``ValueError`` for a
-    tool name no provider takes, as ``to_chat_completions`` does."""
+    carry ``metadata`` ``{"ommat": "bookkeeping", "record_hash"}``, with ``turn`` when given;
+    the pending calls' response carries none.
+    Every response carries ``model_name`` and ``provider_name``. ``turn`` stems every id, and is
+    held in the mark, as ``to_chat_completions`` says. Raises ``ValueError`` for a tool name no
+    provider takes, as ``to_chat_completions`` does."""
     if view is None:
         return []
     stamp = {"record_hash": view["record_hash"], "design_hash": view["design"]["hash"]}
     messages: list[ModelMessage] = []
-    for group in exchanges(view):
+    for group in exchanges(view, turn):
         kept = all(call.result is not None for call in group)
         calls = [
             ToolCallPart(call.name, deepcopy(call.arguments), tool_call_id=call.id)
@@ -58,7 +60,7 @@ def to_model_messages(
                 parts=calls,
                 model_name=model_name,
                 provider_name=provider_name,
-                metadata=_marked(view["record_hash"]) if kept else None,
+                metadata=_marked(view["record_hash"], turn) if kept else None,
             )
         )
         returns = [
@@ -73,7 +75,9 @@ def to_model_messages(
             if call.result is not None
         ]
         if returns:
-            messages.append(ModelRequest(parts=returns, metadata=_marked(view["record_hash"])))
+            messages.append(
+                ModelRequest(parts=returns, metadata=_marked(view["record_hash"], turn))
+            )
     return messages
 
 
@@ -97,7 +101,7 @@ def drop_earlier_bookkeeping(messages: list[ModelMessage]) -> list[ModelMessage]
     marked = [
         m
         for m in messages
-        if isinstance(m, ModelResponse) and is_bookkeeping(m) and type(_record(m)) is str
+        if isinstance(m, ModelResponse) and is_bookkeeping(m) and type(_record(m)[0]) is str
     ]
     if not marked:
         return list(messages)
@@ -129,9 +133,14 @@ def _answers(part: object, gone: set[str]) -> bool:
     return isinstance(part, ToolReturnPart) and part.tool_call_id in gone
 
 
-def _record(message: ModelMessage) -> object:
-    return cast("dict[str, Any]", message.metadata).get("record_hash")
+def _record(message: ModelMessage) -> tuple[object, object]:
+    """A marked message's record and turn, which together tell one rendering from another."""
+    metadata = cast("dict[str, Any]", message.metadata)
+    return metadata.get("record_hash"), metadata.get("turn")
 
 
-def _marked(record_hash: str) -> dict[str, Any]:
-    return {_MARK: BOOKKEEPING, "record_hash": record_hash}
+def _marked(record_hash: str, turn: object) -> dict[str, Any]:
+    mark: dict[str, Any] = {_MARK: BOOKKEEPING, "record_hash": record_hash}
+    if turn is not None:
+        mark["turn"] = turn
+    return mark

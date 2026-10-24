@@ -354,3 +354,38 @@ def test_a_marked_response_holding_text_is_not_bookkeeping() -> None:
     call = to_model_messages(view("unsure"))[0]
     assert isinstance(call, ModelResponse)
     assert not is_bookkeeping(replace(call, parts=[*call.parts, TextPart("x")]))
+
+
+def test_five_agent_turns_repeating_one_record_repeat_no_id() -> None:
+    seen: list[list[ModelMessage]] = []
+
+    def front(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        seen.append(messages)
+        return ModelResponse(parts=[TextPart("ok")])
+
+    agent = Agent(FunctionModel(front), capabilities=[ProcessHistory(drop_earlier_bookkeeping)])
+
+    @agent.tool_plain
+    def archive(order: str, folder: str) -> dict[str, str]:
+        return {"receipt": "r-1"}
+
+    @agent.tool_plain
+    def notify(receipt: str) -> None:
+        return None
+
+    history: list[ModelMessage] = []
+    for n, path in enumerate(["clear", "unsure", "clear", "down", "clear"]):
+        history.append(ModelRequest(parts=[UserPromptPart(f"turn {n}")]))
+        history += to_model_messages(view(path), model_name="ommat", turn=n)
+        result = asyncio.run(agent.run(None, message_history=history))
+        history = list(
+            ModelMessagesTypeAdapter.validate_json(
+                ModelMessagesTypeAdapter.dump_json(result.all_messages())
+            )
+        )
+        shown = seen[-1]
+        assert _paired(shown)
+        ids_ = [c.tool_call_id for c in calls(shown)]
+        assert len(ids_) == len(set(ids_))
+        marked = {m.metadata["turn"] for m in shown if is_bookkeeping(m) and m.metadata}
+        assert marked == {n}

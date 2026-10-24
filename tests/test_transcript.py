@@ -13,11 +13,14 @@ from ommat import (
     CallResult,
     Context,
     ContextEntry,
+    Origin,
     Plan,
     Policy,
+    Question,
     Record,
     Requirement,
     Source,
+    Step,
     Text,
     decide_sync,
     handoff,
@@ -32,7 +35,7 @@ from ommat.conversation import (
     is_bookkeeping,
     to_chat_completions,
 )
-from transcript_turns import PATHS, SOURCES, STATE, YES, confirming, design, model, turn
+from transcript_turns import PATHS, SOURCES, STATE, YES, confirming, design, model, tools, turn
 
 ID = re.compile(r"om_[0-9a-f]{24}_(c[1-9][0-9]*|d|s[1-9][0-9]*)")
 
@@ -529,3 +532,156 @@ def test_the_calls_of_one_call_item_share_no_outcome_object() -> None:
     first = view("down")["rounds"][0]
     assert first[0]["outcome"] == first[1]["outcome"]
     assert first[0]["outcome"] is not first[1]["outcome"]
+
+
+# ---------------------------------------------------------------------------------------------
+# A record rendered for more than one turn
+
+
+def test_a_turn_stems_every_id_within_the_pattern_and_none_keeps_the_view_s() -> None:
+    v = view("clear")
+    plain = to_chat_completions(v)
+    assert plain == to_chat_completions(v, turn=None)
+    turned = to_chat_completions(v, turn="retry-1")
+    old = [c["id"] for m in plain for c in m.get("tool_calls", [])]
+    new = [c["id"] for m in turned for c in m.get("tool_calls", [])]
+    assert all(ID.fullmatch(i) and len(i) <= 40 for i in new)
+    assert [i[27:] for i in new] == [i[27:] for i in old]
+    assert set(new).isdisjoint(old)
+    assert to_chat_completions(v, turn="retry-1") == turned
+    assert to_chat_completions(v, turn=1) != to_chat_completions(v, turn="1")
+
+
+@pytest.mark.parametrize("turn", [True, 1.5, b"x", ["a"], None.__class__])
+def test_a_turn_of_another_type_is_refused(turn: Any) -> None:
+    with pytest.raises(ValueError, match="turn must be a str or an int"):
+        to_chat_completions(view("clear"), turn=turn)
+
+
+def test_five_turns_repeating_one_record_repeat_no_id_and_keep_only_the_last() -> None:
+    history: list[dict[str, Any]] = []
+    for n, path in enumerate(["clear", "unsure", "clear", "down", "clear"]):
+        history.append({"role": "user", "content": f"turn {n}"})
+        messages = to_chat_completions(view(path), turn=n)
+        history += messages
+        if messages[-1]["role"] == "assistant":  # pending calls the caller runs
+            ids_ = [c["id"] for c in messages[-1]["tool_calls"]]
+            history += [{"role": "tool", "tool_call_id": i, "content": "{}"} for i in ids_]
+        history.append({"role": "assistant", "content": "ok"})
+    every = [c["id"] for m in history for c in m.get("tool_calls", [])]
+    assert len(every) == len(set(every))
+    kept = drop_earlier_bookkeeping(history)
+    assert _chat_paired(kept)
+    stems = {c["id"][:27] for m in kept if is_bookkeeping(m) for c in m.get("tool_calls", [])}
+    assert len(stems) == 1
+
+
+# ---------------------------------------------------------------------------------------------
+# Round-three mutation cases
+
+
+def test_a_source_asking_two_refs_lists_them_in_code_point_order() -> None:
+    pair = Source(
+        {"q:zeta": Question("noul", Text("Z?")), "q:alpha": Question("noul", Text("A?"))},
+        needs=["t:state.message"],
+        oracle="model",
+    )
+
+    async def both(batch: Any, *, seconds: float) -> CallResult:
+        return CallResult({"q:route": YES, "q:again": YES, "q:zeta": YES, "q:alpha": YES})
+
+    ld = load(design(sources={**SOURCES, "pair": pair}))
+    bindings = {"default": confirming(YES), "model": both, "tools": tools}
+    v = transcript(decide_sync(ld, STATE, bindings).record)
+    assert v is not None
+    (call,) = [c for c in calls(v) if c["source"] == "pair"]
+    assert call["asks"] == ["q:alpha", "q:zeta"]
+    assert list(call["answers"]) == ["q:alpha", "q:zeta"]
+
+
+def test_pending_arguments_share_no_object_with_decide_s_steps() -> None:
+    def whole(r: Any) -> Plan:
+        step = Step(
+            "archive",
+            {"order": Origin(ref="t:order"), "folder": Origin(literal="old")},
+            [Requirement("d:sure", "yes")],
+        )
+        return (
+            Plan("execute", [step], reason="archive")
+            if r.read("d:sure") == "yes"
+            else Plan("clarify", reply="?")
+        )
+
+    ld = load(design(policy=Policy(whole, version="1", reads=["d:sure", "t:order"])))
+    v = transcript(turn("clear", ld).record)
+    assert v is not None
+    shown = v["decide"]["plan"]["steps"][0]["arguments"]["order"]["value"]
+    pending = v["pending"][0]["arguments"]["order"]
+    assert shown == pending == {"id": "o-1"}
+    assert shown is not pending
+
+
+def test_the_first_marker_in_slot_order_wins_when_the_flagged_ref_holds_none() -> None:
+    entry = ContextEntry(
+        "t:state.message",
+        Text(
+            "{m}: {r} {s}",
+            [
+                {"name": "m", "origin": {"ref": "t:state.message"}},
+                {"name": "r", "origin": {"ref": "d:route"}},
+                {"name": "s", "origin": {"ref": "d:sure"}},
+            ],
+        ),
+    )
+    v = transcript(turn("down", load(design(context=Context([entry])))).record)
+    assert v is not None
+    assert v["decide"]["context"][0]["marker"]["cause"]["code"] == "raised"  # d:route's
+
+
+def test_a_path_walking_into_a_value_that_is_no_record_raises() -> None:
+    edited = _with_step_over(turn("clear").record, "d:route.x")  # d:route is a label
+    with pytest.raises(ValueError, match="holds no value in the log"):
+        transcript(edited)
+
+
+def test_handoff_text_gives_steps_alone_with_the_plan_switch_off() -> None:
+    record = turn("clear", load(design(context=Context([], plan=False, record=False)))).record
+    assert handoff_text(handoff(record)).splitlines() == [
+        'Step 1: archive {"folder":{"value":"old"},"order":{"ref":"t:order.id","value":"o-1"}}',
+        'Step 2: notify {"receipt":{"value":"done"}}',
+    ]
+
+
+def test_a_call_message_mixing_ommat_and_other_ids_is_not_bookkeeping() -> None:
+    ours = to_chat_completions(view("unsure"))[0]["tool_calls"][0]
+    other = {"id": "call_abc", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+    assert not is_bookkeeping({"role": "assistant", "content": None, "tool_calls": [ours, other]})
+
+
+@pytest.mark.parametrize("suffix", ["c0", "c", "c01", "s1", "e"])
+def test_only_a_source_call_s_or_decide_s_id_is_bookkeeping(suffix: str) -> None:
+    assert not is_bookkeeping(
+        {"role": "tool", "tool_call_id": f"om_{'a' * 24}_{suffix}", "content": "{}"}
+    )
+
+
+def test_records_whose_stems_differ_only_in_their_last_digit_are_two_records() -> None:
+    def record(stem: str) -> list[dict[str, Any]]:
+        call = {
+            "id": f"{stem}_d",
+            "type": "function",
+            "function": {"name": "decide", "arguments": "{}"},
+        }
+        return [
+            {"role": "assistant", "content": None, "tool_calls": [call]},
+            {"role": "tool", "tool_call_id": f"{stem}_d", "content": "{}"},
+        ]
+
+    earlier, latest = record("om_" + "a" * 23 + "b"), record("om_" + "a" * 23 + "c")
+    assert drop_earlier_bookkeeping(earlier + latest) == latest
+
+
+def test_a_pending_tool_name_may_hold_digits() -> None:
+    v = json.loads(json.dumps(view("clear")))
+    v["pending"][0]["tool"] = "archive2"
+    assert to_chat_completions(v)[-1]["tool_calls"][0]["function"]["name"] == "archive2"

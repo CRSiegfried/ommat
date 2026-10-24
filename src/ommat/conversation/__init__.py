@@ -56,17 +56,21 @@ def handoff_text(handoff: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
-def to_chat_completions(view: dict[str, Any] | None) -> list[dict[str, Any]]:
+def to_chat_completions(
+    view: dict[str, Any] | None, *, turn: str | int | None = None
+) -> list[dict[str, Any]]:
     """A ``transcript`` view as Chat Completions messages, ``[]`` for ``None``: per group of
     calls an assistant message with null ``content`` and its ``tool_calls``, then a ``tool``
     message per call with a result. Every argument and result is canonical JSON, so a record
     renders to the same bytes each time. Raises ``ValueError`` for a tool name no provider
     takes: a source or pending tool named ``decide``, a pending tool outside ``[A-Za-z0-9_-]``,
-    or a name over 64 characters."""
+    or a name over 64 characters. ``turn``, a ``str`` or an ``int``, gives every id a stem hashed
+    from the record hash and the turn, so one record rendered for two turns of a conversation
+    repeats no id; ``None`` keeps the transcript's ids."""
     if view is None:
         return []
     messages: list[dict[str, Any]] = []
-    for group in exchanges(view):
+    for group in exchanges(view, turn):
         calls = [
             {
                 "id": call.id,

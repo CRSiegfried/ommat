@@ -61,8 +61,10 @@ Compile renders each entry before the policy runs and writes the result into the
 `plan` item, so replay checks the words byte for byte and `redact` digests them.
 
 The design takes the block as `context`. Load checks each entry: it refuses a `q:` ref, two
-entries flagging one ref, a text with no slot naming its flagged ref, and any slot over a field
-the design classes `identifier`, such as the customer's email:
+entries flagging one ref, a text with no slot naming its flagged ref, a text with nothing but
+whitespace outside its placeholders, such as `"{refund}"` alone, so each entry says what its
+value is, and any slot over a field the design classes `identifier`, such as the customer's
+email:
 
 ```python
 DESIGN = Design(
@@ -82,8 +84,10 @@ DESIGN = Design(
 ## Hand it to the next model
 
 `handoff(record)` reads the record and returns what the block switches on, and
-`ommat.conversation.handoff_text` gives it as labelled lines. The driver decides a turn where
-the customer clearly asks for a refund:
+`ommat.conversation.handoff_text` gives it as labelled lines. In the driver, `STATE` is the
+turn's state, a dict of the customer's message, email and order, and `answering(p)` is a
+stand-in binding that answers the refund question `yes` with probability `p`. It decides a
+turn where the customer clearly asks for a refund:
 
 ```python
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
@@ -120,7 +124,10 @@ calls with no result:
 ```
 
 Append the messages after your own user message for the turn. Each id comes from the record
-hash, so one record always renders to the same messages, byte for byte. A source's tool name
+hash, so one record always renders to the same messages, byte for byte. The same design, state
+and answers give the same record: when a turn can repeat one exactly, as a retry does, pass
+each rendering its own `turn`, such as the turn's number, `to_chat_completions(view, turn=3)`,
+so no tool-call id appears twice in the conversation, which a provider may refuse. A source's tool name
 is its name with each `/` as `-`. A step's tool name is its name in the design, which must be
 the name of your tool: the renderers raise `ValueError` for one a provider would refuse.
 
@@ -139,13 +146,28 @@ no pending calls, so run it with `run_plan` too and tell the model what ran in y
 
 When the plan is `clarify` or `inform`, the turn ends in decide's result, and the reply is the
 design's own words. Send it to the user and append it as the assistant's message, so the next
-turn's history holds what was said; no model call words it again.
+turn's history holds what was said; no model call words it again. An `escalate` or `broken`
+plan runs no step either, and the handoff holds no cause, so `Plan: broken` stands beside
+`Verdict: passed`: the transcript's decide result holds the cause, so hand that off, or word the
+outcome in your own code.
 
 ## Hand the calls to a Pydantic AI agent
 
 `ommat.conversation.pydantic_ai.to_model_messages` renders the same calls as Pydantic AI
-messages. Run the agent with the history and no new prompt, and it runs the pending calls with
-its own tools before it answers:
+messages. Each pending call names its step's tool and passes the step's arguments by their
+names in the design, so the agent's tool takes those names as its parameters; a tool whose
+parameters differ fails validation, and Pydantic AI hands the model a retry instead of running
+it. The example's tool takes the refund step's `order`:
+
+```python
+@agent.tool_plain
+def refund_order(order: str) -> dict[str, str]:
+    print("refunding", order)
+    return {"refund": f"R-{order}"}
+```
+
+Run the agent with the history and no new prompt, and it runs the pending calls with its own
+tools before it answers:
 
 ```python
     history: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(str(STATE["message"]))])]
