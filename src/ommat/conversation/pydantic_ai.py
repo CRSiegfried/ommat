@@ -82,7 +82,11 @@ def is_bookkeeping(message: ModelMessage) -> bool:
     call or decide, or its return. A pending call's response, and anything the agent or the
     model wrote, is not."""
     metadata = message.metadata
-    return type(metadata) is dict and metadata.get(_MARK) == BOOKKEEPING
+    if type(metadata) is not dict or metadata.get(_MARK) != BOOKKEEPING:
+        return False
+    if isinstance(message, ModelRequest):  # a request merged with other parts is no longer ours
+        return all(isinstance(part, ToolReturnPart) for part in message.parts)
+    return True
 
 
 def drop_earlier_bookkeeping(messages: list[ModelMessage]) -> list[ModelMessage]:
@@ -90,7 +94,11 @@ def drop_earlier_bookkeeping(messages: list[ModelMessage]) -> list[ModelMessage]
     other than the latest left out, and each return answering one of those calls, wherever it
     stands. The latest record's bookkeeping stays, since the model answers from decide's result.
     A return goes only with its call, so the history never holds one without the other."""
-    marked = [m for m in messages if isinstance(m, ModelResponse) and is_bookkeeping(m)]
+    marked = [
+        m
+        for m in messages
+        if isinstance(m, ModelResponse) and is_bookkeeping(m) and type(_record(m)) is str
+    ]
     if not marked:
         return list(messages)
     latest = _record(marked[-1])
@@ -104,7 +112,7 @@ def drop_earlier_bookkeeping(messages: list[ModelMessage]) -> list[ModelMessage]
     out: list[ModelMessage] = []
     for m in messages:
         if isinstance(m, ModelResponse):
-            if is_bookkeeping(m) and _record(m) != latest:
+            if any(m is n for n in marked) and _record(m) != latest:
                 continue
         else:
             parts = [p for p in m.parts if not _answers(p, gone)]

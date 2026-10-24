@@ -222,3 +222,12 @@ def test_each_public_module_publishes_its_all(name: str) -> None:
         dunder = item.startswith("__") and item.endswith("__")
         assert dunder or not item.startswith("_"), f"{name}.__all__ lists {item}"
         assert hasattr(module, item), f"{name}.__all__ lists {item}, which it does not hold"
+
+
+def test_ci_installs_the_pydantic_ai_extra_so_its_tests_never_skip_there() -> None:
+    import importlib.util
+    import os
+
+    if not os.environ.get("CI"):
+        pytest.skip("only CI must hold every extra")
+    assert importlib.util.find_spec("pydantic_ai") is not None

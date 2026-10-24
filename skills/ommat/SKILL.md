@@ -99,7 +99,8 @@ context = Context(
 #   instructions = handoff_text(handoff(decision.record))
 #   messages = to_chat_completions(transcript(decision.record))  # after your user message
 # With ommat[pydantic-ai]:
-#   from ommat.conversation.pydantic_ai import to_model_messages
+#   from pydantic_ai.capabilities import ProcessHistory
+#   from ommat.conversation.pydantic_ai import drop_earlier_bookkeeping, to_model_messages
 #   history += to_model_messages(transcript(decision.record), model_name="ommat")
 #   agent.run(None, message_history=history)  # runs the pending calls with the agent's tools
 #   Agent(..., capabilities=[ProcessHistory(drop_earlier_bookkeeping)])  # earlier turns' calls out
@@ -130,7 +131,7 @@ See the how-to [Hand off what a turn settled](https://github.com/CRSiegfried/omm
 - **Declare every read.** A rule that reads a ref outside its `reads` makes its `d:` ref `Unavailable` (`undeclared-read`); the policy's makes the plan `broken`. Catching it does not help.
 - **A step with no requirement of its own refuses the plan**, unless the design sets `default_deny=False`. Give each step the `Requirement`s it rests on.
 - **Rules, `when`s, the policy and the codec are sync.** An `async def` one loads, but at run its ref is `Unavailable` with `invalid-return`, or the plan `broken` for the policy. An `async def` observer is refused at entry with `EntryRefusal`.
-- **A handoff's text is the input's own.** An entry whose slot reads `t:state` or a source's `t:` ref carries what the user or a tool wrote; fence `handoff_text` as data in a user message, rather than placing it as instructions, unless every slot reads values your code settled. Load refuses a slot over an `identifier` field.
+- **A handoff's text is the input's own.** An entry whose slot reads `t:state` or a source's `t:` ref carries what the user or a tool wrote; so does a step's board-ref argument, which `handoff_text` and the transcript show with its value. Fence `handoff_text` as data in a user message, rather than placing it as instructions, unless every slot and argument reads values your code settled. Load refuses a slot over an `identifier` field, not an argument.
 - **A transcript's pending calls name your tools.** A step's tool is given as the design declares it, so declare the names your agent's tools have; a name a provider refuses, or `decide`, is a `ValueError`. A plan with a step that binds an earlier result has no pending calls: run it with `run_plan`. Leave ommat's bookkeeping, the source calls and decide, out of the history a later turn reads as `t:state`: `is_bookkeeping(message)` tells it, and `Agent(capabilities=[ProcessHistory(drop_earlier_bookkeeping)])` drops an earlier turn's. The pending calls are not bookkeeping: the agent ran them.
 - **A slot's origin is a ref**, with a field path through records, `t:state.sender.name`, but no list index; give each value its own ref.
 - **In async code, await `decide` and `replay`.** The `_sync` forms raise `RuntimeError` inside a running event loop, as in Jupyter.

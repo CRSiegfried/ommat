@@ -145,6 +145,12 @@ pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 
 `ommat.bindings.idia` and its `oracle_binding` follow idia while idia is 0.x: they may change in any minor release when idia changes, and the changelog will say so.
 
+`ommat[pydantic-ai]` adds the Pydantic AI renderer, `ommat.conversation.pydantic_ai`, outside the compatibility promise like the rest of `ommat.conversation`:
+
+```sh
+pip install "ommat[pydantic-ai] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
+```
+
 ## Where next
 
 - [Write your first design](docs/tutorials/write-a-design.md), the tutorial to start with.

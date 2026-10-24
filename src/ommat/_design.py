@@ -413,8 +413,8 @@ class ContextEntry:
 @dataclass(frozen=True, slots=True)
 class Context:
     """A design's context block: what a turn hands its next reader. ``entries`` in declared
-    order; ``plan``, ``steps`` and ``record`` switch on the plan's kind and text, its steps,
-    and the design and record hash."""
+    order; ``plan``, ``steps`` and ``record`` switch on the plan's kind, verdict, reply and
+    reason, its steps, and the design and record hash."""
 
     entries: Sequence[ContextEntry] = ()
     plan: bool = True

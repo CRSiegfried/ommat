@@ -316,3 +316,35 @@ def test_an_agent_sees_pairs_when_a_turn_ends_at_decide_s_return() -> None:
     shown = seen[-1]
     assert _paired(shown)
     assert [c.tool_name for c in calls(shown)] == ["ask-again", "mail-router", "lookup", "decide"]
+
+
+def test_a_marked_response_with_no_record_hash_does_not_become_the_latest() -> None:
+    messages = to_model_messages(view("unsure"))
+    foreign = ModelResponse(parts=[TextPart("x")], metadata={"ommat": "bookkeeping"})
+    assert drop_earlier_bookkeeping([*messages, foreign]) == [*messages, foreign]
+
+
+def test_a_marked_request_holding_a_prompt_is_not_bookkeeping() -> None:
+    returns_ = to_model_messages(view("unsure"))[1]
+    assert isinstance(returns_, ModelRequest)
+    mixed = replace(returns_, parts=[*returns_.parts, UserPromptPart("hi")])
+    assert is_bookkeeping(returns_)
+    assert not is_bookkeeping(mixed)
+
+
+@pytest.mark.parametrize(
+    ("where", "name", "message"),
+    [
+        ("source", "decide", "the name decide's call takes"),
+        ("source", "a/" + "b" * 63, "over 64 characters"),
+        ("tool", "decide", "the name decide's call takes"),
+    ],
+)
+def test_the_names_refused_are_the_chat_renderer_s(where: str, name: str, message: str) -> None:
+    v = json.loads(json.dumps(view("clear")))
+    if where == "source":
+        v["rounds"][0][0]["source"] = name
+    else:
+        v["pending"][0]["tool"] = name
+    with pytest.raises(ValueError, match=re.escape(message)):
+        to_model_messages(v)

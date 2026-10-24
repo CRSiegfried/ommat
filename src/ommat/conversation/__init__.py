@@ -24,7 +24,9 @@ def handoff_text(handoff: dict[str, Any] | None) -> str:
     """A ``handoff`` view as labelled lines, ``""`` for ``None`` or a view that gives none:
     ``Plan:``; ``Verdict:``, ``Reason:`` and ``Reply:`` where not null; ``Step <n>:`` with its
     tool and tagged arguments as JSON; each entry's text, or ``<ref>: <kind> (<cause code>)``
-    for a marker entry; ``Design:`` with its name, where there is one, and hash; ``Record:``."""
+    for a marker entry; ``Design:`` with its name, where there is one, and hash; ``Record:``.
+    Texts are written as they are, so a text holding a newline can read as a line of its own:
+    fence the whole as data where a slot or argument reads free text."""
     if handoff is None:
         return ""
     lines: list[str] = []
@@ -111,8 +113,13 @@ def drop_earlier_bookkeeping(messages: list[dict[str, Any]]) -> list[dict[str, A
     return [
         m
         for m in messages
-        if id(m) not in earlier and not (m.get("role") == "tool" and m.get("tool_call_id") in gone)
+        if id(m) not in earlier and not (m.get("role") == "tool" and _answers(m, gone))
     ]
+
+
+def _answers(message: dict[str, Any], gone: set[object]) -> bool:
+    call_id = message.get("tool_call_id")
+    return type(call_id) is str and call_id in gone
 
 
 def _call_id(call: object) -> object:

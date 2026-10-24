@@ -12,18 +12,26 @@ import pytest
 from ommat import (
     CallResult,
     Context,
+    ContextEntry,
     Plan,
     Policy,
     Record,
     Requirement,
     Source,
+    Text,
     decide_sync,
+    handoff,
     load,
     read_record,
     replay_sync,
     transcript,
 )
-from ommat.conversation import drop_earlier_bookkeeping, is_bookkeeping, to_chat_completions
+from ommat.conversation import (
+    drop_earlier_bookkeeping,
+    handoff_text,
+    is_bookkeeping,
+    to_chat_completions,
+)
 from transcript_turns import PATHS, SOURCES, STATE, YES, confirming, design, model, turn
 
 ID = re.compile(r"om_[0-9a-f]{24}_(c[1-9][0-9]*|d|s[1-9][0-9]*)")
@@ -320,11 +328,8 @@ def test_chat_completions_renders_every_path_and_ends_after_decide_with_nothing_
     if path == "clear":
         assert messages[-1]["role"] == "assistant"
     else:
-        assert messages[-1] == {
-            "role": "tool",
-            "tool_call_id": v["decide"]["id"],
-            "content": messages[-1]["content"],
-        }
+        assert messages[-1]["role"] == "tool"
+        assert messages[-1]["tool_call_id"] == v["decide"]["id"]
         assert results == [c["id"] for c in calls_made]
 
 
@@ -445,3 +450,76 @@ def test_chat_takes_empty_content_as_none_and_keeps_a_result_with_a_kept_call() 
     assert first[5] in kept
     assert first[6] in kept  # its result stays with it
     assert _chat_paired(kept)
+
+
+# ---------------------------------------------------------------------------------------------
+# Round-one review cases
+
+
+def _with_step_over(record: Record, ref: str) -> Record:
+    """The record with a step whose argument names ``ref``, rehashed, as no decide writes."""
+    from ledger_logs import rehashed
+
+    doc = json.loads(record.document)
+    plan = next(i for i in doc["log"] if i["item"] == "plan")
+    plan["steps"] = [{"tool": "archive", "arguments": {"order": {"ref": ref}}, "requirements": []}]
+    return read_record(json.dumps(rehashed(doc)).encode())
+
+
+def test_a_step_argument_with_no_value_in_the_log_raises_in_both_views() -> None:
+    edited = _with_step_over(turn("unsure").record, "d:sure")  # a marker, no value
+    with pytest.raises(ValueError, match="holds no value in the log"):
+        transcript(edited)
+    with pytest.raises(ValueError, match="holds no value in the log"):
+        handoff(edited)
+
+
+def test_the_flagged_ref_s_marker_wins_over_an_earlier_slot_s() -> None:
+    entry = ContextEntry(
+        "d:sure",
+        Text(
+            "{r} then {s}",
+            [
+                {"name": "r", "origin": {"ref": "d:route"}},
+                {"name": "s", "origin": {"ref": "d:sure"}},
+            ],
+        ),
+    )
+    v = transcript(turn("down", load(design(context=Context([entry])))).record)
+    assert v is not None
+    (got,) = v["decide"]["context"]
+    assert got["marker"]["cause"]["code"] == "need-unavailable"  # d:sure's, not d:route's
+
+
+def test_handoff_text_writes_an_unavailable_marker_as_recorded() -> None:
+    lines = handoff_text(handoff(turn("down").record)).splitlines()
+    assert "d:route: Unavailable (raised)" in lines
+
+
+def test_handoff_text_names_the_design_by_hash_alone_with_no_name() -> None:
+    record = turn("clear").record
+    view = handoff(record)
+    assert view is not None
+    view["design"]["name"] = None
+    assert f"Design: {record.design_hash}" in handoff_text(view).splitlines()
+
+
+@pytest.mark.parametrize("fmt", [1, 2, 3, 4])
+def test_a_record_before_format_5_hands_off_nothing(fmt: int) -> None:
+    data = (Path(__file__).parent / f"format_{fmt}" / "record.json").read_bytes()
+    assert handoff(read_record(data)) is None
+
+
+def test_chat_filters_ignore_odd_members() -> None:
+    odd: list[dict[str, Any]] = [
+        {"role": "assistant", "content": None, "tool_calls": "x"},
+        {"role": "assistant", "content": None, "tool_calls": []},
+        {"role": "tool", "tool_call_id": ["om_x"], "content": "{}"},
+    ]
+    assert not any(is_bookkeeping(m) for m in odd)
+    messages = [*to_chat_completions(view("down")), *odd, *to_chat_completions(view("unsure"))]
+    kept = drop_earlier_bookkeeping(messages)
+    assert kept[: len(odd)] == odd
+    plain = [{"role": "user", "content": "hi"}]
+    assert drop_earlier_bookkeeping(plain) == plain
+    assert drop_earlier_bookkeeping(plain) is not plain

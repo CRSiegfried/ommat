@@ -15,7 +15,7 @@ The `idia` extra's development source is a checkout of idia beside this one, at 
 
 ```sh
 git clone https://github.com/CRSiegfried/idia.git ../idia
-uv sync
+uv sync --all-extras
 uv run ruff check
 uv run ruff format --check
 uv run pyright

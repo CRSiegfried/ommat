@@ -26,8 +26,8 @@ The two overlap: the handoff's plan and entries are also in the transcript's dec
 For an LLM that carries on the conversation, give it the transcript: it sees the calls as its
 own tool calls, and the steps it should run as calls it made. Use the handoff when the next
 reader takes instructions rather than a tool history, or beside the transcript as short
-instructions: declare the block with `plan=False` and `record=False`, so it adds only your
-entries' words to what the transcript already holds.
+instructions: declare the block with `plan=False`, `steps=False` and `record=False`, so it adds
+only your entries' words to what the transcript already holds.
 
 ## Declare the context block
 
@@ -92,7 +92,9 @@ the customer clearly asks for a refund:
 Place the text where your framework takes per-run guidance: Pydantic AI's `instructions`, or a
 system or developer message. An entry's text is the input's own: here the order comes from the
 caller's state, and a slot over the customer's message would put their words in the handoff as
-written. When a slot reads free text, fence the text as data in a user message instead.
+written. A step's argument shows its value too, so a step that passes the customer's message or
+email shows it, and load's `identifier` refusal covers slots alone. When a slot or an argument
+reads free text, fence the text as data in a user message instead.
 
 The plan's steps appear only when the guard passed it, each argument tagged as a literal, a
 board ref with its value, or a binding to an earlier step's result. `Verdict:` gives the guard's
@@ -122,10 +124,12 @@ is its name with each `/` as `-`. A step's tool name is its name in the design, 
 the name of your tool: the renderers raise `ValueError` for one a provider would refuse.
 
 The last message calls the plan's steps, and your code runs them and appends their results. A
-tool run this way gets no idempotency key; when a repeated call would do harm, run the plan with
-`ommat.helpers.run_plan`, which passes each step its key, and append its results instead. A
-plan with a step that binds an earlier step's result leaves no pending calls, so run it with
-`run_plan` too.
+tool run this way gets no idempotency key. When a repeated call would do harm, run the plan with
+`ommat.helpers.run_plan(decision, tools)` instead: it takes the `Decision` and a mapping from
+each tool name to an async callable that takes the step's arguments and an `idempotency_key`
+keyword, and returns `{"results": [[n, result], ...], "raised": ...}`. Answer each pending call
+`..._s<n>` with step n's result. A plan with a step that binds an earlier step's result leaves
+no pending calls, so run it with `run_plan` too and tell the model what ran in your own message.
 
 When the plan is `clarify` or `inform`, the turn ends in decide's result, and the reply is the
 design's own words. Send it to the user and append it as the assistant's message, so the next
@@ -144,8 +148,9 @@ its own tools before it answers:
 ```
 
 Run it with `asyncio.run(agent.run(...))` rather than `agent.run_sync`, which leaves an event
-loop open. With pydantic-ai-slim 2.49, pin `anthropic<2` beside `pydantic-ai-slim[anthropic]`:
-a fresh install takes anthropic 2.x, whose first request fails.
+loop open. With pydantic-ai-slim 2.49, whose `anthropic` extra sets no upper bound, a fresh
+install took anthropic 2.3.0 and its first request failed; pin `anthropic<2` beside
+`pydantic-ai-slim[anthropic]` there (1.8.0 worked).
 
 The source calls and decide are ommat's bookkeeping, and the messages that hold them are marked
 so in their `metadata`, which Pydantic AI keeps and never sends to a model. The pending calls
