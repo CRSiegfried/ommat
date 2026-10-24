@@ -1,6 +1,6 @@
 """The how-to's example runs as the guide says: docs/how-to/hand_off_context. Each Python
 block in the guide is a passage of one of the example's files, and the driver prints the
-guide's output."""
+guide's output, and the agent example runs its pending call where Pydantic AI is installed."""
 
 import re
 from pathlib import Path
@@ -39,3 +39,14 @@ def test_the_driver_prints_the_guide_s_output(capsys: pytest.CaptureFixture[str]
     handoff_run.main()
     (shown,) = _blocks("text")
     assert capsys.readouterr().out == shown
+
+
+def test_the_agent_runs_the_pending_refund_with_its_own_tool(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("pydantic_ai")
+    monkeypatch.setenv("PYDANTIC_AI_NO_BANNER", "1")
+    import agent_run
+
+    agent_run.main()
+    assert capsys.readouterr().out == "refunding A-1001\nYour refund is on its way.\n"

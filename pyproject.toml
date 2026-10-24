@@ -36,9 +36,8 @@ Changelog = "https://github.com/CRSiegfried/ommat/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 # The binding to idia, ommat.bindings.idia.
 idia = ["idia>=0.1,<0.2"]
-# The conversation renderers, ommat.conversation: reserved, so a renderer that takes a
-# provider's library adds its dependency here.
-conversation = []
+# The Pydantic AI renderer, ommat.conversation.pydantic_ai.
+pydantic-ai = ["pydantic-ai-slim>=2.49"]
 
 [tool.uv.sources]
 # Development only: idia from the sibling checkout. uv keeps this out of the built metadata.

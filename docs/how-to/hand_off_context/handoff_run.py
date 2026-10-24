@@ -1,10 +1,10 @@
 """The how-to's driver: decide two turns of the support design with a stand-in binding, and
-print what each hands the next model."""
+print what each hands the next model and the turn as Chat Completions messages."""
 
 from collections.abc import Awaitable, Callable
 
-from ommat import CallResult, SourceCall, decide_sync, handoff, load
-from ommat.conversation import to_messages, to_tool_calls
+from ommat import CallResult, SourceCall, decide_sync, handoff, load, transcript
+from ommat.conversation import handoff_text, to_chat_completions
 from support_design import DESIGN
 
 Binding = Callable[..., Awaitable[CallResult]]
@@ -28,15 +28,17 @@ def answering(yes: float) -> Binding:
 def main() -> None:
     loaded = load(DESIGN)
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
-    (message,) = to_messages(handoff(decision.record), role="user")
-    print(message["content"])
-    for call in to_tool_calls(decision):
-        print(call["function"])
-        print(call["id"] == f"{decision.record.record_hash}:1")
+    print(handoff_text(handoff(decision.record)))
+
+    for message in to_chat_completions(transcript(decision.record)):
+        if message["role"] == "assistant":
+            for call in message["tool_calls"]:
+                print("call", call["id"], call["function"]["name"], call["function"]["arguments"])
+        else:
+            print("result", message["tool_call_id"], len(message["content"]), "bytes")
 
     unsure = decide_sync(loaded, STATE, {"default": answering(0.6)})
-    (message,) = to_messages(handoff(unsure.record), role="user")
-    print(message["content"])
+    print(handoff_text(handoff(unsure.record)))
 
 
 if __name__ == "__main__":

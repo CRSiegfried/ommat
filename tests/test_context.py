@@ -46,9 +46,9 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._canonical import decode, encode
-from ommat.conversation import to_messages, to_tool_calls
+from ommat.conversation import handoff_text
 from ommat.evaluation._diff import _context_alone
-from ommat.helpers import pick_with_margin, run_plan
+from ommat.helpers import pick_with_margin
 from scripted import Scripted, returns
 
 STATE_T = t.record(
@@ -226,7 +226,13 @@ def test_a_broken_entry_writes_the_block_with_no_entries() -> None:
     view = handoff(record)
     assert view is not None
     assert view["context"] == []
-    assert view["plan"] == {"kind": "broken", "reply": None, "reason": None, "steps": []}
+    assert view["plan"] == {
+        "kind": "broken",
+        "reply": None,
+        "reason": None,
+        "verdict": "passed",
+        "steps": [],
+    }
 
 
 def test_the_context_is_rendered_before_the_policy_runs() -> None:
@@ -254,6 +260,7 @@ def test_the_handoff_holds_the_design_the_plan_its_tagged_steps_and_the_entries(
         "kind": "execute",
         "reply": None,
         "reason": "the customer asked for a refund",
+        "verdict": "passed",
         "steps": [
             {
                 "tool": "refund_order",
@@ -267,7 +274,7 @@ def test_the_handoff_holds_the_design_the_plan_its_tagged_steps_and_the_entries(
     }
     assert view["context"] == plan_item(record)["context"]["entries"]
     text = json.dumps(view)
-    for absent in ("requirement", "verdict", "probabilit", "0.9", "acct-991", "helpers"):
+    for absent in ("requirement", "failures", "probabilit", "0.9", "acct-991", "helpers"):
         assert absent not in text
 
 
@@ -279,7 +286,7 @@ def test_the_handoff_holds_the_design_the_plan_its_tagged_steps_and_the_entries(
             True,
             True,
             ["design", "record_hash", "plan", "context"],
-            {"kind", "reply", "reason", "steps"},
+            {"kind", "reply", "reason", "verdict", "steps"},
         ),
         (False, True, True, ["design", "record_hash", "plan", "context"], {"steps"}),
         (
@@ -287,9 +294,9 @@ def test_the_handoff_holds_the_design_the_plan_its_tagged_steps_and_the_entries(
             False,
             True,
             ["design", "record_hash", "plan", "context"],
-            {"kind", "reply", "reason"},
+            {"kind", "reply", "reason", "verdict"},
         ),
-        (True, True, False, ["plan", "context"], {"kind", "reply", "reason", "steps"}),
+        (True, True, False, ["plan", "context"], {"kind", "reply", "reason", "verdict", "steps"}),
         (False, False, True, ["design", "record_hash", "context"], None),
         (False, False, False, ["context"], None),
     ],
@@ -314,6 +321,7 @@ def test_a_non_execute_plan_gives_no_steps_as_an_empty_list() -> None:
         "kind": "inform",
         "reply": "No refund was asked for.",
         "reason": None,
+        "verdict": "passed",
         "steps": [],
     }
 
@@ -326,7 +334,8 @@ def test_a_refused_verdict_keeps_the_kind_and_drops_the_steps() -> None:
     assert view is not None
     assert view["plan"]["kind"] == "execute"
     assert "steps" not in view["plan"]
-    assert "refused" not in json.dumps(view)
+    assert view["plan"]["verdict"] == "refused"
+    assert "failures" not in json.dumps(view)
     only_steps = run(
         under=loaded(
             requirements=[Requirement("d:status", "open")], context=Context(ENTRIES, plan=False)
@@ -590,12 +599,11 @@ def test_check_10_tests_the_block_s_form(context: Any, message: str) -> None:
 # The conversation renderers
 
 
-def test_to_messages_renders_one_message_in_the_view_s_order() -> None:
+def test_handoff_text_gives_the_view_s_lines_in_order() -> None:
     record = run().record
-    (message,) = to_messages(handoff(record), role="user")
-    assert message["role"] == "user"
-    assert message["content"].splitlines() == [
+    assert handoff_text(handoff(record)).splitlines() == [
         "Plan: execute",
+        "Verdict: passed",
         "Reason: the customer asked for a refund",
         'Step 1: refund_order {"note":{"value":"asked"},'
         '"order":{"ref":"t:state.order.id","value":"42"}}',
@@ -603,54 +611,38 @@ def test_to_messages_renders_one_message_in_the_view_s_order() -> None:
         "Refund requested: yes",
         "Order 42 is delivered",
         "Status delivered at bar 0.6",
-        f"Decided by design refunds ({record.design_hash}); record {record.record_hash}",
+        f"Design: refunds {record.design_hash}",
+        f"Record: {record.record_hash}",
     ]
 
 
-def test_to_messages_words_a_marker_by_its_ref_kind_and_cause() -> None:
-    (message,) = to_messages(handoff(run(UNSURE).record), role="user")
-    assert "d:refund: not settled (unsure: abstained)" in message["content"].splitlines()
+def test_handoff_text_gives_a_marker_by_its_ref_kind_and_cause() -> None:
+    assert "d:refund: unsure (abstained)" in handoff_text(handoff(run(UNSURE).record)).splitlines()
 
 
-def test_to_messages_takes_a_role_with_no_default_and_none_for_none() -> None:
-    with pytest.raises(TypeError):
-        to_messages(handoff(run().record))  # type: ignore[call-arg]
-    assert to_messages(None, role="system") == []
-
-
-def test_to_tool_calls_gives_the_steps_before_the_first_binding_keyed_as_run_plan_keys_them() -> (
-    None
-):
-    decision = run()
-    calls = to_tool_calls(decision)
-    assert calls == [
-        {
-            "id": f"{decision.record.record_hash}:1",
-            "type": "function",
-            "function": {"name": "refund_order", "arguments": '{"note":"asked","order":"42"}'},
-        }
+def test_handoff_text_gives_a_refused_verdict_by_its_kind_and_no_steps() -> None:
+    record = run(under=loaded(requirements=[Requirement("d:status", "open")])).record
+    lines = handoff_text(handoff(record)).splitlines()
+    assert lines[:3] == [
+        "Plan: execute",
+        "Verdict: refused",
+        "Reason: the customer asked for a refund",
     ]
-    keys: list[str] = []
-
-    async def refund_order(**kw: Any) -> Any:
-        keys.append(kw["idempotency_key"])
-        return {"receipt": "r-1"}
-
-    async def notify(**kw: Any) -> Any:
-        keys.append(kw["idempotency_key"])
-
-    asyncio.run(run_plan(decision, {"refund_order": refund_order, "notify": notify}))
-    assert keys[0] == calls[0]["id"]
+    assert not any(line.startswith("Step") for line in lines)
 
 
-def test_to_tool_calls_is_empty_for_another_plan_or_a_refused_verdict() -> None:
-    assert to_tool_calls(run(NO)) == []
-    assert to_tool_calls(run(under=loaded(requirements=[Requirement("d:status", "open")]))) == []
+def test_handoff_text_gives_no_verdict_line_for_a_log_with_no_verdict() -> None:
+    view: dict[str, Any] = {
+        "plan": {"kind": "execute", "reply": None, "reason": None, "verdict": None},
+        "context": [],
+    }
+    assert handoff_text(view) == "Plan: execute"
 
 
-def test_to_tool_calls_refuses_what_is_not_a_decision() -> None:
-    with pytest.raises(ValueError, match="takes a Decision"):
-        to_tool_calls(run().record)  # type: ignore[arg-type]
+def test_handoff_text_is_empty_for_none_or_a_view_that_gives_no_line() -> None:
+    assert handoff_text(None) == ""
+    block = Context([], plan=False, steps=False, record=False)
+    assert handoff_text(handoff(run(under=loaded(context=block)).record)) == ""
 
 
 # ---------------------------------------------------------------------------------------------

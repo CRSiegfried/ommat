@@ -4,7 +4,8 @@ escalation target or a verifier.
 ``escalation(record)`` returns the escalation's four members, or ``None`` for a record that
 holds none, reading only the ``plan`` and ``verdict`` items and the record hash.
 ``handoff(record)`` returns what the turn hands its next reader under the design's context
-block, or ``None`` with no block or no ``plan`` item. ``redact(record,
+block, or ``None`` with no block or no ``plan`` item. ``transcript(record)`` returns every
+source call and the turn's conclusion, unworded, or ``None`` with no ``plan`` item. ``redact(record,
 root_key)`` returns the redacted view's document as canonical bytes: the record's ``log`` and
 ``unhashed`` with a keyed digest where each ``content`` or ``identifier`` value was,
 ``redacted``, the record hash its key came from, and from format 3 on the document's ``hash``,
@@ -19,6 +20,7 @@ its JSON form's default. Each view raises ``ValueError`` before reading anything
 here.
 """
 
+from copy import deepcopy
 from typing import Any, cast
 
 from ommat._canonical import encode, keyed_digest, turn_key
@@ -79,9 +81,9 @@ def escalation(record: Record) -> dict[str, Any] | None:
 
 def handoff(record: Record) -> dict[str, Any] | None:
     """What a closed record hands its next reader: ``design`` and ``record_hash`` under the
-    ``record`` switch, ``plan`` with its kind and text under ``plan`` and its steps under
-    ``steps`` once the verdict passed, and ``context``, the entries as recorded; ``None`` when
-    the log has no ``plan`` item or the item holds no block."""
+    ``record`` switch, ``plan`` with its kind, text and verdict kind under ``plan`` and its
+    steps under ``steps`` once the verdict passed, and ``context``, the entries as recorded;
+    ``None`` when the log has no ``plan`` item or the item holds no block."""
     closed = _closed(record)
     log = closed.log
     plan = next((item for item in log if item["item"] == "plan"), None)
@@ -96,7 +98,8 @@ def handoff(record: Record) -> dict[str, Any] | None:
         out["record_hash"] = closed.record_hash
     shown: dict[str, Any] = {}
     if block["plan"]:
-        shown.update(kind=plan["kind"], reply=plan["reply"], reason=plan["reason"])
+        kind = None if verdict is None else verdict["kind"]
+        shown.update(kind=plan["kind"], reply=plan["reply"], reason=plan["reason"], verdict=kind)
     if block["steps"] and passed:
         entries = board_entries(log)
         shown["steps"] = [_handed_step(step, entries, n) for n, step in enumerate(plan["steps"], 1)]
@@ -125,6 +128,101 @@ def _handed_step(step: dict[str, Any], entries: dict[str, object], n: int) -> di
         else:
             arguments[name] = {"step": origin["step"], "path": origin["path"]}
     return {"tool": step["tool"], "arguments": arguments}
+
+
+# ---------------------------------------------------------------------------------------------
+# The transcript
+
+
+def transcript(record: Record) -> dict[str, Any] | None:
+    """Every source call of a closed record and its conclusion, unworded: ``record_hash``,
+    ``design``, ``rounds`` of calls, ``decide`` and the ``pending`` steps; ``None`` when the log
+    has no ``plan`` item. Each value and marker is tagged, and each id is ``om_``, the record
+    hash's first 24 hex digits and ``_c<n>``, ``_d`` or ``_s<n>``. ``pending`` holds a passed
+    ``execute`` plan's steps with their resolved arguments, and is empty for a plan with a
+    binding, which ``run_plan`` runs."""
+    closed = _closed(record)
+    log = closed.log
+    plan = next((item for item in log if item["item"] == "plan"), None)
+    if plan is None:
+        return None
+    verdict = next((item for item in log if item["item"] == "verdict"), None)
+    stem = "om_" + closed.record_hash.removeprefix("sha256:")[:24]
+    settings = next(item for item in log if item["item"] == "settings")
+    providers = cast("dict[str, str]", settings["providers"])
+    block = cast("dict[str, Any] | None", plan.get("context"))
+    written: dict[int, dict[str, Any]] = {}
+    for item in log:
+        if item["item"] == "entry" and item.get("call") is not None:
+            written.setdefault(item["call"], {})[item["ref"]] = _tagged(item)
+    rounds: list[list[dict[str, Any]]] = []
+    held: dict[int, list[dict[str, Any]]] = {}
+    n = 0
+    for index, item in enumerate(log):
+        if item["item"] != "call":
+            continue
+        answers = written.get(index, {})
+        for source in cast("list[str]", item["sources"]):
+            n += 1
+            asks = [r for r, provider in providers.items() if provider == source and r in answers]
+            call = {
+                "id": f"{stem}_c{n}",
+                "source": source,
+                "asks": asks,
+                "outcome": item["outcome"],
+                "answers": {ref: answers[ref] for ref in asks},
+            }
+            if item["round"] not in held:
+                held[item["round"]] = []
+                rounds.append(held[item["round"]])
+            held[item["round"]].append(call)
+    entries = board_entries(log)
+    steps = cast("list[dict[str, Any]]", plan["steps"])
+    board = {
+        entry["ref"]: _tagged(entry)
+        for entry in log
+        if entry["item"] == "entry" and entry["ref"].startswith("d:")
+    }
+    decided: dict[str, Any] = {
+        "id": f"{stem}_d",
+        "board": board,
+        "plan": {
+            "kind": plan["kind"],
+            "reason": plan["reason"],
+            "reply": plan["reply"],
+            "cause": plan["cause"],
+            "steps": [
+                {**_handed_step(step, entries, i), "requirements": step["requirements"]}
+                for i, step in enumerate(steps, 1)
+            ],
+        },
+        "verdict": None
+        if verdict is None
+        else {"kind": verdict["kind"], "failures": verdict["failures"]},
+    }
+    if block is not None:
+        decided["context"] = block["entries"]
+    pending: list[dict[str, Any]] = []
+    passed = verdict is not None and verdict["kind"] == VerdictKind.passed
+    bound = any("step" in origin for step in steps for origin in step["arguments"].values())
+    if passed and plan["kind"] == PlanKind.execute and not bound:  # a binding runs by run_plan
+        for i, step in enumerate(decided["plan"]["steps"], 1):
+            arguments = {name: deepcopy(tag["value"]) for name, tag in step["arguments"].items()}
+            pending.append({"id": f"{stem}_s{i}", "tool": step["tool"], "arguments": arguments})
+    return {
+        "record_hash": closed.record_hash,
+        "design": {"name": None if block is None else block["design"], "hash": log[0]["hash"]},
+        "rounds": rounds,
+        "decide": decided,
+        "pending": pending,
+    }
+
+
+def _tagged(entry: dict[str, Any]) -> dict[str, Any]:
+    """An entry's value as ``{"value"}`` or its marker as ``{"marker"}``, as recorded."""
+    if "value" in entry:
+        return {"value": entry["value"]}
+    return {"marker": entry["marker"]}
 
 
 def _verdict(item: dict[str, Any]) -> Verdict:

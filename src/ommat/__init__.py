@@ -52,7 +52,7 @@ from ommat._markers import (
 from ommat._plan import Binding, Origin, Plan, Step
 from ommat._read_view import ReadView
 from ommat._replay import FindingKind, replay, replay_sync
-from ommat._views import escalation, handoff, redact
+from ommat._views import escalation, handoff, redact, transcript
 
 __version__ = _version("ommat")
 
@@ -117,4 +117,5 @@ __all__ = [
     "redact",
     "replay",
     "replay_sync",
+    "transcript",
 ]

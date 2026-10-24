@@ -77,11 +77,11 @@ kind = Question(
 
 ## Handing off to the next model
 
-A design's context block says what a turn hands the next model in a conversation; `handoff(record)` reads it back, and `ommat.conversation`, outside the compatibility promise, renders it:
+A design's context block says what a turn hands the next model in a conversation, and `handoff(record)` reads it back; `transcript(record)` gives every call of the turn and its conclusion. `ommat.conversation`, outside the compatibility promise, renders both and words nothing:
 
 ```python
-from ommat import Context, ContextEntry, Text, handoff
-from ommat.conversation import to_messages, to_tool_calls
+from ommat import Context, ContextEntry, Text, handoff, transcript
+from ommat.conversation import handoff_text, to_chat_completions
 
 # Each entry flags t:state or a d: ref and words it; one slot names the flagged ref.
 context = Context(
@@ -91,13 +91,17 @@ context = Context(
             Text("Refund requested: {r}", [{"name": "r", "origin": {"ref": "d:refund"}}]),
         )
     ],
-    plan=True,  # the plan's kind, reply and reason
+    plan=True,  # the plan's kind, verdict, reply and reason
     steps=True,  # the steps, only under a passed verdict
     record=True,  # the design and the record hash
 )
 # Design(..., context=context); after decide:
-#   messages = to_messages(handoff(decision.record), role="user")
-#   calls = to_tool_calls(decision)  # stops before a step that binds an earlier result
+#   instructions = handoff_text(handoff(decision.record))
+#   messages = to_chat_completions(transcript(decision.record))  # after your user message
+# With ommat[pydantic-ai]:
+#   from ommat.conversation.pydantic_ai import to_model_messages
+#   history += to_model_messages(transcript(decision.record), model_name="ommat")
+#   agent.run(None, message_history=history)  # runs the pending calls with the agent's tools
 ```
 
 See the how-to [Hand off what a turn settled](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/how-to/hand-off-context.md).
@@ -125,7 +129,8 @@ See the how-to [Hand off what a turn settled](https://github.com/CRSiegfried/omm
 - **Declare every read.** A rule that reads a ref outside its `reads` makes its `d:` ref `Unavailable` (`undeclared-read`); the policy's makes the plan `broken`. Catching it does not help.
 - **A step with no requirement of its own refuses the plan**, unless the design sets `default_deny=False`. Give each step the `Requirement`s it rests on.
 - **Rules, `when`s, the policy and the codec are sync.** An `async def` one loads, but at run its ref is `Unavailable` with `invalid-return`, or the plan `broken` for the policy. An `async def` observer is refused at entry with `EntryRefusal`.
-- **A handoff's text is the input's own.** An entry whose slot reads `t:state` or a source's `t:` ref carries what the user or a tool wrote; pass `role="user"`, or fence it as data, unless every slot reads values your code settled. Load refuses a slot over an `identifier` field.
+- **A handoff's text is the input's own.** An entry whose slot reads `t:state` or a source's `t:` ref carries what the user or a tool wrote; fence `handoff_text` as data in a user message, rather than placing it as instructions, unless every slot reads values your code settled. Load refuses a slot over an `identifier` field.
+- **A transcript's pending calls name your tools.** A step's tool is given as the design declares it, so declare the names your agent's tools have; a name a provider refuses, or `decide`, is a `ValueError`. A plan with a step that binds an earlier result has no pending calls: run it with `run_plan`. Stamp Pydantic AI messages with `model_name` and leave them out of the history a later turn reads as `t:state`.
 - **A slot's origin is a ref**, with a field path through records, `t:state.sender.name`, but no list index; give each value its own ref.
 - **In async code, await `decide` and `replay`.** The `_sync` forms raise `RuntimeError` inside a running event loop, as in Jupyter.
 - **Don't change a value you read** in a rule, a `when` or the policy; see the [spec's Decide section](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#decide).

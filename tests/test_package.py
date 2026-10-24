@@ -12,10 +12,11 @@ def test_version_matches_metadata() -> None:
     assert ommat.__version__ == version("ommat")
 
 
-def test_core_imports_only_the_standard_library() -> None:
+@pytest.mark.parametrize("module", ["ommat", "ommat.conversation"])
+def test_core_imports_only_the_standard_library(module: str) -> None:
     # A fresh interpreter, so modules loaded by pytest or plugins don't count.
     probe = (
-        "import sys; before = set(sys.modules); import ommat; "
+        f"import sys; before = set(sys.modules); import {module}; "
         "names = {m.partition('.')[0] for m in set(sys.modules) - before}; "
         "print('\\n'.join(sorted(names - set(sys.stdlib_module_names) - {'ommat'})))"
     )
@@ -30,6 +31,7 @@ PUBLIC = {
     "Context",
     "ContextEntry",
     "handoff",
+    "transcript",
     "Design",
     "DesignFailure",
     "Group",
@@ -142,7 +144,10 @@ def test_import_ommat_imports_no_binding_module() -> None:
 
 
 def test_import_ommat_imports_no_conversation_module() -> None:
-    probe = "import sys, ommat; print(sorted(m for m in sys.modules if m == 'ommat.conversation'))"
+    probe = (
+        "import sys, ommat; "
+        "print(sorted(m for m in sys.modules if m.startswith('ommat.conversation')))"
+    )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
@@ -153,7 +158,22 @@ def test_ommat_conversation_exports_exactly_its_renderers() -> None:
     import ommat.conversation
 
     assert "conversation" not in ommat.__all__
-    assert ommat.conversation.__all__ == ["to_messages", "to_tool_calls"]
+    assert ommat.conversation.__all__ == ["handoff_text", "to_chat_completions"]
+
+
+def test_ommat_conversation_pydantic_ai_exports_exactly_its_renderer() -> None:
+    pytest.importorskip("pydantic_ai")
+    import ommat.conversation.pydantic_ai
+
+    assert ommat.conversation.pydantic_ai.__all__ == ["to_model_messages"]
+
+
+def test_the_pydantic_ai_extra_names_its_floor_and_the_conversation_extra_is_gone() -> None:
+    from importlib.metadata import metadata
+
+    requires = metadata("ommat").get_all("Requires-Dist") or []
+    assert "pydantic-ai-slim>=2.49; extra == 'pydantic-ai'" in requires
+    assert "conversation" not in (metadata("ommat").get_all("Provides-Extra") or [])
 
 
 EVALUATION = {"EvaluationRefusal", "RefusalReason", "use_answers", "use_answers_sync"}
