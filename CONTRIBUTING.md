@@ -30,7 +30,6 @@ CI runs the same checks on Python 3.11–3.14 on Linux, macOS and Windows. On pu
 - **The spec is normative.** A change that alters behavior the spec describes changes the spec in the same PR, with tests.
 - **The public API is what `ommat.__all__` lists, and the `__all__` of `ommat.types`, `ommat.helpers`, `ommat.evaluation` and `ommat.bindings`.** Modules and names starting with an underscore are internal. Removing or changing a public name needs a deprecation first: one minor release with a `DeprecationWarning`. The conformance suite, `ommat.bindings.conformance`, and the shipped bindings, such as `ommat.bindings.idia` and its `oracle_binding`, are outside it: a shipped binding follows its provider library while that library is 0.x, so it may change in any minor release when the library changes, and the changelog says so.
 - **Record user-visible changes** under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).
-- **Record significant design decisions** as an ADR in [docs/adr/](docs/adr/).
 
 ## Conduct
 
