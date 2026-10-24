@@ -19,6 +19,8 @@ from typing import Any, NamedTuple, cast
 from ommat._answer import AnswerKind, ValueType
 from ommat._canonical import decode, encode
 from ommat._design import (
+    Context,
+    ContextEntry,
     Design,
     DesignFailure,
     Group,
@@ -196,6 +198,39 @@ class _Form:
             groups=groups,
             classes=self.classes(d.classes),
             name=self.string(d.name, "the design's name", ()),
+            context=self.context(d.context),
+        )
+
+    def context(self, c: object) -> Context | None:
+        """The context block: ``None``, or a ``Context`` whose entries are each a
+        ``ContextEntry`` of a string ref and a ``Text``, and whose switches are booleans; an
+        entry of another form is dropped."""
+        if c is None:
+            return None
+        where = "the context block"
+        if not isinstance(c, Context):
+            self.fail((), f"{where} is not a Context")
+            return None
+        entries: list[ContextEntry] = []
+        if isinstance(c.entries, str | bytes | bytearray) or not isinstance(c.entries, Sequence):
+            self.fail((), f"{where}'s entries are not a list")
+        else:
+            for entry in cast("Sequence[object]", c.entries):
+                if not isinstance(entry, ContextEntry):
+                    self.fail((), f"{where} holds an entry that is not a ContextEntry")
+                    continue
+                ref = self.string(entry.ref, f"{where}'s entry ref", (), optional=False)
+                if ref is None:
+                    continue
+                shown = f"the context entry for {quote(ref)}"
+                text = self.text(entry.text, f"{shown}'s text", (ref,))
+                if text is not None:
+                    entries.append(ContextEntry(ref, text))
+        return Context(
+            entries,
+            plan=self.boolean(c.plan, True, f"{where}'s plan switch", ()),
+            steps=self.boolean(c.steps, True, f"{where}'s steps switch", ()),
+            record=self.boolean(c.record, True, f"{where}'s record switch", ()),
         )
 
     def members(

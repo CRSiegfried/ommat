@@ -24,13 +24,13 @@ import enum
 from typing import Any, cast
 
 from ommat._canonical import decode, encode
-from ommat._decide import EntryRefusal, _bound, _callable_or_none, _turn, run_settings
+from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings
 from ommat._design import LoadedDesign
 from ommat._fixture import FixtureBinding, RecordedCalls
 from ommat._ledger import _ITEM_DEPTH, Observer, Record
 from ommat._refs import code_point_sorted
 from ommat._typed import decoded
-from ommat._values import type_name
+from ommat._values import CONTEXT_FORMAT, type_name
 from ommat.helpers import HELPERS
 
 _STATE = "t:state"
@@ -66,7 +66,7 @@ async def replay(
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     if type(record) is not Record:
         raise EntryRefusal(f"record is a {type_name(record)}, not exactly a Record")
-    _callable_or_none(observer, "observer")
+    observer_or_none(observer)
     log = record.log  # read once: every read decodes afresh
     if not any(item["item"] == "verdict" for item in log):
         return None, [{"kind": _K.unfinished}]
@@ -158,7 +158,10 @@ def _findings(
     found += _entry_findings(log, rerun, loaded)
     for kind in (_K.plan, _K.verdict):
         mine, theirs = _first(log, kind.value), _first(rerun, kind.value)
-        if _differ(mine, theirs):
+        compared = mine
+        if kind is _K.plan and mine is not None and design["format"] < CONTEXT_FORMAT:
+            compared = {**mine, "context": None}  # a record before format 5 holds no block
+        if _differ(compared, theirs):
             found.append({"kind": kind, "recorded": mine, "replayed": theirs})
     return found
 

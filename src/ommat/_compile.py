@@ -13,7 +13,8 @@ as ``1``.
 
 This engine has a function policy only: a policy table and plan declarations are
 refused at load, so every ``plan`` item holds ``derivation`` and none holds ``rows`` or
-``slots``. Compile writes no board entry.
+``slots``. Compile writes no board entry. It renders the design's context block over the board
+interpret left, before it calls the policy, into every ``plan`` item it appends.
 """
 
 from collections.abc import Callable, Mapping
@@ -22,10 +23,11 @@ from typing import Any, cast
 from ommat._component import at, call, exception_record, names_read
 from ommat._design import LoadedDesign, Policy, Requirement
 from ommat._guard import Verdict, guard, verdict_item
+from ommat._interpret import _marker_document, _render
 from ommat._ledger import Ledger
 from ommat._markers import Cause, CauseCode, PlanKind, Undetermined
 from ommat._plan import Binding, Origin, Plan, Step, engine_plan
-from ommat._read_view import ComponentKind, ReadView, RequireStopped, Role, UndeclaredRead
+from ommat._read_view import ComponentKind, ReadView, RequireStopped, Role, UndeclaredRead, walk
 from ommat._refs import is_field_path, parse_ref
 from ommat._types import hold_failure
 from ommat._values import domain_error, string_data
@@ -41,6 +43,7 @@ def compile_turn(
     """Run compile over the live board interpret left, every ref on it, and
     return the plan and the verdict, both appended."""
     policy = cast(Policy, loaded._design.policy)  # load refuses the policy table
+    context = context_member(loaded, board)  # before the policy runs
     leaves = {path: loaded._leaf_value(path) for path in policy.params}
     view = ReadView(Role(ComponentKind.policy, _POLICY), policy.reads, policy.params, board, leaves)
     called = call(loaded._callables[_POLICY], view)
@@ -64,7 +67,7 @@ def compile_turn(
             plan = cast(Plan, called.returned)
         else:
             plan = engine_plan(PlanKind.broken, Cause(_C.invalid_return, refs))
-    item = plan_item(plan, called.derivation)
+    item = plan_item(plan, called.derivation, context)
     index = ledger.append(item)
     if called.text is not None:  # whatever the outcome, a stop's included
         ledger.write_unhashed("exceptions", exception_record(called.text), index)
@@ -232,9 +235,55 @@ def _origin(origin: Origin | Binding) -> dict[str, Any]:
     return {"literal": _plain(origin.literal)}
 
 
-def plan_item(plan: Plan, derivation: list[dict[str, Any]] | None) -> dict[str, Any]:
+def context_member(
+    loaded: LoadedDesign, board: Mapping[str, object] | None
+) -> dict[str, Any] | None:
+    """The ``plan`` item's ``context``: null with no block; else the design's name, the
+    switches as declared and each entry rendered over ``board``, or no entries at a broken
+    entry, where ``board`` is ``None``."""
+    block = loaded._context
+    if block is None:
+        return None
+    entries = [] if board is None else [_entry(loaded, board, e) for e in block["entries"]]
+    return {
+        "design": loaded._design.name,
+        "entries": entries,
+        "plan": block["plan"],
+        "steps": block["steps"],
+        "record": block["record"],
+    }
+
+
+def _entry(
+    loaded: LoadedDesign, board: Mapping[str, object], entry: dict[str, Any]
+) -> dict[str, Any]:
+    """One context entry: its text rendered by the closed rule, or, when a board-ref slot
+    reads a marker, no text and that marker, the flagged ref's first."""
+    ref, text = entry["ref"], entry["text"]
+    values: dict[str, object] = {}
+    markers: list[tuple[str, Undetermined]] = []
+    for slot in text["slots"]:
+        tag, origin = next(iter(slot["origin"].items()))
+        if tag == "param":
+            values[slot["name"]] = loaded._leaf_value(origin)
+            continue
+        parsed = parse_ref(origin)
+        value = walk(board[f"{parsed.level}:{parsed.name}"], parsed.fields, origin)
+        if isinstance(value, Undetermined):
+            markers.append((origin, value))
+        values[slot["name"]] = value
+    if markers:
+        flagged = [m for r, m in markers if r == ref]
+        marker = flagged[0] if flagged else markers[0][1]
+        return {"ref": ref, "text": None, "marker": _marker_document(marker)}
+    return {"ref": ref, "text": _render(text["template"], values), "marker": None}
+
+
+def plan_item(
+    plan: Plan, derivation: list[dict[str, Any]] | None, context: dict[str, Any] | None
+) -> dict[str, Any]:
     """The ``plan`` item, with ``derivation`` when a function policy wrote the plan and none
-    at a broken entry, where no policy ran."""
+    at a broken entry, where no policy ran, and ``context`` as ``context_member`` gives it."""
     cause = plan.cause
     item: dict[str, Any] = {
         "item": "plan",
@@ -252,6 +301,7 @@ def plan_item(plan: Plan, derivation: list[dict[str, Any]] | None) -> dict[str, 
         "reason": plan.reason,
         "reply": plan.reply,
         "cause": None if cause is None else {"code": cause.code.value, "refs": list(cause.refs)},
+        "context": context,
     }
     if derivation is not None:
         item["derivation"] = derivation

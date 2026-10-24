@@ -116,11 +116,11 @@ A source names the oracle that answers it, and `decide` takes one binding per or
      replay findings: []
    escalate | d:hazard Unsure: abstained on q:triage/hazard | passed
      call 3: ['details', 'timing'], precision None, attempts None
-       answered from record sha256:50d08efdbe8163ed847be464c267f52f541c6de512771d2b846925c1b89a5e8b
+       answered from record sha256:9975f56e5a6e4c08f0d33b6d9552d3265ac5156c6ed8a63fdc99e64d1df4b7e0
      call 4: ['registry'], precision None, attempts None
        registry: unsupported: the idia binding asks q: refs only, not t:open_orders
      call 5: ['triage'], precision None, attempts None
-       answered from record sha256:50d08efdbe8163ed847be464c267f52f541c6de512771d2b846925c1b89a5e8b
+       answered from record sha256:9975f56e5a6e4c08f0d33b6d9552d3265ac5156c6ed8a63fdc99e64d1df4b7e0
    ```
 
 2. The first report escalates on `d:hazard`: the classifier put 0.58 on a danger to people,

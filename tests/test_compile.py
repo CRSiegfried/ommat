@@ -243,14 +243,14 @@ def test_a_policy_returning_none_is_invalid_return_naming_the_policy() -> None:
 def test_the_plan_and_verdict_items_bytes() -> None:
     record, _, _ = returning(None)
     assert encode(plan_item(record)) == (
-        b'{"cause":{"code":"invalid-return","refs":["policy"]},"derivation":[],"item":"plan",'
-        b'"kind":"broken","reason":null,"reply":null,"steps":[]}'
+        b'{"cause":{"code":"invalid-return","refs":["policy"]},"context":null,"derivation":[],'
+        b'"item":"plan","kind":"broken","reason":null,"reply":null,"steps":[]}'
     )
     assert encode(record.log[-1]) == b'{"failures":[],"item":"verdict","kind":"passed"}'
     record, _, _ = returning(Plan("escalate", [archive()], reason="x"))
     assert encode(plan_item(record)) == (
-        b'{"cause":{"code":"invalid-return","refs":["rule:1"]},"derivation":[],"item":"plan",'
-        b'"kind":"broken","reason":null,"reply":null,"steps":[]}'
+        b'{"cause":{"code":"invalid-return","refs":["rule:1"]},"context":null,"derivation":[],'
+        b'"item":"plan","kind":"broken","reason":null,"reply":null,"steps":[]}'
     )
     record, _, _ = returning(execute(archive(x=Binding(5))))
     assert b'"cause":{"code":"invalid-return","refs":["rule:2","step:1"]}' in encode(
@@ -258,13 +258,14 @@ def test_the_plan_and_verdict_items_bytes() -> None:
     )
     record, _, _ = run(lambda r: r.require("d:lost.status"))
     assert encode(plan_item(record)) == (
-        b'{"cause":{"code":"required","refs":["d:lost.status"]},"derivation":[],"item":"plan",'
+        b'{"cause":{"code":"required","refs":["d:lost.status"]},"context":null,"derivation":[],'
+        b'"item":"plan",'
         b'"kind":"escalate","reason":null,"reply":null,"steps":[]}'
     )
     record, _, verdict = returning(GOOD)
     assert encode(plan_item(record)) == (
-        b'{"cause":null,"derivation":[],"item":"plan","kind":"execute","reason":null,'
-        b'"reply":null,"steps":[{"arguments":{"folder":{"literal":"spam"},'
+        b'{"cause":null,"context":null,"derivation":[],"item":"plan","kind":"execute",'
+        b'"reason":null,"reply":null,"steps":[{"arguments":{"folder":{"literal":"spam"},'
         b'"what":{"ref":"d:route"}},"requirements":[{"ref":"d:route","value":"archive"}],'
         b'"tool":"archive"},{"arguments":{"at":{"path":"items.name","step":1},'
         b'"n":{"path":null,"step":1},"to":{"ref":"t:state.subject"}},'

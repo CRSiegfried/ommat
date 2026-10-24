@@ -78,7 +78,7 @@ def src_hash(fn: Callable[..., Any]) -> str:
 def test_a_minimal_design_writes_every_member_with_its_default() -> None:
     loaded = load(minimal())
     assert decode(loaded.document) == {
-        "format": 4,
+        "format": 5,
         "name": None,
         "state": "record{}",
         "sources": {},
@@ -101,6 +101,7 @@ def test_a_minimal_design_writes_every_member_with_its_default() -> None:
         "plans": {},
         "groups": {},
         "classes": {},
+        "context": None,
     }
     assert loaded.design_hash == sha256_ref(loaded.document)
     assert dict(loaded._graph) == {}

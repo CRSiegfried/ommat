@@ -13,6 +13,8 @@ from ommat._answer import Answer, AnswerKind, ExtractionAnswer, ValueType
 from ommat._binding import CallResult, RenderedQuestion, SourceCall
 from ommat._decide import Decision, EntryRefusal, RunSettings, decide, decide_sync
 from ommat._design import (
+    Context,
+    ContextEntry,
     Design,
     DesignFailure,
     Group,
@@ -50,7 +52,7 @@ from ommat._markers import (
 from ommat._plan import Binding, Origin, Plan, Step
 from ommat._read_view import ReadView
 from ommat._replay import FindingKind, replay, replay_sync
-from ommat._views import escalation, redact
+from ommat._views import escalation, handoff, redact
 
 __version__ = _version("ommat")
 
@@ -61,6 +63,8 @@ __all__ = [
     "CallResult",
     "Cause",
     "CauseCode",
+    "Context",
+    "ContextEntry",
     "Decision",
     "Design",
     "DesignFailure",
@@ -107,6 +111,7 @@ __all__ = [
     "decide_sync",
     "escalation",
     "from_record",
+    "handoff",
     "load",
     "read_record",
     "redact",

@@ -917,6 +917,7 @@ def test_a_label_set_document_loads_at_format_4() -> None:
 @pytest.mark.parametrize("fmt", [1, 2, 3])
 def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -> None:
     doc: dict[str, Any] = {**label_set_doc(), "format": fmt}
+    del doc["context"]  # a design before format 5 holds no block
     (failure,) = refused(written(doc))
     assert failure.check == 11
     assert failure.message.endswith(
@@ -930,6 +931,7 @@ def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -
             minimal(), "find", designs.rule("find", outputs="list<string>", candidates=True)
         )
     )
+    del rule_doc["context"]
     (failure,) = refused(written({**rule_doc, "format": fmt}))
     assert failure.message == f'rule "find" is a candidate set, which format {fmt} does not have'
 

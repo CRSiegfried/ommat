@@ -27,6 +27,9 @@ def test_core_imports_only_the_standard_library() -> None:
 
 # The public API names.
 PUBLIC = {
+    "Context",
+    "ContextEntry",
+    "handoff",
     "Design",
     "DesignFailure",
     "Group",
@@ -103,7 +106,7 @@ def test_the_public_names_are_exactly_the_decisions() -> None:
     public = {n for n in vars(ommat) if not n.startswith("_")}
     # Submodules imported by tests appear as attributes; `types`, `helpers`, `evaluation` and
     # `bindings` are public subpackages, not names in `ommat.__all__`.
-    assert public - {"types", "helpers", "evaluation", "bindings"} == PUBLIC
+    assert public - {"types", "helpers", "evaluation", "bindings", "conversation"} == PUBLIC
 
 
 BINDINGS = {
@@ -136,6 +139,21 @@ def test_import_ommat_imports_no_binding_module() -> None:
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "[]"
+
+
+def test_import_ommat_imports_no_conversation_module() -> None:
+    probe = "import sys, ommat; print(sorted(m for m in sys.modules if m == 'ommat.conversation'))"
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "[]"
+
+
+def test_ommat_conversation_exports_exactly_its_renderers() -> None:
+    import ommat.conversation
+
+    assert "conversation" not in ommat.__all__
+    assert ommat.conversation.__all__ == ["to_messages", "to_tool_calls"]
 
 
 EVALUATION = {"EvaluationRefusal", "RefusalReason", "use_answers", "use_answers_sync"}

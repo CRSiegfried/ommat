@@ -118,6 +118,7 @@ def test_a_described_noul_replays_and_from_record_answers_it() -> None:
 def test_a_described_noul_before_format_4_is_refused_in_a_document_and_a_record() -> None:
     loaded = load(design(DESCRIBED))
     doc = {**json.loads(loaded.document), "format": 3}
+    del doc["context"]  # a design before format 5 holds no block
     with pytest.raises(InvalidDesign) as raised:
         load(json.dumps(doc).encode())
     assert "is a noul question with labels, which format 3 does not have" in str(raised.value)
@@ -207,6 +208,7 @@ def test_a_structured_wording_has_its_own_identity_and_a_text_keeps_its_own() ->
 def test_a_structured_wording_before_format_4_is_refused() -> None:
     loaded = load(slotted({"task": "Does it name a sender?"}))
     doc = {**json.loads(loaded.document), "format": 3}
+    del doc["context"]  # a design before format 5 holds no block
     with pytest.raises(InvalidDesign) as raised:
         load(json.dumps(doc).encode())
     assert "has a structured wording, which format 3 does not have" in str(raised.value)

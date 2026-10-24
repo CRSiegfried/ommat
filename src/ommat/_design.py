@@ -399,12 +399,40 @@ class PlanDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class ContextEntry:
+    """One entry of a context block: ``ref``, the flagged ref, ``t:state`` or a declared ``d:``
+    ref, with or without a field path; ``text``, a ``Text`` with a slot naming ``ref``."""
+
+    ref: str
+    text: Text
+
+    def __post_init__(self) -> None:
+        _set(self, ref=_string(self.ref))
+
+
+@dataclass(frozen=True, slots=True)
+class Context:
+    """A design's context block: what a turn hands its next reader. ``entries`` in declared
+    order; ``plan``, ``steps`` and ``record`` switch on the plan's kind and text, its steps,
+    and the design and record hash."""
+
+    entries: Sequence[ContextEntry] = ()
+    plan: bool = True
+    steps: bool = True
+    record: bool = True
+
+    def __post_init__(self) -> None:
+        _set(self, entries=_sequence(self.entries))
+
+
+@dataclass(frozen=True, slots=True)
 class Design:
     """A design: the state declaration, the components and the blocks.
 
     ``sources``, ``rules``, ``plans``, ``types`` and ``groups`` map each declared name to its
     declaration; ``parameters`` maps each leaf's full path to a ``Parameter``; ``classes``
     maps a ref to its class tree; ``tools`` lists the tool names; each defaults to empty.
+    ``context`` is the context block, ``None`` for none.
     """
 
     state: str
@@ -420,6 +448,7 @@ class Design:
     groups: Mapping[str, Group] = field(default_factory=_empty)
     classes: Mapping[str, Any] = field(default_factory=_empty)
     name: str | None = None
+    context: Context | None = None
 
     def __post_init__(self) -> None:
         types = _mapping(self.types)
@@ -538,7 +567,8 @@ class LoadedDesign:
     candidate-valued question's set ref, and ``_label_at`` how many of its fixed labels come
     before the candidates; ``_candidate_sets``, the refs declared candidate sets;
     ``_requirement_bytes``, each source requirement's values as
-    canonical bytes, by source id. The class trees, payloads, leaf values and plan-level
+    canonical bytes, by source id; ``_context_bytes``, the context block's document object or
+    null. The class trees, payloads, leaf values and plan-level
     requirements are decoded afresh at each read, so nothing a caller
     changes after load reaches a turn.
     """
@@ -547,6 +577,7 @@ class LoadedDesign:
         "_callables",
         "_candidate_sets",
         "_classes_bytes",
+        "_context_bytes",
         "_design",
         "_document",
         "_graph",
@@ -580,6 +611,7 @@ class LoadedDesign:
     _label_at: Mapping[str, int]
     _candidate_sets: frozenset[str]
     _classes_bytes: bytes
+    _context_bytes: bytes
     _payload_bytes: Mapping[str, bytes]
     _leaf_bytes: Mapping[str, bytes]
     _requirement_bytes: Mapping[str, frozenset[bytes]]
@@ -613,6 +645,11 @@ class LoadedDesign:
     def _classes(self) -> dict[str, Any]:
         """Each ref's class tree in full, keyed by ``t:state`` and every provided ref."""
         return cast("dict[str, Any]", decode(self._classes_bytes))
+
+    @property
+    def _context(self) -> dict[str, Any] | None:
+        """The context block's document object, decoded afresh, or ``None`` for none."""
+        return cast("dict[str, Any] | None", decode(self._context_bytes))
 
     def _payload(self, source: str) -> Any:
         """A source's payload as decoded from the document."""

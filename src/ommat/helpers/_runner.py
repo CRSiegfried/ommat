@@ -8,12 +8,11 @@ binding miss and returns what it holds; it retries, times out and records nothin
 """
 
 from collections.abc import Callable, Mapping
-from copy import deepcopy
 from typing import Any, cast
 
 import ommat._decide as _decide
 from ommat._markers import PlanKind, VerdictKind
-from ommat._refs import parse_ref
+from ommat._resolve import board_entries, board_value
 from ommat._values import string_data
 
 _KEY = "idempotency_key"
@@ -80,32 +79,6 @@ def _gate(
     return named, log, item
 
 
-def _entries(log: list[dict[str, Any]]) -> dict[str, object]:
-    """Each board ref's entry value, first by log position; a marker entry holds none, and
-    plan rule 4 keeps a step from naming one."""
-    out: dict[str, object] = {}
-    for i in log:
-        if i["item"] == "entry" and "value" in i:
-            out.setdefault(i["ref"], i["value"])
-    return out
-
-
-def _board(entries: Mapping[str, object], ref: str) -> object:
-    """A board ref's value from the record's entries, copied afresh at each read so no two
-    arguments share an object: the base ref's entry value, its field path walked over it, a
-    null on the path giving null."""
-    # The entry, and a record at every field on the path but a null, hold by plan rule 4 and
-    # conformance, so neither miss is reachable here.
-    fields = parse_ref(ref).fields
-    base = ref[: len(ref) - len(".".join(fields)) - 1] if fields else ref
-    value: Any = entries[base]
-    for field in fields:
-        if value is None:
-            return None
-        value = value[field]
-    return deepcopy(value)
-
-
 class _Miss(Exception):
     """A binding's path missed; carried to the step that sees it."""
 
@@ -134,7 +107,7 @@ async def run_plan(decision: "_decide.Decision", tools: Mapping[str, Any]) -> di
     turn = decision.record.record_hash
     results: list[list[Any]] = []
     held: dict[int, object] = {}
-    entries = _entries(log)
+    entries = board_entries(log)
     for n, step in enumerate(item["steps"], 1):
         keywords: dict[str, Any] = {}
         for name, origin in step["arguments"].items():
@@ -148,7 +121,7 @@ async def run_plan(decision: "_decide.Decision", tools: Mapping[str, Any]) -> di
                 except Exception as exc:  # the result's own `in` or indexing raised
                     return {"results": results, "raised": exc}
             elif "ref" in origin:
-                keywords[name] = _board(entries, origin["ref"])
+                keywords[name] = board_value(entries, origin["ref"])
             else:
                 # Each literal is its own subtree of the gate's one decoding, so it is fresh
                 # for this argument and shared with none.

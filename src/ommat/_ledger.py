@@ -27,6 +27,7 @@ from ommat._provenance import (
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import (
     CANDIDATE_FORMAT,
+    CONTEXT_FORMAT,
     DESCRIPTION_FORMAT,
     EXTRACTION_FORMAT,
     HASH_FORMAT,
@@ -303,6 +304,29 @@ def _marker(value: Any, where: str) -> None:
     m = _members(value, where, {"kind": _STR, "cause": _cause})
     if m["kind"] not in _MARKER_KINDS:
         raise _LedgerError(f"{where}'s kind {m['kind']!r} is not Unsure, Unavailable or Unasked")
+
+
+def _context_entry(value: Any, where: str) -> None:
+    """A context entry: exactly ``ref``, ``text`` and ``marker``, the text a string and the
+    marker null, or the text null and the marker a marker."""
+    m = _members(value, where, {"ref": _STR, "text": _STR_OR_NULL, "marker": _or_null(_marker)})
+    if (m["text"] is None) == (m["marker"] is None):
+        raise _LedgerError(f"{where} holds neither or both of a text and a marker")
+
+
+def _context(value: Any, where: str) -> None:
+    """A ``plan`` item's ``context`` block: the design's name, the entries and the switches."""
+    _members(
+        value,
+        where,
+        {
+            "design": _STR_OR_NULL,
+            "entries": _list_of(_context_entry),
+            "plan": _BOOL,
+            "steps": _BOOL,
+            "record": _BOOL,
+        },
+    )
 
 
 def _outcome(value: Any, where: str) -> None:
@@ -646,7 +670,12 @@ _SHAPES: dict[str, _Check] = {
                 "reply": _STR_OR_NULL,
                 "cause": _or_null(_cause),
             },
-            {"slots": _OBJECT, "rows": _LIST, "derivation": _LIST},
+            {
+                "slots": _OBJECT,
+                "rows": _LIST,
+                "derivation": _LIST,
+                "context": _or_null(cast(_Check, _context)),
+            },
         ),
     ),
     "verdict": cast(_Check, _verdict_shape),
@@ -687,6 +716,10 @@ def _ref_places(kind: str, item: dict[str, Any]) -> list[tuple[str, Any]]:
     elif kind == "plan":
         if item["cause"] is not None:
             places += _cause_refs(item["cause"], "its cause")
+        for i, entry in enumerate(_context_entries(item)):
+            places.append((f"context entry {i}'s ref", entry["ref"]))
+            if entry["marker"] is not None:
+                places += _cause_refs(entry["marker"]["cause"], f"context entry {i}'s marker")
         for n, step in enumerate(cast("list[dict[str, Any]]", item["steps"]), 1):
             for name, origin in cast("dict[str, Any]", step["arguments"]).items():
                 if type(origin) is dict and "ref" in origin:
@@ -700,6 +733,13 @@ def _ref_places(kind: str, item: dict[str, Any]) -> list[tuple[str, Any]]:
             if failure["requirement"] is not None:
                 places.append((f"failure {i}'s requirement", failure["requirement"]["ref"]))
     return places
+
+
+def _context_entries(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """A ``plan`` item's context entries, none when it holds no block. The item has passed
+    its shape check."""
+    context = item.get("context")
+    return [] if context is None else cast("list[dict[str, Any]]", context["entries"])
 
 
 def _no_grounded_ref(kind: str, item: dict[str, Any], where: str) -> None:
@@ -998,6 +1038,10 @@ def _codes(kind: str, item: dict[str, Any]) -> list[tuple[str, str]]:
         places.append(("its outcome's cause", cast(object, item["outcome"]["failed"])))
     elif (kind == "plan" and item["cause"] is not None) or kind == "cause":
         places.append(("its cause", item["cause"]))
+    if kind == "plan":
+        for i, entry in enumerate(_context_entries(item)):
+            if entry["marker"] is not None:
+                places.append((f"context entry {i}'s marker's cause", entry["marker"]["cause"]))
     return [(place, cast(str, cause["code"])) for place, cause in places]
 
 
@@ -1109,6 +1153,8 @@ class Ledger:
                 raise _LedgerError(
                     f"{where}: {place}'s code {code!r} is not in format {fmt}'s cause set"
                 )
+        if kind == "plan":
+            self._check_context(item, fmt, where)
         if kind != "call":
             return
         if fmt >= PRECISION_FORMAT and "precision" not in item:
@@ -1366,6 +1412,34 @@ class Ledger:
                     f"{where}: its sources list {sid!r}, which call item {earlier} lists"
                 )
         return sources
+
+    def _check_context(self, item: dict[str, Any], fmt: int, where: str) -> None:
+        """A ``plan`` item's ``context``: held from format 5 and refused before it; each
+        entry's ref ``t:state`` or a ``d:`` key of the settings' providers, a field path on it
+        naming a key at each place of that ref's class tree."""
+        if fmt < CONTEXT_FORMAT:
+            if "context" in item:
+                raise _LedgerError(f"{where} holds context, which a format-{fmt} record does not")
+            return
+        if "context" not in item:
+            raise _LedgerError(f"{where} has no 'context' member")
+        for i, entry in enumerate(_context_entries(item)):
+            ref = cast(str, entry["ref"])
+            at = f"{where}: context entry {i}'s ref {clipped(ref)}"
+            try:
+                parsed = parse_ref(ref)
+            except ValueError:
+                raise _LedgerError(f"{at} is not a ref") from None
+            base = f"{parsed.level}:{parsed.name}"
+            if parsed.candidate is not None or not (
+                base == _STATE or (parsed.level == "d" and base in self._providers)
+            ):
+                raise _LedgerError(f"{at} is not t:state or a d: ref of the settings' providers")
+            tree: Any = self._classes.get(base)
+            for name in parsed.fields:
+                if type(tree) is not dict or name not in tree:
+                    raise _LedgerError(f"{at} names a field its class tree does not hold")
+                tree = cast("dict[str, Any]", tree)[name]
 
     def _entry(self, item: dict[str, Any], where: str) -> tuple[dict[str, object], list["_Grow"]]:
         ref: str = item["ref"]

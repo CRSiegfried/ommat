@@ -150,20 +150,20 @@ STATE: dict[str, Any] = {
 SPAM = {"q:spam": {"yes": 0.9, "no": 0.1}, "t:body": "text of the mail"}
 REPLIES: dict[str, object] = {"ask": returns(SPAM), "look": returns({"t:size": 4})}
 
-GOLDEN_DESIGN = "sha256:489bc8cc19bf2db2a60567db848be1e4aeb7122507e570beaf29dffb08471a57"
-GOLDEN_RECORD = "sha256:4319e062a4f33a9b5dbb5ae1e8bdeaa4fac3a1af71d5ac5719b11ad99139b8eb"
-GOLDEN_BROKEN = "sha256:6d40c11e519ac13d35d0ea931f306293407bbbd36dbf28d8d8b20d98ac46bf58"
+GOLDEN_DESIGN = "sha256:29228237a6c1350faabe6c5aeb64c239247a961cf1afd62e9341dd0a14379320"
+GOLDEN_RECORD = "sha256:5b992c67e874e15e6ff697184d114a549ac3453413a07c84fa173dc04ea84d75"
+GOLDEN_BROKEN = "sha256:aeda75ea8baf625a43e3a066ee2af16f42338924b29a65350f6eae19fa3e925e"
 GOLDEN_CANCELLED = (
-    "sha256:55292a664bb886570caf2329aa16e1414f5de488f979be84ebd68502fc162bd7",
-    "sha256:d976b83f652350b0c0cdccff199df90ad4599c7bc4c729ed12b48ce400ad7570",
+    "sha256:c7489cb711580adfb665291dda17aec29e8a86139ac79de46fde9eeddf3fdbfb",
+    "sha256:71cc13622a76d61e6cc17ef0586ece3aa2ed97501a0f064a508f06e728e42ebc",
 )
 GOLDEN_REFUSED = (
-    "sha256:81a1c9f59d2ae27f6106e9ded79d535695079fd9e66261e5bf5e42565023edeb",
-    "sha256:c5c2772d66eb6638795df2aa3e2fd4fc2a339b2a7dbbc32abfa2668c062757f4",
+    "sha256:2469b6966de1d9d08e129b919b81cd6c8e51009d438572c153889f86f7d101c7",
+    "sha256:847840e24b21e23744c332bc75f27f90c141c48b419fc6adf5c7fd77f7acba89",
 )
 GOLDEN_ESCALATE = (
-    "sha256:9474553f72cd3c5ab9fe274e388f97a485772730a2316b38ea1bc0d0e4ca7788",
-    "sha256:0d398bf2161feae49389016ff026f49661592457f570566b4bfe32169c068d39",
+    "sha256:863acb4b477bd8eb86c7ee6a8d939189026aee94644a48cfa48be81f19eef973",
+    "sha256:e7874d66d5805ead90a94a3e83bf8e60e4bc4c52bbeba392d6a5bca8c32d7478",
 )
 """Each a pair: the design hash, then the record hash."""
 
@@ -879,6 +879,7 @@ BROKEN_ITEM: dict[str, Any] = {
     "reason": None,
     "reply": None,
     "cause": {"code": "raised", "refs": ["codec"]},
+    "context": None,
 }
 
 

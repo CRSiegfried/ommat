@@ -27,6 +27,8 @@ from ommat._answer import AnswerKind, ValueType
 from ommat._canonical import _DecodeError, _DuplicateKey, decode, document_depth, encode, sha256_ref
 from ommat._design import (
     _BUILT_BY_LOAD,
+    Context,
+    ContextEntry,
     Design,
     DesignFailure,
     Group,
@@ -85,6 +87,7 @@ from ommat._types import (
 )
 from ommat._values import (
     CANDIDATE_FORMAT,
+    CONTEXT_FORMAT,
     DESCRIPTION_FORMAT,
     DESIGN_FORMAT,
     DESIGN_FORMATS,
@@ -242,6 +245,8 @@ class _Loader:
         self.leaf_written: dict[str, Type] = {}  # each leaf's type as declared, for messages
         self.state_type: Type | None = None
         self.class_keys: list[tuple[str, _ParsedRef]] = []  # each classes key check 7 passed
+        # Each context entry's candidate slot, by its flagged ref, refused at check 4.
+        self.context_candidates: list[tuple[str, str]] = []
         # Each leaf check 8 refuses under a boundaries field, left out of check 9's boundaries
         # clauses.
         self.refused_leaves: set[str] = set()
@@ -470,6 +475,20 @@ class _Loader:
             parsed = self.ref(key, "the classes block", "")
             if parsed is not None:
                 self.class_keys.append((key, parsed))
+        for entry in self.context_entries():
+            where = f"the context entry for {_q(entry.ref)}"
+            self.use("", where, "flagged", entry.ref)
+            for slot in entry.text.slots:
+                tag, value = next(iter(slot["origin"].items()))
+                if tag == "ref":
+                    self.use(entry.ref, f"{where}'s text", "context-slot", value)
+                elif tag == "candidate":
+                    self.context_candidates.append((entry.ref, where))
+
+    def context_entries(self) -> tuple[ContextEntry, ...]:
+        """The context block's entries check 10's form test kept, none with no block."""
+        context = self.d.context
+        return () if context is None else tuple(context.entries)
 
     # --- checks 2, 3 and 4 -----------------------------------------------------------------
 
@@ -596,7 +615,13 @@ class _Loader:
             "policy": ("d", "t"),
             "requirement": ("d",),
             "source-requirement": ("d",),
+            "flagged": ("d", "t"),
+            "context-slot": ("d", "t"),
         }
+        for flagged, where in self.context_candidates:
+            self.fail(
+                4, (flagged,), f"{where} has a candidate slot; a context entry's slots hold none"
+            )
         # The clause is on the slot list, so it stands whether or not the slot's ref passes
         # check 7. No source here is grounded: check 12 refuses grounded ones.
         for sid, where, _ in self.candidates:
@@ -610,10 +635,16 @@ class _Loader:
             if u.role == "candidate":
                 continue
             levels = allowed.get(u.role)
+            names = (u.owner, u.ref) if u.owner else (u.ref,)
             if levels is not None and u.parsed.level not in levels:
-                names = (u.owner, u.ref) if u.owner else (u.ref,)
                 shown = " or ".join(f"{level}:" for level in levels)
                 self.fail(4, names, f"{u.where} reads {_q(u.ref)}, which is not at level {shown}")
+            elif u.role == "flagged" and u.parsed.level == "t" and u.base != _STATE:
+                self.fail(
+                    4, names, f"{u.where} flags {_q(u.ref)}, which is not t:state or a d: ref"
+                )
+            elif u.role in ("flagged", "context-slot") and u.parsed.candidate is not None:
+                self.fail(4, names, f"{u.where} names {_q(u.ref)}, a grounded ref")
 
     # --- check 1 ---------------------------------------------------------------------------
 
@@ -642,6 +673,9 @@ class _Loader:
         for name, used in kinds.items():
             if len(used) > 1:
                 self.fail(1, (name,), f"{_q(name)} is declared more than once: {', '.join(used)}")
+        flagged = Counter(entry.ref for entry in self.context_entries())
+        for ref in code_point_sorted({r for r, n in flagged.items() if n > 1}):
+            self.fail(1, (ref,), f"two context entries flag {_q(ref)}")
         for sid, source in self.sources():
             if source.oracle == "default":
                 self.fail(1, (sid,), f'source {_q(sid)} has the oracle name "default"')
@@ -968,6 +1002,12 @@ class _Loader:
                 tag, value = next(iter(slot["origin"].items()))
                 if tag == "param":
                     named_params.append((sid, f"source {_q(sid)}'s question {_q(ref)}", value))
+        for entry in self.context_entries():
+            for slot in entry.text.slots:
+                tag, value = next(iter(slot["origin"].items()))
+                if tag == "param":
+                    shown = f"the context entry for {_q(entry.ref)}"
+                    named_params.append((entry.ref, shown, value))
         for owner, where, path in named_params:
             if path not in declared:
                 self.fail(8, (owner, path), f"{where} names {_q(path)}, which is not a leaf")
@@ -1004,6 +1044,7 @@ class _Loader:
             for ref, question in _questions(source):
                 where = f"source {_q(sid)}'s question {_q(ref)}"
                 self.text(question.wording, where, (sid, ref))
+        self.check_9_context()
         for u in self.uses:
             if u.role == "boundary":
                 continue  # a key's read is typed as its component's read (check 9)
@@ -1052,6 +1093,44 @@ class _Loader:
                         f"{u.where} on {_q(u.ref)} can never hold for {shown}: {reason}",
                     )
         self.check_9_boundaries()
+
+    def check_9_context(self) -> None:
+        """Each context entry's text: its template and slots, a slot naming the flagged ref
+        as spelled, and no slot or flagged ref whose class tree holds ``identifier``."""
+        for entry in self.context_entries():
+            where = f"the context entry for {_q(entry.ref)}"
+            self.text(entry.text, where, (entry.ref,))
+            refs = [
+                cast(str, slot["origin"]["ref"])
+                for slot in entry.text.slots
+                if "ref" in slot["origin"]
+            ]
+            if entry.ref not in refs:
+                self.fail(9, (entry.ref,), f"{where} has no slot naming {_q(entry.ref)}")
+        for u in self.uses:
+            if u.role not in ("flagged", "context-slot"):
+                continue
+            tree = self.tree_at(u)
+            if tree is not None and _holds_identifier(tree):
+                names = (u.owner, u.ref) if u.owner else (u.ref,)
+                self.fail(
+                    9, names, f"{u.where} names {_q(u.ref)}, whose class tree holds identifier"
+                )
+
+    def tree_at(self, u: _Use) -> Any:
+        """The full class tree at a read's field path, or ``None`` when its path names no field,
+        which the read's typing reports."""
+        if u.parsed.level == "q":
+            return None
+        t = self.state_type if u.base == _STATE else self.types.get(u.base)
+        if t is None:
+            return None
+        tree: Any = _tree(t, self.defs, self.d.classes.get(u.base))
+        for field_name in u.parsed.fields:
+            if type(tree) is not dict or field_name not in tree:
+                return None
+            tree = cast("dict[str, Any]", tree)[field_name]
+        return tree
 
     def check_9_boundaries(self) -> None:
         """Check 9's ``boundaries`` clauses. A leaf check 8 refused is left out. No table compares a
@@ -1292,6 +1371,7 @@ class _Loader:
             "plans": {},  # check 12 refuses every plan declaration
             "groups": {g: code_point_sorted(group.refs) for g, group in d.groups.items()},
             "classes": dict(d.classes),  # each tree plain data, from check 10's form test
+            **({"context": _context(d.context)} if self.format >= CONTEXT_FORMAT else {}),
         }
 
     # --- check 11's comparison -------------------------------------------------------------
@@ -1462,6 +1542,8 @@ class _Loader:
             requirements_bytes=encode(decoded["requirements"], MAX_DOCUMENT_DEPTH - 1),
             document=document,
             hash=sha256_ref(document),
+            # Load's own copy of the block, from the document; none before format 5.
+            context_bytes=encode(decoded.get("context"), MAX_DOCUMENT_DEPTH - 1),
         )
 
 
@@ -1667,6 +1749,29 @@ def _structured_template(template: object, at: str = "") -> tuple[list[str], boo
         names += leaf_names
         has_text = has_text or leaf_text
     return names, has_text
+
+
+def _context(context: Context | None) -> dict[str, Any] | None:
+    """The context block's document object, or ``None`` for none."""
+    if context is None:
+        return None
+    return {
+        "entries": [{"ref": e.ref, "text": _text(e.text)} for e in context.entries],
+        "plan": context.plan,
+        "steps": context.steps,
+        "record": context.record,
+    }
+
+
+def _holds_identifier(tree: object) -> bool:
+    """Whether a full class tree holds ``identifier`` at its root or beneath."""
+    if type(tree) is str:
+        return tree == "identifier"
+    if type(tree) is dict:
+        return any(_holds_identifier(v) for v in cast("dict[str, object]", tree).values())
+    if type(tree) is list:
+        return any(_holds_identifier(v) for v in cast("list[object]", tree))
+    return False
 
 
 def _text(text: Text | Structured) -> dict[str, Any]:
@@ -1944,6 +2049,7 @@ _DOCUMENT = frozenset(
         "classes",
     }
 )
+_CONTEXT = frozenset({"entries", "plan", "steps", "record"})
 _FUNCTION = frozenset({"module", "qualname", "version", "source"})
 _SOURCE = frozenset(
     {
@@ -2092,7 +2198,17 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
     of its own. A step is the ``plan`` item's, each
     argument one origin as a declaration writes it. A table's ``inputs``
     and ``rows`` are tested only for the value domain, as their members are not yet decided."""
-    yield from _missing_or_extra(doc, _DOCUMENT, "the document", ())
+    members = _DOCUMENT | {"context"} if fmt >= CONTEXT_FORMAT else _DOCUMENT
+    yield from _missing_or_extra(doc, members, "the document", ())
+    context = doc.get("context")
+    if isinstance(context, dict):
+        block = cast("dict[str, Any]", context)
+        where = "the context block"
+        yield from _missing_or_extra(block, _CONTEXT, where, ())
+        for entry in _items(block.get("entries")):
+            yield from _missing_or_extra(entry, frozenset({"ref", "text"}), f"{where}'s entry", ())
+            if isinstance(entry.get("text"), dict):
+                yield from _text_failures(entry["text"], f"{where}'s entry text", ())
     for path, leaf in _objects(doc["parameters"]):
         yield from _missing_or_extra(
             leaf, frozenset({"type", "value"}), f"parameter {_q(path)}", (path,)
@@ -2451,7 +2567,23 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
         groups=_each(doc["groups"], Group),
         classes=doc["classes"],
         name=doc["name"],
+        context=_context_of(doc.get("context")),
     )
+
+
+def _context_of(value: object) -> Any:
+    """The ``Context`` a document's block declares; a member of another form passes through
+    for check 10 to refuse."""
+    block = _object(value)
+    if block is None:
+        return value
+    entries: Any = block["entries"]
+    if isinstance(entries, list):
+        entries = [
+            m if (o := _object(m)) is None else ContextEntry(o["ref"], _text_of(o["text"]))
+            for m in cast("list[Any]", entries)
+        ]
+    return Context(entries, plan=block["plan"], steps=block["steps"], record=block["record"])
 
 
 def _each(value: object, build: Callable[[Any], Any]) -> Any:

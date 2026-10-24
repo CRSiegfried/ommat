@@ -403,7 +403,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [{ name = "idia", marker = "extra == 'idia'", editable = "../idia" }]
-provides-extras = ["idia"]
+provides-extras = ["idia", "conversation"]
 
 [package.metadata.requires-dev]
 dev = [

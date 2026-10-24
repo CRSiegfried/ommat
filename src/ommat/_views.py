@@ -2,7 +2,9 @@
 escalation target or a verifier.
 
 ``escalation(record)`` returns the escalation's four members, or ``None`` for a record that
-holds none, reading only the ``plan`` and ``verdict`` items and the record hash. ``redact(record,
+holds none, reading only the ``plan`` and ``verdict`` items and the record hash.
+``handoff(record)`` returns what the turn hands its next reader under the design's context
+block, or ``None`` with no block or no ``plan`` item. ``redact(record,
 root_key)`` returns the redacted view's document as canonical bytes: the record's ``log`` and
 ``unhashed`` with a keyed digest where each ``content`` or ``identifier`` value was,
 ``redacted``, the record hash its key came from, and from format 3 on the document's ``hash``,
@@ -25,6 +27,7 @@ from ommat._guard import GuardFailure, Verdict
 from ommat._ledger import Record
 from ommat._markers import PlanKind, VerdictKind
 from ommat._refs import declared_ref
+from ommat._resolve import board_entries, board_value
 from ommat._typed import is_a
 from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH, type_name
 
@@ -68,6 +71,60 @@ def escalation(record: Record) -> dict[str, Any] | None:
         "reason": plan["reason"] if escalated else None,
         "record_hash": record.record_hash,
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# The handoff
+
+
+def handoff(record: Record) -> dict[str, Any] | None:
+    """What a closed record hands its next reader: ``design`` and ``record_hash`` under the
+    ``record`` switch, ``plan`` with its kind and text under ``plan`` and its steps under
+    ``steps`` once the verdict passed, and ``context``, the entries as recorded; ``None`` when
+    the log has no ``plan`` item or the item holds no block."""
+    closed = _closed(record)
+    log = closed.log
+    plan = next((item for item in log if item["item"] == "plan"), None)
+    if plan is None or plan.get("context") is None:
+        return None
+    block = cast("dict[str, Any]", plan["context"])
+    verdict = next((item for item in log if item["item"] == "verdict"), None)
+    passed = verdict is not None and verdict["kind"] == VerdictKind.passed
+    out: dict[str, Any] = {}
+    if block["record"]:
+        out["design"] = {"name": block["design"], "hash": log[0]["hash"]}
+        out["record_hash"] = closed.record_hash
+    shown: dict[str, Any] = {}
+    if block["plan"]:
+        shown.update(kind=plan["kind"], reply=plan["reply"], reason=plan["reason"])
+    if block["steps"] and passed:
+        entries = board_entries(log)
+        shown["steps"] = [_handed_step(step, entries, n) for n, step in enumerate(plan["steps"], 1)]
+    if shown:
+        out["plan"] = shown
+    out["context"] = block["entries"]
+    return out
+
+
+def _handed_step(step: dict[str, Any], entries: dict[str, object], n: int) -> dict[str, Any]:
+    """A step as the handoff gives it: its tool and each argument tagged, a literal as
+    ``{"value"}``, a board ref as ``{"ref", "value"}`` and a binding as ``{"step", "path"}``."""
+    arguments: dict[str, Any] = {}
+    for name, origin in cast("dict[str, Any]", step["arguments"]).items():
+        if "literal" in origin:
+            arguments[name] = {"value": origin["literal"]}
+        elif "ref" in origin:
+            ref = cast(str, origin["ref"])
+            try:
+                value = board_value(entries, ref)
+            except (KeyError, TypeError):
+                raise ValueError(
+                    f"step {n}'s argument {name!r} names {ref!r}, which holds no value in the log"
+                ) from None
+            arguments[name] = {"ref": ref, "value": value}
+        else:
+            arguments[name] = {"step": origin["step"], "path": origin["path"]}
+    return {"tool": step["tool"], "arguments": arguments}
 
 
 def _verdict(item: dict[str, Any]) -> Verdict:
@@ -180,6 +237,16 @@ class _Walk:
             out["reason"] = self.text(item["reason"])
             out["reply"] = self.text(item["reply"])
             out["steps"] = [self.step(step, classes) for step in item["steps"]]
+            context = item.get("context")
+            if context is not None:
+                out["context"] = {
+                    **context,
+                    "design": self.text(context["design"]),
+                    "entries": [
+                        {**e, "text": self.text(e["text"])}
+                        for e in cast("list[dict[str, Any]]", context["entries"])
+                    ],
+                }
         elif kind == "verdict":
             out["failures"] = [
                 {**f, "requirement": self.requirement(f["requirement"], classes)}
@@ -187,7 +254,8 @@ class _Walk:
                 else f
                 for f in cast("list[dict[str, Any]]", item["failures"])
             ]
-        # Every other member is open: markers, causes, derivation, rows, slots, the verdict's
+        # Every other member is open: markers, causes, derivation, rows, slots, a context
+        # entry's ref and marker and the block's switches, the verdict's
         # other members, the run settings and the call item's other members.
         return out
 

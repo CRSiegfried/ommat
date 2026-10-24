@@ -22,14 +22,17 @@ the cut instead. What ``_turn`` takes is checked values, never a
 
 import asyncio
 import contextlib
+import functools
+import inspect
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib.metadata import version
+from types import FunctionType, MethodType
 from typing import Any, cast
 
 from ommat._binding import OracleBinding
-from ommat._compile import compile_turn, plan_item
+from ommat._compile import compile_turn, context_member, plan_item
 from ommat._component import exception_record, now, refuse_awaitable
 from ommat._design import LoadedDesign
 from ommat._guard import Verdict, guard, verdict_item
@@ -141,7 +144,7 @@ async def decide(
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     _callable_or_none(codec, "codec")
-    _callable_or_none(observer, "observer")
+    observer_or_none(observer)
     if settings is None:
         settings = RunSettings()
     elif type(settings) is not RunSettings:
@@ -252,6 +255,49 @@ def _callable_or_none(value: object, name: str) -> None:
     """``None`` or callable; ``callable`` reads the type's call slot and runs no caller code."""
     if value is not None and not callable(value):
         raise EntryRefusal(f"the {name} is a {type_name(value)}, neither None nor callable")
+
+
+def observer_or_none(observer: object) -> None:
+    """``None`` or a callable that is not async: an ``async def`` function or async generator
+    function, a bound method or ``functools.partial`` of one, or an object whose class defines
+    one as ``__call__``, read by type with no caller code run; a test that raises refuses."""
+    _callable_or_none(observer, "observer")
+    if observer is not None and _is_async(observer):
+        raise EntryRefusal(
+            f"the observer is a {type_name(observer)} that is async; it is called sync"
+        )
+
+
+_ASYNC_FLAGS = inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR
+_MRO = type.__dict__["__mro__"]
+_VARS = type.__dict__["__dict__"]
+
+
+def _is_async(value: object) -> bool:
+    """Whether ``value`` calls an async function, by its exact type at each step."""
+    try:
+        for _ in range(32):  # a partial of a partial of ... ends here
+            kind = type(value)
+            if kind is FunctionType:
+                code = cast(FunctionType, value).__code__
+                return bool(code.co_flags & _ASYNC_FLAGS)
+            if kind is MethodType:
+                value = cast(MethodType, value).__func__
+            elif kind is functools.partial:
+                value = cast("functools.partial[Any]", value).func
+            else:
+                call: object = None
+                for klass in cast("tuple[type, ...]", _MRO.__get__(kind)):
+                    members = cast("Mapping[str, object]", _VARS.__get__(klass))
+                    if "__call__" in members:
+                        call = members["__call__"]
+                        break
+                if type(call) is not FunctionType:
+                    return False
+                value = call
+        return True
+    except Exception:
+        return True
 
 
 def _copied(bindings: object) -> dict[object, object]:
@@ -405,7 +451,7 @@ def _broken(
     empty board, both appended; a raising codec's text, or its closed coroutine's, under the
     ``plan`` item's index, taken at the catch and written after the append."""
     plan = engine_plan(PlanKind.broken, cause)
-    index = ledger.append(plan_item(plan, None))
+    index = ledger.append(plan_item(plan, None, context_member(loaded, None)))
     if text is not None:
         ledger.write_unhashed("exceptions", text, index)
     design = loaded._design

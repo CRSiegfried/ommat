@@ -37,7 +37,7 @@ to it, each under that format's rules."""
 RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
 """The record formats this engine reads."""
 
-DESIGN_FORMAT = 4
+DESIGN_FORMAT = 5
 """The format number this engine writes into a design document, which changes only when a
 design rule changes. It reads every design format from 1 up to it."""
 
@@ -83,6 +83,10 @@ PROFILE_FORMAT = 5
 """The first record format whose call item holds the provenance profile's details in place of
 ``snapshot``, ``precision``'s ``unrounded`` and step forms, and whose ``calls`` entry holds
 ``request_id``, ``calibrated``, ``missing`` and ``clients``."""
+
+CONTEXT_FORMAT = 5
+"""The first design format whose document holds a ``context`` member, and the first record
+format whose ``plan`` item does."""
 
 
 def string_data(value: str) -> str:

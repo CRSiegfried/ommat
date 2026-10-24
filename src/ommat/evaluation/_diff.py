@@ -7,7 +7,8 @@ Both records are read first, then refused in order, each before any replay: ``un
 ``different-turn`` when their state entries or ``settings`` items differ by canonical bytes.
 The findings are replay's: the entries, plan and verdict against ``record``,
 ``question-changed`` against ``other``'s identities, and ``not-in-record`` and
-``ref-not-in-record`` meaning not in ``other``. Neither record is edited, and nothing is read
+``ref-not-in-record`` meaning not in ``other``. A plan is compared without its ``context``, so
+a change of context text alone is no plan change. Neither record is edited, and nothing is read
 from either's ``unhashed``.
 """
 
@@ -18,7 +19,7 @@ from ommat._canonical import encode
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
 from ommat._ledger import _ITEM_DEPTH, InvalidRecord, Record, read_record
-from ommat._replay import _STATE, _replay_with
+from ommat._replay import _STATE, FindingKind, _replay_with
 from ommat._values import type_name
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 
@@ -61,7 +62,19 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
                 turn=records[1].record_hash,
             )
     _, found = await _replay_with(mine, loaded, theirs, observer=None)
+    found = [f for f in found if not _context_alone(f)]
     return {"other": records[1].record_hash, "findings": found}
+
+
+def _context_alone(finding: dict[str, Any]) -> bool:
+    """Whether a ``plan`` finding's two items differ only in their ``context``."""
+    if finding["kind"] is not FindingKind.plan:
+        return False
+    mine, theirs = finding["recorded"], finding["replayed"]
+    if mine is None or theirs is None:
+        return False
+    rest = [{k: v for k, v in item.items() if k != "context"} for item in (mine, theirs)]
+    return encode(rest[0], _ITEM_DEPTH) == encode(rest[1], _ITEM_DEPTH)
 
 
 def use_answers_sync(record: object, loaded: LoadedDesign, other: object) -> dict[str, Any]:

@@ -259,7 +259,7 @@ def test_a_described_design_loads_and_writes_its_labels_as_declared() -> None:
     loaded = load(described())
     asked = decode(loaded.document)["sources"]["ask"]["provides"]["q:tone"]
     assert asked["labels"] == [WARM, "cold"]
-    assert decode(loaded.document)["format"] == 4
+    assert decode(loaded.document)["format"] == 5
     assert loaded._labels["q:tone"] == (("warm", "cold"), ("Friendly or grateful", None))
     assert loaded._labels["q:other"] == (("yes", "no"), (None, None))
 
@@ -437,6 +437,7 @@ def check_11(doc: dict[str, Any]) -> str:
 def test_check_11_refuses_a_described_label_in_an_earlier_format(fmt: int) -> None:
     doc = document_of(described())
     doc["format"] = fmt
+    del doc["context"]  # a design before format 5 holds no block
     assert f"has a described label, which format {fmt} does not have" in check_11(doc)
 
 
@@ -452,6 +453,7 @@ def test_check_11_refuses_a_described_label_with_a_member_missing_or_extra() -> 
 def test_a_format_2_document_with_undescribed_labels_loads() -> None:
     doc = document_of(described(tone_question(["warm", "cold"])))
     doc["format"] = 2
+    del doc["context"]  # a design before format 5 holds no block
     loaded = load(doc)
     assert decode(loaded.document)["format"] == 2
 
@@ -1116,8 +1118,8 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden described record
 
-GOLDEN_DESIGN = "sha256:70b8c7680c10f64265fbfd76e4d073044c3c26069bb3ce738cf24ea4a0756796"
-GOLDEN_RECORD = "sha256:9b12ff0ed0ddaf588fa28e18de91504f55c16ebf08396e244c138ba7ecf23787"
+GOLDEN_DESIGN = "sha256:9506decd9b111935642c317d76a76c282d361e299c111a0c4040b39625ecdf20"
+GOLDEN_RECORD = "sha256:f8fdaeda825788bda6cfc389e77df8af1dac87c43b0f4a3bd241121b803af05f"
 
 
 def golden() -> Record:
