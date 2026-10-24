@@ -1,12 +1,11 @@
-"""Check that commit subjects say what changed in plain library terms.
+"""Check that commit subjects describe library changes.
 
-CI pipes in the subjects of the commits a push or pull request adds, one per line::
+CI pipes in the subjects of the commits a push to main adds, one per line::
 
     git log --format=%s <base>..HEAD | python scripts/check_subjects.py
 
-It prints one line per subject that holds the vocabulary of a build process and exits 1, or
-exits 0 when none does. ommat's ADRs are public documents in ``docs/adr/``, so a subject may
-name one. Standard library only.
+It prints one line per subject that names how a change was made rather than what changed, and
+exits 1, or exits 0 when none does. Standard library only.
 
 Each pattern is a whole word or a phrase. A numbered round is a build round only when a lap,
 point, item or step follows it, so "round 3 of the fixpoint" passes while "round 5 lap 2" does
@@ -58,7 +57,7 @@ ORDINARY: tuple[str, ...] = (
     "A wrapper that delegates to the inner binding",
     "Officially supported Python versions",
     "Step 1.5 of the plan binds an earlier step's result",
-    "ADR-0003: record each binding's deadline",
+    "Record each binding's deadline in its call item",
 )
 
 

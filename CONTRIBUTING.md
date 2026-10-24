@@ -22,7 +22,7 @@ uv run pyright
 uv run pytest
 ```
 
-CI runs the same checks on Python 3.11–3.14 on Linux, macOS and Windows. It also runs `scripts/check_subjects.py` over the subjects of the commits a push or pull request adds, and fails a subject that names the build process rather than what changed for a user of the library; naming an ADR is fine.
+CI runs the same checks on Python 3.11–3.14 on Linux, macOS and Windows. On pushes to main it also runs `scripts/check_subjects.py`, which checks that commit subjects describe library changes.
 
 ## Ground rules for changes
 

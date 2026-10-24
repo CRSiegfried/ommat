@@ -1,4 +1,5 @@
-# Lint, type-check and test on every push to main and every pull request.
+# Lint, type-check and test on every push to main and every pull request; check commit
+# subjects on pushes to main.
 # Actions are pinned to full commit SHAs; Dependabot keeps them current.
 #
 # The idia extra resolves through [tool.uv.sources] to the sibling checkout ../idia,
@@ -30,7 +31,7 @@ jobs:
         with:
           path: ommat
           persist-credentials: false
-          fetch-depth: 0  # the subjects check reads the commits the push or PR adds
+          fetch-depth: 0  # the subjects check reads the commits a push adds
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: CRSiegfried/idia
@@ -45,10 +46,11 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pyright
-      - name: Commit subjects in library terms
+      - name: Commit subjects describe library changes
+        if: github.event_name == 'push'
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE: ${{ github.event.before }}
+          HEAD: ${{ github.sha }}
         run: |
           # A new branch's push has no earlier commit: check the pushed commit alone.
           if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then BASE="$HEAD~1"; fi

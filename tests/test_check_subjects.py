@@ -1,5 +1,6 @@
-"""``scripts/check_subjects.py``, which CI runs over the commit subjects a push adds: it passes
-plain library subjects and fails one holding the vocabulary of a build process."""
+"""``scripts/check_subjects.py``, which CI runs over the commit subjects a push to main adds:
+it passes subjects that describe library changes and fails one that names how a change was
+made."""
 
 import subprocess
 import sys
@@ -15,7 +16,10 @@ def run(subjects: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_plain_subjects_pass() -> None:
-    subjects = "Format 4: each binding call gets its seconds\n\nRound 3 of the fixpoint\nADR-0003\n"
+    subjects = (
+        "Format 4: each binding call gets its seconds\n\nRound 3 of the fixpoint\n"
+        "The call item records its deadline\n"
+    )
     result = run(subjects)
     assert result.returncode == 0
     assert result.stdout == "check_subjects: 3 subject(s) pass\n"
