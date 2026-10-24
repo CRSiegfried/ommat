@@ -7,6 +7,10 @@ ommat is published to PyPI by `.github/workflows/publish.yml`, through Trusted P
 1. **PyPI and TestPyPI.** On each site, under *Your account → Publishing → Add a new pending publisher*, enter project `ommat`, owner `CRSiegfried`, repository `ommat`, workflow `publish.yml`, and environment `pypi` on PyPI or `testpypi` on TestPyPI. A pending publisher reserves the name until the first upload.
 2. **GitHub environments.** Under the repository's *Settings → Environments*, create `pypi` and `testpypi`. Give each a required reviewer (the maintainer), and limit `pypi` to tags matching `v*`.
 
+## Until idia is on PyPI
+
+A release pushes its tag alone, with no GitHub release. A GitHub release starts `publish.yml`, which would wait for the `pypi` environment and fail, and an `ommat[idia]` on PyPI could not resolve idia, which is on no package index. Steps 2, 4 and 5 below wait until idia is published there.
+
 ## Release procedure
 
 1. In one commit, bump `version` in `pyproject.toml`, run `uv lock`, and move the `Unreleased` entries in `CHANGELOG.md` under the new version and date.

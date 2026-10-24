@@ -27,6 +27,8 @@ classifiers = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/CRSiegfried/ommat"
+Documentation = "https://github.com/CRSiegfried/ommat/tree/main/docs"
 Repository = "https://github.com/CRSiegfried/ommat"
 Issues = "https://github.com/CRSiegfried/ommat/issues"
 Changelog = "https://github.com/CRSiegfried/ommat/blob/main/CHANGELOG.md"
