@@ -103,7 +103,7 @@ A plan the policy returns is checked against seven plan rules. One it breaks is 
 2. A step binds only results of earlier steps, each by a path that is null or in the binding grammar.
 3. Every step names a tool the design declares, and no argument is named `idempotency_key`.
 4. A step's board-ref origin is one of the policy's declared reads and holds a value on the board.
-5. A plan carries `reply` and `reason` as its kind requires, each holding a character that is not whitespace, and its kind is not `broken`.
+5. A plan's kind is not `broken`. A `clarify` or `inform` plan carries a `reply`, and no other kind carries one; an `escalate` plan carries a `reason`, which any other kind may carry. Each `reply` and `reason` holds a character that is not whitespace.
 6. Every step requirement names a `d:` ref with no field path, that has a provider, and whose value its type can hold.
 7. The plan's `reason` and `reply`, and every literal argument, argument name and requirement value, are in the value domain.
 
