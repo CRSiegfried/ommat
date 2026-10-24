@@ -8,7 +8,7 @@ ref ``unsupported``, with its reason as a line of ``warnings``.
 import asyncio
 import threading
 import time
-from typing import Any
+from typing import Any, Protocol
 
 from ommat import CallResult, Cause, RenderedQuestion, SourceCall, Unavailable
 from ommat.bindings import (
@@ -19,19 +19,30 @@ from ommat.bindings import (
     image_need,
     prompt_text,
 )
-from street_spotter import StreetSpotter
 
 THRESHOLD = 0.5
+
+
+class SpanModel(Protocol):
+    """The shape the binding asks of a model: names for its weights and the code that runs
+    them, and ``predict``, each span of a label scored at or above ``threshold``, as a ``dict``
+    of ``start``, ``end``, ``text`` and ``score``."""
+
+    model_id: str
+    revision: str
+    runtime: str
+
+    def predict(self, text: str, labels: list[str], threshold: float) -> list[dict[str, Any]]: ...
 
 
 class SpanBinding:
     """``binding(batch, seconds=s)`` over one loaded model, safe to call concurrently."""
 
-    def __init__(self, model: StreetSpotter, *, threshold: float = THRESHOLD) -> None:
+    def __init__(self, model: SpanModel, *, threshold: float = THRESHOLD) -> None:
         self._model = model
         self._threshold = threshold
         self._lock = threading.Lock()  # one inference at a time, across threads and loops
-        self._snapshot = f"{model.model_id}@{model.revision}"
+        self._snapshot = f"{model.model_id}@{model.revision} on {model.runtime}"
         self._elicitation = f"span extraction, one request per question, threshold {threshold}"
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:

@@ -110,7 +110,7 @@ def test_a_model_error_marks_its_own_ref_raised() -> None:
 
 
 def test_a_call_that_waits_out_its_seconds_never_starts_the_model() -> None:
-    model = StreetSpotter()
+    model = reports_run.Counted(StreetSpotter())
     binding = SpanBinding(model)
     with binding._lock:
         result = asyncio.run(binding(_batch("street"), seconds=0.01))

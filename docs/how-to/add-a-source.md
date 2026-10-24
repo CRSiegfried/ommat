@@ -93,7 +93,8 @@ timeout each batch takes.
 ## What a call receives
 
 A binding is an async function, `binding(batch, *, seconds)`. `ommat.bindings.OracleBinding`
-is its type.
+is its type. `ommat.Binding` is another thing: a plan step's argument bound to an earlier
+step's result.
 
 `batch` is a tuple of `SourceCall`s in source id order. Each holds:
 
@@ -197,6 +198,13 @@ stands only when the binding returns before the call's end, as when it finds bef
 request that the request cannot run in time. A request that runs to the deadline ends the
 whole call.
 
+Size a source's `timeout` against the model's latency, measured on texts as long as yours. A
+binding that serialises its model, as Path B's does, runs a call's requests one at a time, so
+a call costs about the number of questions times the time of one request, and a request's
+time grows faster than the text's length. For one small named-entity model on a CPU, a
+request took 0.05 s at 16 tokens, 0.14 s at 536, 1.3 s at 2,600 and 18 s at 7,800; with
+`timeout=10`, the 7,800-token text came back `timed-out`, and `decide_sync` returned at 15.4 s.
+
 ## What the record keeps
 
 A call's provenance is hashed on its call item: `snapshot`, the model and its version;
@@ -205,6 +213,21 @@ places the provider rounds probabilities to. `usage`, `attempts`, `warnings` and
 go under the record's `unhashed`, outside every hash. The call item also holds each
 question's identity, kind, labels as declared, value type and list flag, and the entries hold
 each answer.
+
+`decision.record.log` is the hashed log as a list of plain objects, one per item, in order;
+`decision.record.document` is the stored form, canonical JSON bytes. Each `entry` item names
+its `ref` and holds its `value`, or its `marker`. The driver reads the questions' values from
+them:
+
+```python
+def answers(decision: Decision) -> dict[str, object]:
+    """Each question's value, from the record's entry items."""
+    return {
+        item["ref"]: item["value"]["value"] if "value" in item else item["marker"]["kind"]
+        for item in decision.record.log
+        if item["item"] == "entry" and item["ref"].startswith("q:")
+    }
+```
 
 Replay answers each source from the record and calls no binding, so a recorded turn reruns
 with no model. Keep the design document, `loaded.document`, beside each record: when a
@@ -241,9 +264,33 @@ way each time.
 Loading a model takes seconds. Load it once, before `decide`, and hand it to the binding:
 
 ```python
-    model = StreetSpotter()  # load once, before decide
+    model = Counted(StreetSpotter())  # load once, before decide
     binding = SpanBinding(model)
 ```
+
+The binding asks the model for one shape, `SpanModel`:
+
+```python
+class SpanModel(Protocol):
+    """The shape the binding asks of a model: names for its weights and the code that runs
+    them, and ``predict``, each span of a label scored at or above ``threshold``, as a ``dict``
+    of ``start``, ``end``, ``text`` and ``score``."""
+
+    model_id: str
+    revision: str
+    runtime: str
+
+    def predict(self, text: str, labels: list[str], threshold: float) -> list[dict[str, Any]]: ...
+```
+
+A real model rarely has that shape, so wrap it in an adapter that does. Read the model's own
+output: offsets and scores often come only when asked for. GLiNER, for example, returns
+`{"entities": {label: [...]}}`, each with a `confidence` rather than a `score`, and bare
+strings unless called with `include_spans=True, include_confidence=True`.
+
+A model's packaging may leave out what its runtime needs: GLiNER's `gliner2[local]` also needed
+`protobuf` and `sentencepiece` for its tokenizer. On Linux, a CPU-only torch wheel, from
+`https://download.pytorch.org/whl/cpu`, avoids a large GPU download.
 
 The binding is a class whose instance is the async function decide calls:
 
@@ -251,16 +298,18 @@ The binding is a class whose instance is the async function decide calls:
 class SpanBinding:
     """``binding(batch, seconds=s)`` over one loaded model, safe to call concurrently."""
 
-    def __init__(self, model: StreetSpotter, *, threshold: float = THRESHOLD) -> None:
+    def __init__(self, model: SpanModel, *, threshold: float = THRESHOLD) -> None:
         self._model = model
         self._threshold = threshold
         self._lock = threading.Lock()  # one inference at a time, across threads and loops
-        self._snapshot = f"{model.model_id}@{model.revision}"
+        self._snapshot = f"{model.model_id}@{model.revision} on {model.runtime}"
         self._elicitation = f"span extraction, one request per question, threshold {threshold}"
 ```
 
 Pin the weights: load a model revision by its commit hash, not a branch such as `main`, so
-`snapshot` names the weights that ran.
+`snapshot` names the weights that ran. The library and runtime that run them, such as
+`gliner2` and `torch`, move the scores too, so `runtime` names their versions and `snapshot`
+carries it: `snapshot` names what produced the answer, `elicitation` how it was asked.
 
 ### Run inference in a thread, one at a time
 
@@ -368,7 +417,11 @@ scalar answer takes the best span and its score:
 
 `p_null` is `None`: the model gives no probability that the text holds none. A model that
 cuts a long text short answers from part of it: put the ref in the request's `truncated`, or
-give a `warnings` line, so the record says so.
+give a `warnings` line, so the record says so. To learn whether yours cuts, probe it: put a
+known entity at the end of texts of growing length, and see where it stops being found. A text
+past the window the model was trained on that the model does not cut still reads less well:
+give it a `warnings` line, and do not split the text: an answer pieced from parts is not one
+reading of the text the question names.
 
 ### Record the provenance
 
@@ -416,6 +469,32 @@ like your design's, such as the driver's `OWN`. Call it from synchronous code: i
 event loop and raises `RuntimeError` inside a running one. It is public, but outside ommat's
 compatibility promise.
 
+A batch is a tuple of `SourceCall(id, payload, needs, refs, questions)`, positional, and each
+question a `RenderedQuestion(kind, wording, labels, *, descriptions, value_type, is_list, text,
+reference_date)`, the extraction members keyword-only; `text` is the `needs` key that holds the
+text. The driver's own batch:
+
+```python
+OWN = (
+    SourceCall(
+        "places",
+        None,
+        {"t:state.text": TEXT},
+        (),
+        {
+            "q:places/streets": RenderedQuestion(
+                AnswerKind.extraction,
+                "street",
+                (),
+                value_type=ValueType.text,
+                is_list=True,
+                text="t:state.text",
+            )
+        },
+    ),
+)
+```
+
 A binding that passes keeps the protocol; it may still misread its model.
 
 ## Read the answer in a rule
@@ -448,6 +527,11 @@ def sure_street(r: ReadView) -> object:
     return answer.value
 ```
 
+A model's score is its own, uncalibrated, and a bar such as 0.8 is yours to set by measuring.
+A span model's score says how much a span looks like the label, not whether it fills the
+question's role: a recipient's name may score as high as a sender's. A score may also shift with
+the other labels asked beside it, which is why this binding asks one label per request.
+
 A span model's list answer carries no `p_null` and no confidence, so `extract`'s bar never
 applies to it: the rule gets the list, and `[]` when the model found none. For a model that
 does give a `p_null`, a rule can call `extract` first and then read the answer whole for its
@@ -455,16 +539,36 @@ confidence.
 
 ## Run it
 
+The driver wraps the model to count its calls, so the run shows that replay makes none; wrap a
+real model the same way:
+
+```python
+class Counted:
+    """A model that counts its calls, so a run can show that replay makes none."""
+
+    def __init__(self, model: SpanModel) -> None:
+        self.model = model
+        self.model_id, self.revision, self.runtime = model.model_id, model.revision, model.runtime
+        self.calls = 0
+
+    def predict(self, text: str, labels: list[str], threshold: float) -> list[dict[str, Any]]:
+        self.calls += 1
+        return self.model.predict(text, labels, threshold)
+```
+
 From `docs/how-to/add_a_source`, run `python reports_run.py`:
 
 ```text
 conformance: []
 own batches: []
 inform | Logged for Quay Street. | passed
+  answers: {'q:places/street': 'Quay Street', 'q:places/streets': ['Quay Street']}
   replay findings: [] | model calls: 0
 inform | Logged for Elm Row, Mill Lane; no one street stands out. | passed
+  answers: {'q:places/street': 'Elm Row', 'q:places/streets': ['Elm Row', 'Mill Lane']}
   replay findings: [] | model calls: 0
 escalate | the report names no street | passed
+  answers: {'q:places/street': None, 'q:places/streets': []}
   replay findings: [] | model calls: 0
 ```
 
