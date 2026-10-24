@@ -169,7 +169,7 @@ def transcript(record: Record) -> dict[str, Any] | None:
                 "id": f"{stem}_c{n}",
                 "source": source,
                 "asks": asks,
-                "outcome": item["outcome"],
+                "outcome": deepcopy(item["outcome"]),
                 "answers": {ref: answers[ref] for ref in asks},
             }
             if item["round"] not in held:

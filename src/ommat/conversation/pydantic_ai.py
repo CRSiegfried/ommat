@@ -86,7 +86,7 @@ def is_bookkeeping(message: ModelMessage) -> bool:
         return False
     if isinstance(message, ModelRequest):  # a request merged with other parts is no longer ours
         return all(isinstance(part, ToolReturnPart) for part in message.parts)
-    return True
+    return all(isinstance(part, ToolCallPart) for part in message.parts)
 
 
 def drop_earlier_bookkeeping(messages: list[ModelMessage]) -> list[ModelMessage]:
@@ -109,10 +109,11 @@ def drop_earlier_bookkeeping(messages: list[ModelMessage]) -> list[ModelMessage]
         for part in m.parts
         if isinstance(part, ToolCallPart)
     }
+    earlier = {id(m) for m in marked if _record(m) != latest}
     out: list[ModelMessage] = []
     for m in messages:
         if isinstance(m, ModelResponse):
-            if any(m is n for n in marked) and _record(m) != latest:
+            if id(m) in earlier:
                 continue
         else:
             parts = [p for p in m.parts if not _answers(p, gone)]

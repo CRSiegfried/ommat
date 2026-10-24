@@ -523,3 +523,9 @@ def test_chat_filters_ignore_odd_members() -> None:
     plain = [{"role": "user", "content": "hi"}]
     assert drop_earlier_bookkeeping(plain) == plain
     assert drop_earlier_bookkeeping(plain) is not plain
+
+
+def test_the_calls_of_one_call_item_share_no_outcome_object() -> None:
+    first = view("down")["rounds"][0]
+    assert first[0]["outcome"] == first[1]["outcome"]
+    assert first[0]["outcome"] is not first[1]["outcome"]

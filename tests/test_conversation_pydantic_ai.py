@@ -348,3 +348,9 @@ def test_the_names_refused_are_the_chat_renderer_s(where: str, name: str, messag
         v["pending"][0]["tool"] = name
     with pytest.raises(ValueError, match=re.escape(message)):
         to_model_messages(v)
+
+
+def test_a_marked_response_holding_text_is_not_bookkeeping() -> None:
+    call = to_model_messages(view("unsure"))[0]
+    assert isinstance(call, ModelResponse)
+    assert not is_bookkeeping(replace(call, parts=[*call.parts, TextPart("x")]))

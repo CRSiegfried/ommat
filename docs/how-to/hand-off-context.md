@@ -12,7 +12,8 @@ guide shows them at work.
 
 Neither is an audit trail, and neither says a word of its own: every sentence the next model
 reads is a plan's `reason` or `reply` or a text you declared, and the rest are codes. The
-record keeps the guard's account, the provenance and the prompts.
+handoff holds no guard account; the transcript holds the verdict's failures and each step's
+requirements. Only the record keeps the provenance and the prompts.
 
 The example's files are in `docs/how-to/hand_off_context/`: `support_design.py` is the design,
 `handoff_run.py` the driver, which answers with a stand-in binding, so it runs with no model,
@@ -123,6 +124,11 @@ hash, so one record always renders to the same messages, byte for byte. A source
 is its name with each `/` as `-`. A step's tool name is its name in the design, which must be
 the name of your tool: the renderers raise `ValueError` for one a provider would refuse.
 
+The transcript gives every answer, estimate and argument as the record holds it, the customer's
+words and any `identifier` field among them: load's `identifier` refusal covers a context
+entry's slots, not the transcript. Where a turn reads such values, hand off through the handoff
+alone, or share the redacted view instead.
+
 The last message calls the plan's steps, and your code runs them and appends their results. A
 tool run this way gets no idempotency key. When a repeated call would do harm, run the plan with
 `ommat.helpers.run_plan(decision, tools)` instead: it takes the `Decision` and a mapping from
@@ -163,9 +169,10 @@ agent = Agent(FunctionModel(front), capabilities=[ProcessHistory(drop_earlier_bo
 ```
 
 A return leaves only with its call, even where Pydantic AI has merged it into the next turn's
-request, so the history the model sees never holds one without the other. `is_bookkeeping(message)` tells a marked message, for code that reads the
-conversation back, such as a later turn's state. `ommat.conversation` has the same pair for
-Chat Completions messages, which it tells by their ids.
+request, so the history the model sees never holds one without the other.
+`is_bookkeeping(message)` tells a marked message, for code that reads the conversation back,
+such as a later turn's state. `ommat.conversation` has the same pair for Chat Completions
+messages, which it tells by their ids.
 
 In the second turn the plan clarifies, and the caller appends the reply itself:
 
