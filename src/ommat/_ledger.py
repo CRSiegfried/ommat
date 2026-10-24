@@ -1083,8 +1083,10 @@ class Ledger:
 
     def _check_format(self, kind: str, item: dict[str, Any], where: str) -> None:
         """Refuse a form the log's format does not have: a cause code outside its set, a
-        call item's precision before format 3 or its absence from it, and a described label
-        before format 3. Before the design item every kind is refused by the order check."""
+        call item's precision before format 3 or its absence from it, a precision other than an
+        integer or null before format 5, a call item's ``snapshot`` from format 5 or the
+        profile's members before it, and a described label before format 3. Before the design
+        item every kind is refused by the order check."""
         fmt = self._format
         if fmt not in RECORD_FORMATS:
             return  # no design item yet: the order check refuses the item

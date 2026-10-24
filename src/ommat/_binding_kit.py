@@ -264,7 +264,13 @@ def call_result(
         return _joined(cast("str | None", getattr(r, name)) for r in sent)
 
     says = [r.calibrated for r in sent if r.calibrated is not None]
-    calibrated = None if not says else all(says)
+    # Read by identity, so a value off its form folds to None and never to a bool.
+    if any(x is False for x in says):
+        calibrated: bool | None = False
+    elif says and all(x is True for x in says):
+        calibrated = True
+    else:
+        calibrated = None
     result = CallResult(
         values,
         provider=joined("provider"),
@@ -308,9 +314,9 @@ def _missing(result: CallResult, sent: list[RequestProvenance]) -> dict[str, str
     reasons: dict[str, str] = {}
     for detail in DETAILS:
         given = [(r.missing or {}).get(detail) for r in sent]
-        if any(g is None for g in given) or _holds(result, detail):
-            continue
-        codes = [g for g in given if type(g) is str]
+        if any(type(g) is not str for g in given) or _holds(result, detail):
+            continue  # a request with no reason, or one not a str, gives the call none
+        codes = cast("list[str]", given)
         reasons[detail] = next((c for c in codes if c != "not-sent"), "not-sent")
     return dict(sorted(reasons.items())) or None
 

@@ -145,7 +145,12 @@ and from the record's `unhashed` part its `attempts` and its `warnings` lines.
    cannot be seen, and `unchecked-limit` names a limit Decisions does not publish. The binding
    writes its own lines there too.
 
-4. A ref the binding cannot answer is a marker, never left out, and the binding's reason, when
+4. The call item also states who answered and how, the provider, the models, the revision,
+   the runtime and the elicitation, and its `calls` entry gives a reason for each that is
+   null, such as `not-pinned` for Clairic's short name;
+   [The provenance profile](../spec/README.md#the-provenance-profile) lists them.
+
+5. A ref the binding cannot answer is a marker, never left out, and the binding's reason, when
    it gives one, is a `warnings` line of that call. A ref whose request ran out of the call's
    time is `timed-out`, and one whose request failed is `raised`; the call's other refs stand.
    The last block below shows an `unsupported` ref; the spec's

@@ -249,10 +249,10 @@ outside every hash.
 2. `start`, `latency`, `usage`, `attempts`, `warnings`, `truncated`, `sums`, `unexpected`
    and `invalid` sit under `unhashed["calls"]`, keyed by the call item's log index as a
    string, with `request_id`, `calibrated`, `missing`, the reason for each provenance detail
-   a binding that sent a request leaves null, and `clients`, each present only when a binding
-   that sent a request gives it.
+   a binding that sent a request leaves null, and `clients`, each present only when the binding
+   gives it.
 
-3. Name each call's oracle. A call item names no oracle or provider, so look up each of its
+3. Name each call's oracle. A call item names no oracle, so look up each of its
    `sources` in the design: the source's `oracle`, or `default` when it declares none. The
    provider shows in `provider`, null here. The driver does it:
 

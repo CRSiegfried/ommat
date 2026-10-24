@@ -25,7 +25,8 @@ The checks, by name:
   replay's, owes none;
 - ``warnings`` and ``precision``: each conforms as interpret tests it;
 - ``provenance``: each detail of the provenance profile, ``request_id``, ``calibrated``,
-  ``usage`` and ``clients`` in its form, ``claimed`` naming only details holding a value,
+  ``usage``, ``attempts`` and ``clients`` in its form, ``claimed`` naming only details holding
+  a value,
   ``missing`` only details and reasons of the profile and never a detail holding a value; a
   result that sent a request gives each detail a value or a reason, and one that sent none has
   no provenance;
@@ -332,7 +333,7 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
         fail("provenance", problem)
     refused = [held.get(ref) for ref in provided]
     if provided and all(_unsupported(v) for v in refused):
-        set_ = [name for name in _UNSENT if getattr(result, name) is not None]
+        set_ = [name for name in _UNSENT if getattr(result, name) not in (None, 0, {})]
         set_ += [name for name in ("claimed", "truncated") if getattr(result, name) != ()]
         if set_:
             fail("unsupported-provenance", f"every ref is unsupported, yet {', '.join(set_)} set")
@@ -377,12 +378,17 @@ def _provenance_problems(result: CallResult) -> list[str]:
         problems.append("usage is not null or a dict of strings to numbers")
     claimed = cast(object, result.claimed)
     names = cast("tuple[object, ...]", claimed) if type(claimed) is tuple else None
-    if names is None or len(set(names)) != len(names):
+    strings = names is not None and all(type(n) is str for n in names)
+    if names is None or not strings or len(set(names)) != len(names):
         problems.append("claimed is not a tuple of distinct detail names")
+        names = None
     else:
         for name in names:
-            if not (type(name) is str and name in DETAILS and _holds(result, name)):
+            if not (name in DETAILS and _holds(result, cast(str, name))):
                 problems.append(f"claimed names {described(name)}, no detail holding a value")
+    attempts = cast(object, result.attempts)
+    if attempts is not None and not (type(attempts) is int and 0 <= attempts <= MAX_INTEGER):
+        problems.append("attempts is not null or an integer of at least 0")
     missing = cast(object, result.missing)
     reasons: dict[object, object] = {}
     if missing is not None:
@@ -404,7 +410,7 @@ def _provenance_problems(result: CallResult) -> list[str]:
             problems.append(f"{name} holds no value and no reason")
     if not sent:
         set_ = [n for n in HASHED_DETAILS if cast(object, getattr(result, n)) is not None]
-        if result.claimed != ():
+        if type(cast(object, result.claimed)) is tuple and result.claimed != ():
             set_.append("claimed")
         if set_:
             problems.append(f"no request was sent, yet {', '.join(set_)} set")

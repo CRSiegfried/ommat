@@ -18,6 +18,7 @@ from counting import SmallBounds
 from ledger_logs import before_profile, rehashed
 from ommat import (
     CallResult,
+    Cause,
     Design,
     InvalidRecord,
     Plan,
@@ -28,6 +29,7 @@ from ommat import (
     Source,
     SourceCall,
     Text,
+    Unavailable,
     decide_sync,
     from_record,
     load,
@@ -508,6 +510,26 @@ def test_an_invalid_new_member_is_digested_under_invalid(member: str, value: obj
     assert entry["invalid"][member] == digest(repr(value), record)
 
 
+def test_the_fold_refuses_a_clients_package_at_two_versions_and_ignores_unsent_ones() -> None:
+    with pytest.raises(ValueError, match="clients names idia at two versions"):
+        call_result({}, [sent(clients={"idia": "1"}), sent(clients={"idia": "2"})], precision=0)
+    unsent = RequestProvenance(runtime={"torch": "2.4"}, claimed=("revision",))
+    result = call_result({}, [sent(runtime={"torch": "2.5"}), unsent], precision=0)
+    assert (result.runtime, result.claimed) == ({"torch": "2.5"}, ())
+
+
+def test_a_missing_reason_falls_back_to_not_sent_and_never_to_a_made_up_one() -> None:
+    both_unsent = [sent(missing={"prompt": "not-sent"}), sent(missing={"prompt": "not-sent"})]
+    assert call_result({}, both_unsent, precision=0).missing == {"prompt": "not-sent"}
+    odd = [sent(missing={"prompt": cast(Any, 5)}), sent(missing={"prompt": cast(Any, 5)})]
+    assert call_result({}, odd, precision=0).missing is None
+
+
+def test_an_off_form_calibrated_folds_to_none_not_to_a_bool() -> None:
+    odd = [sent(calibrated=cast(Any, "no"))]
+    assert call_result({}, odd, precision=0).calibrated is None
+
+
 def test_the_fold_reads_no_request_whose_attempts_is_not_above_0() -> None:
     for attempts in (-1, 0):
         result = call_result({}, [RequestProvenance(provider="p", attempts=attempts)], precision=2)
@@ -595,3 +617,46 @@ def test_a_claimed_list_or_a_step_past_the_size_bounds_is_refused_at_the_read(
         doc["log"][3][name] = big
         with pytest.raises(InvalidRecord, match=name):
             read_record(rehashed(doc))
+
+
+@pytest.mark.parametrize("precision", [1.5, True, {"step": "0.05", "of": "p"}, {"step": 5}, "u"])
+def test_a_format_5_precision_off_its_json_kinds_is_refused_at_the_read(precision: object) -> None:
+    doc = doc_of(turn(**PROFILE))
+    doc["log"][3]["precision"] = precision
+    refused(doc, 'is not an integer or null, "unrounded" or a step')
+
+
+def test_a_runtime_past_the_size_bounds_is_refused_at_the_read(small_bounds: SmallBounds) -> None:
+    doc = doc_of(turn(**PROFILE))
+    doc["log"][3]["runtime"] = {"torch": "x" * 300}
+    with pytest.raises(InvalidRecord, match="runtime"):
+        read_record(rehashed(doc))
+
+
+@pytest.mark.parametrize(
+    ("member", "value"),
+    [("missing", []), ("missing", {1: "hidden"}), ("request_id", Name.gliner)],
+)
+def test_more_unhashed_details_off_their_form_fail_nothing(member: str, value: object) -> None:
+    record = turn(**{member: value})
+    assert call_item(record)["outcome"] == "returned"
+    assert member in calls_entry(record)["invalid"]
+
+
+def test_the_conformance_suite_reports_an_unhashable_claim_and_a_bad_attempts() -> None:
+    every: dict[str, str] = dict.fromkeys(sorted(DETAILS), "not-reported")
+    bad_claim = answering(attempts=1, missing=every, claimed=cast(Any, (["a"],)))
+    assert "provenance: batch 0: claimed is not a tuple of distinct detail names" in check(
+        bad_claim, batches=ONE
+    )
+    bad_count = answering(attempts=cast(Any, "3"))
+    assert any("attempts is not null" in f for f in check(bad_count, batches=ONE))
+
+
+def test_an_all_unsupported_result_with_attempts_0_owes_nothing() -> None:
+    async def refusing(batch: Batch, *, seconds: float) -> object:
+        marker = Unavailable(Cause("unsupported"))
+        values = {ref: marker for call in batch for ref in call.refs}
+        return CallResult(values, attempts=0, warnings=("refused",))
+
+    assert check(refusing, batches=ONE) == []

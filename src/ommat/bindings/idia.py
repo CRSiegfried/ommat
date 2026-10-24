@@ -19,7 +19,9 @@ ref of a wire request that did not answer ``timed-out`` when its error is idia's
 ``unsupported``, with its reason a line of the call's warnings; so is a question alone whose
 described noul or structured instruction the provider's capabilities do not carry, or that
 idia's ``Question`` refuses, a choice rendered with fewer than two labels among them, and the
-source's other questions are sent.
+source's other questions are sent. Each outcome's provenance is written under ommat's names,
+idia's ``snapshot`` as ``revision``, ``versions`` as ``runtime``, ``prompt_sent`` as ``prompt``
+and ``client_versions`` as ``clients``, with idia's reasons and claims under the same names.
 """
 
 from __future__ import annotations

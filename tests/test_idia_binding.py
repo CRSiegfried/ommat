@@ -887,3 +887,12 @@ def test_a_call_of_an_answered_and_a_failed_request_keeps_the_answered_ones_deta
     assert result.revision == "scripted-1"  # the answered request's
     assert result.claimed == ("revision",)
     assert result.missing is None or "revision" not in result.missing
+
+
+def test_idias_details_and_reasons_are_ommats_under_the_binding_names() -> None:
+    from ommat._provenance import DETAILS, REASONS
+    from ommat.bindings.idia import _detail  # pyright: ignore[reportPrivateUsage]
+
+    mapped = {_detail(d) for d in idia.DETAILS} | {"provider", "model_requested", "precision"}
+    assert mapped == DETAILS
+    assert set(idia.REASONS) == REASONS

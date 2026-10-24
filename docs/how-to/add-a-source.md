@@ -271,7 +271,10 @@ A leaf that runs a model in your process loads its weights before its first call
 with `idia.leaf(name)`, await its `load()`, then wrap it in a `Dispatcher`. idia's
 [providers spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/providers.md) says
 which leaves load. GLiNER's is one: install it with its extra, then build it with
-`idia.leaf("gliner")`.
+`idia.leaf("gliner")`, not `idia.provider("gliner")`, which returns it unloaded. Build the leaf
+before the event loop runs, since building it imports its runtime, which takes seconds;
+`load()` then fetches the weights, its one network step, and closing the dispatcher releases
+the leaf's worker. Under pip, torch comes from PyPI, the large GPU wheel on Linux.
 
 ```sh
 pip install "idia[gliner] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
@@ -291,12 +294,12 @@ async def provider(leaf: Any) -> Dispatcher:
 ```
 
 It loads on one event loop, `asyncio.run(provider(leaf))`, and each `decide_sync` then runs on
-a loop of its own. idia's
-[dispatch spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/dispatch.md) holds
-that one `Dispatcher` serves successive `asyncio.run` calls, and its providers spec that a client a leaf creates follows the
-running loop. A leaf given a client of your own refuses a call on any other loop: let the leaf
-create its client, or load and decide on one loop with `decide`. Close the dispatcher when you
-are done, as the driver does, to release the leaf.
+a loop of its own. idia's [dispatch
+spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/dispatch.md) holds that one
+`Dispatcher` serves successive `asyncio.run` calls, and its providers spec that a client a leaf
+creates follows the running loop. A leaf given a client of your own refuses a call on any other
+loop: let the leaf create its client, or load and decide on one loop with `decide`. Close the
+dispatcher when you are done, as the driver does, to release the leaf.
 
 ### Put what an oracle cannot answer in a source of its own
 
