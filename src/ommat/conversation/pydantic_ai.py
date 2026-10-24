@@ -22,7 +22,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from ommat.conversation._exchanges import BOOKKEEPING, exchanges
+from ommat.conversation._exchanges import BOOKKEEPING, check_turn, exchanges
 
 __all__ = ["drop_earlier_bookkeeping", "is_bookkeeping", "to_model_messages"]
 
@@ -45,6 +45,7 @@ def to_model_messages(
     Every response carries ``model_name`` and ``provider_name``. ``turn`` stems every id, and is
     held in the mark, as ``to_chat_completions`` says. Raises ``ValueError`` for a tool name no
     provider takes, as ``to_chat_completions`` does."""
+    check_turn(turn)
     if view is None:
         return []
     stamp = {"record_hash": view["record_hash"], "design_hash": view["design"]["hash"]}

@@ -64,12 +64,23 @@ def exchanges(view: dict[str, Any], turn: object = None) -> list[list[Call]]:
 _STEM = 27  # "om_" and 24 hex digits
 
 
-def turn_stem(record_hash: str, turn: object) -> str:
-    """The id stem for a record rendered under ``turn``, a ``str`` or an ``int``: ``om_`` and
-    the first 24 hex digits of SHA-256 over the canonical JSON of the record hash and the turn,
-    so an id keeps its form and its bound whatever the turn holds."""
+def check_turn(turn: object) -> None:
+    """Refuse a ``turn`` that is not ``None``, exactly a ``str`` or an ``int``, or that the
+    canonical encoding does not take."""
+    if turn is None:
+        return
     if type(turn) is not str and type(turn) is not int:
         raise ValueError(f"turn must be a str or an int, not {type(turn).__name__}")
+    encode(turn)  # an int past 2^53 - 1 or a str with a surrogate raises ValueError
+
+
+def turn_stem(record_hash: str, turn: object) -> str:
+    """The id stem for a record rendered under ``turn``: ``om_`` and the first 24 hex digits of
+    SHA-256 over the canonical JSON of the record hash and the turn, so an id keeps its form and
+    its bound whatever the turn holds. ``turn`` is exactly a ``str`` or an ``int``, the canonical
+    encoding's: an ``int`` of magnitude at most 2^53 - 1, a ``str`` with no surrogate; anything
+    else raises ``ValueError``."""
+    check_turn(turn)
     digest = hashlib.sha256(encode([record_hash, turn])).hexdigest()
     return "om_" + digest[:24]
 

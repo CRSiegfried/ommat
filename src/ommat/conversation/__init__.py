@@ -15,7 +15,7 @@ does not import this package, and this module takes nothing beyond the standard 
 from typing import Any, cast
 
 from ommat._canonical import encode
-from ommat.conversation._exchanges import BOOKKEEPING_ID, exchanges
+from ommat.conversation._exchanges import BOOKKEEPING_ID, check_turn, exchanges
 
 __all__ = ["drop_earlier_bookkeeping", "handoff_text", "is_bookkeeping", "to_chat_completions"]
 
@@ -64,9 +64,11 @@ def to_chat_completions(
     message per call with a result. Every argument and result is canonical JSON, so a record
     renders to the same bytes each time. Raises ``ValueError`` for a tool name no provider
     takes: a source or pending tool named ``decide``, a pending tool outside ``[A-Za-z0-9_-]``,
-    or a name over 64 characters. ``turn``, a ``str`` or an ``int``, gives every id a stem hashed
-    from the record hash and the turn, so one record rendered for two turns of a conversation
-    repeats no id; ``None`` keeps the transcript's ids."""
+    or a name over 64 characters. ``turn``, exactly a ``str`` or an ``int`` the canonical
+    encoding takes, else ``ValueError``, gives every id a stem hashed from the record hash and
+    the turn, so one record rendered for two turns of a conversation repeats no id; ``None``
+    keeps the transcript's ids."""
+    check_turn(turn)
     if view is None:
         return []
     messages: list[dict[str, Any]] = []

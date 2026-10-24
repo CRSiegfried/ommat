@@ -10,8 +10,9 @@ assumes you have done [Write your first design](../tutorials/write-a-design.md).
 [conversation renderers](../spec/README.md#the-conversation-renderers) state the rules; the
 guide shows them at work.
 
-Neither is an audit trail, and neither says a word of its own: every sentence the next model
-reads is a plan's `reason` or `reply` or a text you declared, and the rest are codes. The
+Neither is an audit trail, and neither renderer says a word of its own: beyond fixed labels,
+each sentence it writes is a plan's `reason` or `reply` or a text you declared. The transcript
+also carries the turn's values as recorded, as the section on its calls says. The
 handoff holds no guard account; the transcript holds the verdict's failures and each step's
 requirements. Only the record keeps the provenance and the prompts.
 
@@ -127,7 +128,9 @@ Append the messages after your own user message for the turn. Each id comes from
 hash, so one record always renders to the same messages, byte for byte. The same design, state
 and answers give the same record: when a turn can repeat one exactly, as a retry does, pass
 each rendering its own `turn`, such as the turn's number, `to_chat_completions(view, turn=3)`,
-so no tool-call id appears twice in the conversation, which a provider may refuse. A source's tool name
+so no tool-call id appears twice in the conversation, which a provider may refuse. A `turn` is
+exactly a `str` or an `int`, an `int` within 2^53 - 1 either side of zero and a `str` with no
+lone surrogate, so a nanosecond clock is too large; anything else raises `ValueError`. A source's tool name
 is its name with each `/` as `-`. A step's tool name is its name in the design, which must be
 the name of your tool: the renderers raise `ValueError` for one a provider would refuse.
 
@@ -146,10 +149,45 @@ no pending calls, so run it with `run_plan` too and tell the model what ran in y
 
 When the plan is `clarify` or `inform`, the turn ends in decide's result, and the reply is the
 design's own words. Send it to the user and append it as the assistant's message, so the next
-turn's history holds what was said; no model call words it again. An `escalate` or `broken`
-plan runs no step either, and the handoff holds no cause, so `Plan: broken` stands beside
-`Verdict: passed`: the transcript's decide result holds the cause, so hand that off, or word the
-outcome in your own code.
+turn's history holds what was said; no model call words it again. An `escalate` plan runs no
+step either, and the handoff gives its `Reason:`. A `broken` plan has none, and the handoff
+holds no cause, so `Plan: broken` stands beside `Verdict: passed`: the transcript's decide
+result holds the cause, so hand that off, or word the outcome in your own code.
+
+## When an estimate is not settled
+
+`handoff_run.py`'s second turn answers too close to call. The rule abstains, the policy asks to
+clarify, and the entry over `d:refund` gives its marker's kind and cause instead of a value:
+
+```python
+    unsure = decide_sync(loaded, STATE, {"default": answering(0.6)})
+    print(handoff_text(handoff(unsure.record)))
+```
+
+`handoff_run.py` prints both turns' handoffs and the first turn's calls:
+
+```text
+Plan: execute
+Verdict: passed
+Reason: the customer asked for a refund
+Step 1: refund_order {"order":{"ref":"t:state.order.id","value":"A-1001"}}
+Refund requested: yes
+Order A-1001 is delivered
+Design: support sha256:b4c10170984a81abc3bd88c5f7192120e135a178bd9e31805161bdc4dfa5ac16
+Record: sha256:5013f8d89a2ec632c8f1431cedfa581a370b57c708603b24b6153b908bfe7c2d
+call om_5013f8d89a2ec632c8f1431c_c1 ask {"asks":["q:refund"]}
+result om_5013f8d89a2ec632c8f1431c_c1 97 bytes
+call om_5013f8d89a2ec632c8f1431c_d decide {"design":{"hash":"sha256:b4c10170984a81abc3bd88c5f7192120e135a178bd9e31805161bdc4dfa5ac16","name":"support"}}
+result om_5013f8d89a2ec632c8f1431c_d 481 bytes
+call om_5013f8d89a2ec632c8f1431c_s1 refund_order {"order":"A-1001"}
+Plan: clarify
+Verdict: passed
+Reply: Would you like a refund for this order?
+d:refund: Unsure (abstained)
+Order A-1001 is delivered
+Design: support sha256:b4c10170984a81abc3bd88c5f7192120e135a178bd9e31805161bdc4dfa5ac16
+Record: sha256:c34897f04fd5b52643c488c6daddb172f5a1e3f2f0fff4f7a859e97de7329b85
+```
 
 ## Hand the calls to a Pydantic AI agent
 
@@ -196,7 +234,7 @@ request, so the history the model sees never holds one without the other.
 such as a later turn's state. `ommat.conversation` has the same pair for Chat Completions
 messages, which it tells by their ids.
 
-In the second turn the plan clarifies, and the caller appends the reply itself:
+In `agent_run.py`'s second turn the plan clarifies, and the caller appends the reply itself:
 
 ```python
     reply = unsure.plan.reply
@@ -205,48 +243,13 @@ In the second turn the plan clarifies, and the caller appends the reply itself:
         print(reply)
 ```
 
-The example prints:
+`agent_run.py` prints:
 
 ```console
 refunding A-1001
 Your refund is on its way.
 Would you like a refund for this order?
 8 bookkeeping messages, 4 kept
-```
-
-## When an estimate is not settled
-
-The driver's second turn answers too close to call. The rule abstains, the policy asks to
-clarify, and the entry over `d:refund` gives its marker's kind and cause instead of a value:
-
-```python
-    unsure = decide_sync(loaded, STATE, {"default": answering(0.6)})
-    print(handoff_text(handoff(unsure.record)))
-```
-
-The driver prints both turns' handoffs and the first turn's calls:
-
-```text
-Plan: execute
-Verdict: passed
-Reason: the customer asked for a refund
-Step 1: refund_order {"order":{"ref":"t:state.order.id","value":"A-1001"}}
-Refund requested: yes
-Order A-1001 is delivered
-Design: support sha256:b4c10170984a81abc3bd88c5f7192120e135a178bd9e31805161bdc4dfa5ac16
-Record: sha256:5013f8d89a2ec632c8f1431cedfa581a370b57c708603b24b6153b908bfe7c2d
-call om_5013f8d89a2ec632c8f1431c_c1 ask {"asks":["q:refund"]}
-result om_5013f8d89a2ec632c8f1431c_c1 97 bytes
-call om_5013f8d89a2ec632c8f1431c_d decide {"design":{"hash":"sha256:b4c10170984a81abc3bd88c5f7192120e135a178bd9e31805161bdc4dfa5ac16","name":"support"}}
-result om_5013f8d89a2ec632c8f1431c_d 481 bytes
-call om_5013f8d89a2ec632c8f1431c_s1 refund_order {"order":"A-1001"}
-Plan: clarify
-Verdict: passed
-Reply: Would you like a refund for this order?
-d:refund: Unsure (abstained)
-Order A-1001 is delivered
-Design: support sha256:b4c10170984a81abc3bd88c5f7192120e135a178bd9e31805161bdc4dfa5ac16
-Record: sha256:c34897f04fd5b52643c488c6daddb172f5a1e3f2f0fff4f7a859e97de7329b85
 ```
 
 ## Switch parts off

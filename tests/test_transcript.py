@@ -685,3 +685,25 @@ def test_a_pending_tool_name_may_hold_digits() -> None:
     v = json.loads(json.dumps(view("clear")))
     v["pending"][0]["tool"] = "archive2"
     assert to_chat_completions(v)[-1]["tool_calls"][0]["function"]["name"] == "archive2"
+
+
+@pytest.mark.parametrize(
+    ("turn", "message"),
+    [
+        (2**53, "magnitude"),
+        (-(2**53), "magnitude"),
+        ("\ud800", "surrogate"),
+        (True, "a str or an int"),
+    ],
+)
+def test_a_turn_the_canonical_encoding_refuses_raises_even_with_no_view(
+    turn: Any, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        to_chat_completions(None, turn=turn)
+    with pytest.raises(ValueError, match=message):
+        to_chat_completions(view("clear"), turn=turn)
+
+
+def test_the_largest_turn_the_encoding_takes_renders() -> None:
+    assert to_chat_completions(view("clear"), turn=2**53 - 1)
