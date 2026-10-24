@@ -246,8 +246,8 @@ def call_result(
     line in the order first given, ``None`` when none has one; ``runtime`` and ``clients`` each
     merged; ``claimed`` the union, sorted; ``calibrated`` false when any request that holds one
     says false, true when every one that holds one says true, ``None`` when none holds one;
-    ``missing`` a detail's reason when every request lacks the detail, the first code other
-    than ``not-sent``, else ``not-sent``, and none for a detail the result holds a value for;
+    ``missing`` a detail's reason when every request gives one for it and the result holds no
+    value for it, the first code other than ``not-sent``, else ``not-sent``;
     ``usage`` summed per key over the requests that report it, ``None`` when none does;
     ``attempts`` summed; ``truncated`` sorted and distinct; ``warnings`` as given. When no
     request made an attempt, the result has no provenance and ``attempts``, ``precision`` and

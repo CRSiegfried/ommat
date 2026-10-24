@@ -660,3 +660,57 @@ def test_an_all_unsupported_result_with_attempts_0_owes_nothing() -> None:
         return CallResult(values, attempts=0, warnings=("refused",))
 
     assert check(refusing, batches=ONE) == []
+
+
+@pytest.mark.parametrize(
+    ("member", "value", "says"),
+    [
+        ("claimed", ["alice@example.com"], "which is no detail"),
+        ("precision", {"step": "alice@example.com"}, "is not a step of its grammar"),
+        ("precision", {"step": "0.1"}, "is not a step of its grammar"),
+    ],
+)
+def test_a_hand_edited_claim_or_step_is_refused_at_the_read(
+    member: str, value: object, says: str
+) -> None:
+    doc = doc_of(turn(**PROFILE))
+    doc["log"][3][member] = value
+    refused(doc, says)
+
+
+class Raising:
+    """A value whose __eq__ and __bool__ raise: binding code the suite must not run."""
+
+    def __eq__(self, other: object) -> bool:
+        raise ValueError("ran")
+
+    def __bool__(self) -> bool:
+        raise ValueError("ran")
+
+    __hash__ = object.__hash__
+
+
+def unsupported_with(**members: Any) -> Any:
+    async def binding(batch: Batch, *, seconds: float) -> object:
+        marker = Unavailable(Cause("unsupported"))
+        return CallResult({ref: marker for call in batch for ref in call.refs}, **members)
+
+    return binding
+
+
+def test_an_all_unsupported_result_with_calibrated_false_is_reported() -> None:
+    failures = check(unsupported_with(calibrated=False), batches=ONE)
+    assert any("unsupported-provenance" in f and "calibrated" in f for f in failures), failures
+
+
+def test_the_suite_runs_no_code_of_a_bindings_odd_member() -> None:
+    for name in ("attempts", "usage", "request_id", "claimed"):
+        failures = check(unsupported_with(**{name: Raising()}), batches=ONE)
+        assert failures, name
+
+
+def test_the_stand_in_reads_no_leading_article_into_a_street() -> None:
+    from street_spotter import StreetSpotter
+
+    (found,) = StreetSpotter().predict("The Elm Row lamp is out.", ["street"], 0.5)
+    assert found["text"] == "Elm Row"

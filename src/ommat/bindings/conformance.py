@@ -323,7 +323,8 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
         elif ref in questions and not _in_form(ref, value, *questions[ref]):
             fail("answers", f"{ref} is not in its kind's form")
     called = _sent(result)
-    if per_ref and called and not result.warnings:
+    warnings = cast(object, result.warnings)
+    if per_ref and called and not (type(warnings) is tuple and warnings):
         fail("per-ref-cause", "a timed-out or raised ref with no warnings line")
     if not warnings_conform(cast(object, result.warnings)):
         fail("warnings", "warnings does not conform")
@@ -333,10 +334,24 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
         fail("provenance", problem)
     refused = [held.get(ref) for ref in provided]
     if provided and all(_unsupported(v) for v in refused):
-        set_ = [name for name in _UNSENT if getattr(result, name) not in (None, 0, {})]
-        set_ += [name for name in ("claimed", "truncated") if getattr(result, name) != ()]
+        set_ = [name for name in _UNSENT if not _unset(cast(object, getattr(result, name)))]
+        set_ += [
+            name
+            for name in ("claimed", "truncated")
+            if not (
+                type(cast(object, getattr(result, name))) is tuple and not getattr(result, name)
+            )
+        ]
         if set_:
             fail("unsupported-provenance", f"every ref is unsupported, yet {', '.join(set_)} set")
+
+
+def _unset(value: object) -> bool:
+    """Whether a member a result that sent no request holds is unset: ``None``, an ``attempts``
+    of 0 or an empty ``missing``, read by type, so no code of the binding's value runs."""
+    return (
+        value is None or (type(value) is int and value == 0) or (type(value) is dict and not value)
+    )
 
 
 def _sent(result: CallResult) -> bool:

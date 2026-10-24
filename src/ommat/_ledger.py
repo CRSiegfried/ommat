@@ -22,6 +22,7 @@ from ommat._provenance import (
     HASHED_DETAILS,
     REASONS,
     STRING_DETAILS,
+    precision_conforms,
 )
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import (
@@ -575,6 +576,8 @@ def _precision_shape(value: Any, where: str) -> None:
     if type(value) is dict:
         members = cast("dict[str, object]", value)
         if list(members) == ["step"] and type(members["step"]) is str:
+            if not precision_conforms(members):  # the step's grammar, as the profile gives it
+                raise _LedgerError(f"{where}'s step is not a step of its grammar")
             return
     raise _LedgerError(f'{where} is not an integer or null, "unrounded" or a step')
 
@@ -590,6 +593,17 @@ def _is_versions(value: Any) -> bool:
 
 
 _VERSIONS = _kind(_is_versions, "a non-empty object of strings")
+
+
+def _claimed_shape(value: Any, where: str) -> None:
+    """A ``claimed``: a list of strings, each a detail's name of the provenance profile."""
+    _STRINGS(value, where)
+    for name in cast("list[str]", value):
+        if name not in DETAILS:
+            raise _LedgerError(f"{where} names {clipped(name)}, which is no detail")
+
+
+_CLAIMED = cast(_Check, _claimed_shape)
 _PROFILE_ONLY = ("provider", "model_requested", "model_reported", "revision", "runtime", "claimed")
 """The call item's members from format 5, in place of ``snapshot``."""
 _CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
@@ -616,7 +630,7 @@ _SHAPES: dict[str, _Check] = {
             "model_reported": _STR_OR_NULL,
             "revision": _STR_OR_NULL,
             "runtime": _or_null(_VERSIONS),
-            "claimed": _STRINGS,
+            "claimed": _CLAIMED,
         },
     ),
     "round": _shape({"round": _INT, "cost": _NUMBER, "deadline": _BOOL}),

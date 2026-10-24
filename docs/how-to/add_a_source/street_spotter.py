@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-_STREET = re.compile(r"\b(?:[A-Z][a-z]+ ){1,2}(Street|Road|Lane|Row)\b")
+_STREET = re.compile(r"\b(?!(?:The|A|An|This) )(?:[A-Z][a-z]+ ){1,2}(Street|Road|Lane|Row)\b")
 _SCORES = {"Street": 0.95, "Road": 0.95, "Lane": 0.7, "Row": 0.7}
 
 
