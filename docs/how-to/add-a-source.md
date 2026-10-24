@@ -56,7 +56,9 @@ SOURCES = {
 
 A question's kind is `noul`, `choice`, `score` or `extraction`. The first three ask for a
 probability for each label: `noul` for `yes` and `no`, `choice` and `score` for the labels
-the question declares. An extraction asks for a typed value read from a text, and declares
+the question declares. A label is its name, such as `"delivery"`, or exactly
+`{"name": "delivery", "description": "Where an order is"}`; load refuses a mapping of `name`
+alone. An extraction asks for a typed value read from a text, and declares
 four members of its own:
 
 - `value_type`: `text`, `number`, `date`, `time`, `datetime` or `duration`;
@@ -248,11 +250,79 @@ def idia_bindings(provider: idia.Dispatcher) -> dict[str, OracleBinding]:
 
 `oracle_binding` sends each source as one idia request, writes the record's provenance and
 marks what idia cannot ask `unsupported`; [The idia binding](../spec/README.md#the-idia-binding)
-states what it does and which dispatchers it refuses. A design that asks label kinds and
-extractions of different models binds one dispatcher per oracle. It is outside ommat's
-compatibility promise: while idia is 0.x it may change in any minor release when idia
-changes, and the changelog says so.
-[Decide with real models through idia](../tutorials/decide-with-idia.md) runs it end to end.
+states what it does and which dispatchers it refuses. It is outside ommat's compatibility
+promise: while idia is 0.x it may change in any minor release when idia changes, and the
+changelog says so. [Decide with real models through idia](../tutorials/decide-with-idia.md)
+runs it end to end over two wire models.
+
+### Load a leaf that needs it
+
+A leaf that runs a model in your process loads its weights before its first call: build it
+with `idia.leaf(name)`, await its `load()`, then wrap it in a `Dispatcher`. idia's
+[providers spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/providers.md) says
+which leaves load. `idia_run.py` does it for any leaf:
+
+```python
+async def provider(leaf: Any) -> Dispatcher:
+    """Load the leaf when it has a load step, then wrap it in a dispatcher."""
+    load_step = getattr(leaf, "load", None)
+    if load_step is not None:
+        await load_step()
+    return Dispatcher(leaf)
+```
+
+It loads on one event loop, `asyncio.run(provider(leaf))`, and each `decide_sync` then runs on
+a loop of its own. idia's [dispatch spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/dispatch.md) holds that one `Dispatcher` serves
+successive `asyncio.run` calls, and its providers spec that a client a leaf creates follows the
+running loop. A leaf given a client of your own refuses a call on any other loop: let the leaf
+create its client, or load and decide on one loop with `decide`. Close the dispatcher when you
+are done, as the driver does, to release the leaf.
+
+### Put what an oracle cannot answer in a source of its own
+
+idia refuses a whole request when one of its questions is a kind the provider does not take,
+so every ref of that source comes back `unsupported`: one `choice` beside three extractions,
+asked of an extraction model, loses all four. A described `noul` or a structured wording the
+provider does not carry is `unsupported` alone. A leaf may also refuse at the call what its
+capabilities do not say, such as a value type; then every ref of the request is `raised`,
+with the leaf's message as a line. Give each oracle sources that ask
+only what its model answers, and a design that asks label kinds and extractions of different
+models one dispatcher per oracle.
+
+### Split a long text before deciding
+
+`oracle_binding` takes only a dispatcher whose overflow policy is `Fail`, so idia neither
+trims nor splits a text. One longer than the provider's input does not fit, and the request is
+refused before any call: every ref of the source is `unsupported`, with a line such as
+`places: unsupported: the state alone is estimated at 346 tokens, over the limit of 256`. The
+idia binding sends each source as one request, so the caller splits the text and decides each
+part in a turn of its own.
+
+### Run it offline
+
+`idia_run.py` runs Path A with no model: idia's scripted leaf declares capabilities like a
+text span leaf's, extractions of text, with an input window of 256 tokens so that the second
+report overflows it, and answers through the same street finder. From
+`docs/how-to/add_a_source`, run `python idia_run.py`:
+
+```text
+conformance: []
+inform | Logged for Elm Row, Mill Lane; no one street stands out. | passed
+  answers: {'q:places/street': 'Elm Row', 'q:places/streets': ['Elm Row', 'Mill Lane']}
+  replay findings: [] | leaf calls: 0
+escalate | the report names no street | passed
+  answers: {'q:places/street': 'unsupported', 'q:places/streets': 'unsupported'}
+  warning: places: unsupported: the state alone is estimated at 346 tokens, over the limit of 256
+  replay findings: [] | leaf calls: 0
+```
+
+The second report is longer than that window, so idia refuses it before any call.
+
+### What Path A records
+
+Path A's `snapshot` is the one the leaf reports: for some leaves a bare commit hash, for some
+none, with a `no-snapshot` line in `warnings`. The binding writes neither the model id idia
+reports nor the runtime versions a leaf may report, so keep them beside the record.
 
 ## Path B: write a binding over a local model
 
@@ -288,7 +358,8 @@ A real model rarely has that shape, so wrap it in an adapter that does. Read the
 output: offsets and scores often come only when asked for. GLiNER2, for example, gives bare
 strings unless asked for spans and confidences. A model's packaging may also leave out what its
 runtime needs, such as its tokenizer's library; on Linux, a CPU-only torch wheel avoids a large
-GPU download.
+GPU download; uv's package index set in a library's own project does not carry to a project
+that depends on it, so set it in yours.
 
 The binding is a class whose instance is the async function decide calls:
 
@@ -451,7 +522,10 @@ the protocol asks.
 
 ## Hold the binding to the protocol
 
-Run the conformance suite before you bind anything:
+Run the conformance suite before you bind anything, over a binding of either path; `idia_run.py`
+runs it over Path A's. Over a leaf that answers only text extractions, most of the suite's
+batches come back `unsupported` before any call, so a pass there mostly tests the refusals.
+`reports_run.py` runs it over Path B's:
 
 ```python
     print("conformance:", check(binding, deterministic=True))
@@ -462,7 +536,7 @@ Run the conformance suite before you bind anything:
 [The binding protocol](../spec/README.md#the-binding-protocol) lists, and returns each failure
 as a string naming its check; an empty list passes. `deterministic=True` also checks that two
 calls with one batch return equal results, which a local model on a CPU should; a model on a
-GPU may not repeat exactly, so drop the flag there. Pass `batches=` to send batches shaped
+GPU or behind a network may not repeat exactly, so drop the flag there. Pass `batches=` to send batches shaped
 like your design's, such as the driver's `OWN`. Call it from synchronous code: it runs its own
 event loop and raises `RuntimeError` inside a running one. It is public, but outside ommat's
 compatibility promise.
@@ -534,6 +608,8 @@ A span model's score says how much a span looks like the label, not whether it f
 question's role: a recipient's name may score as high as a sender's. A score may also shift with
 the other labels asked beside it, as [The binding protocol](../spec/README.md#the-binding-protocol)
 warns of any question beside others, which is why this binding asks one label per request.
+Path A asks a source's questions together in one request, so the two paths' answers to one
+design may differ.
 
 A span model's list answer carries no `p_null` and no confidence, so `extract`'s bar never
 applies to it: the rule gets the list, and `[]` when the model found none. For a model that

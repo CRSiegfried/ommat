@@ -20,10 +20,7 @@ from ommat import (
     SourceCall,
     Unavailable,
     ValueType,
-    decide_sync,
-    load,
 )
-from reports_design import DESIGN
 from span_binding import SpanBinding
 from street_spotter import StreetSpotter
 
@@ -58,8 +55,7 @@ def _contiguous(block: str, text: str) -> bool:
 
 def test_the_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixture[str]) -> None:
     results = reports_run.main()
-    (shown,) = _blocks("text")
-    assert capsys.readouterr().out == shown
+    assert capsys.readouterr().out == _blocks("text")[1]
     assert [plan.kind for plan, _ in results] == [
         PlanKind.inform,
         PlanKind.inform,
@@ -68,18 +64,12 @@ def test_the_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixture[st
     assert [calls for _, calls in results] == [0, 0, 0]
 
 
-def test_the_idia_path_binds_an_idia_provider() -> None:
+def test_the_idia_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixture[str]) -> None:
     pytest.importorskip("idia")
-    from idia import Dispatcher, RetryPolicy
-    from idia.providers.scripted import Scripted
+    import idia_run
 
-    import idia_path
-    from test_idia_binding import answer_all, caps
-
-    leaf = Scripted(capabilities=caps(), script=answer_all)
-    bindings = idia_path.idia_bindings(Dispatcher(leaf, retry=RetryPolicy.without_delay()))
-    decision = decide_sync(load(DESIGN), {"text": "The lamp on Quay Street is out."}, bindings)
-    assert decision.plan.kind is PlanKind.escalate
+    assert idia_run.main() == [PlanKind.inform, PlanKind.escalate]
+    assert capsys.readouterr().out == _blocks("text")[0]
 
 
 class _Failing(StreetSpotter):
