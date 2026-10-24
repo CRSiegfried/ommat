@@ -119,8 +119,9 @@ aligned with them. An extraction question also holds `value_type`, `is_list`, `t
 [candidate-valued](../spec/README.md#the-candidate-valued-label-set) `choice` may differ from
 call to call, so keep no labels by ref.
 
-A need that holds an answer is the `Answer` or `ExtractionAnswer` itself, and an image is
-bytes; `ommat.bindings.json_value` writes a need as JSON, and `image_need` reads an image.
+A need that holds an answer is the `Answer` or `ExtractionAnswer` itself, and an image is a
+`dict` of `media_type` and `data`, its bytes; `ommat.bindings.json_value` writes a need as JSON,
+and `image_need` reads an image.
 Treat `needs` as read-only, and change no durable state: no cache on disk, no write to a
 store.
 

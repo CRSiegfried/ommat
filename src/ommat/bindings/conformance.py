@@ -315,7 +315,7 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
     questions = {ref: (call, q) for call in batch for ref, q in call.questions.items()}
     per_ref = False
     for ref, value in held.items():
-        if isinstance(value, Undetermined):
+        if is_a(value, Undetermined):
             if not _binding_marker(value):
                 fail("markers", f"{ref} holds a marker a binding may not return")
             elif cast(Unavailable, value).cause.code in _PER_REF:
@@ -364,7 +364,9 @@ def _sent(result: CallResult) -> bool:
 def _holds(result: CallResult, detail: str) -> bool:
     if detail.startswith("usage."):
         usage = cast(object, result.usage)
-        return type(usage) is dict and detail.removeprefix("usage.") in usage
+        key = detail.removeprefix("usage.")
+        keys = cast("dict[object, object]", usage) if type(usage) is dict else {}
+        return any(type(k) is str and k == key for k in keys)  # runs no key's code
     return cast(object, getattr(result, detail)) is not None
 
 
@@ -417,8 +419,9 @@ def _provenance_problems(result: CallResult) -> list[str]:
                 elif not (type(reason) is str and reason in REASONS):
                     problems.append(f"missing gives {name} {described(reason)}, no reason")
     sent = _sent(result)
+    given_names = {k for k in reasons if type(k) is str}  # exact strings, so no key's code runs
     for name in sorted(DETAILS):
-        held, given = _holds(result, name), name in reasons
+        held, given = _holds(result, name), name in given_names
         if held and given:
             problems.append(f"{name} holds a value and a reason")
         elif sent and not held and not given:

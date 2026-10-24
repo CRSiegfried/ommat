@@ -11,10 +11,10 @@ no credential. Run it when ommat's record format or the tutorial's printing chan
 wire input changes, the design, a prompt's form or the leaf, the logs themselves are recorded
 again live, with ``scripts/record_idia_e2e.py`` and ``scripts/record_idia_tutorial.py``.
 When idia's log changes form, its ``upgrade_log`` in ``idia.providers.recorded`` brings each log
-up offline, editing it in place, before this script runs. The record document is rewritten
-only when its hash or log changed, so a run with nothing to change keeps the timings of
-whichever run wrote it. A changed record hash changes the ``answered from record`` lines, so
-copy the new output into the tutorial page's printed blocks.
+up offline, editing it in place, before this script runs. The record document is rewritten only
+when its hash or hashed log changed, its ``unhashed`` part not compared, so a run with nothing
+to change keeps the timings of whichever run wrote it. A changed record hash changes the
+``answered from record`` lines, so copy the new output into the tutorial page's printed blocks.
 """
 
 import asyncio

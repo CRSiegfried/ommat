@@ -714,3 +714,35 @@ def test_the_stand_in_reads_no_leading_article_into_a_street() -> None:
 
     (found,) = StreetSpotter().predict("The Elm Row lamp is out.", ["street"], 0.5)
     assert found["text"] == "Elm Row"
+
+
+class Evil:
+    """A value whose __class__ raises: binding code the suite must not run."""
+
+    @property
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleMethodOverride]
+        raise RuntimeError("ran")
+
+
+def test_the_suite_reads_a_value_by_type_and_runs_none_of_its_code() -> None:
+    async def evil(batch: Batch, *, seconds: float) -> object:
+        return CallResult({ref: Evil() for call in batch for ref in call.refs})
+
+    assert check(evil, batches=ONE) == []  # a t: value the suite does not judge, and no raise
+
+
+class Key(str):
+    """A key whose hash is a detail's and whose __eq__ raises."""
+
+    __slots__ = ()
+
+    def __hash__(self) -> int:
+        return hash("input_tokens")
+
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("ran")
+
+
+def test_the_suite_runs_no_code_of_a_bindings_usage_or_missing_key() -> None:
+    assert check(answering(attempts=1, usage={Key("x"): 1}), batches=ONE)
+    assert check(answering(attempts=1, missing={Key("x"): "hidden"}), batches=ONE)
