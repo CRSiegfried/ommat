@@ -281,10 +281,10 @@ _CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
 
 
 def before_profile(doc: dict[str, Any], fmt: int) -> dict[str, Any]:
-    """A current record document made format ``fmt``, 3 or 4, or below once the caller drops
-    what format 3 added: each call item's ``revision``
-    back to ``snapshot``, the profile's other members and its ``calls`` entries' gone, as a
-    record before the provenance profile holds them. Its ``hash`` is left to recompute."""
+    """A current record document made format ``fmt``: the format number set, each call item's
+    ``revision`` renamed back to ``snapshot``, the profile's other members and its ``calls``
+    entries' dropped, as a record before the provenance profile holds them. A caller below
+    format 3 also drops what format 3 added. Its ``hash`` is left to recompute."""
     doc["log"][0]["format"] = fmt
     for item in doc["log"]:
         if item["item"] == "call":

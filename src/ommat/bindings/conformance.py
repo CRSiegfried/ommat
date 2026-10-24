@@ -411,7 +411,7 @@ def _provenance_problems(result: CallResult) -> list[str]:
                 problems.append(f"claimed names {described(name)}, no detail holding a value")
     attempts = cast(object, result.attempts)
     if attempts is not None and not (type(attempts) is int and 0 <= attempts <= MAX_INTEGER):
-        problems.append("attempts is not null or an integer of at least 0")
+        problems.append("attempts is not null or an integer from 0 to 2**53 - 1")
     missing = cast(object, result.missing)
     reasons: dict[object, object] = {}
     if missing is not None:
