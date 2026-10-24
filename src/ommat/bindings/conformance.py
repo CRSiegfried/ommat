@@ -274,8 +274,14 @@ async def _check(binding: OracleBinding, batches: list[Batch], deterministic: bo
                 continue
             if type(first) is not CallResult or type(again) is not CallResult:
                 fail("deterministic", "a call did not return a CallResult")
-            elif replace(first, request_id=None) != replace(again, request_id=None):
-                fail("deterministic", "two calls with one batch returned different results")
+            else:
+                try:  # the results' values are the binding's, whose __eq__ may raise
+                    same = replace(first, request_id=None) == replace(again, request_id=None)
+                except Exception:
+                    fail("deterministic", "two calls' results could not be compared")
+                else:
+                    if not same:
+                        fail("deterministic", "two calls with one batch returned different results")
     return failures
 
 
@@ -335,6 +341,8 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
     refused = [held.get(ref) for ref in provided]
     if provided and all(_unsupported(v) for v in refused):
         set_ = [name for name in _UNSENT if not _unset(cast(object, getattr(result, name)))]
+        empty = type(cast(object, result.missing)) is dict and not result.missing
+        set_ = [n for n in set_ if not (n == "missing" and empty)]  # an empty one is never written
         set_ += [
             name
             for name in ("claimed", "truncated")
@@ -347,11 +355,9 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
 
 
 def _unset(value: object) -> bool:
-    """Whether a member a result that sent no request holds is unset: ``None``, an ``attempts``
-    of 0 or an empty ``missing``, read by type, so no code of the binding's value runs."""
-    return (
-        value is None or (type(value) is int and value == 0) or (type(value) is dict and not value)
-    )
+    """Whether a member a result that sent no request holds is unset: ``None`` or an
+    ``attempts`` of 0, read by type, so no code of the binding's value runs."""
+    return value is None or (type(value) is int and value == 0)
 
 
 def _sent(result: CallResult) -> bool:

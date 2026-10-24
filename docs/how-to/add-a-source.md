@@ -311,7 +311,9 @@ provider does not carry is `unsupported` alone. A leaf may also refuse at the ca
 capabilities do not say, such as a value type; then every ref of the request is `raised`,
 with the leaf's message as a line. Give each oracle sources that ask
 only what its model answers, and a design that asks label kinds and extractions of different
-models one dispatcher per oracle.
+models one dispatcher per oracle. A source's extractions read one text and one reference date,
+and an extraction source sends idia its text alone, so keep its other needs in a source of
+their own.
 
 ### Split a long text before deciding
 
@@ -348,8 +350,9 @@ Path A writes what idia's outcome reports under ommat's names: the provider, the
 requested and reported, idia's `snapshot` as the revision, the leaf's runtime versions, the
 client libraries' versions, and idia's own reasons for each detail it leaves null and the
 details it claims. A local leaf's model id is its own word, so idia claims it, and its
-revision too when the leaf was given a model rather than loading one; a wire alias has no
-revision, with `not-pinned` and a `no-snapshot` line in `warnings`.
+revision too when the leaf was given a model rather than loading one. A leaf with no pinned
+revision, a wire alias or a local leaf built with `revision=None`, has none, with `not-pinned`
+and a `no-snapshot` line in `warnings`.
 
 ## Path B: write a binding over a local model
 

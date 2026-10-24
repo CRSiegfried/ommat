@@ -530,7 +530,8 @@ def _held(name: str, result: object) -> bool:
 def _unhashed_details(result: object, judged: _Judged) -> None:
     """Write ``request_id``, ``calibrated``, ``clients`` and ``missing`` when each conforms,
     else keep its ``repr`` in ``invalid``; never a fault. ``missing`` conforms when it is null
-    or a non-empty ``dict`` from a detail's name to a reason, for details left null."""
+    or a ``dict`` from a detail's name to a reason, for details left null; an empty one is
+    written nowhere, as null."""
     request_id = cast(object, getattr(result, "request_id", None))
     if string_conforms(request_id, exact=True):
         judged.request_id = cast("str | None", request_id)

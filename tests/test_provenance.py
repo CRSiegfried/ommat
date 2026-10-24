@@ -746,3 +746,17 @@ class Key(str):
 def test_the_suite_runs_no_code_of_a_bindings_usage_or_missing_key() -> None:
     assert check(answering(attempts=1, usage={Key("x"): 1}), batches=ONE)
     assert check(answering(attempts=1, missing={Key("x"): "hidden"}), batches=ONE)
+
+
+def test_a_deterministic_check_over_values_whose_eq_raises_reports_and_never_raises() -> None:
+    async def odd(batch: Batch, *, seconds: float) -> object:
+        return CallResult({ref: Raising() for call in batch for ref in call.refs})
+
+    assert check(odd, batches=ONE, deterministic=True) == [
+        "deterministic: batch 0: two calls' results could not be compared"
+    ]
+
+
+def test_an_all_unsupported_result_with_an_empty_usage_is_reported() -> None:
+    failures = check(unsupported_with(usage={}), batches=ONE)
+    assert any("unsupported-provenance" in f and "usage" in f for f in failures), failures
