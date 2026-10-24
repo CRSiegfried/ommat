@@ -713,13 +713,19 @@ def test_the_import_guard_names_the_extra() -> None:
 SITE = re.compile(r"\bUnavailable\(|\bFailed\(|\bround\(|\braise\b")
 
 
-def test_every_marker_refusal_and_raise_site_names_its_decision() -> None:
+SPEC = Path(__file__).resolve().parent.parent / "docs" / "spec" / "README.md"
+CITES = re.compile(r"# spec: ([^:]+?)(?::|$)")
+
+
+def test_every_marker_refusal_and_raise_site_names_its_spec_section() -> None:
+    headings = set(re.findall(r"^## (.+?)\s*$", SPEC.read_text(encoding="utf-8"), re.MULTILINE))
     lines = MODULE.read_text(encoding="utf-8").splitlines()
     sites = [n for n, line in enumerate(lines) if SITE.search(line.split("#")[0])]
     assert sites
     for n in sites:
-        here, above = lines[n], lines[n - 1].strip()
-        assert "# §" in here or above.startswith("# §"), f"line {n + 1}: {here.strip()}"
+        cited = CITES.findall(lines[n]) + CITES.findall(lines[n - 1].strip())
+        assert cited, f"line {n + 1}: {lines[n].strip()}"
+        assert set(cited) <= headings, f"line {n + 1}: {cited}"
 
 
 def test_the_module_ignores_no_type_check() -> None:

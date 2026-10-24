@@ -65,7 +65,9 @@ Each call sets one idia deadline from `seconds`; seconds idia's deadline cannot 
 
 A `noul` answer is `yes` as the provider gave it and `no` as idia's `noul_complement` derives it; a `choice` or `score` answer is its probabilities by name, idia's chosen label and confidence left out, so a tie at the top abstains in the choice helpers where the provider named one; a refusal is `refused`; a fault is `invalid-answer` with a line naming its rules; an extraction is written through `extraction_value`, and a value it refuses or a span into a part other than the text is `invalid-answer` with a line. Each ref of a wire request that did not answer is `timed-out` when its error is idia's `DeadlineExceeded`, the request the call's time could not hold, else `raised`, with the request's status and message as a line; the other refs stand. `snapshot`, `elicitation` and `prompt` are each outcome's distinct values in source order, one per line; a prompt the leaf built as a mapping is written through `prompt_text`, as JSON with its keys sorted and its lists in order, the form idia's recorded log keeps, which for this binding is the order sent, since it receives refs in code-point order and frames none. `usage` sums each outcome's input and output tokens and passes, `attempts` each outcome's attempts, `truncated` holds the refs of an outcome the provider cut short, and `precision` is the leaf's declared probability decimals, `None` when it declares none or no request made an attempt; each outcome is one `RequestProvenance`, folded by `call_result`. Every line goes through `bounded_warnings`, each need through `json_value` and each image need through `image_need`.
 
-In the binding's source, each site that writes a marker or raises carries a `# §<slug>` comment naming the design decision that requires it.
+Importing it without idia installed raises `ModuleNotFoundError` naming the extra; any other import failure propagates.
+
+In the binding's source, each site that writes a marker, rounds or raises carries a `# spec: <section>` comment naming the section of this spec that states the rule it keeps, its heading as written.
 
 ## The candidate-valued label set
 

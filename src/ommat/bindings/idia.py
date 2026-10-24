@@ -32,8 +32,8 @@ try:
     import idia
 except ModuleNotFoundError as error:
     if error.name != "idia":
-        raise  # §idia-binding: any other import failure propagates
-    raise ModuleNotFoundError(  # §idia-binding: a missing extra is named
+        raise  # spec: The idia binding: any other import failure propagates
+    raise ModuleNotFoundError(  # spec: The idia binding: a missing extra is named
         'ommat.bindings.idia needs the "idia" extra: pip install "ommat[idia]"',
         name=error.name,
     ) from error
@@ -64,20 +64,20 @@ def oracle_binding(provider: object) -> OracleBinding:
     overflow policy is not ``Fail``, which could trim the state the model saw; and one whose leaf
     declares probability decimals outside 0 to 17, which no call's ``precision`` can hold."""
     if not isinstance(provider, idia.Dispatcher):
-        raise ValueError(  # §idia-binding: one leaf per oracle, its policies shown
+        raise ValueError(  # spec: The idia binding: one leaf per oracle, its policies shown
             f"the idia binding takes a Dispatcher over one leaf, not a {type(provider).__name__}"
         )
     if provider.reask:
-        raise ValueError(  # §idia-binding: a re-ask is a second answer to one question
+        raise ValueError(  # spec: The idia binding: a re-ask is a second answer to one question
             "the idia binding takes a Dispatcher with the re-ask off"
         )
     if not isinstance(provider.overflow, idia.Fail):
-        raise ValueError(  # §idia-binding: a trimmed state is not what the record holds
+        raise ValueError(  # spec: The idia binding: a trimmed state is not what the record holds
             "the idia binding takes a Dispatcher whose overflow policy is Fail"
         )
     decimals = provider.capabilities.rounding.probability_decimals
     if decimals is not None and not 0 <= decimals <= _MAX_DECIMALS:
-        raise ValueError(  # §call-precision: a precision past 0 to 17 fails every call
+        raise ValueError(  # spec: The idia binding: a precision past 0 to 17 fails every call
             f"the idia binding takes a leaf whose probability decimals are 0 to "
             f"{_MAX_DECIMALS}, not {decimals}"
         )
@@ -95,7 +95,7 @@ class _Binding:
         try:
             deadline = idia.Deadline.after(seconds)
         except ValueError as error:
-            # §binding-refusal: a deadline idia cannot hold sends nothing
+            # spec: The idia binding: a deadline idia cannot hold sends nothing
             refused = Unavailable(Cause("unsupported"))
             refs = (ref for source in batch for ref in (*source.refs, *source.questions))
             return CallResult(dict.fromkeys(refs, refused), warnings=bounded_warnings([str(error)]))
@@ -105,7 +105,7 @@ class _Binding:
         for source in batch:
             reason = _refusal(self.provider, source, deadline, requests, values, lines)
             if reason is not None:
-                refused = Unavailable(Cause("unsupported"))  # §binding-refusal
+                refused = Unavailable(Cause("unsupported"))  # spec: The idia binding
                 values.update(dict.fromkeys((*source.refs, *source.questions), refused))
                 lines.append(f"{source.id}: unsupported: {reason}")
         async with asyncio.TaskGroup() as group:
@@ -126,9 +126,9 @@ class _Binding:
                 if error is None:
                     values[ref] = _value(source.id, ref, response.answers[ref], lines)
                 elif isinstance(error, idia.DeadlineExceeded):
-                    values[ref] = Unavailable(Cause("timed-out"))  # §per-ref-cause
+                    values[ref] = Unavailable(Cause("timed-out"))  # spec: The binding protocol
                 else:
-                    values[ref] = Unavailable(Cause("raised"))  # §per-ref-cause
+                    values[ref] = Unavailable(Cause("raised"))  # spec: The binding protocol
         return call_result(
             values,
             [_provenance(o) for o in outcomes],
@@ -164,13 +164,13 @@ def _refusal(
     for ref, rendered in source.questions.items():
         uncarried = _uncarried(rendered, capabilities)
         if uncarried is not None:
-            values[ref] = Unavailable(Cause("unsupported"))  # §binding-refusal
+            values[ref] = Unavailable(Cause("unsupported"))  # spec: The idia binding
             lines.append(f"{source.id}: unsupported {ref}: the provider does not carry {uncarried}")
             continue
         try:
             questions.append(_question(ref, rendered))
         except ValueError as refused:
-            values[ref] = Unavailable(Cause("unsupported"))  # §binding-refusal
+            values[ref] = Unavailable(Cause("unsupported"))  # spec: The idia binding
             lines.append(f"{source.id}: unsupported {ref}: {refused}")
     if not questions:
         return None
@@ -203,22 +203,22 @@ def _request(
         texts = sorted({cast(str, q.text) for q in extractions})
         dates = sorted({q.reference_date for q in extractions if q.reference_date is not None})
         if len(texts) > 1:
-            raise _Unsendable(  # §binding-refusal: one request holds one text its spans index
+            raise _Unsendable(  # spec: The idia binding: one request holds one text its spans index
                 f"its extractions read different texts, {', '.join(texts)}"
             )
         if len(dates) > 1:
-            raise _Unsendable(  # §binding-refusal: one request takes one reference date
+            raise _Unsendable(  # spec: The idia binding: one request takes one reference date
                 f"its extractions name different reference dates, {', '.join(dates)}"
             )
         if dates:
             options["reference_date"] = dates[0]
-        # §extraction-kind: the spans index the text, the state's part 0
+        # spec: The idia binding: the spans index the text, the state's part 0
         first: idia.Part = idia.TextPart(text=source.needs[texts[0]])
     else:
         try:
             written = json_value(needs)
         except TypeError as unwritable:
-            raise _Unsendable(str(unwritable)) from None  # §binding-refusal: no bytes in JSON
+            raise _Unsendable(str(unwritable)) from None  # spec: The idia binding: no bytes in JSON
         first = idia.JsonPart(value=_tuples(written))
     state = idia.State(parts=(first, *images))
     return idia.Request(state=state, questions=questions, deadline=deadline, options=options)
@@ -282,15 +282,14 @@ async def _answer(provider: idia.Dispatcher, request: idia.Request) -> idia.Resp
 def _value(sid: str, ref: str, answer: idia.Answer, lines: list[str]) -> object:
     """An answer as ommat takes it, or its marker."""
     if isinstance(answer, idia.Refusal):
-        return Unavailable(Cause("refused"))  # §provider-refusal
+        return Unavailable(Cause("refused"))  # spec: The idia binding
     if isinstance(answer, idia.Fault):
         rules = ", ".join(dict.fromkeys(str(f.rule) for f in answer.failures))
         lines.append(f"{sid}: invalid-answer {ref}: {rules}")
-        # §split-faults-between-answers-and-request-outcomes: a fault is its question's alone
-        # §oracle-binding-protocol: a value the binding found unusable
+        # spec: The idia binding: a fault is its question's alone, a value found unusable
         return Unavailable(Cause("invalid-answer"))
     if isinstance(answer, idia.NoulAnswer):
-        # §call-precision: no is idia's complement (§carry-one-probability-for-a-noul)
+        # spec: The idia binding: no is idia's complement
         return {"yes": answer.probability, "no": idia.noul_complement(answer.probability)}
     if isinstance(answer, idia.ExtractionAnswer):
         try:
@@ -299,7 +298,7 @@ def _value(sid: str, ref: str, answer: idia.Answer, lines: list[str]) -> object:
             )
         except ValueError as unwritable:
             lines.append(f"{sid}: invalid-answer {ref}: {unwritable}")
-            # §binding-kit, §extraction-kind: a value or span the text cannot hold
+            # spec: The idia binding: a value or span the text cannot hold
             return Unavailable(Cause("invalid-answer"))
     return dict(cast(idia.LabelAnswer, answer).probabilities)
 
@@ -315,7 +314,7 @@ def _spans(span: idia.Span | tuple[idia.Span, ...] | None) -> object:
 
 def _pair(span: idia.Span) -> tuple[int, int]:
     if span.part != 0:
-        raise ValueError(  # §extraction-kind: a span indexes the text, part 0
+        raise ValueError(  # spec: The idia binding: a span indexes the text, part 0
             f"a span into part {span.part}, not the text"
         )
     return (span.start, span.end)
