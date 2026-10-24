@@ -17,19 +17,27 @@ def test_the_three_binding_types_are_public() -> None:
 def test_a_call_result_defaults_every_provenance_member_to_null() -> None:
     result = CallResult({"t:x": 1})
     assert result.values == {"t:x": 1}
-    assert (result.snapshot, result.elicitation, result.prompt) == (None, None, None)
+    assert (result.revision, result.elicitation, result.prompt) == (None, None, None)
     assert (result.usage, result.attempts) == (None, None)
     assert result.truncated == ()
     assert (result.warnings, result.precision) == ((), None)
+    for name in ("provider", "model_requested", "model_reported", "runtime", "request_id"):
+        assert getattr(result, name) is None
+    assert (result.calibrated, result.missing, result.clients, result.claimed) == (
+        None,
+        None,
+        None,
+        (),
+    )
 
 
 def test_a_call_result_takes_its_provenance_by_keyword_only() -> None:
     with pytest.raises(TypeError):
         CallResult({}, "snap")  # pyright: ignore[reportCallIssue]
     result = CallResult(
-        {}, snapshot="m-1", elicitation="e", prompt="p", usage={"in": 3}, attempts=2
+        {}, revision="m-1", elicitation="e", prompt="p", usage={"in": 3}, attempts=2
     )
-    assert (result.snapshot, result.elicitation, result.prompt) == ("m-1", "e", "p")
+    assert (result.revision, result.elicitation, result.prompt) == ("m-1", "e", "p")
     assert (result.usage, result.attempts) == ({"in": 3}, 2)
 
 
@@ -37,7 +45,7 @@ def test_a_call_result_checks_nothing_when_built() -> None:
     # Interpret tests it at the write, so a bad value fails its ref or the call by the fault scope,
     # not as a raise inside the binding.
     bad: Any = cast(Any, object())
-    result = CallResult(bad, snapshot=bad, elicitation=bad, prompt=bad, usage=bad, attempts=True)
+    result = CallResult(bad, revision=bad, elicitation=bad, prompt=bad, usage=bad, attempts=True)
     assert result.values is bad
     assert result.attempts is True
 

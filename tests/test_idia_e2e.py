@@ -109,5 +109,10 @@ def test_the_record_holds_each_calls_provenance() -> None:
     assert all(c["outcome"] == "returned" for c in calls)
     by_source = {c["sources"][0]: c for c in calls}
     assert by_source["triage"]["precision"] == 2
-    assert by_source["details"]["precision"] is None
+    assert by_source["details"]["precision"] == "unrounded"  # Clairic declares no rounding
+    assert by_source["triage"]["provider"] == "openai-decisions"
+    assert by_source["details"]["revision"] is None  # the short name 'clairic' pins nothing
+    entry = record.unhashed["calls"][str(record.log.index(by_source["details"]))]
+    assert entry["missing"]["revision"] == "not-pinned"
+    assert entry["missing"]["runtime"] == "not-applicable"
     assert by_source["triage"]["prompt"] is not None

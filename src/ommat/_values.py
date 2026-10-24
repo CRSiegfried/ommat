@@ -30,12 +30,19 @@ deepest member."""
 MAX_DOCUMENT_DEPTH = 128
 """The deepest a document the encoder writes or a reader parses nests."""
 
-FORMAT = 4
-"""The format number this engine writes into a record and a design document. It reads every
-format from 1 up to it, each under that format's rules."""
+RECORD_FORMAT = 5
+"""The format number this engine writes into a record. It reads every record format from 1 up
+to it, each under that format's rules."""
 
-FORMATS = frozenset(range(1, FORMAT + 1))
-"""The formats this engine reads."""
+RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
+"""The record formats this engine reads."""
+
+DESIGN_FORMAT = 4
+"""The format number this engine writes into a design document, which changes only when a
+design rule changes. It reads every design format from 1 up to it."""
+
+DESIGN_FORMATS = frozenset(range(1, DESIGN_FORMAT + 1))
+"""The design formats this engine reads."""
 
 EXTRACTION_FORMAT = 2
 """The first format with the extraction answer kind and a call's ``truncated``."""
@@ -71,6 +78,11 @@ HASH_FORMAT = 3
 PER_REF_FORMAT = 4
 """The first format whose entry may hold a binding's ``timed-out`` or ``raised`` under a
 returned call."""
+
+PROFILE_FORMAT = 5
+"""The first record format whose call item holds the provenance profile's details in place of
+``snapshot``, ``precision``'s ``unrounded`` and step forms, and whose ``calls`` entry holds
+``request_id``, ``calibrated``, ``missing`` and ``clients``."""
 
 
 def string_data(value: str) -> str:

@@ -38,7 +38,7 @@ except ModuleNotFoundError as error:
         name=error.name,
     ) from error
 
-from ommat import AnswerKind, CallResult, Cause, RenderedQuestion, SourceCall, Unavailable
+from ommat import AnswerKind, CallResult, Cause, Failed, RenderedQuestion, SourceCall, Unavailable
 from ommat.bindings import (
     OracleBinding,
     RequestProvenance,
@@ -91,7 +91,9 @@ class _Binding:
 
     provider: idia.Dispatcher
 
-    async def __call__(self, batch: tuple[SourceCall, ...], /, *, seconds: float) -> CallResult:
+    async def __call__(
+        self, batch: tuple[SourceCall, ...], /, *, seconds: float
+    ) -> CallResult | Failed:
         try:
             deadline = idia.Deadline.after(seconds)
         except ValueError as error:
@@ -129,12 +131,16 @@ class _Binding:
                     values[ref] = Unavailable(Cause("timed-out"))  # spec: The binding protocol
                 else:
                     values[ref] = Unavailable(Cause("raised"))  # spec: The binding protocol
-        return call_result(
-            values,
-            [_provenance(o) for o in outcomes],
-            precision=self.provider.capabilities.rounding.probability_decimals,
-            warnings=bounded_warnings(lines),
-        )
+        sent = [o for o in outcomes if o.attempts]
+        try:
+            return call_result(
+                values,
+                [_provenance(o) for o in outcomes],
+                precision=_precision(sent[0].rounding) if sent else None,
+                warnings=bounded_warnings(lines),
+            )
+        except ValueError:  # spec: The idia binding: one package at two versions in a call
+            return Failed(Cause("invalid-return"))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -342,9 +348,24 @@ def _error(error: idia.ProviderError) -> str:
     return f"{type(error).__name__}{status}{request}: {error.message}"
 
 
+_NAMES = {"snapshot": "revision", "versions": "runtime", "prompt_sent": "prompt"}
+"""idia's name for a profile detail, where ommat's differs."""
+
+
+def _detail(name: str) -> str:
+    return _NAMES.get(name, name)
+
+
+def _precision(rounding: idia.Rounding) -> int | str:
+    """An outcome's rounding as ``precision``: its probability decimals, or ``unrounded``."""
+    decimals = rounding.probability_decimals
+    return "unrounded" if decimals is None else decimals
+
+
 def _provenance(outcome: idia.Outcome) -> RequestProvenance:
-    """One wire request's provenance: its prompt as text, the usage figures it reports, and
-    its keys when idia warns the provider cut it short."""
+    """One wire request's provenance under ommat's names: the profile's details, the prompt as
+    text, the usage figures it reports, idia's reasons and claims, the client versions, and its
+    keys when idia warns the provider cut it short."""
     usage = outcome.usage
     figures = (
         None
@@ -357,10 +378,19 @@ def _provenance(outcome: idia.Outcome) -> RequestProvenance:
     )
     cut = any(w.code == idia.WARNING_PROVIDER_TRUNCATED for w in outcome.warnings)
     return RequestProvenance(
-        snapshot=outcome.snapshot,
+        provider=outcome.provider,
+        model_requested=outcome.model_requested,
+        model_reported=outcome.model_reported,
+        revision=outcome.snapshot,
+        runtime=dict(outcome.versions) or None,
         elicitation=outcome.elicitation,
         prompt=prompt_text(outcome.prompt_sent),
-        usage=figures,
+        claimed=tuple(_detail(d) for d in outcome.claimed),
+        usage=figures or None,
         attempts=outcome.attempts,
+        request_id=outcome.request_id,
+        calibrated=outcome.calibrated,
+        missing={_detail(d): r for d, r in outcome.unreported.items()} or None,
+        clients=dict(outcome.client_versions) or None,
         truncated=tuple(outcome.keys) if cut else (),
     )

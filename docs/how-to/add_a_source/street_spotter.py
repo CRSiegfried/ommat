@@ -8,6 +8,7 @@ model to download.
 """
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 _STREET = re.compile(r"\b(?:[A-Z][a-z]+ ){1,2}(Street|Road|Lane|Row)\b")
@@ -18,9 +19,10 @@ class StreetSpotter:
     """The model: ``model_id`` and ``revision`` name the weights a real model loads, and
     ``runtime`` the code that runs them."""
 
+    provider = "street_spotter"
     model_id = "example/street-spotter"
     revision = "1"
-    runtime = "street_spotter 1"
+    runtime: Mapping[str, str] = {"python": "3.11", "street_spotter": "1"}
 
     def __init__(self) -> None:
         pass  # a real model loads its weights here, which takes seconds

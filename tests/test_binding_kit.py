@@ -373,7 +373,7 @@ def test_any_other_value_is_refused(prompt: object) -> None:
 
 def test_the_requests_provenance_is_joined_summed_and_sorted() -> None:
     first = RequestProvenance(
-        snapshot="s1",
+        revision="s1",
         elicitation="passthrough",
         prompt="p1",
         usage={"input_tokens": 10, "output_tokens": 2},
@@ -381,7 +381,7 @@ def test_the_requests_provenance_is_joined_summed_and_sorted() -> None:
         truncated=("q:b", "q:a"),
     )
     second = RequestProvenance(
-        snapshot="s1",
+        revision="s1",
         elicitation="passthrough",
         prompt="p2",
         usage={"input_tokens": 5, "passes": 2},
@@ -392,7 +392,7 @@ def test_the_requests_provenance_is_joined_summed_and_sorted() -> None:
     result = call_result(values, iter([first, second]), precision=2, warnings=("w",))
     assert result == CallResult(
         values,
-        snapshot="s1",
+        revision="s1",
         elicitation="passthrough",
         prompt="p1\np2",
         usage={"input_tokens": 15, "output_tokens": 2, "passes": 2},
@@ -407,10 +407,10 @@ def test_the_requests_provenance_is_joined_summed_and_sorted() -> None:
 def test_a_request_with_none_holds_no_line() -> None:
     result = call_result(
         {},
-        [RequestProvenance(attempts=1), RequestProvenance(snapshot="s", attempts=1)],
+        [RequestProvenance(attempts=1), RequestProvenance(revision="s", attempts=1)],
         precision=None,
     )
-    assert (result.snapshot, result.elicitation, result.prompt, result.usage) == (
+    assert (result.revision, result.elicitation, result.prompt, result.usage) == (
         "s",
         None,
         None,
@@ -433,4 +433,4 @@ def test_a_call_that_made_no_attempt_holds_null_attempts_and_precision(
 
 def test_a_provenance_checks_nothing_when_built() -> None:
     odd: Any = 3
-    assert RequestProvenance(snapshot=odd, attempts=odd).attempts == 3
+    assert RequestProvenance(revision=odd, attempts=odd).attempts == 3

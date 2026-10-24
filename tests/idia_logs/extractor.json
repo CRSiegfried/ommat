@@ -99,6 +99,10 @@
           "request_id": "9be937ee-c3e4-4db6-9a4e-cb0ef7f030ab",
           "snapshot": null,
           "type": "WireResponse",
+          "unreported": {
+            "snapshot": "not-pinned",
+            "versions": "not-applicable"
+          },
           "usage": {
             "input_tokens": 202,
             "output_tokens": 0,
@@ -187,6 +191,10 @@
           "request_id": "35d40d13-6a97-4bcb-909f-359a9fb11454",
           "snapshot": null,
           "type": "WireResponse",
+          "unreported": {
+            "snapshot": "not-pinned",
+            "versions": "not-applicable"
+          },
           "usage": {
             "input_tokens": 155,
             "output_tokens": 0,

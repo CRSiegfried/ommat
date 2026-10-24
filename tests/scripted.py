@@ -37,7 +37,7 @@ from ommat._compile import compile_turn
 from ommat._interpret import interpret
 from ommat._ledger import Ledger, Observer
 from ommat._read_view import Access, UndeclaredRead, _UndeclaredStop
-from ommat._values import FORMAT
+from ommat._values import RECORD_FORMAT
 from ommat.helpers import HELPERS
 
 Batch = tuple[SourceCall, ...]
@@ -139,7 +139,7 @@ def open_ledger(
     ``state`` is in the record's form."""
     ledger = Ledger(observer)
     ledger.append(
-        {"item": "design", "hash": loaded.design_hash, "format": FORMAT, "helpers": HELPERS}
+        {"item": "design", "hash": loaded.design_hash, "format": RECORD_FORMAT, "helpers": HELPERS}
     )
     ledger.append(
         {

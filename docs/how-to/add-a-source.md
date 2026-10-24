@@ -210,10 +210,15 @@ runs on, and `decide_sync` waits for it before it returns.
 
 ## What the record keeps
 
-A call's provenance is hashed on its call item: `snapshot`, what produced the answer;
-`elicitation`, the method; `prompt`, what the model was sent; and `precision`, the decimal
-places the provider rounds probabilities to. `usage`, `attempts`, `warnings` and `truncated`
-go under the record's `unhashed`, outside every hash. The call item also holds each
+A call's provenance is hashed on its call item: `provider`, `model_requested` and
+`model_reported`, `revision`, `runtime`, the code that ran the model, `elicitation`, the
+method, `precision`, how the provider rounds probabilities, `prompt`, what the model was sent,
+and `claimed`, the details the source asserts and cannot verify. `usage`, `attempts`,
+`request_id`, `calibrated`, `missing`, `clients`, `warnings` and `truncated` go under the
+record's `unhashed`, outside every hash. A binding that sends a request gives each detail a
+value, or a reason in `missing` why it has none;
+[The provenance profile](../spec/README.md#the-provenance-profile) lists the details and the
+reasons. The call item also holds each
 question's identity, kind, labels as declared, value type and list flag, and the entries hold
 each answer.
 
@@ -320,9 +325,11 @@ The second report is longer than that window, so idia refuses it before any call
 
 ### What Path A records
 
-Path A's `snapshot` is the one the leaf reports: for some leaves a bare commit hash, for some
-none, with a `no-snapshot` line in `warnings`. The binding writes neither the model id idia
-reports nor the runtime versions a leaf may report, so keep them beside the record.
+Path A writes what idia's outcome reports under ommat's names: the provider, the models
+requested and reported, idia's `snapshot` as the revision, the leaf's runtime versions, the
+client libraries' versions, and idia's own reasons for each detail it leaves null and the
+details it claims. A local leaf's model id and revision are its own word, so idia claims them;
+a wire alias has no revision, with `not-pinned` and a `no-snapshot` line in `warnings`.
 
 ## Path B: write a binding over a local model
 
@@ -343,13 +350,14 @@ The binding asks the model for one shape, `SpanModel`:
 
 ```python
 class SpanModel(Protocol):
-    """The shape the binding asks of a model: names for its weights and the code that runs
-    them, and ``predict``, each span of a label scored at or above ``threshold``, as a ``dict``
-    of ``start``, ``end``, ``text`` and ``score``."""
+    """The shape the binding asks of a model: the library that runs it, names for its weights,
+    the versions of the code that runs them, and ``predict``, each span of a label scored at or
+    above ``threshold``, as a ``dict`` of ``start``, ``end``, ``text`` and ``score``."""
 
+    provider: str
     model_id: str
     revision: str
-    runtime: str
+    runtime: Mapping[str, str]
 
     def predict(self, text: str, labels: list[str], threshold: float) -> list[dict[str, Any]]: ...
 ```
@@ -371,14 +379,14 @@ class SpanBinding:
         self._model = model
         self._threshold = threshold
         self._lock = threading.Lock()  # one inference at a time, across threads and loops
-        self._snapshot = f"{model.model_id}@{model.revision} on {model.runtime}"
         self._elicitation = f"span extraction, one request per question, threshold {threshold}"
 ```
 
 Pin the weights: load a model revision by its commit hash, not a branch such as `main`, so
-`snapshot` names the weights that ran. The library and runtime that run them, such as
-`gliner2` and `torch`, move the scores too, so `runtime` names their versions and `snapshot`
-carries it: `snapshot` names what produced the answer, `elicitation` how it was asked.
+`revision` names the weights that ran. The library and runtime that run them, such as
+`gliner2` and `torch`, move the scores too, so `runtime` names their versions: `provider`,
+the model, `revision` and `runtime` name what produced the answer, `elicitation` how it was
+asked.
 
 ### Run inference in a thread, one at a time
 
@@ -391,7 +399,7 @@ the loop and the engine's timeout keep running, and mark a model error on its ow
                 except Exception as error:  # never BaseException: a cancellation propagates
                     lines.append(f"{ref}: raised: {type(error).__name__}: {error}")
                     values[ref] = Unavailable(Cause("raised"))
-                    requests.append(self._request(label))
+                    requests.append(self._request(label, failed=True))
                     continue
                 if spans is None:  # at the call's end: ommat has timed out the whole call
                     lines.append(f"{ref}: timed-out: the model was busy until the call's end")
@@ -494,31 +502,54 @@ its spans still index the whole text.
 
 ### Record the provenance
 
-Each request the call sends is one `RequestProvenance`. `snapshot` names the model, its
-revision and the runtime that ran it, `elicitation` the method and its threshold, and `prompt` what the model received
-beside the text, which the record already holds as a need, written by `prompt_text`:
+Each request the call sends is one `RequestProvenance`: the provider, the model, its
+revision and runtime, `elicitation`, the method and its threshold, and `prompt`, what the
+model received beside the text, which the record already holds as a need, written by
+`prompt_text`. The model id and revision are the model's own word, which the binding cannot
+check, so it claims them; a request that failed reports no model, its `model_reported`
+`not-sent`. Each detail the model cannot give is null, with its reason:
 
 ```python
-    def _request(self, label: str) -> RequestProvenance:
-        """One model request's provenance: the model, the method and the arguments it took."""
+    def _request(self, label: str, *, failed: bool = False) -> RequestProvenance:
+        """One model request's provenance: what ran it and how, the arguments it took, and why
+        each detail the model cannot give is null; a request that failed reports no model."""
+        model = self._model
         return RequestProvenance(
-            snapshot=self._snapshot,
+            provider=model.provider,
+            model_requested=model.model_id,
+            model_reported=None if failed else model.model_id,
+            revision=model.revision,
+            runtime=dict(model.runtime),
             elicitation=self._elicitation,
             prompt=prompt_text({"labels": [label], "threshold": self._threshold}),
+            # The model's own word, not checked.
+            claimed=("revision",) if failed else ("model_reported", "revision"),
             attempts=1,
+            missing={**NOT_GIVEN, "model_reported": "not-sent"} if failed else NOT_GIVEN,
         )
 ```
 
-`call_result` folds the requests into the call's `CallResult`, each distinct value once.
-`precision` is `None`, since the model rounds no probabilities, and `bounded_warnings` keeps
-the lines within their bounds:
-
 ```python
-        return call_result(values, requests, precision=None, warnings=bounded_warnings(lines))
+NOT_GIVEN = {
+    "request_id": "not-reported",
+    "calibrated": "not-reported",
+    "usage.input_tokens": "not-reported",
+    "usage.output_tokens": "not-applicable",  # an encoder writes no tokens
+    "usage.passes": "not-reported",
+}
 ```
 
-A batch whose every ref is `unsupported` sends no request, so its provenance is all null, as
-the protocol asks.
+`call_result` folds the requests into the call's `CallResult`, each distinct value once.
+`precision` is `unrounded`, since the model's scores reach the answer as it computed them,
+and `bounded_warnings` keeps the lines within their bounds:
+
+```python
+warnings = bounded_warnings(lines)
+return call_result(values, requests, precision="unrounded", warnings=warnings)
+```
+
+A batch whose every ref is `unsupported` sends no request, so it has no provenance and owes
+no reason, as the protocol asks.
 
 ## Hold the binding to the protocol
 
@@ -627,7 +658,8 @@ class Counted:
 
     def __init__(self, model: SpanModel) -> None:
         self.model = model
-        self.model_id, self.revision, self.runtime = model.model_id, model.revision, model.runtime
+        self.provider, self.model_id = model.provider, model.model_id
+        self.revision, self.runtime = model.revision, model.runtime
         self.calls = 0
 
     def predict(self, text: str, labels: list[str], threshold: float) -> list[dict[str, Any]]:

@@ -106,4 +106,4 @@ def test_a_call_that_waits_out_its_seconds_never_starts_the_model() -> None:
         result = asyncio.run(binding(_batch("street"), seconds=0.01))
     assert result.values["q:places/street"] == Unavailable(Cause("timed-out"))
     assert model.calls == 0
-    assert result.snapshot is None
+    assert result.revision is None

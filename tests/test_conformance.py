@@ -28,6 +28,7 @@ from ommat import (
 from ommat._binding import OracleBinding
 from ommat._fixture import FixtureBinding, RecordedCalls
 from ommat._interpret import MAX_WARNINGS
+from ommat._provenance import DETAILS
 from ommat.bindings import image_need
 from ommat.bindings.conformance import _default_batches, check
 
@@ -237,9 +238,9 @@ async def not_returned(_: Batch, *, seconds: float) -> object:
     return CallResult({NOUL: Unavailable(Cause("not-returned"))})
 
 
-async def unsupported_with_a_snapshot(_: Batch, *, seconds: float) -> object:
+async def unsupported_with_a_revision(_: Batch, *, seconds: float) -> object:
     marker = Unavailable(Cause("unsupported"))
-    return CallResult({NOUL: marker}, snapshot="model-1", truncated=(NOUL,))
+    return CallResult({NOUL: marker}, revision="model-1", truncated=(NOUL,))
 
 
 class Counter:
@@ -278,9 +279,9 @@ class Counter:
         (changed(precision=18), ["precision: batch 0: precision 18 does not conform"]),
         (changed(precision=True), ["precision: batch 0: precision True does not conform"]),
         (
-            unsupported_with_a_snapshot,
+            unsupported_with_a_revision,
             [
-                "unsupported-provenance: batch 0: every ref is unsupported, yet snapshot, "
+                "unsupported-provenance: batch 0: every ref is unsupported, yet revision, "
                 "truncated set"
             ],
         ),
@@ -381,7 +382,8 @@ def test_each_call_receives_the_suites_seconds() -> None:
 def per_ref(code: str, *lines: str, attempts: int | None = 2) -> BindingFn:
     async def binding(batch: Batch, *, seconds: float) -> object:
         marker = Unavailable(Cause(code))
-        return CallResult({NOUL: marker}, warnings=lines, attempts=attempts)
+        missing = dict.fromkeys(sorted(DETAILS), "not-sent") if attempts else None
+        return CallResult({NOUL: marker}, warnings=lines, attempts=attempts, missing=missing)
 
     return binding
 

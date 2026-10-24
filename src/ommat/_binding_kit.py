@@ -14,7 +14,7 @@ version.
 import datetime
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 from ommat._binding import CallResult
@@ -23,6 +23,7 @@ from ommat._interpret import (
     MAX_WARNINGS,
     _record_form,  # pyright: ignore[reportPrivateUsage]
 )
+from ommat._provenance import DETAILS
 from ommat._values import described, escape_surrogates
 
 _TAIL = 64
@@ -208,16 +209,27 @@ def _object(value: object) -> object:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RequestProvenance:
-    """One provider request's provenance, which ``call_result`` folds into the call's:
-    ``prompt`` the text ``prompt_text`` gives, ``usage`` a mapping from string to number,
-    ``attempts`` 0 for a request never sent, and ``truncated`` the ``q:`` refs the provider cut
-    short. It checks nothing when built."""
+    """One provider request's provenance, which ``call_result`` folds into the call's: the
+    profile's details, ``prompt`` the text ``prompt_text`` gives, ``runtime`` and ``clients``
+    mappings from package to version, ``claimed`` the details the provider asserts and cannot
+    verify, ``usage`` a mapping from string to number, ``attempts`` 0 for a request never
+    sent, ``missing`` from each detail the request left null to its reason, and ``truncated``
+    the ``q:`` refs the provider cut short. It checks nothing when built."""
 
-    snapshot: str | None = None
+    provider: str | None = None
+    model_requested: str | None = None
+    model_reported: str | None = None
+    revision: str | None = None
+    runtime: Mapping[str, str] | None = None
     elicitation: str | None = None
     prompt: str | None = None
+    claimed: tuple[str, ...] = ()
     usage: Mapping[str, float] | None = None
     attempts: int = 0
+    request_id: str | None = None
+    calibrated: bool | None = None
+    missing: Mapping[str, str] | None = None
+    clients: Mapping[str, str] | None = None
     truncated: tuple[str, ...] = ()
 
 
@@ -225,32 +237,88 @@ def call_result(
     values: dict[str, object],
     requests: Iterable[RequestProvenance],
     *,
-    precision: int | None,
+    precision: "int | str | dict[str, str] | None",
     warnings: tuple[str, ...] = (),
 ) -> CallResult:
-    """The ``CallResult`` of a call sent as ``requests``: each distinct ``snapshot``,
-    ``elicitation`` and ``prompt`` one per line in the order first given, ``None`` when none
-    has one; ``usage`` summed per key over the requests that report it, ``None`` when none
-    does; ``attempts`` summed; ``truncated`` sorted and distinct; ``warnings`` as given. When no
-    request made an attempt, ``attempts`` and ``precision`` are ``None``, as a binding that
-    called no model returns them."""
-    sent = list(requests)
+    """The ``CallResult`` of a call sent as ``requests``, read only from those whose
+    ``attempts`` is above 0: each distinct ``provider``, ``model_requested``,
+    ``model_reported``, ``revision``, ``elicitation``, ``prompt`` and ``request_id`` one per
+    line in the order first given, ``None`` when none has one; ``runtime`` and ``clients`` each
+    merged; ``claimed`` the union, sorted; ``calibrated`` false when any request that holds one
+    says false, true when every one that holds one says true, ``None`` when none holds one;
+    ``missing`` a detail's reason when every request lacks the detail, the first code other
+    than ``not-sent``, else ``not-sent``, and none for a detail the result holds a value for;
+    ``usage`` summed per key over the requests that report it, ``None`` when none does;
+    ``attempts`` summed; ``truncated`` sorted and distinct; ``warnings`` as given. When no
+    request made an attempt, the result has no provenance and ``attempts``, ``precision`` and
+    ``missing`` are ``None``, as a binding that called no model returns them. A package at two
+    versions in ``runtime`` or ``clients`` is a ``ValueError``."""
+    given = list(requests)
+    sent = [r for r in given if r.attempts]
     usage: dict[str, float] = {}
     for request in sent:
         for key, figure in (request.usage or {}).items():
             usage[key] = usage[key] + figure if key in usage else figure
-    called = any(r.attempts for r in sent)
-    return CallResult(
+
+    def joined(name: str) -> str | None:
+        return _joined(cast("str | None", getattr(r, name)) for r in sent)
+
+    says = [r.calibrated for r in sent if r.calibrated is not None]
+    calibrated = None if not says else all(says)
+    result = CallResult(
         values,
-        snapshot=_joined(r.snapshot for r in sent),
-        elicitation=_joined(r.elicitation for r in sent),
-        prompt=_joined(r.prompt for r in sent),
+        provider=joined("provider"),
+        model_requested=joined("model_requested"),
+        model_reported=joined("model_reported"),
+        revision=joined("revision"),
+        elicitation=joined("elicitation"),
+        prompt=joined("prompt"),
+        request_id=joined("request_id"),
+        runtime=_merged("runtime", (r.runtime for r in sent)),
+        precision=precision if sent else None,
+        claimed=tuple(sorted({name for r in sent for name in r.claimed})),
         usage=usage or None,
-        attempts=sum(r.attempts for r in sent) if called else None,
+        attempts=sum(r.attempts for r in sent) if sent else None,
+        calibrated=calibrated,
+        clients=_merged("clients", (r.clients for r in sent)),
         truncated=tuple(sorted({ref for r in sent for ref in r.truncated})),
         warnings=warnings,
-        precision=precision if called else None,
     )
+    return replace(result, missing=_missing(result, sent))
+
+
+def _merged(name: str, mappings: Iterable[Mapping[str, str] | None]) -> dict[str, str] | None:
+    """The mappings merged; ``None`` when none holds a package. A package at two versions is a
+    ``ValueError``."""
+    merged: dict[str, str] = {}
+    for mapping in mappings:
+        for package, version in (mapping or {}).items():
+            if merged.setdefault(package, version) != version:
+                raise ValueError(
+                    f"{name} names {package} at two versions, {merged[package]} and {version}"
+                )
+    return merged or None
+
+
+def _missing(result: CallResult, sent: list[RequestProvenance]) -> dict[str, str] | None:
+    """Each detail every sent request gives a reason for and the result holds no value for,
+    with the first reason other than ``not-sent``, else ``not-sent``."""
+    if not sent:
+        return None
+    reasons: dict[str, str] = {}
+    for detail in DETAILS:
+        given = [(r.missing or {}).get(detail) for r in sent]
+        if any(g is None for g in given) or _holds(result, detail):
+            continue
+        codes = [cast(str, g) for g in given]
+        reasons[detail] = next((c for c in codes if c != "not-sent"), "not-sent")
+    return dict(sorted(reasons.items())) or None
+
+
+def _holds(result: CallResult, detail: str) -> bool:
+    if detail.startswith("usage."):
+        return result.usage is not None and detail.removeprefix("usage.") in result.usage
+    return getattr(result, detail) is not None
 
 
 def _joined(values: Iterable[str | None]) -> str | None:

@@ -57,7 +57,8 @@ class Counted:
 
     def __init__(self, model: SpanModel) -> None:
         self.model = model
-        self.model_id, self.revision, self.runtime = model.model_id, model.revision, model.runtime
+        self.provider, self.model_id = model.provider, model.model_id
+        self.revision, self.runtime = model.revision, model.runtime
         self.calls = 0
 
     def predict(self, text: str, labels: list[str], threshold: float) -> list[dict[str, Any]]:

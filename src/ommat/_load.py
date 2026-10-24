@@ -86,9 +86,9 @@ from ommat._types import (
 from ommat._values import (
     CANDIDATE_FORMAT,
     DESCRIPTION_FORMAT,
+    DESIGN_FORMAT,
+    DESIGN_FORMATS,
     EXTRACTION_FORMAT,
-    FORMAT,
-    FORMATS,
     MAX_DOCUMENT_DEPTH,
     MISSING,
     NOUL_DESCRIPTION_FORMAT,
@@ -212,7 +212,7 @@ class _Loader:
         *,
         parsed: dict[str, Any] | None = None,
         given: bytes | None = None,
-        fmt: int = FORMAT,
+        fmt: int = DESIGN_FORMAT,
     ) -> None:
         # From a document: the parsed document and, given as bytes, the bytes.
         self.parsed = parsed
@@ -2023,8 +2023,8 @@ def _gate(given: bytes | Mapping[str, Any]) -> tuple[dict[str, Any] | None, Any]
     found = member_named(members, "format")  # no code of a caller's key runs
     if found is MISSING:
         return None, ((), "the document has no format")
-    if type(found) is not int or found not in FORMATS:
-        known = ", ".join(str(f) for f in sorted(FORMATS))
+    if type(found) is not int or found not in DESIGN_FORMATS:
+        known = ", ".join(str(f) for f in sorted(DESIGN_FORMATS))
         return None, ((), f"the document's format is not one this engine reads: {known}")
     # The document as a holder, then each value it holds to the size bounds too; it shares
     # no container, so the holder's walk is linear in it.

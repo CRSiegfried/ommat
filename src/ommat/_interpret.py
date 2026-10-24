@@ -58,6 +58,15 @@ from ommat._component import (
 from ommat._design import LoadedDesign, Question, Rule, Source
 from ommat._ledger import Ledger
 from ommat._markers import Cause, CauseCode, Failed, Unasked, Unavailable, Undetermined, Unsure
+from ommat._provenance import (
+    DETAILS,
+    HASHED_DETAILS,
+    REASONS,
+    precision_conforms,
+    string_conforms,
+    versions,
+    versions_conform,
+)
 from ommat._read_view import (
     ComponentKind,
     ReadView,
@@ -81,7 +90,6 @@ from ommat._values import (
 
 _STATE = "t:state"
 _DEFAULT = "default"
-_PROVENANCE = ("snapshot", "elicitation", "prompt")
 
 _C = CauseCode
 _STRUCTURAL = frozenset({_C.raised, _C.timed_out, _C.invalid_return, _C.unexpected_ref})
@@ -99,8 +107,6 @@ MAX_WARNINGS = 2**8
 """The most lines a call's ``warnings`` holds."""
 MAX_WARNING_CODE_POINTS = 2**16
 """The most code points a call's ``warnings`` holds in all."""
-MAX_PRECISION = 17
-"""The most decimal places a call's ``precision`` names: past it a double holds no more."""
 _MARKER_KINDS: dict[type[Undetermined], str] = {
     Unsure: "Unsure",
     Unavailable: "Unavailable",
@@ -277,7 +283,8 @@ class _Judged:
 
     failed: Cause | None
     written: dict[str, Written]
-    provenance: dict[str, str | None]
+    provenance: dict[str, object]
+    """The call item's hashed details and ``claimed``; none on a failed call."""
     usage: dict[str, float] | None = None
     attempts: int | None = None
     unexpected: list[str] = field(default_factory=list[str])
@@ -288,13 +295,15 @@ class _Judged:
     """The ``q:`` refs the binding reported cut short, in code-point order."""
     warnings: list[str] = field(default_factory=list[str])
     """The binding's warning lines, in its order."""
-    precision: int | None = None
-    """The decimal places the provider rounds probabilities to; null on a failed call."""
+    request_id: str | None = None
+    calibrated: bool | None = None
+    missing: dict[str, str] | None = None
+    """Each null detail's reason; never on a failed call."""
+    clients: dict[str, str] | None = None
 
 
 def _judge(batch: _Batch, returned: _Returned, types: Mapping[str, Type]) -> _Judged:
-    provenance: dict[str, str | None] = dict.fromkeys(_PROVENANCE)
-    judged = _Judged(None, {}, provenance)
+    judged = _Judged(None, {}, no_provenance())
     codes: list[CauseCode] = []  # in fault-scope order; the first decides
     given: dict[str, object] = {}
     result = returned.result
@@ -332,34 +341,23 @@ def _judge(batch: _Batch, returned: _Returned, types: Mapping[str, Type]) -> _Ju
                     judged.unexpected.append(ref if ref is not None else guarded_repr(key))
             if judged.unexpected:
                 codes.append(_C.unexpected_ref)
-        for name in _PROVENANCE:
-            value = cast(object, getattr(result, name, None))
-            if value is None:
-                continue
-            # A string's length is tested before its code points are read.
-            if is_a(value, str) and domain_error(value) is None:
-                provenance[name] = string_data(cast(str, value))
-            else:
-                judged.invalid[name] = guarded_repr(value)
-                codes.append(_C.invalid_return)
+        if not _provenance(result, judged):
+            codes.append(_C.invalid_return)
         judged.usage = _usage(cast(object, getattr(result, "usage", None)), judged.invalid)
         judged.attempts = _attempts(cast(object, getattr(result, "attempts", None)), judged.invalid)
         judged.truncated = _truncated(
             cast(object, getattr(result, "truncated", ())), batch, judged.invalid
         )
         judged.warnings = _warnings(cast(object, getattr(result, "warnings", ())), judged.invalid)
-        precision = cast(object, getattr(result, "precision", None))
-        if precision_conforms(precision):
-            judged.precision = cast("int | None", precision)
-        else:
-            judged.invalid["precision"] = guarded_repr(precision)
+        _unhashed_details(result, judged)
+        if not _claimed(result, judged):
             codes.append(_C.invalid_return)
     else:
         codes.append(_C.invalid_return)
     if codes:
         judged.failed = Cause(codes[0], list(batch.refs))
-        judged.provenance = dict.fromkeys(_PROVENANCE)
-        judged.precision = None
+        judged.provenance = no_provenance()
+        judged.missing = None
         marker = Unavailable(judged.failed)
         judged.written = dict.fromkeys(batch.refs, marker)
         return judged
@@ -485,10 +483,94 @@ def warnings_conform(value: object) -> bool:
     )
 
 
-def precision_conforms(value: object) -> bool:
-    """Whether ``value`` is a conforming ``precision``: ``None`` or an exact ``int`` from 0 to
-    ``MAX_PRECISION``."""
-    return value is None or (type(value) is int and 0 <= value <= MAX_PRECISION)
+def no_provenance() -> dict[str, object]:
+    """The provenance of a call that sent no request: each hashed detail null, ``claimed``
+    empty."""
+    return {**dict.fromkeys(HASHED_DETAILS), "claimed": []}
+
+
+def _provenance(result: object, judged: _Judged) -> bool:
+    """Write each conforming hashed detail into ``judged``; ``False`` when any does not
+    conform, its ``repr`` kept in ``invalid`` by the detail's name."""
+    conforms = True
+    for name in HASHED_DETAILS:
+        value = cast(object, getattr(result, name, None))
+        if name == "precision":
+            ok = precision_conforms(value)
+        elif name == "runtime":
+            ok = versions_conform(value)
+        else:  # a string's length is tested before its code points are read
+            ok = string_conforms(value)
+        if not ok:
+            judged.invalid[name] = guarded_repr(value)
+            conforms = False
+        elif name == "runtime":
+            judged.provenance[name] = versions(value)
+        elif name == "precision" and type(value) is dict:
+            judged.provenance[name] = dict(cast("dict[str, str]", value))
+        elif name == "precision" or value is None:
+            judged.provenance[name] = value
+        else:
+            judged.provenance[name] = string_data(cast(str, value))
+    return conforms
+
+
+def _held(name: str, result: object) -> bool:
+    """Whether the detail ``name`` holds a value in what the binding returned, whatever its
+    form: a ``usage`` figure is held when ``usage`` is a ``dict`` with its key."""
+    if name.startswith("usage."):
+        usage = cast(object, getattr(result, "usage", None))
+        key = name.removeprefix("usage.")
+        return type(usage) is dict and key in cast("dict[object, object]", usage)
+    return cast(object, getattr(result, name, None)) is not None
+
+
+def _unhashed_details(result: object, judged: _Judged) -> None:
+    """Write ``request_id``, ``calibrated``, ``clients`` and ``missing`` when each conforms,
+    else keep its ``repr`` in ``invalid``; never a fault. ``missing`` conforms when it is null
+    or a non-empty ``dict`` from a detail's name to a reason, for details left null."""
+    request_id = cast(object, getattr(result, "request_id", None))
+    if string_conforms(request_id, exact=True):
+        judged.request_id = cast("str | None", request_id)
+    else:
+        judged.invalid["request_id"] = guarded_repr(request_id)
+    calibrated = cast(object, getattr(result, "calibrated", None))
+    if calibrated is None or type(calibrated) is bool:
+        judged.calibrated = calibrated
+    else:
+        judged.invalid["calibrated"] = guarded_repr(calibrated)
+    clients = cast(object, getattr(result, "clients", None))
+    if versions_conform(clients, exact=True):
+        judged.clients = versions(clients)
+    else:
+        judged.invalid["clients"] = guarded_repr(clients)
+    missing = cast(object, getattr(result, "missing", None))
+    if missing is None:
+        return
+    if type(missing) is dict:
+        pairs = list(cast("dict[object, object]", missing).items())
+        if not pairs:
+            return  # an empty missing is not written
+        if all(
+            type(k) is str and k in DETAILS and type(v) is str and v in REASONS for k, v in pairs
+        ) and not any(_held(cast(str, k), result) for k, _ in pairs):
+            judged.missing = {cast(str, k): cast(str, v) for k, v in pairs}
+            return
+    judged.invalid["missing"] = guarded_repr(cast(object, missing))
+
+
+def _claimed(result: object, judged: _Judged) -> bool:
+    """Write a conforming ``claimed`` sorted: exactly a tuple of distinct exact ``str``, each
+    the name of a detail that holds a value; ``False`` when it does not conform."""
+    value = cast(object, getattr(result, "claimed", ()))
+    if type(value) is tuple:
+        names = cast("tuple[object, ...]", value)
+        distinct = all(type(n) is str for n in names) and len(set(names)) == len(names)
+        if distinct and all(n in DETAILS and _held(cast(str, n), result) for n in names):
+            judged.provenance["claimed"] = code_point_sorted(cast("tuple[str, ...]", names))
+            return True
+    judged.invalid["claimed"] = guarded_repr(cast(object, value))
+    return False
 
 
 def _warnings(value: object, invalid: dict[str, str]) -> list[str]:
@@ -826,6 +908,9 @@ class _Turn:
                 unhashed["truncated"] = judged.truncated
             if judged.warnings:
                 unhashed["warnings"] = judged.warnings
+            for name in ("request_id", "calibrated", "missing", "clients"):
+                if getattr(judged, name) is not None:
+                    unhashed[name] = getattr(judged, name)
             self.ledger.write_unhashed("calls", unhashed, index)
             if outcome.error is not None:
                 self.ledger.write_unhashed("exceptions", exception_record(outcome.error), index)
@@ -1184,7 +1269,6 @@ class _Turn:
             "sources": list(batch.sources),
             "outcome": outcome,
             **judged.provenance,
-            "precision": judged.precision,
             "questions": questions,
         }
 

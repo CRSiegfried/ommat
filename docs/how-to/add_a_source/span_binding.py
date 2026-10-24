@@ -8,6 +8,7 @@ ref ``unsupported``, with its reason as a line of ``warnings``.
 import asyncio
 import threading
 import time
+from collections.abc import Mapping
 from typing import Any, Protocol
 
 from ommat import CallResult, Cause, RenderedQuestion, SourceCall, Unavailable
@@ -22,15 +23,25 @@ from ommat.bindings import (
 
 THRESHOLD = 0.5
 
+NOT_GIVEN = {
+    "request_id": "not-reported",
+    "calibrated": "not-reported",
+    "usage.input_tokens": "not-reported",
+    "usage.output_tokens": "not-applicable",  # an encoder writes no tokens
+    "usage.passes": "not-reported",
+}
+"""Why each detail the model cannot give is null."""
+
 
 class SpanModel(Protocol):
-    """The shape the binding asks of a model: names for its weights and the code that runs
-    them, and ``predict``, each span of a label scored at or above ``threshold``, as a ``dict``
-    of ``start``, ``end``, ``text`` and ``score``."""
+    """The shape the binding asks of a model: the library that runs it, names for its weights,
+    the versions of the code that runs them, and ``predict``, each span of a label scored at or
+    above ``threshold``, as a ``dict`` of ``start``, ``end``, ``text`` and ``score``."""
 
+    provider: str
     model_id: str
     revision: str
-    runtime: str
+    runtime: Mapping[str, str]
 
     def predict(self, text: str, labels: list[str], threshold: float) -> list[dict[str, Any]]: ...
 
@@ -42,7 +53,6 @@ class SpanBinding:
         self._model = model
         self._threshold = threshold
         self._lock = threading.Lock()  # one inference at a time, across threads and loops
-        self._snapshot = f"{model.model_id}@{model.revision} on {model.runtime}"
         self._elicitation = f"span extraction, one request per question, threshold {threshold}"
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
@@ -68,7 +78,7 @@ class SpanBinding:
                 except Exception as error:  # never BaseException: a cancellation propagates
                     lines.append(f"{ref}: raised: {type(error).__name__}: {error}")
                     values[ref] = Unavailable(Cause("raised"))
-                    requests.append(self._request(label))
+                    requests.append(self._request(label, failed=True))
                     continue
                 if spans is None:  # at the call's end: ommat has timed out the whole call
                     lines.append(f"{ref}: timed-out: the model was busy until the call's end")
@@ -76,15 +86,25 @@ class SpanBinding:
                     continue
                 requests.append(self._request(label))
                 values[ref] = _answer(ref, question, text, spans, lines)
-        return call_result(values, requests, precision=None, warnings=bounded_warnings(lines))
+        warnings = bounded_warnings(lines)
+        return call_result(values, requests, precision="unrounded", warnings=warnings)
 
-    def _request(self, label: str) -> RequestProvenance:
-        """One model request's provenance: the model, the method and the arguments it took."""
+    def _request(self, label: str, *, failed: bool = False) -> RequestProvenance:
+        """One model request's provenance: what ran it and how, the arguments it took, and why
+        each detail the model cannot give is null; a request that failed reports no model."""
+        model = self._model
         return RequestProvenance(
-            snapshot=self._snapshot,
+            provider=model.provider,
+            model_requested=model.model_id,
+            model_reported=None if failed else model.model_id,
+            revision=model.revision,
+            runtime=dict(model.runtime),
             elicitation=self._elicitation,
             prompt=prompt_text({"labels": [label], "threshold": self._threshold}),
+            # The model's own word, not checked.
+            claimed=("revision",) if failed else ("model_reported", "revision"),
             attempts=1,
+            missing={**NOT_GIVEN, "model_reported": "not-sent"} if failed else NOT_GIVEN,
         )
 
     def _predict(

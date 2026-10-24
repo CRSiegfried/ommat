@@ -236,12 +236,12 @@ def test_an_answer_or_a_list_need_is_compared_by_its_document() -> None:
 
 
 def test_provenance_is_null_and_the_first_line_names_the_stored_record() -> None:
-    record = stored(ask=returns(SPAM, snapshot="m-1", prompt="p", precision=2))
+    record = stored(ask=returns(SPAM, revision="m-1", prompt="p", precision=2))
     item = next(c for c in calls(record) if "ask" in c["sources"])
-    assert (item["snapshot"], item["prompt"], item["precision"]) == ("m-1", "p", 2)
+    assert (item["revision"], item["prompt"], item["precision"]) == ("m-1", "p", 2)
     again = mixed(record)[0]
     item = next(c for c in calls(again) if "ask" in c["sources"])
-    for name in ("snapshot", "elicitation", "prompt", "precision"):
+    for name in ("revision", "elicitation", "prompt", "precision"):
         assert item[name] is None
     assert warned(again, "ask") == [f"answered from record {record.record_hash}"]
     unhashed = again.unhashed["calls"]
@@ -407,7 +407,7 @@ def test_a_source_refused_whole_gives_one_line_beside_the_record_hash() -> None:
     values = cast(Any, result).values
     assert all(v == Unavailable(Cause(U)) for v in values.values())
     assert cast(Any, result).truncated == ()
-    for name in ("snapshot", "elicitation", "prompt", "precision", "usage", "attempts"):
+    for name in ("revision", "elicitation", "prompt", "precision", "usage", "attempts"):
         assert getattr(result, name) is None
     warnings = cast(Any, result).warnings
     assert warnings == (

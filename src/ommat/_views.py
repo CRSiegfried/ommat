@@ -268,10 +268,11 @@ class _Walk:
     # -- unhashed ----------------------------------------------------------------------------
 
     def unhashed(self, unhashed: dict[str, Any]) -> dict[str, Any]:
-        """``unhashed`` with its text digested: exception text, ``unexpected`` and ``warnings``
-        each whole, ``invalid``'s ``repr`` text, the ``reads`` values and an unknown member
-        whole; member names, log-index keys, ``usage``, ``sums``, ``truncated``, times, the
-        engine and codec names and an exception's ``type`` are open."""
+        """``unhashed`` with its text digested: exception text, ``unexpected``, ``warnings`` and
+        ``request_id`` each whole, ``invalid``'s ``repr`` text, the ``reads`` values and an
+        unknown member whole; member names, log-index keys, ``usage``, ``sums``, ``truncated``,
+        ``calibrated``, ``missing``, ``clients``, times, the engine and codec names and an
+        exception's ``type`` are open."""
         out: dict[str, Any] = {}
         for member, value in unhashed.items():
             if member in ("turn", "engine", "codec"):
@@ -301,6 +302,8 @@ class _Walk:
             out["unexpected"] = self.digest(entry["unexpected"])
         if "warnings" in entry:  # the binding's text, one value
             out["warnings"] = self.digest(entry["warnings"])
+        if "request_id" in entry:  # the provider's id, which may echo the caller's
+            out["request_id"] = self.digest(entry["request_id"])
         if "invalid" in entry:
             invalid = cast("dict[str, Any]", entry["invalid"])
             out["invalid"] = {name: self.digest(text) for name, text in invalid.items()}

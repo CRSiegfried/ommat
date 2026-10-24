@@ -27,6 +27,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._fixture import FixtureBinding, RecordedCalls
+from ommat._provenance import HASHED_DETAILS
 from ommat._typed import decoded
 from ommat._types import AnswerType, Interval, ListOf, MappingOf, Nullable, RecordOf, Scalar
 from scripted import Scripted, raising, returns
@@ -67,8 +68,9 @@ def answer(binding: FixtureBinding, *batch: SourceCall) -> object:
 
 def values(result: object) -> dict[str, Any]:
     assert type(result) is CallResult
-    for name in ("snapshot", "elicitation", "prompt", "usage", "attempts"):
+    for name in (*HASHED_DETAILS, "usage", "attempts", "request_id", "calibrated", "missing"):
         assert getattr(result, name) is None
+    assert (result.claimed, result.clients) == ((), None)
     return result.values
 
 

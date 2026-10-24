@@ -1,0 +1,44 @@
+"""Rebuild, offline, the files ommat derives from its recorded idia logs: the end-to-end turn's
+record document and the idia tutorial's printed output.
+
+Run it from the repository root::
+
+    uv run python scripts/regenerate_idia_fixtures.py
+
+It replays each turn from the logs in ``tests/idia_logs`` with idia's ``Recorded`` leaf in mode
+``none``, under placeholder credentials that are never sent, so it makes no wire call and reads
+no credential. Run it when ommat's record format or the tutorial's printing changes. When the
+wire input changes, the design, a prompt's form or the leaf, the logs themselves are recorded
+again live, with ``scripts/record_idia_e2e.py`` and ``scripts/record_idia_tutorial.py``.
+"""
+
+import asyncio
+import contextlib
+import io
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path[:0] = [
+    str(ROOT / "tests"),
+    str(ROOT / "docs/tutorials/street_reports"),
+    str(ROOT / "docs/tutorials/decide_with_idia"),
+]
+
+import decide_live  # noqa: E402
+import idia_e2e as e2e  # noqa: E402
+
+
+def main() -> None:
+    record = e2e.decide(e2e.PLACEHOLDER, "none").record
+    e2e.RECORD.write_bytes(record.document)
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        asyncio.run(decide_live.run(e2e.recorded_providers(e2e.PLACEHOLDER, "none")))
+    (e2e.TUTORIAL / "output.txt").write_text(printed.getvalue(), encoding="utf-8")
+    print(f"{e2e.RECORD.relative_to(ROOT)}: {record.record_hash}")
+    print(f"{(e2e.TUTORIAL / 'output.txt').relative_to(ROOT)}: rewritten")
+
+
+if __name__ == "__main__":
+    main()

@@ -21,13 +21,17 @@ The checks, by name:
 - ``answers``: each ``q:`` value that is not a marker is in its kind's form, as interpret's own
   test judges it, an extraction's spans bounded by its text in ``needs``;
 - ``per-ref-cause``: a result with a ``timed-out`` or ``raised`` ref holds a ``warnings`` line
-  when the binding called a provider; a result whose ``truncated`` is empty and whose
-  provenance, ``precision``, ``usage`` and ``attempts`` are all null, as a replay's are, owes
-  none;
+  when the binding sent a request, its ``attempts`` above 0; a result that sent none, as a
+  replay's, owes none;
 - ``warnings`` and ``precision``: each conforms as interpret tests it;
-- ``unsupported-provenance``: a result whose every ref is ``unsupported`` holds null
-  provenance, ``precision``, ``usage`` and ``attempts``, and ``truncated`` empty;
-- ``deterministic``, when asked: two calls with one batch return equal ``CallResult``s.
+- ``provenance``: each detail of the provenance profile is in its form, ``claimed`` names only
+  details holding a value, ``missing`` only details and reasons of the profile, and a result
+  that sent a request gives each detail a value or a reason, never both;
+- ``unsupported-provenance``: a result whose every ref is ``unsupported`` has no provenance,
+  ``usage``, ``attempts``, ``request_id``, ``calibrated``, ``missing`` or ``clients``, and
+  ``truncated`` empty;
+- ``deterministic``, when asked: two calls with one batch return equal ``CallResult``s but
+  for ``request_id``, which a provider gives each request afresh.
 
 A binding that passes may still misread its provider: the suite holds it to the protocol only.
 A binding that returns a ``Failed`` for every batch passes every check but ``deterministic``.
@@ -36,6 +40,7 @@ A binding that returns a ``Failed`` for every batch passes every check but ``det
 import asyncio
 import inspect
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from typing import Any, cast
 
 from ommat._answer import AnswerKind, ValueType
@@ -45,10 +50,18 @@ from ommat._interpret import (
     _BINDING_MARKERS,  # pyright: ignore[reportPrivateUsage]
     _STRUCTURAL,  # pyright: ignore[reportPrivateUsage]
     answer_written,
-    precision_conforms,
     warnings_conform,
 )
 from ommat._markers import Cause, CauseCode, Failed, Unavailable, Undetermined
+from ommat._provenance import (
+    DETAILS,
+    HASHED_DETAILS,
+    REASONS,
+    STRING_DETAILS,
+    precision_conforms,
+    string_conforms,
+    versions_conform,
+)
 from ommat._typed import is_a
 from ommat._values import described, string_data
 
@@ -56,7 +69,16 @@ __all__ = ["check"]
 
 Batch = tuple[SourceCall, ...]
 
-_PROVENANCE = ("snapshot", "elicitation", "precision", "prompt", "usage", "attempts")
+_UNSENT = (
+    *HASHED_DETAILS,
+    "usage",
+    "attempts",
+    "request_id",
+    "calibrated",
+    "missing",
+    "clients",
+)
+"""The members a result that sent no request holds null."""
 _PER_REF = frozenset({CauseCode.timed_out, CauseCode.raised})
 _SECONDS = float(RunSettings().timeout)
 """The seconds each call has: the run settings' default timeout."""
@@ -248,7 +270,7 @@ async def _check(binding: OracleBinding, batches: list[Batch], deterministic: bo
                 continue
             if type(first) is not CallResult or type(again) is not CallResult:
                 fail("deterministic", "a call did not return a CallResult")
-            elif first != again:
+            elif replace(first, request_id=None) != replace(again, request_id=None):
                 fail("deterministic", "two calls with one batch returned different results")
     return failures
 
@@ -296,22 +318,77 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
                 per_ref = True
         elif ref in questions and not _in_form(ref, value, *questions[ref]):
             fail("answers", f"{ref} is not in its kind's form")
-    called = result.truncated != () or any(
-        getattr(result, name) is not None for name in _PROVENANCE
-    )
+    called = _sent(result)
     if per_ref and called and not result.warnings:
         fail("per-ref-cause", "a timed-out or raised ref with no warnings line")
     if not warnings_conform(cast(object, result.warnings)):
         fail("warnings", "warnings does not conform")
     if not precision_conforms(cast(object, result.precision)):
         fail("precision", f"precision {described(result.precision)} does not conform")
+    for problem in _provenance_problems(result):
+        fail("provenance", problem)
     refused = [held.get(ref) for ref in provided]
     if provided and all(_unsupported(v) for v in refused):
-        set_ = [name for name in _PROVENANCE if getattr(result, name) is not None]
-        if result.truncated != ():
-            set_.append("truncated")
+        set_ = [name for name in _UNSENT if getattr(result, name) is not None]
+        set_ += [name for name in ("claimed", "truncated") if getattr(result, name) != ()]
         if set_:
             fail("unsupported-provenance", f"every ref is unsupported, yet {', '.join(set_)} set")
+
+
+def _sent(result: CallResult) -> bool:
+    """Whether the binding says it sent a request: ``attempts`` above 0."""
+    attempts = cast(object, result.attempts)
+    return type(attempts) is int and attempts > 0
+
+
+def _holds(result: CallResult, detail: str) -> bool:
+    if detail.startswith("usage."):
+        usage = cast(object, result.usage)
+        return type(usage) is dict and detail.removeprefix("usage.") in usage
+    return cast(object, getattr(result, detail)) is not None
+
+
+def _provenance_problems(result: CallResult) -> list[str]:
+    """What breaks the provenance profile: a detail out of its form, a ``claimed`` or a
+    ``missing`` out of theirs, and, on a call that sent a request, a detail with neither a
+    value nor a reason, or with both."""
+    problems = [
+        f"{name} {described(getattr(result, name))} is not a string or null"
+        for name in STRING_DETAILS
+        if not string_conforms(cast(object, getattr(result, name)))
+    ]
+    if not versions_conform(cast(object, result.runtime)):
+        problems.append("runtime is not null or a non-empty dict of strings")
+    if not versions_conform(cast(object, result.clients), exact=True):
+        problems.append("clients is not null or a non-empty dict of exact strings")
+    claimed = cast(object, result.claimed)
+    names = cast("tuple[object, ...]", claimed) if type(claimed) is tuple else None
+    if names is None or len(set(names)) != len(names):
+        problems.append("claimed is not a tuple of distinct detail names")
+    else:
+        for name in names:
+            if not (type(name) is str and name in DETAILS and _holds(result, name)):
+                problems.append(f"claimed names {described(name)}, no detail holding a value")
+    missing = cast(object, result.missing)
+    reasons: dict[object, object] = {}
+    if missing is not None:
+        if type(missing) is not dict:
+            problems.append("missing is not null or a dict")
+        else:
+            reasons = cast("dict[object, object]", missing)
+            for name, reason in reasons.items():
+                if not (type(name) is str and name in DETAILS):
+                    problems.append(f"missing names {described(name)}, no detail")
+                elif not (type(reason) is str and reason in REASONS):
+                    problems.append(f"missing gives {name} {described(reason)}, no reason")
+    if _sent(result):
+        for name in sorted(DETAILS):
+            held, given = _holds(result, name), name in reasons
+            if held and given:
+                problems.append(f"{name} holds a value and a reason")
+            elif not held and not given:
+                problems.append(f"{name} holds no value and no reason")
+    return problems
 
 
 def _in_form(ref: str, value: object, call: SourceCall, question: RenderedQuestion) -> bool:

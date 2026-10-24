@@ -18,7 +18,7 @@ from designs import bounded, full, gated, minimal, question, rule, with_rule, wi
 from ommat import Design, DesignFailure, InvalidDesign, LoadedDesign, Source, When, load
 from ommat import types as t
 from ommat._canonical import decode, encode, sha256_ref
-from ommat._values import FORMAT
+from ommat._values import DESIGN_FORMAT
 
 
 def doc_of(design: Design) -> dict[str, Any]:
@@ -222,7 +222,7 @@ def parsed_cases() -> list[tuple[Any, str]]:
         ({**with_check_1_defect(), "name": b"x"}, "outside the value domain"),
         ({**with_check_1_defect(), "extra": 1}, 'the member "extra"'),
     ]
-    for value in (0, FORMAT + 1, True, "1", 1.0, None):
+    for value in (0, DESIGN_FORMAT + 1, True, "1", 1.0, None):
         cases.append(({**with_check_1_defect(), "format": value}, "format is not one this engine"))
     for member in ("state", "classes"):
         doc = with_check_1_defect()
@@ -237,7 +237,7 @@ def test_check_11_refuses_a_parsed_document_with_one_failure(given: Any, says: s
 
 
 def test_an_unknown_format_is_refused_before_the_value_domain() -> None:
-    doc = {**with_check_1_defect(), "format": FORMAT + 1, "name": float("nan")}
+    doc = {**with_check_1_defect(), "format": DESIGN_FORMAT + 1, "name": float("nan")}
     assert "format" in gate_failure(doc).message
 
 

@@ -99,6 +99,10 @@
           "request_id": "6c9d865b-5b90-48cb-9bfa-183078eefec5",
           "snapshot": null,
           "type": "WireResponse",
+          "unreported": {
+            "snapshot": "not-pinned",
+            "versions": "not-applicable"
+          },
           "usage": {
             "input_tokens": 202,
             "output_tokens": 0,
@@ -184,6 +188,10 @@
           "request_id": "2af11dc1-d82a-4faf-857b-f78bf076117a",
           "snapshot": null,
           "type": "WireResponse",
+          "unreported": {
+            "snapshot": "not-pinned",
+            "versions": "not-applicable"
+          },
           "usage": {
             "input_tokens": 153,
             "output_tokens": 0,
@@ -272,6 +280,10 @@
           "request_id": "f4a416fa-6312-4e37-9cdd-36fed1e49227",
           "snapshot": null,
           "type": "WireResponse",
+          "unreported": {
+            "snapshot": "not-pinned",
+            "versions": "not-applicable"
+          },
           "usage": {
             "input_tokens": 155,
             "output_tokens": 0,
@@ -396,6 +408,10 @@
           "request_id": "7baefaeb-3059-4bc9-9329-a5a2c0d1b33c",
           "snapshot": null,
           "type": "WireResponse",
+          "unreported": {
+            "snapshot": "not-pinned",
+            "versions": "not-applicable"
+          },
           "usage": {
             "input_tokens": 200,
             "output_tokens": 0,

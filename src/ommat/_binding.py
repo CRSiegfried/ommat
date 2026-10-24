@@ -193,21 +193,36 @@ class CallResult:
     """What a binding returns for its batch: ``values``, a ``dict`` from each ref the batch
     provides to its value, a ``q:`` ref's a ``dict`` from label name to probability or, for an
     extraction question, exactly the keys ``value``, ``guess``, ``p_null``, ``confidence`` and
-    ``span``; the call's provenance, null when no model was called; and ``truncated``, the
-    ``q:`` refs whose answer came from a response the provider cut short, kept outside every
-    hash; ``warnings``, the binding's own lines about the call, such as why it refused a ref
-    with ``unsupported``, kept outside every hash; and ``precision``, the decimal places the
-    provider rounds probabilities to, or ``None`` when unknown or not a decimal count, hashed
-    on the call item."""
+    ``span``; then the call's provenance, hashed on the call item: ``provider``, the provider's
+    name, ``model_requested`` and ``model_reported``, ``revision``, the exact version that
+    answered, ``runtime``, the code that ran the model as a ``dict`` from package to version,
+    ``elicitation``, how it was asked, ``precision``, how the provider rounds probabilities
+    (decimal places, ``"unrounded"``, ``{"step": s}`` or ``None`` when unknown), ``prompt``,
+    and ``claimed``, the details the source asserts and cannot verify; and kept outside every
+    hash: ``usage``, ``attempts``, ``request_id``, ``calibrated``, the provider's claim that its
+    probabilities are calibrated, ``missing``, from each detail a call that sent a request
+    leaves null to its reason, ``clients``, the versions of the libraries that made the call,
+    ``truncated``, the ``q:`` refs whose answer came from a response the provider cut short, and
+    ``warnings``, the binding's own lines about the call. A binding that sent no request returns
+    no provenance. It checks nothing when built; interpret tests it at the write."""
 
     values: dict[str, Any]
     _: KW_ONLY
-    snapshot: str | None = None
+    provider: str | None = None
+    model_requested: str | None = None
+    model_reported: str | None = None
+    revision: str | None = None
+    runtime: dict[str, str] | None = None
     elicitation: str | None = None
-    precision: int | None = None
+    precision: "int | str | dict[str, str] | None" = None
     prompt: str | None = None
+    claimed: tuple[str, ...] = ()
     usage: dict[str, float] | None = None
     attempts: int | None = None
+    request_id: str | None = None
+    calibrated: bool | None = None
+    missing: dict[str, str] | None = None
+    clients: dict[str, str] | None = None
     truncated: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 

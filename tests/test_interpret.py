@@ -263,10 +263,15 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
             "round": 1,
             "sources": ["ask", "body"],
             "outcome": "returned",
-            "snapshot": None,
+            "provider": None,
+            "model_requested": None,
+            "model_reported": None,
+            "revision": None,
             "elicitation": None,
             "prompt": None,
+            "runtime": None,
             "precision": None,
+            "claimed": [],
             "questions": questions,
         },
         {
@@ -484,7 +489,7 @@ def failed(record: Record, code: str, refs: list[str] = ASKED) -> None:
     of the batch `Unavailable` with it, naming the call."""
     call = record.log[3]
     assert call["outcome"] == {"failed": {"code": code, "refs": refs}}
-    assert (call["snapshot"], call["elicitation"], call["prompt"]) == (None, None, None)
+    assert (call["revision"], call["elicitation"], call["prompt"]) == (None, None, None)
     for ref in refs:
         assert entry(record, ref)["marker"] == mark(code, *refs)
         assert entry(record, ref)["call"] == 3
@@ -614,14 +619,14 @@ def test_an_unexpected_key_fails_the_call_and_is_kept_in_unhashed() -> None:
 
 def test_an_unexpected_key_outranks_a_bad_provenance_member() -> None:
     values: dict[Any, Any] = {**OK, "t:nope": 1}
-    record, _ = run(make(asking()), {"ask": returns(values, snapshot=3)})
+    record, _ = run(make(asking()), {"ask": returns(values, revision=3)})
     failed(record, "unexpected-ref")
-    assert record.unhashed["calls"]["3"]["invalid"] == {"snapshot": "3"}
+    assert record.unhashed["calls"]["3"]["invalid"] == {"revision": "3"}
 
 
 @pytest.mark.parametrize(
     ("member", "value"),
-    [("snapshot", 3), ("elicitation", b"e"), ("prompt", "\ud800"), ("snapshot", ["m"])],
+    [("revision", 3), ("elicitation", b"e"), ("prompt", "\ud800"), ("revision", ["m"])],
 )
 def test_a_provenance_member_not_null_or_a_domain_string_is_invalid_return(
     member: str, value: object
@@ -640,7 +645,7 @@ def test_a_call_items_provenance_is_the_call_results() -> None:
         make(asking()),
         {
             "ask": ok(
-                snapshot="m-1",
+                revision="m-1",
                 elicitation="e-2",
                 prompt="the prompt",
                 usage={"in": 3, "out": 1.5},
@@ -649,7 +654,7 @@ def test_a_call_items_provenance_is_the_call_results() -> None:
         },
     )
     call = record.log[3]
-    assert (call["snapshot"], call["elicitation"], call["prompt"]) == ("m-1", "e-2", "the prompt")
+    assert (call["revision"], call["elicitation"], call["prompt"]) == ("m-1", "e-2", "the prompt")
     assert record.unhashed["calls"]["3"]["usage"] == {"in": 3, "out": 1.5}
     assert record.unhashed["calls"]["3"]["attempts"] == 2
 
@@ -1791,7 +1796,7 @@ def test_a_bindings_base_exception_propagates_bare_with_no_item_of_its_round() -
 
 
 def test_a_late_call_results_usage_and_attempts_are_null_and_nothing_else_is_kept() -> None:
-    late = ok(usage={"in": 3}, attempts=2, snapshot=5)
+    late = ok(usage={"in": 3}, attempts=2, revision=5)
     record, _ = run(make(asking(timeout=0.02)), {"ask": ignoring_cancel(5, late)})
     failed(record, "timed-out")
     call = record.unhashed["calls"]["3"]
@@ -3509,13 +3514,13 @@ def test_a_binding_value_over_the_size_bounds_fails_its_ref_alone(
     assert entry(record, "t:body")["value"] == "b"
 
 
-def test_a_snapshot_over_the_size_bounds_is_invalid_return_and_unrepresentable(
+def test_a_revision_over_the_size_bounds_is_invalid_return_and_unrepresentable(
     small_bounds: SmallBounds,
 ) -> None:
-    record, _ = run(make(asking()), {"ask": ok(snapshot=_BIG)})
+    record, _ = run(make(asking()), {"ask": ok(revision=_BIG)})
     assert record.log[3]["outcome"] == {"failed": {"code": "invalid-return", "refs": ASKED}}
-    assert record.log[3]["snapshot"] is None
-    assert record.unhashed["calls"]["3"]["invalid"] == {"snapshot": "<unrepresentable>"}
+    assert record.log[3]["revision"] is None
+    assert record.unhashed["calls"]["3"]["invalid"] == {"revision": "<unrepresentable>"}
 
 
 def test_a_usage_over_the_size_bounds_is_recorded_null(small_bounds: SmallBounds) -> None:

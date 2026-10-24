@@ -17,13 +17,17 @@ from typing import Any, cast
 from ommat._answer import PROBABILITY_KINDS, AnswerKind, ValueType
 from ommat._canonical import decode, decode_written, encode, encode_checked, record_hash
 from ommat._markers import CauseCode, MarkerKind, OutcomeKind, PlanKind, VerdictKind
+from ommat._provenance import (
+    DETAILS,
+    HASHED_DETAILS,
+    REASONS,
+    STRING_DETAILS,
+)
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import (
     CANDIDATE_FORMAT,
     DESCRIPTION_FORMAT,
     EXTRACTION_FORMAT,
-    FORMAT,
-    FORMATS,
     HASH_FORMAT,
     LABEL_OVERFLOW_FORMAT,
     MAX_DEPTH,
@@ -33,6 +37,9 @@ from ommat._values import (
     NOUL_DESCRIPTION_FORMAT,
     PER_REF_FORMAT,
     PRECISION_FORMAT,
+    PROFILE_FORMAT,
+    RECORD_FORMAT,
+    RECORD_FORMATS,
     UNSUPPORTED_FORMAT,
     WARNINGS_FORMAT,
     clipped,
@@ -94,7 +101,7 @@ def _value_places(item: Any, where: str) -> list[tuple[str, Any]]:
     any shape, so each is size-tested before the item is copied or encoded: an entry's
     value, each class tree, a plan's reason and reply and each step's argument names,
     literal arguments and requirement values, each verdict failure's requirement value, and
-    a call item's snapshot, elicitation and prompt. A member of the wrong shape is left for
+    a call item's string provenance and runtime. A member of the wrong shape is left for
     the shape checks. Members are found by their keys' string data, so no code of a key
     runs, and each place is named by member names and positions alone, never by a string
     the item holds, which is not yet size-tested."""
@@ -113,7 +120,7 @@ def _value_places(item: Any, where: str) -> list[tuple[str, Any]]:
         for i, tree in enumerate(members_of(member_named(item, "classes"))):
             places.append((f"{where}'s class tree {i}", tree))
     elif type(kind) is str and kind == "call":
-        put(item, ("snapshot", "elicitation", "prompt"), where)
+        put(item, ("snapshot", *STRING_DETAILS, "runtime"), where)
     elif type(kind) is str and kind == "verdict":
         for i, failure in enumerate(_listed(member_named(item, "failures"))):
             at = f"{where}'s 'failures'[{i}]['requirement']"
@@ -266,7 +273,7 @@ def _cause(value: Any, where: str) -> None:
     m = _members(value, where, {"code": _STR, "refs": _STRINGS})
     # The newest format's set: a shape check knows no record. The append's ``_check_format``
     # then tests each code against the record's own format's set.
-    if m["code"] not in _CAUSE_CODES[FORMAT]:
+    if m["code"] not in _CAUSE_CODES[RECORD_FORMAT]:
         raise _LedgerError(f"{where}'s code {m['code']!r} is not in the closed cause set")
 
 
@@ -279,7 +286,8 @@ _GATED_CODES: dict[CauseCode, int] = {
 }
 """Each code a later format added, with the first format that holds it."""
 _CAUSE_CODES: dict[int, frozenset[str]] = {
-    fmt: frozenset(c.value for c in CauseCode if fmt >= _GATED_CODES.get(c, 1)) for fmt in FORMATS
+    fmt: frozenset(c.value for c in CauseCode if fmt >= _GATED_CODES.get(c, 1))
+    for fmt in RECORD_FORMATS
 }
 """Each format's closed cause set."""
 _ANSWER_KINDS = frozenset(AnswerKind)
@@ -558,6 +566,35 @@ _EXTRACTION_QUESTION: dict[str, _Check] = {
     "is_list": _BOOL,
 }
 
+
+def _precision_shape(value: Any, where: str) -> None:
+    """A ``precision``'s JSON kinds: null, an integer, ``"unrounded"`` or exactly
+    ``{"step": s}`` with ``s`` a string; the append tests which a format holds."""
+    if value is None or type(value) is int or value == "unrounded":
+        return
+    if type(value) is dict:
+        members = cast("dict[str, object]", value)
+        if list(members) == ["step"] and type(members["step"]) is str:
+            return
+    raise _LedgerError(f'{where} is not an integer or null, "unrounded" or a step')
+
+
+_PRECISION = cast(_Check, _precision_shape)
+
+
+def _is_versions(value: Any) -> bool:
+    if type(value) is not dict:
+        return False
+    members = cast("dict[str, object]", value)
+    return bool(members) and all(type(x) is str for x in members.values())
+
+
+_VERSIONS = _kind(_is_versions, "a non-empty object of strings")
+_PROFILE_ONLY = ("provider", "model_requested", "model_reported", "revision", "runtime", "claimed")
+"""The call item's members from format 5, in place of ``snapshot``."""
+_CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
+"""A ``calls`` entry's members from format 5."""
+
 _SHAPES: dict[str, _Check] = {
     "design": _shape({"hash": _STR, "format": _INT, "helpers": _INT}),
     "settings": _shape({"settings": _run_settings, "providers": _OBJECT, "classes": _OBJECT}),
@@ -567,12 +604,20 @@ _SHAPES: dict[str, _Check] = {
             "round": _INT,
             "sources": _sources,
             "outcome": _outcome,
-            "snapshot": _STR_OR_NULL,
             "elicitation": _STR_OR_NULL,
             "prompt": _STR_OR_NULL,
             "questions": _questions,
         },
-        {"precision": _INT_OR_NULL},  # each format's own: the append tests it
+        {  # each format's own: the append tests which it holds
+            "precision": _PRECISION,
+            "snapshot": _STR_OR_NULL,
+            "provider": _STR_OR_NULL,
+            "model_requested": _STR_OR_NULL,
+            "model_reported": _STR_OR_NULL,
+            "revision": _STR_OR_NULL,
+            "runtime": _or_null(_VERSIONS),
+            "claimed": _STRINGS,
+        },
     ),
     "round": _shape({"round": _INT, "cost": _NUMBER, "deadline": _BOOL}),
     "certificate": _shape({"round": _INT}),
@@ -731,13 +776,16 @@ _INVALID_NAMES = frozenset(
     {
         "code",
         "snapshot",
-        "elicitation",
-        "prompt",
+        *HASHED_DETAILS,
+        "claimed",
         "usage",
         "attempts",
+        "request_id",
+        "calibrated",
+        "missing",
+        "clients",
         "truncated",
         "warnings",
-        "precision",
     }
 )
 _NUMBERS = _kind(
@@ -807,8 +855,23 @@ def _call_entry(value: Any, where: str) -> None:
             "sums": _sums,
             "truncated": _truncated,
             "warnings": _warnings,
+            "request_id": _STR,
+            "calibrated": _BOOL,
+            "missing": _missing,
+            "clients": _VERSIONS,
         },
     )
+
+
+def _missing(value: Any, where: str) -> None:
+    _OBJECT(value, where)
+    if not value:
+        raise _LedgerError(f"{where} is empty; an empty member is not written")
+    for name, reason in cast("dict[str, Any]", value).items():
+        if name not in DETAILS:
+            raise _LedgerError(f"{where} has the key {clipped(name)}, which names no detail")
+        if type(reason) is not str or reason not in REASONS:
+            raise _LedgerError(f"{where}[{name!r}] is not a reason of the provenance profile")
 
 
 def _sums_keys(entry: dict[str, Any], questions: Mapping[str, str], where: str) -> None:
@@ -901,10 +964,14 @@ def _call_entry_format(entry: dict[str, Any], fmt: int, where: str) -> None:
         ("truncated", EXTRACTION_FORMAT),
         ("warnings", WARNINGS_FORMAT),
         ("precision", PRECISION_FORMAT),
+        *((name, PROFILE_FORMAT) for name in _PROFILE_ONLY),
+        *((name, PROFILE_FORMAT) for name in _CALLS_PROFILE),
     )
     for name, first in since:
         if fmt < first and (name in entry or name in invalid):
             raise _LedgerError(f"{where} holds {name}, which a format-{fmt} record does not")
+    if fmt >= PROFILE_FORMAT and "snapshot" in invalid:
+        raise _LedgerError(f"{where} holds snapshot, which a format-{fmt} record does not")
 
 
 def _codes(kind: str, item: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1019,7 +1086,7 @@ class Ledger:
         call item's precision before format 3 or its absence from it, and a described label
         before format 3. Before the design item every kind is refused by the order check."""
         fmt = self._format
-        if fmt not in FORMATS:
+        if fmt not in RECORD_FORMATS:
             return  # no design item yet: the order check refuses the item
         for place, code in _codes(kind, item):
             if code not in _CAUSE_CODES[fmt]:
@@ -1032,6 +1099,18 @@ class Ledger:
             raise _LedgerError(f"{where} has no 'precision' member")
         if fmt < PRECISION_FORMAT and "precision" in item:
             raise _LedgerError(f"{where} holds precision, which a format-{fmt} record does not")
+        if fmt < PROFILE_FORMAT and type(item.get("precision")) not in (int, type(None)):
+            raise _LedgerError(
+                f"{where}'s precision is not an integer or null, which a format-{fmt} record's is"
+            )
+        held = ("snapshot",) if fmt < PROFILE_FORMAT else _PROFILE_ONLY
+        refused = _PROFILE_ONLY if fmt < PROFILE_FORMAT else ("snapshot",)
+        for name in held:
+            if name not in item:
+                raise _LedgerError(f"{where} has no {name!r} member")
+        for name in refused:
+            if name in item:
+                raise _LedgerError(f"{where} holds {name}, which a format-{fmt} record does not")
         if fmt < NOUL_DESCRIPTION_FORMAT and any(
             q["kind"] == AnswerKind.noul and q["labels"] is not None
             for q in cast("dict[str, Any]", item["questions"]).values()
@@ -1093,7 +1172,7 @@ class Ledger:
             )
         if kind == "design":
             fmt = item["format"]
-            if fmt not in FORMATS:
+            if fmt not in RECORD_FORMATS:
                 raise _LedgerError(f"{where}: the format {fmt} is not one this ledger knows")
             return self._set(_phase=_DESIGNED, _format=fmt)
         if kind == "settings":
@@ -1539,8 +1618,8 @@ def _read(doc: object) -> Record:
         raise _LedgerError("the log has no design item first")
     fmt = member_named(first, "format")
     fmt = None if fmt is MISSING else fmt
-    if type(fmt) is not int or fmt not in FORMATS:
-        known = ", ".join(str(f) for f in sorted(FORMATS))
+    if type(fmt) is not int or fmt not in RECORD_FORMATS:
+        known = ", ".join(str(f) for f in sorted(RECORD_FORMATS))
         raise _LedgerError(
             f"the record's format {described(fmt)} is not one this reader knows: {known}"
         )
@@ -1577,7 +1656,7 @@ def _read(doc: object) -> Record:
     if err is not None:
         raise _LedgerError(f"unhashed is outside the value domain: {err}")
     for i, entry in enumerate(members_of(member_named(cast(object, unhashed), "calls"))):
-        for name in ("usage", "warnings"):  # each a value
+        for name in ("usage", "warnings", "request_id", "clients"):  # each a value
             found = member_named(entry, name)
             if found is not MISSING:
                 _sized_value(found, f"unhashed 'calls' entry {i}'s {name!r}")

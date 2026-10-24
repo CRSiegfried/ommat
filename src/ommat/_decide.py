@@ -40,8 +40,8 @@ from ommat._plan import Plan, engine_plan
 from ommat._refs import code_point_sorted
 from ommat._typed import is_a, typed
 from ommat._values import (
-    FORMAT,
     MAX_INTEGER,
+    RECORD_FORMAT,
     UNREPRESENTABLE,
     described,
     quote,
@@ -328,7 +328,12 @@ async def _turn(
         if codec is not None:
             ledger.write_unhashed("codec", _codec_name(codec))
         ledger.append(
-            {"item": "design", "hash": loaded.design_hash, "format": FORMAT, "helpers": HELPERS}
+            {
+                "item": "design",
+                "hash": loaded.design_hash,
+                "format": RECORD_FORMAT,
+                "helpers": HELPERS,
+            }
         )
         ledger.append(
             {

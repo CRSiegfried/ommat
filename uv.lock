@@ -29,39 +29,6 @@ wheels = [
 ]
 
 [[package]]
-name = "idia"
-version = "0.1.0"
-source = { editable = "../idia" }
-
-[package.optional-dependencies]
-cloudflare = [
-    { name = "httpx2" },
-]
-openai = [
-    { name = "httpx2" },
-    { name = "openai" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx2", marker = "extra == 'cloudflare'", specifier = ">=2.16" },
-    { name = "httpx2", marker = "extra == 'openai'", specifier = ">=2.16" },
-    { name = "httpx2", marker = "extra == 'system-one'", specifier = ">=2.16" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=3.35.1" },
-]
-provides-extras = ["system-one", "openai", "cloudflare"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx2", specifier = ">=2.16" },
-    { name = "openai", specifier = ">=3.35.1" },
-    { name = "pyright", specifier = ">=1.1.400" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-cov", specifier = ">=6" },
-    { name = "ruff", specifier = ">=0.14" },
-]
-
-[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -238,6 +205,43 @@ wheels = [
 ]
 
 [[package]]
+name = "idia"
+version = "0.1.0"
+source = { editable = "../idia" }
+
+[package.optional-dependencies]
+cloudflare = [
+    { name = "httpx2" },
+]
+openai = [
+    { name = "httpx2" },
+    { name = "openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gliner2", extras = ["local"], marker = "extra == 'gliner'", specifier = ">=2.0.0" },
+    { name = "httpx2", marker = "extra == 'cloudflare'", specifier = ">=2.16" },
+    { name = "httpx2", marker = "extra == 'openai'", specifier = ">=2.16" },
+    { name = "httpx2", marker = "extra == 'system-one'", specifier = ">=2.16" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=3.35.1" },
+    { name = "protobuf", marker = "extra == 'gliner'", specifier = ">=4" },
+    { name = "sentencepiece", marker = "extra == 'gliner'", specifier = ">=0.2" },
+    { name = "torch", marker = "extra == 'gliner'", specifier = ">=2.1", index = "https://download.pytorch.org/whl/cpu" },
+]
+provides-extras = ["system-one", "openai", "cloudflare", "gliner"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx2", specifier = ">=2.16" },
+    { name = "openai", specifier = ">=3.35.1" },
+    { name = "pyright", specifier = ">=1.1.400" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-cov", specifier = ">=6" },
+    { name = "ruff", specifier = ">=0.14" },
+]
+
+[[package]]
 name = "idna"
 version = "3.20"
 source = { registry = "https://pypi.org/simple" }
@@ -369,6 +373,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nodeenv"
+version = "1.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/8e/105de02c1322cfada6d9710d9146ef8026419d433c9d08359a2d35805811/nodeenv-1.11.0.tar.gz", hash = "sha256:3ce8fe5b71d16e8af7039ca65257354100bc772965d6bc549070649e53b1b146", size = 99301, upload-time = "2026-09-26T11:29:21.367Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/c8/12811c9b48fde162bb72b6f2e78fada9a247a09d7bb5be2050a5d099c77b/nodeenv-1.11.0-py2.py3-none-any.whl", hash = "sha256:edaa16e6c14d7cf395d75d4bbd5a26390f4dc06501a33b4e76282b02cc688a25", size = 34277, upload-time = "2026-09-26T11:29:19.933Z" },
+]
+
+[[package]]
 name = "ommat"
 version = "0.4.0"
 source = { editable = "." }
@@ -400,15 +413,6 @@ dev = [
     { name = "pytest-cov", specifier = ">=6" },
     { name = "rfc8785", specifier = ">=0.1.4" },
     { name = "ruff", specifier = ">=0.14" },
-]
-
-[[package]]
-name = "nodeenv"
-version = "1.11.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9a/8e/105de02c1322cfada6d9710d9146ef8026419d433c9d08359a2d35805811/nodeenv-1.11.0.tar.gz", hash = "sha256:3ce8fe5b71d16e8af7039ca65257354100bc772965d6bc549070649e53b1b146", size = 99301, upload-time = "2026-09-26T11:29:21.367Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/c8/12811c9b48fde162bb72b6f2e78fada9a247a09d7bb5be2050a5d099c77b/nodeenv-1.11.0-py2.py3-none-any.whl", hash = "sha256:edaa16e6c14d7cf395d75d4bbd5a26390f4dc06501a33b4e76282b02cc688a25", size = 34277, upload-time = "2026-09-26T11:29:19.933Z" },
 ]
 
 [[package]]

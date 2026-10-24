@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from ledger_logs import rehashed
+from ledger_logs import before_profile, rehashed
 from ommat import (
     CallResult,
     Cause,
@@ -41,6 +41,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._canonical import decode
+from ommat._provenance import DETAILS
 from ommat.bindings.conformance import check
 from ommat.helpers import pick_with_margin
 
@@ -98,6 +99,7 @@ async def split(batch: Batch, *, seconds: float) -> object:
         },
         warnings=("b: the request ran out of time", "c: HTTP 503 Service Unavailable"),
         attempts=3,
+        missing=dict.fromkeys(sorted(DETAILS), "not-reported"),
     )
 
 
@@ -214,12 +216,12 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
 
 
 GOLDEN_DESIGN = "sha256:97d0e25d741abda264142afbc710bdbe0043ad017f7cbc9f99e31f7ee938ab7b"
-GOLDEN_RECORD = "sha256:4114aa19438254663e278f2807a294c39547c58c6fd3126b80b755741cf7b620"
+GOLDEN_RECORD = "sha256:c19824589a2f932994304a05f084f837d0ff6e4a033483c6d4dbc38a6bd6cd11"
 
 
 def test_the_golden_per_ref_record() -> None:
     record = per_ref_turn()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 4, "helpers": 2}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 5, "helpers": 2}
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)
     assert decode(record.document)["hash"] == GOLDEN_RECORD
 
@@ -229,7 +231,7 @@ def test_a_per_ref_marker_reads_back_at_format_4_and_is_refused_at_format_3() ->
     assert read_record(json.dumps(doc).encode()).log == per_ref_turn().log
     for earlier in (1, 2, 3):
         old = copy.deepcopy(doc)
-        old["log"][0]["format"] = earlier
+        before_profile(old, earlier)
         if earlier < 3:
             for item in old["log"]:
                 if item["item"] == "call":
@@ -248,7 +250,7 @@ async def raised_only(batch: Batch, *, seconds: float) -> object:
 
 def test_a_raised_marker_alone_is_refused_at_format_3() -> None:
     doc = json.loads(decide_sync(LOADED, {"text": "a"}, {"o": raised_only}).record.document)
-    doc["log"][0]["format"] = 3
+    before_profile(doc, 3)
     with pytest.raises(InvalidRecord, match="raised marker under returned call item"):
         read_record(rehashed(doc))
 
@@ -263,7 +265,7 @@ def test_an_engine_timeout_under_a_failed_call_is_read_at_every_format() -> None
     (call,) = (i for i in record.log if i["item"] == "call")
     assert call["outcome"]["failed"]["code"] == "timed-out"
     doc = json.loads(record.document)
-    doc["log"][0]["format"] = 3
+    before_profile(doc, 3)
     assert read_record(rehashed(doc)).log[0]["format"] == 3
 
 
@@ -299,7 +301,7 @@ def test_a_format_3_record_replays_under_its_format_3_design_with_no_finding() -
     again, findings = replay_sync(format_3_record(), format_3_design())
     assert findings == []
     assert again is not None
-    assert again.log[0]["format"] == 4  # the engine writes its own format
+    assert again.log[0]["format"] == 5  # the engine writes its own format
 
 
 def test_a_format_3_record_under_the_format_4_design_is_design_mismatch_alone() -> None:

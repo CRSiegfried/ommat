@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from ledger_logs import rehashed
+from ledger_logs import before_profile, rehashed
 from ommat import (
     CallResult,
     Design,
@@ -123,7 +123,7 @@ def test_a_described_noul_before_format_4_is_refused_in_a_document_and_a_record(
     assert "is a noul question with labels, which format 3 does not have" in str(raised.value)
     record, _ = run(design(DESCRIBED))
     stored = json.loads(record.document)
-    stored["log"][0]["format"] = 3
+    before_profile(stored, 3)
     with pytest.raises(InvalidRecord, match="a noul's labels, which a format-3 record"):
         read_record(rehashed(stored))
 

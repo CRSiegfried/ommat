@@ -274,3 +274,30 @@ def rehashed(doc: dict[str, Any]) -> dict[str, Any]:
     else:
         doc.pop("hash", None)
     return doc
+
+
+_PROFILE_ONLY = ("provider", "model_requested", "model_reported", "runtime", "claimed")
+_CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
+
+
+def before_profile(doc: dict[str, Any], fmt: int) -> dict[str, Any]:
+    """A current record document made format ``fmt``, below 5: each call item's ``revision``
+    back to ``snapshot``, the profile's other members and its ``calls`` entries' gone, as a
+    record before the provenance profile holds them. Its ``hash`` is left to recompute."""
+    doc["log"][0]["format"] = fmt
+    for item in doc["log"]:
+        if item["item"] == "call":
+            item["snapshot"] = item.pop("revision")
+            for name in _PROFILE_ONLY:
+                item.pop(name, None)
+            if type(item.get("precision")) is not int:
+                item["precision"] = None
+    for entry in doc["unhashed"].get("calls", {}).values():
+        for name in _CALLS_PROFILE:
+            entry.pop(name, None)
+        invalid = entry.get("invalid", {})
+        for name in (*_PROFILE_ONLY, "revision", *_CALLS_PROFILE):
+            invalid.pop(name, None)
+        if "invalid" in entry and not invalid:
+            del entry["invalid"]
+    return doc

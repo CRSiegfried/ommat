@@ -87,7 +87,7 @@ A source names the oracle that answers it, and `decide` takes one binding per or
 
    ```
    escalate | d:hazard Unsure: abstained on q:triage/hazard | passed
-     call 3: ['details', 'timing'], precision None, attempts 2
+     call 3: ['details', 'timing'], precision unrounded, attempts 2
        details: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
        timing: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
      call 4: ['registry'], precision None, attempts None
@@ -101,7 +101,7 @@ A source names the oracle that answers it, and `decide` takes one binding per or
        triage: unchecked-limit max_total_options: max_total_options is unknown, so it was not checked
      replay findings: []
    escalate | a hazard to people: send a crew now | passed
-     call 3: ['details', 'timing'], precision None, attempts 2
+     call 3: ['details', 'timing'], precision unrounded, attempts 2
        details: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
        timing: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
      call 4: ['registry'], precision None, attempts None
@@ -116,11 +116,11 @@ A source names the oracle that answers it, and `decide` takes one binding per or
      replay findings: []
    escalate | d:hazard Unsure: abstained on q:triage/hazard | passed
      call 3: ['details', 'timing'], precision None, attempts None
-       answered from record sha256:b2526811ca71bb7d97d67712fa0f5425534c01be7cd77ca041035dadfaef7fae
+       answered from record sha256:50d08efdbe8163ed847be464c267f52f541c6de512771d2b846925c1b89a5e8b
      call 4: ['registry'], precision None, attempts None
        registry: unsupported: the idia binding asks q: refs only, not t:open_orders
      call 5: ['triage'], precision None, attempts None
-       answered from record sha256:b2526811ca71bb7d97d67712fa0f5425534c01be7cd77ca041035dadfaef7fae
+       answered from record sha256:50d08efdbe8163ed847be464c267f52f541c6de512771d2b846925c1b89a5e8b
    ```
 
 2. The first report escalates on `d:hazard`: the classifier put 0.58 on a danger to people,
@@ -133,9 +133,9 @@ A source names the oracle that answers it, and `decide` takes one binding per or
 Each line under a plan is one call item of the record: the sources it asked, its `precision`,
 and from the record's `unhashed` part its `attempts` and its `warnings` lines.
 
-1. `precision` is the number of decimals the model's provider declares it rounds probabilities
-   to: 2 for Decisions, and none for Clairic, which declares none. The registry call asked no
-   model, so it has no precision and no attempts.
+1. `precision` is how the model's provider declares it rounds probabilities: 2 decimals for
+   Decisions, and `unrounded` for Clairic, which rounds none. The registry call asked no model,
+   so it has no precision and no attempts.
 
 2. `attempts` counts the requests the binding sent for the call, retries included: one for
    `triage`, and one each for `details` and `timing`, so 2 on their call.

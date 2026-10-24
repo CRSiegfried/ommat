@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from designs import roles
-from ledger_logs import rehashed
+from ledger_logs import before_profile, rehashed
 from ommat import (
     Cause,
     EntryRefusal,
@@ -243,7 +243,7 @@ def hashed(record: Record | None) -> list[dict[str, Any]]:
 
 
 def test_replay_reads_nothing_from_unhashed() -> None:
-    record = live(ask=returns(SPAM, usage={"tokens": 5}, attempts=2, snapshot="m-1"))
+    record = live(ask=returns(SPAM, usage={"tokens": 5}, attempts=2, revision="m-1"))
 
     def change(doc: dict[str, Any]) -> None:
         calls = doc["unhashed"]["calls"]
@@ -263,7 +263,7 @@ def test_replay_reads_nothing_from_unhashed() -> None:
     rerun_copy, found_copy = run(copy_)
     assert found == found_copy == []  # call items are not compared
     assert hashed(rerun_copy) == hashed(rerun)
-    assert all(item.get("snapshot") is None for item in hashed(rerun))
+    assert all(item.get("revision") is None for item in hashed(rerun))
     assert rerun is not None
     assert all(
         c["usage"] is None and c["attempts"] is None for c in rerun.unhashed["calls"].values()
@@ -1095,7 +1095,7 @@ def test_a_format_2_record_whose_question_is_now_described_is_mismatch_and_chang
     undescribed = load(f3.described(f3.tone_question(["warm", "cold"])))
     doc = json.loads(f3.ran(loaded=undescribed).document)
     del doc["hash"]
-    doc["log"][0]["format"] = 2  # as a format-2 engine wrote it
+    before_profile(doc, 2)  # as a format-2 engine wrote it
     for item in doc["log"]:
         if item["item"] == "call":
             del item["precision"]

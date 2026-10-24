@@ -102,7 +102,7 @@ def test_a_format_2_record_replays_under_its_format_2_design_with_no_finding() -
     again, findings = replay_sync(format_2_record(), format_2_design())
     assert findings == []
     assert again is not None
-    assert again.log[0]["format"] == 4  # the engine writes its own format
+    assert again.log[0]["format"] == 5  # the engine writes its own format
     assert decode(again.document)["hash"] == again.record_hash
 
 
@@ -138,7 +138,7 @@ def test_a_format_2_design_decides_a_turn_at_the_engines_format() -> None:
     record = decide_sync(
         format_2_design(), stored_state, {"mail": nothing, "default": nothing}
     ).record
-    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 4, "helpers": 2}
+    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 5, "helpers": 2}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -654,7 +654,7 @@ def test_an_unsupported_refusal_marks_each_ref_and_keeps_its_reason_as_a_warning
     record = ran(unsupported("no tone questions here"))
     call = call_of(record)
     assert call["outcome"] == "returned"
-    assert (call["snapshot"], call["elicitation"], call["prompt"]) == (None, None, None)
+    assert (call["revision"], call["elicitation"], call["prompt"]) == (None, None, None)
     for ref in ("q:other", "q:tone"):
         assert entry(record, ref)["marker"] == {
             "kind": "Unavailable",
@@ -1117,7 +1117,7 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # The golden described record
 
 GOLDEN_DESIGN = "sha256:70b8c7680c10f64265fbfd76e4d073044c3c26069bb3ce738cf24ea4a0756796"
-GOLDEN_RECORD = "sha256:120537eb3e7d6210fd71c6b2d92af7da367f4b9a14aa7981638020be69998def"
+GOLDEN_RECORD = "sha256:9b12ff0ed0ddaf588fa28e18de91504f55c16ebf08396e244c138ba7ecf23787"
 
 
 def golden() -> Record:

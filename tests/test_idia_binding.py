@@ -45,6 +45,8 @@ from ommat import (  # noqa: E402
     Answer,
     AnswerKind,
     CallResult,
+    Cause,
+    Failed,
     RenderedQuestion,
     SourceCall,
     Unavailable,
@@ -217,7 +219,8 @@ def test_a_leaf_declaring_decimals_no_precision_holds_is_refused(decimals: int) 
 def test_a_leaf_declaring_decimals_precision_holds_is_taken(decimals: int | None) -> None:
     rounding = Rounding(probability_decimals=decimals, score_decimals=None)
     binding, _ = built(rounding=rounding)
-    assert call(binding, source()).precision == decimals
+    expected = "unrounded" if decimals is None else decimals  # idia's None is unrounded
+    assert call(binding, source()).precision == expected
 
 
 # ---------------------------------------------------------------------------------------------
@@ -587,7 +590,7 @@ def test_a_call_that_reaches_no_model_holds_null_attempts_and_precision() -> Non
     result = call(binding, source(), seconds=1e-9)
     assert code(result, "q:triage/hazard") == "timed-out"
     assert leaf.calls == []
-    assert (result.attempts, result.precision, result.snapshot) == (None, None, None)
+    assert (result.attempts, result.precision, result.revision) == (None, None, None)
 
 
 def test_a_packed_source_keeps_the_answers_of_the_wire_requests_that_answered() -> None:
@@ -628,7 +631,7 @@ def test_the_sources_run_concurrently_and_their_provenance_is_joined_and_summed(
     assert result.usage == {"input_tokens": 20, "output_tokens": 4, "passes": 2}
     assert result.attempts == 2
     assert result.precision == 2
-    assert result.snapshot is not None
+    assert result.revision is not None
     prompts = (result.prompt or "").split("\n")
     assert len(prompts) == 2
     assert all(json.loads(p) for p in prompts)
@@ -663,7 +666,7 @@ def test_each_failed_attempt_is_a_line() -> None:
 def test_a_batch_with_nothing_sent_holds_null_provenance() -> None:
     binding, _ = built()
     result = call(binding, source("registry", refs=("t:registry/open",)))
-    assert (result.snapshot, result.prompt, result.usage, result.attempts) == (
+    assert (result.revision, result.prompt, result.usage, result.attempts) == (
         None,
         None,
         None,
@@ -800,3 +803,72 @@ def test_a_form_the_provider_does_not_carry_is_unsupported_alone(
     (line,) = result.warnings
     assert line == f"triage: unsupported q:triage/a: the provider does not carry {says}"
     assert [q.key for q in sent(leaf)] == ["q:triage/b"]
+
+
+# ---------------------------------------------------------------------------------------------
+# The provenance profile, as idia's leaves fill it
+
+
+def test_a_local_leafs_runtime_reasons_and_claims_reach_the_call_under_ommats_names() -> None:
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        return Reply(
+            answers=answer_all(wire_request, deadline),
+            usage=Usage(input_tokens=12, output_tokens=None),
+            versions={"python": "3.11.9", "gliner2": "1.2.0", "torch": "2.5.1"},
+            client_versions={"huggingface_hub": "0.26.0"},
+            unreported={"usage.output_tokens": "not-applicable", "usage.passes": "not-reported"},
+            claimed=frozenset({"model_reported", "snapshot"}),
+        )
+
+    binding, _ = built(script)
+    result = call(binding, source())
+    assert result.runtime == {"python": "3.11.9", "gliner2": "1.2.0", "torch": "2.5.1"}
+    assert result.claimed == ("model_reported", "revision")  # idia's snapshot is the revision
+    assert result.revision == "scripted-1"
+    assert result.missing == {
+        "usage.output_tokens": "not-applicable",
+        "usage.passes": "not-reported",
+    }
+    assert result.clients is not None
+    assert "huggingface_hub" in result.clients
+    assert result.clients["idia"] == idia.__version__
+    assert (result.provider, result.model_requested) == ("scripted", "scripted-1")
+
+
+def test_a_wire_alias_is_an_unpinned_revision_and_a_runtime_that_does_not_apply() -> None:
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        return Reply(answers=answer_all(wire_request, deadline), pinned=False)
+
+    binding, _ = built(script)
+    result = call(binding, source())
+    assert (result.revision, result.runtime) == (None, None)
+    assert result.missing is not None
+    assert result.missing["revision"] == "not-pinned"
+    assert result.missing["runtime"] == "not-applicable"
+    assert any("not a pinned version" in line for line in result.warnings)
+
+
+def test_a_failed_request_gives_not_sent_to_each_detail_it_holds_no_value_for() -> None:
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        raise ProviderError("HTTP 500: busy", status_code=500, is_retryable=False)
+
+    binding, _ = built(script)
+    result = call(binding, source())
+    assert code(result, "q:triage/hazard") == "raised"
+    assert result.claimed == ()
+    assert result.missing is not None
+    assert set(result.missing.values()) == {"not-sent"}
+    assert {"revision", "model_reported", "prompt"} <= set(result.missing)
+    assert result.precision == 2  # the leaf's rounding, a value whatever the request did
+
+
+def test_a_call_whose_requests_name_one_package_at_two_versions_is_invalid_return() -> None:
+    seen = iter(("2.5", "2.4"))
+
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        return Reply(answers=answer_all(wire_request, deadline), versions={"torch": next(seen)})
+
+    binding, _ = built(script)
+    other = source("second", {"q:second/hazard": NOUL})
+    result = asyncio.run(binding((source(), other), seconds=60.0))
+    assert result == Failed(Cause("invalid-return"))

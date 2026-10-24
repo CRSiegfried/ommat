@@ -219,6 +219,11 @@
           "request_id": "req_a7e06ce8d9b540568ecd07c1969bfa47",
           "snapshot": null,
           "type": "WireResponse",
+          "unreported": {
+            "snapshot": "not-pinned",
+            "usage.passes": "not-reported",
+            "versions": "not-applicable"
+          },
           "usage": {
             "input_tokens": 486,
             "output_tokens": 0,
