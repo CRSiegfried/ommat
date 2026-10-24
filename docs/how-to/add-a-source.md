@@ -199,15 +199,16 @@ request that the request cannot run in time. A request that runs to the deadline
 whole call.
 
 Size a source's `timeout` against the model's latency, measured on texts as long as yours. A
-binding that serialises its model, as Path B's does, runs a call's requests one at a time, so
-a call costs about the number of questions times the time of one request, and a request's
-time grows faster than the text's length. For one small named-entity model on a CPU, a
-request took 0.05 s at 16 tokens, 0.14 s at 536, 1.3 s at 2,600 and 18 s at 7,800; with
-`timeout=10`, the 7,800-token text came back `timed-out`, and `decide_sync` returned at 15.4 s.
+binding that serialises its model, as Path B's does, runs a call's requests one at a time, and
+queues requests from concurrent calls behind them, so a call costs about the number of
+questions times the time of one request, and a request's time can grow faster than the text's
+length: for one small named-entity model on a CPU, 0.14 s at 536 tokens and 18 s at 7,800. A
+call past its timeout is `Failed` with `timed-out`, but a thread started by `asyncio.to_thread`
+runs on, and `decide_sync` waits for it before it returns.
 
 ## What the record keeps
 
-A call's provenance is hashed on its call item: `snapshot`, the model and its version;
+A call's provenance is hashed on its call item: `snapshot`, what produced the answer;
 `elicitation`, the method; `prompt`, what the model was sent; and `precision`, the decimal
 places the provider rounds probabilities to. `usage`, `attempts`, `warnings` and `truncated`
 go under the record's `unhashed`, outside every hash. The call item also holds each
@@ -217,13 +218,13 @@ each answer.
 `decision.record.log` is the hashed log as a list of plain objects, one per item, in order;
 `decision.record.document` is the stored form, canonical JSON bytes. Each `entry` item names
 its `ref` and holds its `value`, or its `marker`. The driver reads the questions' values from
-them:
+them, for each extraction question:
 
 ```python
 def answers(decision: Decision) -> dict[str, object]:
-    """Each question's value, from the record's entry items."""
+    """Each extraction question's value, or its marker's cause, from the record's entry items."""
     return {
-        item["ref"]: item["value"]["value"] if "value" in item else item["marker"]["kind"]
+        item["ref"]: item["value"]["value"] if "value" in item else item["marker"]["cause"]["code"]
         for item in decision.record.log
         if item["item"] == "entry" and item["ref"].startswith("q:")
     }
@@ -284,13 +285,10 @@ class SpanModel(Protocol):
 ```
 
 A real model rarely has that shape, so wrap it in an adapter that does. Read the model's own
-output: offsets and scores often come only when asked for. GLiNER, for example, returns
-`{"entities": {label: [...]}}`, each with a `confidence` rather than a `score`, and bare
-strings unless called with `include_spans=True, include_confidence=True`.
-
-A model's packaging may leave out what its runtime needs: GLiNER's `gliner2[local]` also needed
-`protobuf` and `sentencepiece` for its tokenizer. On Linux, a CPU-only torch wheel, from
-`https://download.pytorch.org/whl/cpu`, avoids a large GPU download.
+output: offsets and scores often come only when asked for. GLiNER2, for example, gives bare
+strings unless asked for spans and confidences. A model's packaging may also leave out what its
+runtime needs, such as its tokenizer's library; on Linux, a CPU-only torch wheel avoids a large
+GPU download.
 
 The binding is a class whose instance is the async function decide calls:
 
@@ -419,14 +417,14 @@ scalar answer takes the best span and its score:
 cuts a long text short answers from part of it: put the ref in the request's `truncated`, or
 give a `warnings` line, so the record says so. To learn whether yours cuts, probe it: put a
 known entity at the end of texts of growing length, and see where it stops being found. A text
-past the window the model was trained on that the model does not cut still reads less well:
-give it a `warnings` line, and do not split the text: an answer pieced from parts is not one
-reading of the text the question names.
+past the window the model was trained on that the model does not cut may read less well: give
+it a `warnings` line. A binding that splits the text instead names that in `elicitation`, and
+its spans still index the whole text.
 
 ### Record the provenance
 
-Each request the call sends is one `RequestProvenance`. `snapshot` names the model and its
-revision, `elicitation` the method and its threshold, and `prompt` what the model received
+Each request the call sends is one `RequestProvenance`. `snapshot` names the model, its
+revision and the runtime that ran it, `elicitation` the method and its threshold, and `prompt` what the model received
 beside the text, which the record already holds as a need, written by `prompt_text`:
 
 ```python
@@ -469,9 +467,9 @@ like your design's, such as the driver's `OWN`. Call it from synchronous code: i
 event loop and raises `RuntimeError` inside a running one. It is public, but outside ommat's
 compatibility promise.
 
-A batch is a tuple of `SourceCall(id, payload, needs, refs, questions)`, positional, and each
-question a `RenderedQuestion(kind, wording, labels, *, descriptions, value_type, is_list, text,
-reference_date)`, the extraction members keyword-only; `text` is the `needs` key that holds the
+A batch is a tuple of `SourceCall(id, payload, needs, refs, questions)`, its fields in this
+order, and each question a `RenderedQuestion(kind, wording, labels, *, descriptions,
+value_type, is_list, text, reference_date)`, all but the first three keyword-only; `text` is the `needs` key that holds the
 text. The driver's own batch:
 
 ```python
@@ -482,6 +480,9 @@ OWN = (
         {"t:state.text": TEXT},
         (),
         {
+            "q:places/street": RenderedQuestion(
+                AnswerKind.extraction, "street", (), value_type=ValueType.text, text="t:state.text"
+            ),
             "q:places/streets": RenderedQuestion(
                 AnswerKind.extraction,
                 "street",
@@ -489,7 +490,7 @@ OWN = (
                 value_type=ValueType.text,
                 is_list=True,
                 text="t:state.text",
-            )
+            ),
         },
     ),
 )
@@ -527,10 +528,12 @@ def sure_street(r: ReadView) -> object:
     return answer.value
 ```
 
-A model's score is its own, uncalibrated, and a bar such as 0.8 is yours to set by measuring.
+A model's score is the model's own, and need not be calibrated: a bar such as 0.8 is yours to
+set by measuring.
 A span model's score says how much a span looks like the label, not whether it fills the
 question's role: a recipient's name may score as high as a sender's. A score may also shift with
-the other labels asked beside it, which is why this binding asks one label per request.
+the other labels asked beside it, as [The binding protocol](../spec/README.md#the-binding-protocol)
+warns of any question beside others, which is why this binding asks one label per request.
 
 A span model's list answer carries no `p_null` and no confidence, so `extract`'s bar never
 applies to it: the rule gets the list, and `[]` when the model found none. For a model that

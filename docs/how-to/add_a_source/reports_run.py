@@ -36,6 +36,9 @@ OWN = (
         {"t:state.text": TEXT},
         (),
         {
+            "q:places/street": RenderedQuestion(
+                AnswerKind.extraction, "street", (), value_type=ValueType.text, text="t:state.text"
+            ),
             "q:places/streets": RenderedQuestion(
                 AnswerKind.extraction,
                 "street",
@@ -43,7 +46,7 @@ OWN = (
                 value_type=ValueType.text,
                 is_list=True,
                 text="t:state.text",
-            )
+            ),
         },
     ),
 )
@@ -63,9 +66,9 @@ class Counted:
 
 
 def answers(decision: Decision) -> dict[str, object]:
-    """Each question's value, from the record's entry items."""
+    """Each extraction question's value, or its marker's cause, from the record's entry items."""
     return {
-        item["ref"]: item["value"]["value"] if "value" in item else item["marker"]["kind"]
+        item["ref"]: item["value"]["value"] if "value" in item else item["marker"]["cause"]["code"]
         for item in decision.record.log
         if item["item"] == "entry" and item["ref"].startswith("q:")
     }
