@@ -1,6 +1,6 @@
 # pyright: reportPrivateUsage=false
 """A candidate-valued label set: a ``choice`` whose labels are a fixed part and the members of a
-``list<string>`` candidate set, rendered each time the question is asked (§candidate-sets)."""
+``list<string>`` candidate set, rendered each time the question is asked."""
 
 import json
 from typing import Any
@@ -703,7 +703,7 @@ def test_acceptance_decide_and_replay(
 
 
 # ---------------------------------------------------------------------------------------------
-# Where the candidates go: `at`, the owner's decision for jev's measured order
+# Where the candidates go: `at` places them among the fixed labels
 
 
 def at(k: int, fixed: list[Any] | None = None) -> Design:
@@ -715,7 +715,7 @@ def rendered(record: Record) -> list[str]:
     return entries(record)["q:sender"]["value"]["labels"]
 
 
-def test_at_0_puts_the_candidates_first_as_jev_measured() -> None:
+def test_at_0_puts_the_candidates_first() -> None:
     record = run(["ana@x.org", "bob@y.org"], Model(top="ana@x.org"), at(0))
     assert rendered(record) == ["ana@x.org", "bob@y.org", "none", "several"]
     assert replay_sync(record, load(at(0)))[1] == []

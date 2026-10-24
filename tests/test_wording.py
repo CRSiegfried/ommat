@@ -263,7 +263,7 @@ def test_a_described_noul_with_a_structured_wording_runs_through_idia_and_replay
     assert replay_sync(record, loaded)[1] == []
 
 
-def test_a_provider_that_carries_neither_form_leaves_the_question_unsupported() -> None:
+def test_a_provider_without_structured_instructions_leaves_the_question_unsupported() -> None:
     record, leaf, _ = idia_turn(carries_structured_instructions=False)
     assert leaf.calls == []
     entry = next(i for i in record.log if i.get("ref") == "q:named")

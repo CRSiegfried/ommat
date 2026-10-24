@@ -16,7 +16,8 @@ sources sent run concurrently under one deadline, the call's ``seconds``. Each a
 the value ommat takes; a provider's refusal is ``refused``, a fault ``invalid-answer``, and each
 ref of a wire request that did not answer ``timed-out`` when its error is idia's
 ``DeadlineExceeded``, else ``raised``. A source the binding cannot send is
-``unsupported``, with its reason a line of the call's warnings; so is a question alone that
+``unsupported``, with its reason a line of the call's warnings; so is a question alone whose
+described noul or structured instruction the provider's capabilities do not carry, or that
 idia's ``Question`` refuses, a choice rendered with fewer than two labels among them, and the
 source's other questions are sent.
 """

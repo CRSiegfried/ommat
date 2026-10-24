@@ -348,7 +348,7 @@ def test_check_10_bounds_names_and_descriptions_together(monkeypatch: pytest.Mon
     assert failure.message.endswith("labels hold more than 2^3 code points")
 
 
-def test_an_extraction_question_with_object_labels_still_declares_labels() -> None:
+def test_an_extraction_question_with_object_labels_declares_labels() -> None:
     q = Question("extraction", Text("Is it?"), [WARM])
     found = refused(with_source(minimal(), "s", Source({"q:x": q})))
     assert any("is an extraction question and declares labels" in f.message for f in found)

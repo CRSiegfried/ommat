@@ -1370,7 +1370,7 @@ class Ledger:
     @property
     def drifted_copies(self) -> tuple[int, ...]:
         """The indices of stored copies that no longer encode to their bytes, re-encoded each
-        time it is read: the test of §ledger that a component changes no value it reads."""
+        time it is read: the test that a component changes no value it reads."""
         return tuple(
             i
             for i, (copy, data) in enumerate(zip(self._items, self._bytes, strict=True))
