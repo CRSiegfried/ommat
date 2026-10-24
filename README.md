@@ -36,7 +36,7 @@ ommat's one operation is **decide**, which runs two stages:
 - **Interpret.** Sources fetch model answers and other outside values onto a shared board, a blackboard, in rounds, through bindings the caller supplies; rules, which are functions with declared reads, turn them into estimates. An unknown stays unknown, as a marker (`Unsure`, `Unavailable` or `Unasked`), never a quiet no or a `None`.
 - **Compile.** One policy reads the estimates and writes the plan: execute these steps, clarify, inform, or escalate. If the policy raises, reads what it did not declare, or returns a plan that breaks ommat's plan rules, compile puts a `broken` plan in its place that names the cause. The guard then checks an `execute` plan: every requirement the design declares for the plan and every requirement each step declares must hold, and a step that declares none refuses the plan unless the design turns that off. Every other plan passes.
 
-Decide returns the plan, the guard's verdict and a record of the turn, and calls no tool. The caller runs the steps of a passed `execute` plan with its own workflow engine, or with the small reference runner ommat ships. Nothing after decide consults the model.
+Decide returns the plan, the guard's verdict and a record of the turn, and calls no tool. A design that declares a context block also has compile write, into the record, what the turn settled for the next model in the conversation, which `handoff(record)` gives back. The caller runs the steps of a passed `execute` plan with its own workflow engine, or with the small reference runner ommat ships. Nothing after decide consults the model.
 
 ## A first decision
 
@@ -150,6 +150,7 @@ pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 - [Write your first design](docs/tutorials/write-a-design.md), the tutorial to start with.
 - [Decide with real models through idia](docs/tutorials/decide-with-idia.md), which binds a design to model providers.
 - [Add a source](docs/how-to/add-a-source.md), which answers a new oracle through idia or a binding of your own.
+- [Hand off what a turn settled](docs/how-to/hand-off-context.md), which gives the next model in a conversation the plan and the estimates you choose.
 - [The spec](docs/spec/README.md), what ommat does and leaves out.
 - [CHANGELOG.md](CHANGELOG.md), each release.
 - [idia](https://github.com/CRSiegfried/idia), the library that puts the questions to the models.
@@ -166,7 +167,7 @@ To use ommat with idia, add idia's own skill too, from its [skills/idia](https:/
 
 ## Status
 
-Pre-release, at 0.4.0. It writes format-5 records and format-4 design documents, and reads record formats 1 to 5 and design formats 1 to 4, so the records and designs of earlier releases still load and replay, given each design's stored document and the functions it names.
+Pre-release, at 0.4.0. It writes format-5 records and design documents, and reads record and design formats 1 to 5, so the records and designs of earlier releases still load and replay, given each design's stored document and the functions it names.
 
 0.4.0 asks a `choice` over a candidate set of strings, but leaves out decision tables, data rules, plan declarations, candidate sets of records and per-candidate questions, which `load` refuses in a design, among other things the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
 

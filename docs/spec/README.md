@@ -2,12 +2,13 @@
 
 The normative description of ommat's behavior. The Python package is one implementation of it. JSON conformance fixtures that any implementation, in any language, must pass come later, and the spec will then carry its own version, separate from the package version.
 
-The spec covers what record format 5 and design format 4 hold and the engine does:
+The spec covers what record format 5 and design format 5 hold and the engine does:
 
 - loading a design, and the load checks that refuse an invalid one;
 - decide: the turn's entry with the codec, the broken entry, interpret over rounds of sources and function rules, the three markers and their causes, and compile with a function policy, the plan rules and the guard;
 - the ledger and the observer, the record with its canonical JSON encoding and hashes, and reading a stored record back;
-- the record views: the escalation view and the redacted view;
+- the context block a design declares, rendered into the record, and the record views: the escalation view, the handoff view and the redacted view;
+- the conversation renderers, which render a handoff as a message and a passed plan as tool calls;
 - replay of a recorded turn with no model call, and the evaluation job `use_answers`;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;
 - the answer kinds: `noul`, `choice` and `score`, which give a probability to each label, and `extraction`, a typed value read from a text, with the probability that the text holds none, the model's reading whatever it answered, its confidence and the span it read;
@@ -21,7 +22,7 @@ The sections below are written; the rest is not yet.
 
 ## Formats
 
-A record and a design document each carry a format number, each its own, which changes only when that document's rules change. This engine writes record format 5 and design format 4, and reads record formats 1 to 5 and design formats 1 to 4, each under its own rules. A record before format 5 holds `snapshot` in a call item in place of the provenance profile's `provider`, `model_requested`, `model_reported`, `revision`, `runtime` and `claimed`, `precision` only as an integer or null, and no `request_id`, `calibrated`, `missing` or `clients` in a `calls` entry, nor any of these, nor the profile's `provider`, `model_requested`, `model_reported`, `revision`, `runtime` or `claimed`, as an `invalid` key; from format 5 `snapshot` is neither a call item's member nor an `invalid` key. A format-1 design document holds no extraction question or `boundaries` roles of one, and a format-1 record no extraction answer and no `truncated` in its `unhashed`. A format-1 or format-2 design document holds no described label, and a format-1 or format-2 record no `unsupported` cause, no call item `precision`, no `warnings` in a `calls` entry, no `warnings` or `precision` as an `invalid` key, and no document `hash`. A record before format 4 holds no entry with a `timed-out` or `raised` marker whose call item is recorded `returned`. A record's cause codes are read against its own format's set. A design document loads to the hash of its own bytes, so a design of an earlier format keeps its hash and replays its records. The record's `design` item also carries the helper version, 2, the version that has `extract`; replay reports a different one as `helpers-mismatch` and runs under the loaded helpers.
+A record and a design document each carry a format number, each its own, which changes only when that document's rules change. This engine writes record format 5 and design format 5, and reads record formats 1 to 5 and design formats 1 to 5, each under its own rules. A design document before format 5 holds no `context` member and declares no context block, and a record before format 5 holds no `context` in its `plan` item; replay compares such a plan item as though its `context` were null. A record before format 5 holds `snapshot` in a call item in place of the provenance profile's `provider`, `model_requested`, `model_reported`, `revision`, `runtime` and `claimed`, `precision` only as an integer or null, and no `request_id`, `calibrated`, `missing` or `clients` in a `calls` entry, nor any of these, nor the profile's `provider`, `model_requested`, `model_reported`, `revision`, `runtime` or `claimed`, as an `invalid` key; from format 5 `snapshot` is neither a call item's member nor an `invalid` key. A format-1 design document holds no extraction question or `boundaries` roles of one, and a format-1 record no extraction answer and no `truncated` in its `unhashed`. A format-1 or format-2 design document holds no described label, and a format-1 or format-2 record no `unsupported` cause, no call item `precision`, no `warnings` in a `calls` entry, no `warnings` or `precision` as an `invalid` key, and no document `hash`. A record before format 4 holds no entry with a `timed-out` or `raised` marker whose call item is recorded `returned`. A record's cause codes are read against its own format's set. A design document loads to the hash of its own bytes, so a design of an earlier format keeps its hash and replays its records. The record's `design` item also carries the helper version, 2, the version that has `extract`; replay reports a different one as `helpers-mismatch` and runs under the loaded helpers.
 
 ## The record document
 
@@ -127,7 +128,37 @@ A `-0.0` in a value written to the board, an answer's probability or member incl
 
 A marker a rule returns is written with its cause when each of the cause's refs is a ref the design provides, with or without a field path, a source, rule or tool name, a parameter path, `policy`, `codec`, `rule:N` or `step:N`. Otherwise the rule's entry is `Unavailable` with `invalid-return` naming the rule, so a cause carries none of the turn's input.
 
+Decide and replay refuse an async observer with `EntryRefusal`: an `async def` function or async generator function, a bound method or `functools.partial` of one, or an object whose class defines one as `__call__`. The test reads types and runs none of the observer's code. A sync observer that returns a coroutine is not caught, and what any observer returns is not read.
+
 A cancellation of a running turn appends the `cause` item `cancelled`, closes the record, and propagates the `CancelledError` with the record as its `record`. To read `exc.record`, catch the `CancelledError` inside the task that awaits decide; a `CancelledError` that asyncio raises afresh carries no record. A cancellation requested from the observer takes effect at decide's next await. If the turn has none left, decide finishes, asyncio marks the finished task cancelled and raises a fresh `CancelledError`, and the decision is lost.
+
+## The context block
+
+A design may declare `context=Context(entries, plan=True, steps=True, record=True)`, what a turn hands its next reader, such as an LLM carrying on the conversation. With none, nothing is handed off. Each `ContextEntry(ref, text)` flags `ref`, which is `t:state` or a `d:` ref, with or without a field path, and words it with `text`, a `Text` whose slots name board refs or parameters, one of them `ref` as spelled. There is no reserved `{value}` slot and no size bound. The switches each default on: `plan` gives the plan's kind, `reply` and `reason`; `steps` its steps' tools and arguments, never their requirements; `record` the design's name and hash and the record hash.
+
+Load refuses two entries flagging one ref (check 1); a slot ref with no provider (check 3); a flagged ref that is a `q:` ref, a `t:` ref other than `t:state`, or grounded, and a candidate slot (check 4); a parameter slot naming no leaf (check 8); and, at check 9, a template whose placeholders and slots do not match, one blank outside its placeholders, a text with no slot naming its flagged ref, a path naming no field, and any slot whose ref's class tree holds `identifier` at the path or beneath it. Slots add no read and no edge to the graph.
+
+Compile renders each entry over the board interpret left, before it calls the policy, and writes the block into the `plan` item's `context`: `{"design", "entries", "plan", "steps", "record"}`, the design's name or null, the entries in declared order and the switches as declared; `context` is null when the design declares none. An entry is `{"ref", "text", "marker"}`: the rendered text and null; or, when any board-ref slot reads a marker, null and that marker's `{"kind", "cause"}`, the flagged ref's if it reads one, else the first in slot order. The engine never words a marker. At a broken entry the block holds no entries. A rendered text is `content`, digested by `redact`, as is the design's name; a ref, a marker and the switches are `open`. Replay renders the block again as part of the plan item, so a changed text is a `plan` finding. `use_answers` compares a plan without its `context`.
+
+An entry's text is the input's own: a slot over `t:state` or a source's `t:` ref carries what the user or a tool wrote, and the next reader receives it as written.
+
+## The handoff view
+
+`handoff(record)` takes any closed `Record` and returns `None` when the log has no `plan` item or its `context` is null or absent. Otherwise it returns a plain dict of these members, in this order, each under its switch:
+
+- `design`, `{"name", "hash"}`, and `record_hash`, under `record`;
+- `plan`: `kind`, `reply` and `reason` as recorded under `plan`, and `steps` under `steps` when the verdict passed, a list, empty for a plan with none; left out when it would hold no member;
+- `context`, the entries as recorded, under no switch.
+
+A step is `{"tool", "arguments"}`, each argument tagged: a literal `{"value": v}`, a board ref `{"ref": r, "value": v}` with the value resolved from the record as `run_plan` resolves it, and a binding `{"step": n, "path": p}`. Under a refused verdict, or a log with no verdict, the plan keeps its kind and loses its steps, so a handoff never shows steps that will not run. It holds no guard, verdict, requirement, probability, span, provenance or version. It raises `ValueError` for a `record` that is not exactly a `Record`, and for a board-ref argument with no value in the log, which no record decide returned holds.
+
+## The conversation renderers
+
+`ommat.conversation` is outside the compatibility promise and may change in any minor release. It takes nothing beyond the standard library; the `conversation` extra installs nothing yet and is reserved for a renderer that needs a provider's library. `import ommat` does not import it.
+
+`to_messages(handoff, *, role)` returns `[{"role": role, "content": text}]`, or `[]` for `None`. Its lines, in order: `Plan: <kind>`, then `Reason: ...` and `Reply: ...` where not null; `Step <n>: <tool> <arguments>` for each step, its tagged arguments as canonical JSON; each entry's text, or `<ref>: not settled (<kind>: <cause code>)` for a marker entry; and `Decided by design <name> (<hash>); record <hash>`. A member the view leaves out gives no line. `role` has no default: pick `user`, or fence the content as data, when a slot reads free text, and `system` or `developer` only when every slot reads settled values.
+
+`to_tool_calls(decision)` takes exactly a `Decision`, else raises `ValueError`, and returns OpenAI-shape tool calls, `{"id", "type": "function", "function": {"name", "arguments"}}`, `arguments` a JSON string of the values resolved from the record, for an `execute` plan under a passed verdict, else `[]`. Each id is the step's idempotency key, `<record hash>:<n>`. The calls end before the first step with a binding argument, which resolves only from an earlier tool's result; run such a plan with `run_plan`, whose keys match these ids, so a tool that keeps its keys runs no step twice.
 
 ## The choice helpers
 

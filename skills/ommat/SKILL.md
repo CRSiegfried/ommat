@@ -75,6 +75,33 @@ kind = Question(
 )
 ```
 
+## Handing off to the next model
+
+A design's context block says what a turn hands the next model in a conversation; `handoff(record)` reads it back, and `ommat.conversation`, outside the compatibility promise, renders it:
+
+```python
+from ommat import Context, ContextEntry, Text, handoff
+from ommat.conversation import to_messages, to_tool_calls
+
+# Each entry flags t:state or a d: ref and words it; one slot names the flagged ref.
+context = Context(
+    [
+        ContextEntry(
+            "d:refund",
+            Text("Refund requested: {r}", [{"name": "r", "origin": {"ref": "d:refund"}}]),
+        )
+    ],
+    plan=True,  # the plan's kind, reply and reason
+    steps=True,  # the steps, only under a passed verdict
+    record=True,  # the design and the record hash
+)
+# Design(..., context=context); after decide:
+#   messages = to_messages(handoff(decision.record), role="user")
+#   calls = to_tool_calls(decision)  # stops before a step that binds an earlier result
+```
+
+See the how-to [Hand off what a turn settled](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/how-to/hand-off-context.md).
+
 ## Rules of the engine
 
 - An unknown is a marker, `Unsure`, `Unavailable` or `Unasked` (all `Undetermined`), never `None` or a quiet no. Test reads with `isinstance(value, Undetermined)` before using them, in rules and in the policy; `if value:` on a marker raises. A rule passes a read's marker on with its own cause by returning it; `r.require(ref)` stops instead, with cause `required` naming the read.
@@ -97,7 +124,8 @@ kind = Question(
 - **Nothing carries between turns.** Each turn stands alone; the caller passes what a later turn needs, such as an earlier step's result, in its input state, in fields declared in `state`: decide drops an undeclared field without a word. See [Continuing a workflow](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#continuing-a-workflow).
 - **Declare every read.** A rule that reads a ref outside its `reads` makes its `d:` ref `Unavailable` (`undeclared-read`); the policy's makes the plan `broken`. Catching it does not help.
 - **A step with no requirement of its own refuses the plan**, unless the design sets `default_deny=False`. Give each step the `Requirement`s it rests on.
-- **Rules, `when`s, the policy and the codec are sync.** An `async def` one loads, but at run its ref is `Unavailable` with `invalid-return`, or the plan `broken` for the policy.
+- **Rules, `when`s, the policy and the codec are sync.** An `async def` one loads, but at run its ref is `Unavailable` with `invalid-return`, or the plan `broken` for the policy. An `async def` observer is refused at entry with `EntryRefusal`.
+- **A handoff's text is the input's own.** An entry whose slot reads `t:state` or a source's `t:` ref carries what the user or a tool wrote; pass `role="user"`, or fence it as data, unless every slot reads values your code settled. Load refuses a slot over an `identifier` field.
 - **A slot's origin is a ref**, with a field path through records, `t:state.sender.name`, but no list index; give each value its own ref.
 - **In async code, await `decide` and `replay`.** The `_sync` forms raise `RuntimeError` inside a running event loop, as in Jupyter.
 - **Don't change a value you read** in a rule, a `when` or the policy; see the [spec's Decide section](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#decide).
