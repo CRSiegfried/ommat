@@ -141,6 +141,7 @@ pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 
 - [Write your first design](docs/tutorials/write-a-design.md), the tutorial to start with.
 - [Decide with real models through idia](docs/tutorials/decide-with-idia.md), which binds a design to model providers.
+- [Add a source](docs/how-to/add-a-source.md), which answers a new oracle through idia or a binding of your own.
 - [The spec](docs/spec/README.md), what ommat does and leaves out.
 - [CHANGELOG.md](CHANGELOG.md), each release.
 - [idia](https://github.com/CRSiegfried/idia), the library that puts the questions to the models.

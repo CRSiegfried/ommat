@@ -56,7 +56,7 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["docs/tutorials/write_a_design", "docs/tutorials/street_reports", "docs/tutorials/decide_with_idia"]
+pythonpath = ["docs/tutorials/write_a_design", "docs/tutorials/street_reports", "docs/tutorials/decide_with_idia", "docs/how-to/add_a_source"]
 addopts = ["--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error"]
@@ -75,7 +75,7 @@ fail_under = 90
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests", "docs/tutorials/write_a_design", "docs/tutorials/street_reports", "docs/tutorials/decide_with_idia"]
+src = ["src", "tests", "docs/tutorials/write_a_design", "docs/tutorials/street_reports", "docs/tutorials/decide_with_idia", "docs/how-to/add_a_source"]
 
 [tool.ruff.lint]
 select = [
@@ -92,8 +92,8 @@ select = [
 ]
 
 [tool.pyright]
-include = ["src", "tests", "docs/tutorials", "scripts"]
-extraPaths = ["src", "tests", "scripts", "docs/tutorials/write_a_design", "docs/tutorials/street_reports", "docs/tutorials/decide_with_idia"]
+include = ["src", "tests", "docs/tutorials", "docs/how-to", "scripts"]
+extraPaths = ["src", "tests", "scripts", "docs/tutorials/write_a_design", "docs/tutorials/street_reports", "docs/tutorials/decide_with_idia", "docs/how-to/add_a_source"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 

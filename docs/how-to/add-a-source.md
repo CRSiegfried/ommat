@@ -1,0 +1,473 @@
+# Add a source
+
+This guide wires a new oracle into a design: a source that asks it, a binding that answers
+for it, and the checks that hold the binding to ommat's protocol. It assumes you have done
+[Write your first design](../tutorials/write-a-design.md). The
+[binding protocol](../spec/README.md#the-binding-protocol) in the spec states the protocol;
+the guide shows where each rule bites.
+
+There are two ways to answer a source. If idia has a provider for your model, bind it
+through idia, as [Path A](#path-a-bind-an-idia-provider) shows. Otherwise write a binding of
+your own, as [Path B](#path-b-write-a-binding-over-a-local-model) shows over a model run in
+your own process, such as a named-entity model on torch.
+
+The example's files are in `docs/how-to/add_a_source/`: `street_spotter.py` is a small
+stand-in for a local span model, so the example runs with no model to download,
+`span_binding.py` is the binding over it, `reports_design.py` the design that asks it and
+`reports_run.py` the driver. Run the driver from that folder with
+`python reports_run.py`.
+
+## Declare the source
+
+A source names the refs it provides, the board values it needs and the oracle that answers
+it. The example's source asks two extraction questions of an oracle named `spans`:
+
+```python
+SOURCES = {
+    "places": Source(
+        {
+            "q:places/street": Question(
+                "extraction", Text("street"), None, value_type="text", text={"ref": "t:state.text"}
+            ),
+            "q:places/streets": Question(
+                "extraction",
+                Text("street"),
+                None,
+                value_type="text",
+                is_list=True,
+                text={"ref": "t:state.text"},
+            ),
+        },
+        oracle="spans",
+        timeout=5,
+    ),
+}
+```
+
+- **What it provides.** Each `q:` ref maps to a `Question`; each `t:` ref, a value the
+  oracle fetches rather than judges, maps to its type. A source provides `q:` refs or `t:`
+  refs, never both.
+- **`needs`.** The board refs whose values the binding receives. An extraction's `text` and
+  `reference_date` refs join them on their own, so this source declares none.
+- **`oracle`.** The name you bind at decide. A source with none is answered by the binding
+  named `default`.
+- **`timeout`.** The seconds a call to this source has. A batch takes the largest timeout
+  its sources declare, else the run settings' `timeout`, 60 seconds by default.
+
+A question's kind is `noul`, `choice`, `score` or `extraction`. The first three ask for a
+probability for each label: `noul` for `yes` and `no`, `choice` and `score` for the labels
+the question declares. An extraction asks for a typed value read from a text, and declares
+four members of its own:
+
+- `value_type`: `text`, `number`, `date`, `time`, `datetime` or `duration`;
+- `is_list`: whether the answer is a list of such values;
+- `text`: the board ref of the string the answer's spans index;
+- `reference_date`: the board ref of the date a date written without a year is read
+  against, or `None`.
+
+Both refs name values of type exactly `string`. The
+[extraction kind](../spec/README.md#the-extraction-kind) gives the value grammars.
+
+The wording is what the oracle receives, so word it for the model that answers. A span model
+takes an entity label, so this design's wording is `Text("street")`, sent as it is.
+
+## Bind the oracle by name
+
+`decide` takes a mapping from oracle name to binding:
+
+```python
+        decision = decide_sync(loaded, {"text": report}, {"spans": binding})
+```
+
+Give one binding for each oracle a source names, and one under `default` when some source
+names none. A name missing from the mapping, or a key other than `default` that the design
+does not declare, is an `EntryRefusal` before the turn starts.
+
+Each round, the ready sources that share an oracle go to its binding as one batch, in one
+call; a source that names none is a batch of its own. The binding may split a batch into as
+many provider requests as it likes. A round's calls run at once, so one binding bound under
+several names, or as `default`, is called concurrently with itself.
+[The binding protocol](../spec/README.md#the-binding-protocol) states the batching and the
+timeout each batch takes.
+
+## What a call receives
+
+A binding is an async function, `binding(batch, *, seconds)`. `ommat.bindings.OracleBinding`
+is its type.
+
+`batch` is a tuple of `SourceCall`s in source id order. Each holds:
+
+- `id`, the source's id, and `payload`, the source's `payload` from the design;
+- `needs`, each need's value keyed by the need as declared, never a marker, since a source is
+  called only when its needs are determined;
+- `refs`, the `t:` refs it provides, in code-point order;
+- `questions`, each `q:` ref's `RenderedQuestion`, in the code-point order of their refs.
+
+A `RenderedQuestion` holds `kind`, `wording`, `labels`, the label names, and `descriptions`,
+aligned with them. An extraction question also holds `value_type`, `is_list`, `text`, the
+`needs` key that holds its text, and `reference_date`, the rendered date or `None`.
+`wording` is a string, or a JSON object or array for a
+[structured wording](../spec/README.md#a-structured-wording). The labels of a
+[candidate-valued](../spec/README.md#the-candidate-valued-label-set) `choice` may differ from
+call to call, so keep no labels by ref.
+
+A need that holds an answer is the `Answer` or `ExtractionAnswer` itself, and an image is
+bytes; `ommat.bindings.json_value` writes a need as JSON, and `image_need` reads an image.
+Treat `needs` as read-only, and change no durable state: no cache on disk, no write to a
+store.
+
+The order is part of what ran: a provider may answer a question differently beside other
+questions. A binding that asks one question per request, or frames its own order, names that
+method in `elicitation`.
+
+`seconds` is the time the call has. [Seconds and timeouts](#seconds-and-timeouts) says what
+to do with it.
+
+## What a call returns
+
+A binding returns a `CallResult`, or a `Failed` when the whole call failed.
+
+Build `values` from `call.refs` and `call.questions` alone: each ref the batch provides maps
+to its value, and no other key. A ref left out is written `Unavailable` with `not-returned`; a
+key the batch does not provide, such as a candidate-valued question the engine left out of the
+batch, fails the whole call with `unexpected-ref`.
+
+- A `noul`, `choice` or `score` answer is a `dict` from each label name to its probability,
+  a number in [0, 1], with exactly the question's label names as keys. Probabilities are
+  written as returned, whatever their sum.
+- An extraction answer is exactly `value`, `guess`, `p_null`, `confidence` and `span`.
+  Build it with `ommat.bindings.extraction_value(value, guess, p_null, confidence, span)`,
+  which the binding protocol describes.
+- A `t:` ref's value is a value of its declared type.
+- Any ref may instead be one of the markers below.
+
+`Failed(Cause(code))` fails the call, with `raised`, `timed-out`, `invalid-return` or
+`unexpected-ref`, and every ref of the batch is `Unavailable` with that code. A binding that
+raises fails the call with `raised`. The binding protocol lists the other returns that fail
+the whole call; `call_result` checks none of them. Mark refs one by one where you can, so
+the other refs stand.
+
+Catch `Exception`, never `BaseException`: the cancellation that ends a call at its timeout,
+or that cancels the turn, must propagate. Return once, after any retries of your own.
+
+## Markers a binding returns
+
+A binding never returns `Unsure`: that marker is a rule's, saying it read its evidence and
+did not settle. A binding marks a ref `Unavailable`, with one of six causes; an `Unsure`, an
+`Unasked` or any other cause is written `invalid-return`.
+
+| Cause | When |
+|---|---|
+| `unsupported` | The binding will not put the question to any provider: its ref, kind or shape is outside what the provider takes. |
+| `refused` | The provider declined to answer. |
+| `invalid-answer` | A `q:` ref's reply the binding cannot parse, or one interpret would refuse: a value outside the grammar, a span that does not read its value. |
+| `invalid-return` | A `t:` value the provider returned that the binding cannot use, one its declared type does not allow. |
+| `timed-out` | The request that carried the ref ran out of the call's `seconds`. |
+| `raised` | The request that carried the ref failed any other way. |
+
+Build each as `Unavailable(Cause("unsupported"))`; interpret names the ref in the cause.
+Give the reason as a line of `warnings`, such as
+`q:places/streets: unsupported: the model takes its label as a string, not a structured
+wording`. A `timed-out` or `raised` ref under a call that reached a provider needs one.
+
+`unsupported` is the binding's own refusal. Return it for each ref the binding will not
+ask; never raise for one, and never leave one out of `values`. When the binding asks no
+provider at all, its result carries null provenance.
+
+A model that looked and found nothing is not a marker; its answer is a value
+([The extraction kind](../spec/README.md#the-extraction-kind)). A scalar with nothing found
+is `None`, on which `extract` abstains. A list is `[]` when the model read the text and found
+no items, which `extract` returns, or `None` when it gave no reading. This binding returns
+`[]`.
+
+## Seconds and timeouts
+
+`seconds` is a positive `float`, the smaller of the batch's timeout and the time left to the
+turn's deadline, when the run settings set one. Turn it into a deadline once, as the call
+starts, and add no margin of your own:
+
+```python
+        deadline = time.monotonic() + seconds  # once, with no margin of its own
+```
+
+Every request, retry and wait the call makes ends by that deadline. At the deadline, ommat's
+own timeout ends the call: the call is `Failed` with `timed-out`, every ref of the batch
+`Unavailable` with it, and a result that comes later is never read. A per-ref `timed-out`
+stands only when the binding returns before the call's end, as when it finds before sending a
+request that the request cannot run in time. A request that runs to the deadline ends the
+whole call.
+
+## What the record keeps
+
+A call's provenance is hashed on its call item: `snapshot`, the model and its version;
+`elicitation`, the method; `prompt`, what the model was sent; and `precision`, the decimal
+places the provider rounds probabilities to. `usage`, `attempts`, `warnings` and `truncated`
+go under the record's `unhashed`, outside every hash. The call item also holds each
+question's identity, kind, labels as declared, value type and list flag, and the entries hold
+each answer.
+
+Replay answers each source from the record and calls no binding, so a recorded turn reruns
+with no model. Keep the design document, `loaded.document`, beside each record: when a
+replay reports `design-mismatch`, [Replay](../spec/README.md#replay) says how to find the
+member that differs.
+
+## Path A: bind an idia provider
+
+Install the binding with `ommat[idia]`, as the README's install section shows, then wrap an
+idia `Dispatcher` over one leaf, as `idia_path.py` does:
+
+```python
+def idia_bindings(provider: idia.Dispatcher) -> dict[str, OracleBinding]:
+    """The design's one oracle, answered by an idia provider."""
+    return {"spans": oracle_binding(provider)}
+```
+
+`oracle_binding` sends each source as one idia request, writes the record's provenance and
+marks what idia cannot ask `unsupported`; [The idia binding](../spec/README.md#the-idia-binding)
+states what it does and which dispatchers it refuses. A design that asks label kinds and
+extractions of different models binds one dispatcher per oracle. It is outside ommat's
+compatibility promise: while idia is 0.x it may change in any minor release when idia
+changes, and the changelog says so.
+[Decide with real models through idia](../tutorials/decide-with-idia.md) runs it end to end.
+
+## Path B: write a binding over a local model
+
+`span_binding.py` binds a local span model: it takes a text and an entity label and returns
+the spans it finds, each with its offsets and a score. It calls no API and answers the same
+way each time.
+
+### Load the model once
+
+Loading a model takes seconds. Load it once, before `decide`, and hand it to the binding:
+
+```python
+    model = StreetSpotter()  # load once, before decide
+    binding = SpanBinding(model)
+```
+
+The binding is a class whose instance is the async function decide calls:
+
+```python
+class SpanBinding:
+    """``binding(batch, seconds=s)`` over one loaded model, safe to call concurrently."""
+
+    def __init__(self, model: StreetSpotter, *, threshold: float = THRESHOLD) -> None:
+        self._model = model
+        self._threshold = threshold
+        self._lock = threading.Lock()  # one inference at a time, across threads and loops
+        self._snapshot = f"{model.model_id}@{model.revision}"
+        self._elicitation = f"span extraction, one request per question, threshold {threshold}"
+```
+
+Pin the weights: load a model revision by its commit hash, not a branch such as `main`, so
+`snapshot` names the weights that ran.
+
+### Run inference in a thread, one at a time
+
+Inference blocks, and a binding runs on decide's event loop. Run it in a worker thread, so
+the loop and the engine's timeout keep running, and mark a model error on its own ref:
+
+```python
+                try:
+                    spans = await asyncio.to_thread(self._predict, text, label, deadline)
+                except Exception as error:  # never BaseException: a cancellation propagates
+                    lines.append(f"{ref}: raised: {type(error).__name__}: {error}")
+                    values[ref] = Unavailable(Cause("raised"))
+                    requests.append(self._request(label))
+                    continue
+                if spans is None:  # at the call's end: ommat has timed out the whole call
+                    lines.append(f"{ref}: timed-out: the model was busy until the call's end")
+                    values[ref] = Unavailable(Cause("timed-out"))
+                    continue
+```
+
+Decide calls a binding concurrently with itself when it is bound under several names or as
+`default`, and turns on several loops or threads may share one instance; a model is rarely
+safe to share. A `threading.Lock` taken inside the worker thread serialises access across all
+of them, where an `asyncio.Lock` belongs to one loop. Keep each call's state in locals, so the
+binding is safe to call concurrently:
+
+```python
+    def _predict(
+        self, text: str, label: str, deadline: float
+    ) -> list[tuple[int, int, str, float]] | None:
+        """The model's spans as Python values, a torch or numpy scalar made an int or float;
+        ``None`` when another inference held the model until ``deadline``."""
+        left = deadline - time.monotonic()
+        if left <= 0 or not self._lock.acquire(timeout=left):
+            return None
+        try:
+            found = self._model.predict(text, [label], self._threshold)
+        finally:
+            self._lock.release()
+        spans = [(int(s["start"]), int(s["end"]), str(s["text"]), float(s["score"])) for s in found]
+        return sorted(spans)
+```
+
+The conversion matters: a torch or numpy scalar is not an `int` or `float`, and the answer
+must hold Python numbers. A thread cannot be stopped, so when ommat's timeout ends a call,
+its inference runs on to its end, holding the lock, and its result is dropped. The wait for
+the lock ends with the call, so a call cut while it waits does not go on to run the model,
+bar a lock freed in the instant between ommat's end and the binding's own deadline. A `None`
+from `_predict` comes at the call's end, when ommat has already timed out the whole call, so
+its `timed-out` marker is a guard that is never read.
+`decide_sync` and `check` wait for such a thread to end: on Python 3.11 for as long as it
+runs, on 3.12 and later for up to 300 seconds.
+
+### Refuse what the model cannot answer
+
+A span model answers an extraction of value type `text` from a text, worded as a label
+string. Mark every other ref `unsupported`, each with its reason:
+
+```python
+def _refusal(question: RenderedQuestion, image: bool) -> str | None:
+    """Why the model cannot answer ``question``, or ``None`` when it can."""
+    if question.kind != "extraction":
+        return f"the model answers extractions, not a {question.kind}"
+    if question.value_type != "text":
+        return f"the model reads text spans, not a {question.value_type}"
+    if not isinstance(question.wording, str):
+        return "the model takes its label as a string, not a structured wording"
+    if image:
+        return "the source needs an image, which the model cannot read"
+    return None
+```
+
+A `t:` ref is marked the same way, and so is a source that needs an image, read with
+`ommat.bindings.image_need`. A span model gives no label probabilities, so `noul`, `choice`
+and `score` are refused alike. A model that gives only `yes` for a `noul` holds `no` as its
+own library derives it ([The binding protocol](../spec/README.md#the-binding-protocol)); ommat
+ships no such helper for a hand-written binding.
+
+### Check each span
+
+A span must read the value it locates. Check `text[start:end]` against the value the model
+returned, and mark the ref `invalid-answer` when they differ:
+
+```python
+    for start, end, found, _ in spans:
+        if text[start:end] != found:
+            lines.append(f"{ref}: invalid-answer: span [{start}, {end}] does not read {found!r}")
+            return Unavailable(Cause("invalid-answer"))
+```
+
+Offsets are code points, as Python's string indexes are; a model that reports token or byte
+offsets needs them converted. Then build the answer through `extraction_value`. A list answer
+carries every span and no confidence, since the model gives no one confidence for the list; a
+scalar answer takes the best span and its score:
+
+```python
+    if question.is_list:  # every span found, and no one confidence for the list
+        found_all = [found for _, _, found, _ in spans]
+        return extraction_value(found_all, None, None, None, [(s, e) for s, e, _, _ in spans])
+    if not spans:  # the model found none: a null value, not a marker
+        return extraction_value(None, None, None, None, None)
+    start, end, found, score = max(spans, key=lambda s: s[3])
+    return extraction_value(found, None, None, score, (start, end))
+```
+
+`p_null` is `None`: the model gives no probability that the text holds none. A model that
+cuts a long text short answers from part of it: put the ref in the request's `truncated`, or
+give a `warnings` line, so the record says so.
+
+### Record the provenance
+
+Each request the call sends is one `RequestProvenance`. `snapshot` names the model and its
+revision, `elicitation` the method and its threshold, and `prompt` what the model received
+beside the text, which the record already holds as a need, written by `prompt_text`:
+
+```python
+    def _request(self, label: str) -> RequestProvenance:
+        """One model request's provenance: the model, the method and the arguments it took."""
+        return RequestProvenance(
+            snapshot=self._snapshot,
+            elicitation=self._elicitation,
+            prompt=prompt_text({"labels": [label], "threshold": self._threshold}),
+            attempts=1,
+        )
+```
+
+`call_result` folds the requests into the call's `CallResult`, each distinct value once.
+`precision` is `None`, since the model rounds no probabilities, and `bounded_warnings` keeps
+the lines within their bounds:
+
+```python
+        return call_result(values, requests, precision=None, warnings=bounded_warnings(lines))
+```
+
+A batch whose every ref is `unsupported` sends no request, so its provenance is all null, as
+the protocol asks.
+
+## Hold the binding to the protocol
+
+Run the conformance suite before you bind anything:
+
+```python
+    print("conformance:", check(binding, deterministic=True))
+    print("own batches:", check(binding, batches=[OWN], deterministic=True))
+```
+
+`ommat.bindings.conformance.check` calls the binding with its own batches, which
+[The binding protocol](../spec/README.md#the-binding-protocol) lists, and returns each failure
+as a string naming its check; an empty list passes. `deterministic=True` also checks that two
+calls with one batch return equal results, which a local model on a CPU should; a model on a
+GPU may not repeat exactly, so drop the flag there. Pass `batches=` to send batches shaped
+like your design's, such as the driver's `OWN`. Call it from synchronous code: it runs its own
+event loop and raises `RuntimeError` inside a running one. It is public, but outside ommat's
+compatibility promise.
+
+A binding that passes keeps the protocol; it may still misread its model.
+
+## Read the answer in a rule
+
+`extract(r, ref, null_bar)` returns an extraction's `value`, or `Unsure` with `abstained`
+when the value is `None` or `p_null` is given and at or above `null_bar`; a `None` `p_null`
+never abstains, and the result never depends on `confidence`. `null_bar` has no default, and
+applies only to a model that gives a `p_null`. The list rule uses it:
+
+```python
+    "streets": Rule(
+        "d:streets",
+        t.list_(t.string),
+        lambda r: extract(r, "q:places/streets", 0.5),
+        version="1",
+        reads=["q:places/streets"],
+    ),
+```
+
+To weigh confidence, read the answer whole. It is an `ExtractionAnswer`, or a marker:
+
+```python
+def sure_street(r: ReadView) -> object:
+    """The street the model is sure of: the answer read whole, for its confidence."""
+    answer = r.read("q:places/street")
+    if isinstance(answer, MARKERS):
+        return answer
+    if answer.value is None or answer.confidence is None or answer.confidence < 0.8:
+        return Unsure(Cause("abstained", ["q:places/street"]))
+    return answer.value
+```
+
+A span model's list answer carries no `p_null` and no confidence, so `extract`'s bar never
+applies to it: the rule gets the list, and `[]` when the model found none. For a model that
+does give a `p_null`, a rule can call `extract` first and then read the answer whole for its
+confidence.
+
+## Run it
+
+From `docs/how-to/add_a_source`, run `python reports_run.py`:
+
+```text
+conformance: []
+own batches: []
+inform | Logged for Quay Street. | passed
+  replay findings: [] | model calls: 0
+inform | Logged for Elm Row, Mill Lane; no one street stands out. | passed
+  replay findings: [] | model calls: 0
+escalate | the report names no street | passed
+  replay findings: [] | model calls: 0
+```
+
+In the second report the best street scores 0.7, below the rule's bar of 0.8, so `d:street`
+is `Unsure` and the plan informs with the list. The third names none: the list is `[]` and the
+plan escalates. Each replay rebuilds its plan with no model call.
