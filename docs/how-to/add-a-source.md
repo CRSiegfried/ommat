@@ -7,9 +7,10 @@ for it, and the checks that hold the binding to ommat's protocol. It assumes you
 the guide shows where each rule bites.
 
 There are two ways to answer a source. If idia has a provider for your model, bind it
-through idia, as [Path A](#path-a-bind-an-idia-provider) shows. Otherwise write a binding of
-your own, as [Path B](#path-b-write-a-binding-over-a-local-model) shows over a model run in
-your own process, such as a named-entity model on torch.
+through idia, as [Path A](#path-a-bind-an-idia-provider) shows; idia's `gliner` leaf, for one,
+runs the GLiNER2 span extractor in your process. Otherwise write a binding of your own, as
+[Path B](#path-b-write-a-binding-over-a-local-model) shows over a model run in your own
+process, such as a named-entity model on torch that idia has no leaf for.
 
 The example's files are in `docs/how-to/add_a_source/`: `street_spotter.py` is a small
 stand-in for a local span model, so the example runs with no model to download,
@@ -269,7 +270,16 @@ runs it end to end over two wire models.
 A leaf that runs a model in your process loads its weights before its first call: build it
 with `idia.leaf(name)`, await its `load()`, then wrap it in a `Dispatcher`. idia's
 [providers spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/providers.md) says
-which leaves load. `idia_run.py` does it for any leaf:
+which leaves load. GLiNER's is one: install it with its extra, then build it with
+`idia.leaf("gliner")`.
+
+```sh
+pip install "idia[gliner] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
+pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
+```
+
+`idia_run.py` loads any leaf so, and runs over idia's scripted leaf so the example needs no
+model:
 
 ```python
 async def provider(leaf: Any) -> Dispatcher:
