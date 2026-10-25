@@ -167,7 +167,7 @@ def test_a_function_whose_source_cannot_be_read_round_trips() -> None:
 
 def with_check_1_defect() -> dict[str, Any]:
     doc = doc_of(minimal())
-    doc["tools"] = {"Bad": {}}  # not in the segment grammar: check 1
+    doc["tools"] = {"Bad": {}}  # not in the name grammar: check 1
     return doc
 
 

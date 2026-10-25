@@ -663,7 +663,7 @@ class _Loader:
             for name in names:
                 shown = f"{kind} {_q(name)}"
                 if not is_declared_name(name):
-                    self.fail(1, (name,), f"{shown} is not in the segment grammar")
+                    self.fail(1, (name,), f"{shown} is not in the name grammar")
                 if name in _ROLES:
                     self.fail(1, (name,), f"{shown} is a role name")
                 if kind == "type definition" and name in _WORDS:

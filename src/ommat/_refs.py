@@ -108,7 +108,7 @@ def declared_ref(ref: str) -> str:
 
 
 def is_declared_name(value: object) -> bool:
-    """Whether ``value`` is in the segment grammar: segments joined by ``/``, no prefix."""
+    """Whether ``value`` is in the name grammar: segments joined by ``/``, no prefix."""
     return isinstance(value, str) and _NAME_RE.fullmatch(value) is not None
 
 

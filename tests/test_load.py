@@ -1333,7 +1333,7 @@ def test_an_invalid_design_survives_pickle_and_copy(clone: Callable[[Any], Any])
 
 def test_a_message_quotes_names_as_json_strings() -> None:
     (failure,) = only(with_source(minimal(), 'b"ad', Source({"t:x": t.string})), 1)
-    assert failure.message == 'source "b\\"ad" is not in the segment grammar'
+    assert failure.message == 'source "b\\"ad" is not in the name grammar'
 
 
 def test_names_are_in_code_point_order() -> None:
