@@ -497,6 +497,27 @@ def test_a_source_whose_every_question_idia_refuses_sends_no_request() -> None:
     assert [q.key for c in leaf.calls for q in c.wire_request.questions] == ["q:good/x"]
 
 
+def test_a_grounded_key_is_sent_verbatim_and_answered_under_it() -> None:
+    # In code-point order, as interpret passes them.
+    keys = (
+        "q:triage/hazard",
+        'q:triage/out["Bridge ] Lane"]',
+        'q:triage/out["Quay \\"St\\""]',
+        'q:triage/out["Zoë Row"]',
+    )
+    questions = {
+        key: RenderedQuestion(AnswerKind.noul, f"Is a lamp out on {key}?", ("yes", "no"))
+        for key in keys
+    }
+    binding, leaf = built()
+    result = call(binding, source("triage", questions))
+    (sent,) = leaf.calls
+    assert [q.key for q in sent.wire_request.questions] == list(keys)
+    assert set(result.values) == set(keys)
+    for key in keys:
+        assert result.values[key] == {"yes": 0.7, "no": pytest.approx(0.3)}
+
+
 def test_candidate_shaped_labels_are_sent_and_answered_by_name() -> None:
     labels = ("none", "several", '"Ana" <a@x.org>', "]", "Zoë Ångström", "李")
     q = RenderedQuestion(AnswerKind.choice, "Who?", labels, descriptions=(None,) * len(labels))

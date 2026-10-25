@@ -578,7 +578,6 @@ def nowhere(design: Design, *, check: int = 3) -> None:
         minimal(groups={"g": Group(["q:none"])}),
         full(groups={"g": Group(["q:intent/tone", "q:intent/tone"])}),
         with_source(minimal(), "s", Source({"q:x": question("Is {a}?", slot("a", ref="t:none"))})),
-        with_rule(full(), "r", rule("r", reads=('q:intent/tone["a"]',))),
     ],
 )
 def test_check_3(design: Design) -> None:
@@ -590,11 +589,12 @@ def test_a_field_path_under_the_state_has_its_provider() -> None:
     assert checks(design) == {9}  # provided, and typed at check 9
 
 
-def test_a_candidate_slot_on_an_ungrounded_source_fails_checks_3_and_4() -> None:
+def test_a_candidate_slot_on_an_ungrounded_source_fails_check_4() -> None:
     design = with_source(
         minimal(), "s", Source({"q:x": question("Is {c}?", slot("c", candidate="t:set"))})
     )
-    assert checks(design) == {3, 4}
+    (failure,) = only(design, 4)
+    assert "candidate only when it is grounded" in failure.message
 
 
 # ---------------------------------------------------------------------------------------------
@@ -611,6 +611,7 @@ def test_a_candidate_slot_on_an_ungrounded_source_fails_checks_3_and_4() -> None
         with_source(
             full(), "s", Source({"q:x": question("Is {a}?", slot("a", ref="q:intent/tone"))})
         ),
+        with_rule(full(), "r", rule("r", reads=('q:intent/tone["a"]',))),
     ],
 )
 def test_check_4(design: Design) -> None:
@@ -1112,7 +1113,7 @@ def test_a_refused_forms_malformed_ref_provides_nothing() -> None:
 def test_a_refused_source_sharing_an_id_with_a_rule_is_not_reported_at_check_1() -> None:
     # No other check's clause runs on a refused form (check 12).
     design = with_rule(
-        with_source(minimal(), "x", Source({"q:y": question()}, grounded="t:set")),
+        with_source(minimal(), "x", Source({"t:y": t.string}, grounded="t:set")),
         "x",
         rule("x"),
     )
@@ -1161,10 +1162,11 @@ REFUSED: list[tuple[Design, str]] = [
         "candidate set of records",
     ),
     (
-        with_source(minimal(), "s", Source({"q:x": question()}, grounded="t:set")),
-        "grounded declaration",
+        with_source(minimal(), "s", Source({"t:x": t.string}, grounded="t:set")),
+        "grounded source of t: refs",
     ),
-    (with_rule(minimal(), "r", rule("r", grounded="t:set")), "grounded declaration"),
+    (with_rule(minimal(), "r", rule("r", grounded="t:set")), "grounded rule"),
+    (minimal(plans={"ask": PlanDeclaration("clarify", grounded="t:set")}), "plan declaration"),
 ]
 
 
@@ -1212,15 +1214,6 @@ def test_a_refused_form_still_provides_for_checks_2_and_3() -> None:
 
 def test_no_other_clause_runs_on_a_refused_form() -> None:
     design = with_rule(minimal(), "Bad", Table("d:Bad", "nope<", "U", [], []))
-    assert checks(design) == {12}
-
-
-def test_a_grounded_provider_provides_its_bracketed_refs() -> None:
-    design = with_rule(
-        with_source(minimal(), "s", Source({"q:x": question()}, grounded="t:set")),
-        "r",
-        rule("r", reads=('q:x["a"]',)),
-    )
     assert checks(design) == {12}
 
 
@@ -2252,12 +2245,19 @@ def test_a_label_sets_document_holds_its_fixed_part_and_set_and_loads_to_its_has
         (over("t:s", ("set", Source({"t:s": t.list_(t.string)}))), "is not a candidate set"),
         (over("d:find", find=rule("find", outputs=t.list_(t.string))), "is not a candidate set"),
         (over("t:s.f", ("set", SET)), 'names "t:s.f", which is not a candidate set'),
-        (over('t:s["a"]', ("set", SET)), "which has no provider"),
     ],
 )
 def test_a_label_set_naming_no_candidate_set_fails_check_3(design: Design, says: str) -> None:
     (failure,) = only(design, 3)
     assert says in failure.message
+
+
+def test_a_bracketed_label_set_is_no_candidate_set_and_a_grounded_ref() -> None:
+    failures = refused(over('t:s["a"]', ("set", SET)))
+    assert {(f.check, f.message.rsplit(", ", 1)[-1]) for f in failures} == {
+        (3, "which is not a candidate set"),
+        (4, "a grounded ref"),
+    }
 
 
 def test_a_label_set_at_q_fails_check_4() -> None:

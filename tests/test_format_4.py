@@ -216,7 +216,7 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
 
 
 GOLDEN_DESIGN = "sha256:532bcbfcb74394fa5bbbeb424410effa79ebcb0b5dd858b65ead94176c85e1f2"
-GOLDEN_RECORD = "sha256:0f1a688937f5a679583e2173adbfa5ee190cffec5edd49141e8163f98511e5f7"
+GOLDEN_RECORD = "sha256:32d9649d123618e9bc38c9993395eb5e3b96e164a81ff9eead516746c70d7f0b"
 
 
 def test_the_golden_per_ref_record() -> None:

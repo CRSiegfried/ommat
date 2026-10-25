@@ -1117,7 +1117,7 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # The golden described record
 
 GOLDEN_DESIGN = "sha256:081ef00e43ac1398f073913450bbcffa703ea27bf3e2d525ed4ebb56a56fe3a1"
-GOLDEN_RECORD = "sha256:ac309a45253de211fd2cd7fc8ab50299bfdc24fba120282dcd9ecf81602ecc1b"
+GOLDEN_RECORD = "sha256:8d204e903c040d9d5d53c500ee1256128a06bff8e990adae906072692a07f3c1"
 
 
 def golden() -> Record:

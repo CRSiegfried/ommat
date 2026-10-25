@@ -396,7 +396,7 @@ def refused_form_docs() -> list[tuple[dict[str, Any], str]]:
         (policy_table, "policy table"),
         (plan_doc(), "plan declaration"),
         (candidates, "candidate set of records"),
-        (grounded, "grounded declaration"),
+        (grounded, "grounded source of t: refs"),
     ]
 
 

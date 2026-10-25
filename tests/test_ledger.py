@@ -456,8 +456,8 @@ GROUNDED_FAILURE = {"step": 1, "requirement": {"ref": GROUNDED, "value": 1}, "re
 def test_a_grounded_ref_is_refused_wherever_redaction_would_rewrite_one(
     prefix: list[dict[str, Any]], item: dict[str, Any]
 ) -> None:
-    # This engine's record does not name a grounded entry's set, so redact could not digest
-    # one.
+    # A plan or verdict never holds a grounded ref, and an entry or cause holds one only when the
+    # settings item's grounded names its declared ref, which this log's does not.
     refused(prefix, item, "is a grounded ref")
 
 
@@ -476,9 +476,8 @@ def test_an_origin_carrying_set_is_refused(origin: dict[str, Any]) -> None:
     refused(HEAD, grounded_plan(arguments={"x": origin}), "carries set")
 
 
-def test_a_grounded_ref_elsewhere_and_a_role_or_rule_name_in_a_cause_are_kept() -> None:
-    # A question key is digested whole, and a cause's role names and rule:N are no refs.
-    ledger_of([*R1_DONE, call(2, "s", questions={'q:spam["x"]': QUESTIONS["q:spam"]})])
+def test_a_role_or_rule_name_in_a_cause_is_kept() -> None:
+    # A cause's role names and rule:N are no refs.
     cause = {"code": "invalid-return", "refs": ["policy", "rule:2", "step:1", 'x["a"]']}
     ledger_of([*HEAD, {**PLAN, "kind": "broken", "steps": [], "cause": cause}])
 
@@ -800,7 +799,6 @@ def test_members_that_do_not_fit_their_kind_are_refused(
     [
         call(2, "s", questions=question(kind="choice", labels=["a", "b"])),
         call(2, "s", questions=question(kind="score", labels=["low", "high"])),
-        call(2, "s", questions={'q:spam["x"]': {"identity": "i", "kind": "noul", "labels": None}}),
         call(2, "s", outcome={"failed": {"code": "timed-out", "refs": []}}),
         {"item": "certificate", "round": 2},
     ],
@@ -1130,7 +1128,7 @@ def test_a_calls_entry_holds_the_sums_of_its_call_items_questions() -> None:
         (7, {"spam": 1.8}, "'spam', which names no key of its call item's questions"),
         (7, {"q:spam.f": 1.8}, "'q:spam.f', which names no key of its call item's questions"),
         (3, {"q:spam": 1.8}, "'q:spam', which names no key of its call item's questions"),
-        (7, {'q:spam["x"]': 1.8}, "is a grounded ref, which a record holds nowhere"),
+        (7, {'q:spam["x"]': 1.8}, "is a grounded ref whose declared ref is not grounded"),
     ],
 )
 def test_a_sums_member_of_the_wrong_shape_or_key_is_refused(
@@ -1152,15 +1150,6 @@ def test_a_long_sums_key_is_clipped_in_the_refusal() -> None:
     with pytest.raises(_LedgerError, match=r"\(5002 code points\)") as info:
         ledger.write_unhashed("calls", {**CALL, "sums": {key: "x"}}, 7)
     assert len(str(info.value)) < 300
-
-
-def test_a_grounded_question_key_matches_no_sums_key() -> None:
-    # A grounded question key is no declared ref, so no sums key names it; a grounded sums
-    # key over a declared question is refused as grounded.
-    grounded = call(2, "s", questions={'q:spam["x"]': QUESTIONS["q:spam"]})
-    ledger = ledger_of([*R1_DONE, grounded])
-    with pytest.raises(_LedgerError, match="which names no key"):
-        ledger.write_unhashed("calls", {**CALL, "sums": {'q:spam["x"]': 2}}, 7)
 
 
 def test_a_refused_call_item_adds_no_questions() -> None:
