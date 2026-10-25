@@ -75,9 +75,10 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
 
 
 def _context_alone(finding: dict[str, Any]) -> bool:
-    """Whether a ``plan`` finding's two items differ only in their ``context``: the rest
-    compared with its ``order`` taken over the rest alone, or without one when an item, of a
-    record before format 6, holds none."""
+    """Whether a ``plan`` finding's two items differ only in their ``context``. The rest of each
+    is compared with an ``order`` derived afresh over the rest alone; when either item holds no
+    ``order``, as one of a record before format 6 does not, the rest is compared without one.
+    The items given are not changed."""
     if finding["kind"] is not FindingKind.plan:
         return False
     mine, theirs = finding["recorded"], finding["replayed"]

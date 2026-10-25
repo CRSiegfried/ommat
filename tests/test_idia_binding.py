@@ -308,7 +308,11 @@ def test_an_extraction_source_or_an_image_state_sends_as_it_would_without_state(
         assert isinstance(parts[1], ImagePart)
 
 
-@pytest.mark.parametrize("state", [3, "", ["t:state"]])
+class _Ref(str):
+    """A str subclass, which a state is not."""
+
+
+@pytest.mark.parametrize("state", [3, "", ["t:state"], True, _Ref("t:state")])
 def test_a_state_that_names_no_need_is_refused(state: Any) -> None:
     leaf = Scripted(capabilities=caps(), script=answer_all)
     with pytest.raises(ValueError, match="state names a need's ref"):

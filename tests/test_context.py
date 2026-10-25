@@ -440,6 +440,14 @@ def test_use_answers_drops_a_plan_finding_whose_context_alone_gains_a_marker() -
     assert found  # the answers' entries still differ
 
 
+def test_a_context_change_against_an_item_of_a_record_before_format_6_is_context_alone() -> None:
+    mine = plan_item(run().record)
+    theirs = copy.deepcopy(mine)
+    del mine["order"]  # a format-5 record's plan item holds none
+    theirs["context"]["entries"][0]["text"] = "something else"
+    assert _context_alone({"kind": FindingKind.plan, "recorded": mine, "replayed": theirs})
+
+
 def test_an_order_change_outside_the_context_is_not_context_alone() -> None:
     mine = plan_item(run().record)
     theirs = copy.deepcopy(mine)
