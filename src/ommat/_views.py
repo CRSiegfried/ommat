@@ -13,9 +13,10 @@ open. Each value's class is read from the ``settings`` item's class tree for its
 answer to a candidate-valued choice, each label and ``probabilities`` key that is not a fixed
 name takes its set's class, found through the call item the answer's entry names.
 
-This engine's record holds no grounded ref and no origin carrying ``set``, since the ledger refuses
-both at the write and the read: every ref passes unchanged and every literal takes
-its JSON form's default. Each view raises ``ValueError`` before reading anything when
+This engine's record holds no origin carrying ``set``, which the ledger refuses, so every literal
+takes its JSON form's default; it holds a grounded ref only at an entry's ref, a cause's refs and
+a call's ``sums`` and ``truncated``, where its candidate is digested under its set's class, and
+every other ref passes unchanged. Each view raises ``ValueError`` before reading anything when
 ``record`` is not exactly a ``Record``. The continuation record is deferred, so it has no function
 here.
 """

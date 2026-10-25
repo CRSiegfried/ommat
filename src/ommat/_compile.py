@@ -230,8 +230,8 @@ def _origin(origin: Origin | Binding) -> dict[str, Any]:
     origin = cast(Origin, origin)
     if origin.ref is not None:
         return {"ref": origin.ref}
-    # No literal here carries a set: only a grounded expansion writes one, and load refuses
-    # grounded declarations; a policy's is refused before rule 1.
+    # No literal here carries a set: only a grounded plan's expansion writes one, and load
+    # refuses grounded plans; a policy's is refused before rule 1.
     return {"literal": _plain(origin.literal)}
 
 
