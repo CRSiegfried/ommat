@@ -142,6 +142,7 @@ def test_the_page_s_script_parses(tmp_path: Path) -> None:
         ('{"log": []}'.encode("utf-16"), "not UTF-8"),
         (b'\xef\xbb\xbf{"log": []}', "not JSON"),
         (b'{"log": [], "x": "\xed\xa0\x80"}', "not UTF-8"),
+        (b'{"log": [], "x": 9007199254740993}', "names no double exactly"),
     ],
     ids=[
         "nan",
@@ -155,6 +156,7 @@ def test_the_page_s_script_parses(tmp_path: Path) -> None:
         "utf-16",
         "bom",
         "surrogate",
+        "inexact integer",
     ],
 )
 def test_page_refuses_a_document_that_is_not_strict_json(document: bytes, message: str) -> None:
@@ -292,3 +294,20 @@ def test_a_design_that_matches_its_record_is_not_noted(
     (tmp_path / "design.json").write_bytes(DESIGN.document)
     assert main([str(tmp_path), "-o", str(tmp_path / "lens.html")]) == 0
     assert "matches no record" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("first", [b'{"hash": [1]}', b'{"hash": {}}', b"[]", b"3"])
+def test_the_command_shows_a_record_whose_design_item_is_malformed(
+    tmp_path: Path, first: bytes
+) -> None:
+    (tmp_path / "r.json").write_bytes(b'{"log": [' + first + b"]}")
+    (tmp_path / "design.json").write_bytes(DESIGN.document)
+    out = tmp_path / "lens.html"
+    assert main([str(tmp_path), "-o", str(out)]) == 0
+    assert len(_data(out.read_text(encoding="utf-8"))["records"]) == 1
+
+
+def test_an_exact_large_integer_reads_as_ommat_reads_it() -> None:
+    from ommat.lens import read_document
+
+    assert read_document(b'{"log": [], "n": 9007199254740992}', "x")["n"] == 2.0**53

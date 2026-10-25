@@ -139,7 +139,8 @@ def _identity(file: Path) -> tuple[int, int] | None:
 def _design_hash(document: bytes) -> object:
     log: list[object] = read_document(document, "record")["log"]
     first = log[0] if log else None
-    return cast("dict[str, object]", first).get("hash") if isinstance(first, dict) else None
+    held = cast("dict[str, object]", first).get("hash") if isinstance(first, dict) else None
+    return held if isinstance(held, str) else None
 
 
 if __name__ == "__main__":

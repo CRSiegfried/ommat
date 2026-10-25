@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from importlib.resources import files
 from typing import Any, cast
 
+from ommat._canonical import integer_literal
 from ommat._values import MAX_DOCUMENT_DEPTH
 
 __all__ = ["page"]
@@ -80,6 +81,7 @@ def read_document(document: object, what: str) -> dict[str, Any]:
             source,
             parse_constant=_refuse_constant,
             parse_float=_finite,
+            parse_int=_exact,
             object_pairs_hook=_unrepeated,
         )
     except json.JSONDecodeError as error:
@@ -104,6 +106,13 @@ def _finite(text: str) -> float:
     number = float(text)
     if not math.isfinite(number):
         raise ValueError(f"{text} is out of a JSON number's range")
+    return number
+
+
+def _exact(text: str) -> int | float:
+    number = integer_literal(text)  # ommat's own rule for an integer past 2^53 - 1
+    if number is None:
+        raise ValueError(f"the integer {text} names no double exactly")
     return number
 
 
