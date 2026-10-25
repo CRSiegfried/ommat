@@ -12,7 +12,7 @@ def test_version_matches_metadata() -> None:
     assert ommat.__version__ == version("ommat")
 
 
-@pytest.mark.parametrize("module", ["ommat", "ommat.conversation"])
+@pytest.mark.parametrize("module", ["ommat", "ommat.conversation", "ommat.lens"])
 def test_core_imports_only_the_standard_library(module: str) -> None:
     # A fresh interpreter, so modules loaded by pytest or plugins don't count.
     probe = (
@@ -108,7 +108,7 @@ def test_the_public_names_are_exactly_the_decisions() -> None:
     public = {n for n in vars(ommat) if not n.startswith("_")}
     # Submodules imported by tests appear as attributes; `types`, `helpers`, `evaluation` and
     # `bindings` are public subpackages, not names in `ommat.__all__`.
-    assert public - {"types", "helpers", "evaluation", "bindings", "conversation"} == PUBLIC
+    assert public - {"types", "helpers", "evaluation", "bindings", "conversation", "lens"} == PUBLIC
 
 
 BINDINGS = {

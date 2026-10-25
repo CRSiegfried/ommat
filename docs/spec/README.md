@@ -9,6 +9,7 @@ The spec covers what record format 6 and design format 6 hold and the engine doe
 - the ledger and the observer, the record with its canonical JSON encoding, order objects and hashes, the ordered encoding a model reads, and reading a stored record back;
 - the context block a design declares, rendered into the record, and the record views: the escalation view, the handoff view, the transcript view and the redacted view;
 - the conversation renderers, which render a handoff as text and a transcript as Chat Completions or Pydantic AI messages;
+- the record lens, which renders stored records as an HTML page a person reads;
 - replay of a recorded turn with no model call, and the evaluation job `use_answers`;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;
 - the answer kinds: `noul`, `choice` and `score`, which give a probability to each label, and `extraction`, a typed value read from a text, with the probability that the text holds none, the model's reading whatever it answered, its confidence and the span it read;
@@ -212,6 +213,18 @@ ommat's bookkeeping is the source calls and decide, with their results. `is_book
 Both renderers take an optional `turn`, exactly a `str` or an `int` in the value domain, an `int` of magnitude at most 2^53 - 1 and a `str` with no surrogate, else `ValueError`, checked even for a `None` view. With one, every rendered id's stem, `om_` and 24 hexadecimal digits, is instead the first 24 of SHA-256 over the canonical JSON of `[record hash, turn]`; its suffix stays, so an id keeps its form and bound. The same design, state and answers give the same record, so one conversation holds a record once unless each rendering takes its own `turn`, as an exact retry must, since a provider may refuse a repeated tool-call id. The Pydantic AI mark then holds `turn`, and each filter's record is the record and the turn. With `None`, the ids are the transcript's.
 
 A source's tool name is its name with each `/` as `-`, which no ommat name holds, and a pending step's is its tool as the design declares it, which must be the caller's tool's name. Both renderers raise `ValueError` for a source or pending tool named `decide`, a pending tool outside `[A-Za-z0-9_-]`, and a name over 64 characters.
+
+## The record lens
+
+`ommat.lens` is outside the compatibility promise and may change in any minor release. It takes nothing beyond the standard library, `import ommat` does not import it, and the page it writes loads nothing from the network.
+
+`page(records, designs=(), *, skipped=())` returns one self-contained HTML page as a `str`. `records` are record documents as `bytes`, such as `decision.record.document`, a sequence named `record 1`, `record 2` and so on, or a mapping from a name to the bytes; `designs` are design documents as `bytes`, such as `loaded.document`; `skipped` names files the caller passed over, which the page counts. A record is any JSON object holding a `log` list, so a redacted view or a hand-edited record shows too. It raises `ValueError` for an argument that is not `bytes`, a record without a `log` list, or a design that is not a JSON object.
+
+The page shows one record at a time, with Previous, Next, a picker and the arrow keys among several. Each round is a column of its call items and entries in log order: a `noul`, `choice` or `score` answer's probabilities as percentages, an extraction's value with its confidence and the probability that the text holds none, a marker by kind and cause code. The plan and the verdict come last. A design pairs with each record whose `design` item holds the SHA-256 of the design's bytes; with one design and no match, the page uses it and says it may differ.
+
+Selecting an entry, a call or the plan shows what it came from and what it fed. Links from the record: an entry's call, its candidate set, the refs of a derivation and of a marker's cause, and the plan's cause and step arguments. Links from the paired design: each rule's and the policy's declared reads, and each source's needs, slot refs and candidate set. The record holds no read set, so a design link is what the component declared, and each link says which it is.
+
+`python -m ommat.lens PATH [-o FILE] [--open]` writes the page, by default to `ommat-lens.html`, for a record file or for every `.json` and `.jsonl` file under a folder, a `.jsonl` line by line. A JSON object with a `log` list is a record, one with a `policy` and no `log` a design; any other file is skipped and named on stderr. With no record it writes nothing and exits 1. The page also opens a further record, design or folder itself.
 
 ## The choice helpers
 

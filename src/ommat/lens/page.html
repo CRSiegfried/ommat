@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Record Lens</title>
+<style>
+/* The page loads nothing from the network: fonts are the system's, script and data inline. */
+:root {
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --ink: #17212b;
+  --muted: #5b6875;
+  --line: #d6dde3;
+  --accent: #1d6b8a;
+  --accent-soft: #dcecf3;
+  --down: #7a4fb0;
+  --down-soft: #ece4f6;
+  --good: #2f7d4f;
+  --warn: #a86a12;
+  --bad: #b23b3b;
+  --bar: #c9dbe5;
+  --display: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11171c; --panel: #182129; --ink: #e5ebf0; --muted: #94a3b0; --line: #2a3742;
+    --accent: #5fb2d3; --accent-soft: #173445; --down: #b593e0; --down-soft: #2c2340;
+    --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #2b4656; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11171c; --panel: #182129; --ink: #e5ebf0; --muted: #94a3b0; --line: #2a3742;
+  --accent: #5fb2d3; --accent-soft: #173445; --down: #b593e0; --down-soft: #2c2340;
+  --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #2b4656; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); }
+[hidden] { display: none !important; }
+.wrap { padding-block: 20px 40px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+h1 { font: 600 26px/1.1 var(--display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 65ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+select, button, .file { font: 500 13px var(--body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+button:hover, .file:hover, select:hover { border-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.file input { display: none; }
+.summary { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.kv { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.k { font: 500 11px var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.v { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.chip { font: 600 11px var(--display); text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.chip.good { color: var(--good); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); } .chip.info { color: var(--accent); }
+.notice { color: var(--warn); font-size: 13px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.flow { overflow-x: auto; padding-bottom: 6px; }
+.cols { display: flex; gap: 14px; align-items: flex-start; min-width: min-content; }
+.col { width: 270px; flex: none; display: grid; gap: 8px; }
+.colhead { font: 600 13px var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; display: grid; gap: 6px; cursor: pointer; text-align: left; width: 100%; font: inherit; color: inherit; }
+.card:hover { border-color: var(--accent); }
+.card.call { border-style: dashed; }
+.card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.card.up { background: var(--accent-soft); border-color: var(--accent); }
+.card.down { background: var(--down-soft); border-color: var(--down); }
+.card.dim { opacity: .45; }
+.ref { font: 500 12.5px var(--mono); overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.bars { display: grid; gap: 3px; }
+.bar { display: grid; grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) 3.4em; gap: 6px; align-items: center; font-size: 12px; }
+.bar .lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .track { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.bar .fill { height: 100%; background: var(--bar); }
+.bar.top .fill { background: var(--accent); }
+.bar.top .lab { font-weight: 600; }
+.pct { font-variant-numeric: tabular-nums; text-align: right; font-family: var(--mono); font-size: 11.5px; }
+.val { font: 12px var(--mono); background: var(--bg); border-radius: 4px; padding: 4px 6px; overflow-wrap: anywhere; max-height: 7.5em; overflow: auto; white-space: pre-wrap; }
+.marker { font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+aside { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; position: sticky; top: env(safe-area-inset-top, 0px); max-height: calc(100vh - 32px); overflow: auto; }
+aside h2 { font: 600 15px var(--display); letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+aside h3 { font: 600 12px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 6px 0 2px; }
+aside ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 4px; }
+aside li { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+aside li button { background: none; border: none; padding: 0; color: var(--accent); font: 500 12.5px var(--mono); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.how { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+textarea { width: 100%; min-height: 110px; font: 12px var(--mono); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.paste { display: grid; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.paste .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.err { color: var(--bad); font-size: 13px; }
+.pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pager select { flex: 1 1 240px; min-width: 0; max-width: 100%; }
+button:disabled { opacity: .4; cursor: default; }
+@media (prefers-reduced-motion: no-preference) { .card { transition: background .15s, border-color .15s, opacity .15s; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Record Lens</h1>
+      <p class="sub">ommat records laid out as they ran: each round's calls and entries, the answers as percentages, and where each value came from. Select any card to trace its lineage.</p>
+    </div>
+    <div class="controls">
+      <label class="file" for="recFile">Open record…<input id="recFile" type="file" accept=".json,application/json"></label>
+      <label class="file" for="dirFile">Open folder…<input id="dirFile" type="file" webkitdirectory multiple></label>
+      <label class="file" for="desFile">Open design…<input id="desFile" type="file" accept=".json,application/json"></label>
+      <button id="pasteBtn" type="button">Paste JSON</button>
+    </div>
+  </header>
+
+  <div class="paste" id="pastePanel" hidden>
+    <label class="k" for="pasteRec">Record document (the record's <code>document</code> bytes, or its <code>log</code>)</label>
+    <textarea id="pasteRec" spellcheck="false" placeholder='{"hash": "sha256:…", "log": [ … ], "unhashed": { … }}'></textarea>
+    <label class="k" for="pasteDes">Design document, optional (the loaded design's <code>document</code>)</label>
+    <textarea id="pasteDes" spellcheck="false" placeholder='{"format": 6, "sources": { … }, "rules": { … }, "policy": { … }}'></textarea>
+    <div class="row"><button id="pasteGo" type="button">Show this record</button><span class="err" id="pasteErr"></span></div>
+  </div>
+
+  <nav class="pager" id="pager" hidden>
+    <button id="prev" type="button">‹ Previous</button>
+    <select id="pick" aria-label="Record in this folder"></select>
+    <span class="v" id="count"></span>
+    <button id="next" type="button">Next ›</button>
+    <span class="meta" id="deckNote"></span>
+  </nav>
+
+  <div class="summary" id="summary"></div>
+  <div class="main">
+    <div class="flow"><div class="cols" id="cols"></div></div>
+    <aside id="lineage"></aside>
+  </div>
+</div>
+
+<script id="lens-data" type="application/json">__OMMAT_LENS_DATA__</script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pct = (p) => (typeof p === "number" ? (p * 100).toFixed(p * 100 >= 99.95 || p * 100 < 0.05 ? 0 : 1) + "%" : "–");
+
+// A ref's declared base: prefix and name, without a grounded bracket or a field path.
+function parseRef(ref) {
+  const m = /^([qtd]):([^.[\]]+)/.exec(ref || "");
+  if (!m) return { base: ref, candidate: null };
+  let rest = ref.slice(m[0].length), candidate = null;
+  if (rest.startsWith("[")) {
+    // The bracket holds a JSON string; read it with a JSON parser, not by searching for ].
+    let i = 1, s = "";
+    for (; i < rest.length; i++) { if (rest[i] === "\\") { i++; continue; } if (rest[i] === '"' && i > 1) break; }
+    try { candidate = JSON.parse(rest.slice(1, i + 1)); } catch (e) { candidate = rest.slice(1, i + 1); }
+  }
+  return { base: m[1] + ":" + m[2], candidate };
+}
+
+let state = null;
+
+function build(record, design) {
+  const log = Array.isArray(record) ? record : record.log;
+  if (!Array.isArray(log)) throw new Error("The record has no log: give the record document or its log.");
+  const unhashed = (!Array.isArray(record) && record.unhashed) || {};
+  const settings = log.find((i) => i.item === "settings") || {};
+  const providers = settings.providers || {};
+  const grounded = settings.grounded || {};
+  const entries = new Map(), calls = new Map();
+  let plan = null, verdict = null;
+  const rounds = new Map();
+  log.forEach((it, idx) => {
+    if (it.item === "entry") { entries.set(it.ref, { idx, ...it }); col(it.round).entries.push(it.ref); }
+    else if (it.item === "call") { calls.set(idx, { idx, ...it }); col(it.round).calls.push(idx); }
+    else if (it.item === "plan") plan = { idx, ...it };
+    else if (it.item === "verdict") verdict = it;
+  });
+  function col(n) { if (!rounds.has(n)) rounds.set(n, { calls: [], entries: [] }); return rounds.get(n); }
+
+  // Node ids: "e:<ref>" for an entry, "c:<index>" for a call, "plan".
+  const inputs = new Map(); // node -> [{node, how, src}]
+  const add = (node, from, how, src) => {
+    if (!from || from === node) return;
+    if (!inputs.has(node)) inputs.set(node, []);
+    if (!inputs.get(node).some((x) => x.node === from)) inputs.get(node).push({ node: from, how, src });
+  };
+  // A ref read, as the nodes holding it: its entry, or each grounded entry of a declared ref.
+  const nodesOf = (ref) => {
+    const { base } = parseRef(ref);
+    if (entries.has(ref)) return ["e:" + ref];
+    if (entries.has(base)) return ["e:" + base];
+    const out = [];
+    for (const r of entries.keys()) if (parseRef(r).base === base) out.push("e:" + r);
+    return out;
+  };
+  const sourceInputs = (sid) => {
+    const s = design && design.sources && design.sources[sid];
+    if (!s) return [];
+    const refs = [...(s.needs || [])];
+    for (const q of Object.values(s.provides || {})) {
+      if (!q || typeof q !== "object") continue;
+      for (const slot of (q.wording && q.wording.slots) || []) if (slot.origin && slot.origin.ref) refs.push(slot.origin.ref);
+      if (q.text && q.text.ref) refs.push(q.text.ref);
+      if (q.reference_date && q.reference_date.ref) refs.push(q.reference_date.ref);
+    }
+    if (s.grounded) refs.push(s.grounded);
+    return refs;
+  };
+  for (const [ref, e] of entries) {
+    const node = "e:" + ref;
+    const { base } = parseRef(ref);
+    if (e.call != null && calls.has(e.call)) add(node, "c:" + e.call, "asked in this call", "record");
+    if (grounded[base]) for (const n of nodesOf(grounded[base])) add(node, n, "its candidate set", "record");
+    for (const d of e.derivation || []) for (const r of d.refs || []) for (const n of nodesOf(r)) add(node, n, "helper " + d.helper, "record");
+    if (e.marker) for (const r of (e.marker.cause && e.marker.cause.refs) || []) for (const n of nodesOf(r)) add(node, n, "named in its marker's cause", "record");
+    const provider = providers[base];
+    if (ref.startsWith("d:") && design && design.rules && design.rules[provider]) {
+      for (const r of design.rules[provider].reads || []) for (const n of nodesOf(r)) add(node, n, "rule " + provider + " reads it", "design");
+    }
+  }
+  for (const [idx, c] of calls) {
+    for (const sid of c.sources || []) for (const r of sourceInputs(sid)) for (const n of nodesOf(r)) add("c:" + idx, n, "source " + sid + " needs it", "design");
+  }
+  if (plan) {
+    for (const d of plan.derivation || []) for (const r of d.refs || []) for (const n of nodesOf(r)) add("plan", n, "helper " + d.helper, "record");
+    if (plan.cause) for (const r of plan.cause.refs || []) for (const n of nodesOf(r)) add("plan", n, "named in the plan's cause", "record");
+    for (const step of plan.steps || []) for (const o of Object.values(step.arguments || {})) if (o && o.ref) for (const n of nodesOf(o.ref)) add("plan", n, "a step's argument", "record");
+    if (design && design.policy) for (const r of design.policy.reads || []) for (const n of nodesOf(r)) add("plan", n, "the policy reads it", "design");
+  }
+  const outputs = new Map();
+  for (const [node, ins] of inputs) for (const i of ins) {
+    if (!outputs.has(i.node)) outputs.set(i.node, []);
+    outputs.get(i.node).push({ node, how: i.how, src: i.src });
+  }
+  return { log, unhashed, settings, providers, grounded, entries, calls, plan, verdict, rounds, inputs, outputs, design, record };
+}
+
+function reach(map, start) {
+  const seen = new Set(), stack = [start];
+  while (stack.length) for (const x of map.get(stack.pop()) || []) if (!seen.has(x.node)) { seen.add(x.node); stack.push(x.node); }
+  return seen;
+}
+
+function valueHtml(e) {
+  if (e.marker) {
+    const c = e.marker.cause || {};
+    const tone = e.marker.kind === "Unavailable" ? "bad" : "warn";
+    return `<div class="marker"><span class="chip ${tone}">${esc(e.marker.kind)}</span><span class="v">${esc(c.code || "")}</span>${(c.refs || []).length ? `<span class="meta">${(c.refs || []).map(esc).join(", ")}</span>` : ""}</div>`;
+  }
+  const v = e.value;
+  if (v && typeof v === "object" && v.probabilities) {
+    const labels = (v.labels && v.labels.length ? v.labels : Object.keys(v.probabilities));
+    const top = labels.reduce((a, b) => (v.probabilities[b] > v.probabilities[a] ? b : a), labels[0]);
+    return `<div class="bars">${labels.map((l) => {
+      const p = v.probabilities[l];
+      return `<div class="bar${l === top ? " top" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${Math.max(0, Math.min(100, (p || 0) * 100))}%"></span></span><span class="pct">${pct(p)}</span></div>`;
+    }).join("")}</div>`;
+  }
+  if (v && typeof v === "object" && v.kind === "extraction") {
+    const shown = v.value === null ? "none found" : JSON.stringify(v.value);
+    return `<div class="val">${esc(shown)}</div><div class="meta"><span>confidence ${pct(v.confidence)}</span><span>none: ${pct(v.p_null)}</span>${v.guess != null ? `<span>guess ${esc(JSON.stringify(v.guess))}</span>` : ""}</div>`;
+  }
+  return `<div class="val">${esc(JSON.stringify(v, null, 1))}</div>`;
+}
+
+function render() {
+  const s = state;
+  const design = s.log.find((i) => i.item === "design") || {};
+  const plan = s.plan, verdict = s.verdict;
+  const vtone = verdict ? (verdict.kind === "passed" ? "good" : "bad") : "warn";
+  const designName = s.design && s.design.name;
+  $("summary").innerHTML = [
+    designName ? `<div class="kv"><span class="k">Design</span><span class="v">${esc(designName)}</span></div>` : "",
+    `<div class="kv"><span class="k">Design hash</span><span class="v">${esc((design.hash || "").slice(0, 19))}…</span></div>`,
+    s.record && s.record.hash ? `<div class="kv"><span class="k">Record</span><span class="v">${esc(s.record.hash.slice(0, 19))}…</span></div>` : "",
+    `<div class="kv"><span class="k">Format</span><span class="v">${esc(design.format ?? "?")}</span></div>`,
+    plan ? `<div class="kv"><span class="k">Plan</span><span class="chip info">${esc(plan.kind)}</span></div>` : "",
+    `<div class="kv"><span class="k">Verdict</span><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "none")}</span></div>`,
+    plan && (plan.reason || plan.reply) ? `<div class="kv"><span class="k">${plan.reason ? "Reason" : "Reply"}</span><span>${esc(plan.reason || plan.reply)}</span></div>` : "",
+    s.design ? "" : `<div class="notice">No design loaded: lineage shows only what the record holds. Open the design to see what each rule and source read.</div>`,
+  ].join("");
+
+  const order = [...s.rounds.keys()].sort((a, b) => a - b);
+  let html = "";
+  for (const n of order) {
+    const r = s.rounds.get(n);
+    html += `<section class="col"><div class="colhead"><span>Round ${n}</span><span>${r.entries.length} entr${r.entries.length === 1 ? "y" : "ies"}</span></div>`;
+    for (const idx of r.calls) {
+      const c = s.calls.get(idx);
+      const un = (s.unhashed.calls || {})[idx] || {};
+      const failed = c.outcome && c.outcome.failed;
+      html += `<button type="button" class="card call" data-node="c:${idx}"><span class="k">Call · ${esc((c.sources || []).join(", "))}</span>
+        <span class="meta">${failed ? `<span class="chip bad">failed ${esc(failed.code)}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
+        <span class="meta">${Object.keys(c.questions || {}).map(esc).join(" · ")}</span></button>`;
+    }
+    for (const ref of r.entries) {
+      const e = s.entries.get(ref);
+      const { base, candidate } = parseRef(ref);
+      const who = s.providers[base] || (ref === "t:state" ? "the state" : "");
+      html += `<button type="button" class="card" data-node="e:${esc(ref)}"><span class="ref">${esc(ref)}</span>
+        <span class="meta">${who ? `<span>from ${esc(who)}</span>` : ""}${candidate != null ? `<span>candidate ${esc(candidate)}</span>` : ""}</span>${valueHtml(e)}</button>`;
+    }
+    html += `</section>`;
+  }
+  if (plan) {
+    const steps = (plan.steps || []).map((st, i) => `<div class="val">${i + 1}. ${esc(st.tool)} ${esc(JSON.stringify(st.arguments))}</div>`).join("");
+    const fails = verdict && verdict.failures && verdict.failures.length ? `<div class="meta">${verdict.failures.map((f) => esc(f.code || JSON.stringify(f))).join(" · ")}</div>` : "";
+    html += `<section class="col"><div class="colhead"><span>Decision</span><span></span></div>
+      <button type="button" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind)}</span>
+      ${plan.reason ? `<span>${esc(plan.reason)}</span>` : ""}${plan.reply ? `<span>${esc(plan.reply)}</span>` : ""}
+      ${plan.cause ? `<div class="marker"><span class="chip warn">cause</span><span class="v">${esc(plan.cause.code)}</span></div>` : ""}${steps}
+      <span class="meta"><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "no verdict")}</span></span>${fails}</button></section>`;
+  }
+  $("cols").innerHTML = html;
+  select(null);
+}
+
+const label = (node) => node === "plan" ? "plan" : node.startsWith("c:") ? "call · " + (state.calls.get(+node.slice(2)).sources || []).join(", ") : node.slice(2);
+
+function select(node) {
+  const up = node ? reach(state.inputs, node) : new Set();
+  const down = node ? reach(state.outputs, node) : new Set();
+  for (const el of document.querySelectorAll("[data-node]")) {
+    const n = el.dataset.node;
+    el.classList.toggle("sel", n === node);
+    el.classList.toggle("up", up.has(n));
+    el.classList.toggle("down", down.has(n));
+    el.classList.toggle("dim", !!node && n !== node && !up.has(n) && !down.has(n));
+  }
+  const list = (items) => items && items.length
+    ? `<ul>${items.map((i) => `<li><button type="button" data-go="${esc(i.node)}">${esc(label(i.node))}</button><span class="how">${esc(i.how)} · ${i.src}</span></li>`).join("")}</ul>`
+    : `<p class="meta">None</p>`;
+  $("lineage").innerHTML = node
+    ? `<h2>Lineage</h2><div class="ref">${esc(label(node))}</div>
+       <div class="legend"><span><span class="sw" style="background:var(--accent)"></span>came from</span><span><span class="sw" style="background:var(--down)"></span>fed into</span></div>
+       <h3>Came from, directly</h3>${list(state.inputs.get(node))}
+       <h3>Fed into, directly</h3>${list(state.outputs.get(node))}
+       <p class="meta">${up.size} upstream and ${down.size} downstream in all. "record" links are in the record itself; "design" links come from the design document.</p>`
+    : `<h2>Lineage</h2><p class="meta">Select a card to see what it came from and what it fed. The plan is the last column.</p>
+       <div class="legend"><span><span class="sw" style="background:var(--accent)"></span>came from</span><span><span class="sw" style="background:var(--down)"></span>fed into</span></div>`;
+}
+
+document.addEventListener("click", (ev) => {
+  const go = ev.target.closest("[data-go]");
+  if (go) { select(go.dataset.go); const el = document.querySelector(`[data-node="${CSS.escape(go.dataset.go)}"]`); if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" }); return; }
+  const card = ev.target.closest("[data-node]");
+  if (card) select(card.classList.contains("sel") ? null : card.dataset.node);
+});
+
+function show(record, design) { state = build(record, design || null); render(); }
+
+
+// A folder: every record in it, each paired with its design by hash when the design is there too.
+let deck = [], at = 0;
+async function sha(text) {
+  if (!(window.crypto && crypto.subtle)) return null;
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return "sha256:" + [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+const isRecord = (j) => (j && Array.isArray(j.log)) || (Array.isArray(j) && j.some((i) => i && i.item === "design"));
+const isDesign = (j) => j && !Array.isArray(j) && !j.log && (j.sources || j.policy);
+const designHash = (rec) => { const log = Array.isArray(rec) ? rec : rec.log; const d = log.find((i) => i && i.item === "design"); return d && d.hash; };
+
+async function openFolder(files) {
+  const list = [...files].filter((f) => /\.(json|jsonl)$/i.test(f.name))
+    .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name));
+  const recs = [], designs = new Map(), skipped = [];
+  for (const f of list) {
+    const name = f.webkitRelativePath || f.name, text = await f.text(), docs = [];
+    if (/\.jsonl$/i.test(f.name)) {
+      text.split("\n").forEach((line, i) => { if (!line.trim()) return; try { docs.push([name + " · line " + (i + 1), JSON.parse(line), line]); } catch (e) { skipped.push(name + " line " + (i + 1)); } });
+    } else {
+      try { docs.push([name, JSON.parse(text), text]); } catch (e) { skipped.push(name); continue; }
+    }
+    for (const [n, j, raw] of docs) {
+      if (isRecord(j)) recs.push({ name: n, record: j });
+      else if (isDesign(j)) { designs.set(await sha(raw), j); designs.set(await sha(raw.replace(/\s+$/, "")), j); }
+      else skipped.push(n);
+    }
+  }
+  deckFrom(recs, designs, skipped, list.length);
+}
+
+function deckFrom(recs, designs, skipped, read) {
+  if (!recs.length) {
+    leaveDeck();
+    $("summary").innerHTML = `<span class="err">No ommat records found in that folder (${read} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.</span>`;
+    return;
+  }
+  const only = new Set(designs.values()).size === 1 ? [...designs.values()][0] : null;
+  deck = recs.map((r) => {
+    const exact = designs.get(designHash(r.record));
+    return { ...r, design: exact || only || loadedDesign, guessed: !exact && !!(only || loadedDesign) };
+  });
+  const paired = deck.filter((d) => d.design && !d.guessed).length;
+  $("pick").innerHTML = deck.map((d, i) => `<option value="${i}">${esc(d.name)}</option>`).join("");
+  $("deckNote").textContent = `${paired} of ${deck.length} paired with their design by hash` + (skipped.length ? ` · ${skipped.length} file${skipped.length === 1 ? "" : "s"} skipped` : "");
+  $("deckNote").title = skipped.join("\n");
+  $("pager").hidden = false;
+  showAt(0);
+}
+
+function showAt(i) {
+  if (!deck.length) return;
+  at = Math.max(0, Math.min(deck.length - 1, i));
+  const d = deck[at];
+  try { show(d.record, d.design); } catch (e) { $("cols").innerHTML = ""; $("summary").innerHTML = `<span class="err">${esc(d.name)}: ${esc(e.message)}</span>`; }
+  $("summary").insertAdjacentHTML("afterbegin", `<div class="kv"><span class="k">File</span><span class="v">${esc(d.name)}</span></div>`);
+  if (d.guessed) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">This record's design hash matches no design in the folder; lineage uses the folder's only design, which may differ.</div>`);
+  $("pick").value = String(at);
+  $("count").textContent = `${at + 1} of ${deck.length}`;
+  $("prev").disabled = at === 0;
+  $("next").disabled = at === deck.length - 1;
+}
+function leaveDeck() { deck = []; $("pager").hidden = true; }
+
+$("dirFile").addEventListener("change", () => { const files = $("dirFile").files; if (files && files.length) openFolder(files).catch((e) => { $("summary").innerHTML = `<span class="err">Couldn't read that folder: ${esc(e.message)}</span>`; }); $("dirFile").value = ""; });
+$("prev").addEventListener("click", () => showAt(at - 1));
+$("next").addEventListener("click", () => showAt(at + 1));
+$("pick").addEventListener("change", () => showAt(+$("pick").value));
+document.addEventListener("keydown", (ev) => {
+  if (!deck.length || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  if (ev.target.closest && ev.target.closest("input, textarea, select")) return;
+  if (ev.key === "ArrowLeft") showAt(at - 1);
+  else if (ev.key === "ArrowRight") showAt(at + 1);
+});
+
+let loadedDesign = null;
+const readFile = (input, cb) => input.addEventListener("change", () => {
+  const f = input.files && input.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { try { cb(JSON.parse(r.result)); } catch (e) { $("summary").innerHTML = `<span class="err">That file is not JSON: ${esc(e.message)}</span>`; } };
+  r.readAsText(f); input.value = "";
+});
+readFile($("recFile"), (rec) => { leaveDeck(); try { show(rec, loadedDesign); } catch (e) { $("summary").innerHTML = `<span class="err">${esc(e.message)}</span>`; } });
+readFile($("desFile"), (des) => {
+  loadedDesign = des;
+  if (deck.length) { deck.forEach((d) => { if (!d.design || d.guessed) { d.design = des; d.guessed = true; } }); showAt(at); }
+  else if (state) show(state.record, des);
+});
+$("pasteBtn").addEventListener("click", () => { $("pastePanel").hidden = !$("pastePanel").hidden; });
+$("pasteGo").addEventListener("click", () => {
+  $("pasteErr").textContent = "";
+  try {
+    const rec = JSON.parse($("pasteRec").value);
+    const raw = $("pasteDes").value.trim();
+    loadedDesign = raw ? JSON.parse(raw) : null;
+    leaveDeck();
+    show(rec, loadedDesign);
+    $("pastePanel").hidden = true;
+  } catch (e) { $("pasteErr").textContent = "Couldn't read that: " + e.message; }
+});
+
+const DATA = JSON.parse($("lens-data").textContent);
+if (DATA.records.length) deckFrom(DATA.records, new Map(Object.entries(DATA.designs)), DATA.skipped, DATA.read);
+else {
+  $("summary").innerHTML = `<span>No record yet. Open a record file, or a folder of records and their designs, with the buttons above.</span>`;
+  select(null);
+}
+</script>
+</body>
+</html>
