@@ -413,6 +413,43 @@ def test_a_context_text_change_alone_is_no_plan_change_to_do_and_diff() -> None:
     assert not _context_alone({"kind": FindingKind.plan, "recorded": mine, "replayed": theirs})
 
 
+def informing(r: Any) -> Plan:
+    return Plan("inform", reply="ok")
+
+
+def test_a_context_change_that_adds_an_object_is_still_context_alone() -> None:
+    # A marker object in the context shifts every later object's pre-order index, so the
+    # items' orders are compared over the rest alone.
+    mine = plan_item(run().record)
+    theirs = copy.deepcopy(mine)
+    theirs["context"]["entries"][0]["marker"] = {
+        "kind": "Unsure",
+        "cause": {"code": "x", "refs": []},
+    }
+    theirs["order"] = {"9": [1, 0]}
+    assert _context_alone({"kind": FindingKind.plan, "recorded": mine, "replayed": theirs})
+
+
+def test_use_answers_drops_a_plan_finding_whose_context_alone_gains_a_marker() -> None:
+    from ommat.evaluation import use_answers_sync
+
+    under = loaded(policy=Policy(informing, version="1"))
+    sure, unsure = run(YES, under), run(UNSURE, under)
+    found = use_answers_sync(sure.record, under, unsure.record)["findings"]
+    assert all(f["kind"] is not FindingKind.plan for f in found)
+    assert found  # the answers' entries still differ
+
+
+def test_an_order_change_outside_the_context_is_not_context_alone() -> None:
+    mine = plan_item(run().record)
+    theirs = copy.deepcopy(mine)
+    arguments = theirs["steps"][0]["arguments"]
+    assert len(arguments) > 1
+    theirs["steps"][0]["arguments"] = dict(reversed(list(arguments.items())))
+    theirs["order"] = {}  # as the ledger would not write it: the rest is compared afresh
+    assert not _context_alone({"kind": FindingKind.plan, "recorded": mine, "replayed": theirs})
+
+
 def _edited(record: Any, change: Any) -> bytes:
     """The record's document with its plan item changed, rehashed so only the ledger's
     shape checks can refuse it."""

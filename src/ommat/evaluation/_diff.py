@@ -18,7 +18,13 @@ from typing import Any
 from ommat._canonical import encode
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
-from ommat._ledger import _ITEM_DEPTH, InvalidRecord, Record, read_record
+from ommat._ledger import (  # pyright: ignore[reportPrivateUsage]
+    _ITEM_DEPTH,
+    InvalidRecord,
+    Record,
+    _with_held_order,
+    read_record,
+)
 from ommat._replay import _STATE, FindingKind, _differ, _replay_with
 from ommat._values import type_name
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
@@ -69,13 +75,20 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
 
 
 def _context_alone(finding: dict[str, Any]) -> bool:
-    """Whether a ``plan`` finding's two items differ only in their ``context``."""
+    """Whether a ``plan`` finding's two items differ only in their ``context``: the rest
+    compared with its ``order`` taken over the rest alone, or without one when an item, of a
+    record before format 6, holds none."""
     if finding["kind"] is not FindingKind.plan:
         return False
     mine, theirs = finding["recorded"], finding["replayed"]
     if mine is None or theirs is None:
         return False
-    rest = [{k: v for k, v in item.items() if k != "context"} for item in (mine, theirs)]
+    held = "order" in mine and "order" in theirs
+    rest = [
+        {k: v for k, v in item.items() if k not in ("context", "order")} for item in (mine, theirs)
+    ]
+    if held:
+        rest = [_with_held_order(item) for item in rest]
     return encode(rest[0], _ITEM_DEPTH) == encode(rest[1], _ITEM_DEPTH)
 
 
