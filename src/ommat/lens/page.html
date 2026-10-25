@@ -299,8 +299,8 @@ function render() {
     `<div class="kv"><span class="k">Design hash</span><span class="v">${hash(design.hash)}</span></div>`,
     s.record && str(s.record.hash) ? `<div class="kv"><span class="k">Record</span><span class="v">${hash(s.record.hash)}</span></div>` : "",
     `<div class="kv"><span class="k">Format</span><span class="v">${esc(design.format ?? "?")}</span></div>`,
-    plan ? `<div class="kv"><span class="k">Plan</span><span class="chip info">${esc(plan.kind)}</span></div>` : "",
-    `<div class="kv"><span class="k">Verdict</span><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "none")}</span></div>`,
+    plan ? `<div class="kv"><span class="k">Plan</span><span class="chip info">${esc(plan.kind ?? "?")}</span></div>` : "",
+    `<div class="kv"><span class="k">Verdict</span><span class="chip ${vtone}">${esc(verdict ? verdict.kind ?? "?" : "none")}</span></div>`,
     plan && (plan.reason || plan.reply) ? `<div class="kv"><span class="k">${plan.reason ? "Reason" : "Reply"}</span><span>${esc(plan.reason || plan.reply)}</span></div>` : "",
     s.design ? "" : `<div class="notice">No design loaded: lineage shows only what the record holds. Open the design to see what each rule and source read.</div>`,
   ].join("");
@@ -334,7 +334,7 @@ function render() {
       <div role="button" tabindex="0" aria-pressed="false" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind ?? "?")}</span>
       ${plan.reason ? `<span>${esc(plan.reason)}</span>` : ""}${plan.reply ? `<span>${esc(plan.reply)}</span>` : ""}
       ${plan.cause ? `<div class="marker"><span class="chip warn">cause</span><span class="v">${esc(obj(plan.cause).code ?? "")}</span></div>` : ""}${steps}
-      <span class="meta"><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "no verdict")}</span></span>${fails}</div></section>`;
+      <span class="meta"><span class="chip ${vtone}">${esc(verdict ? verdict.kind ?? "?" : "no verdict")}</span></span>${fails}</div></section>`;
   }
   $("cols").innerHTML = html;
   select(null);
@@ -369,7 +369,7 @@ function select(node) {
 // A problem with something the reader opened: said once at the top, the view left as it was.
 function flash(message) {
   const old = $("flash"); if (old) old.remove();
-  $("summary").insertAdjacentHTML("afterbegin", `<span class="err" id="flash">${message}</span>`);
+  $("summary").insertAdjacentHTML("afterbegin", `<span class="err" id="flash" role="alert">${message}</span>`);
 }
 
 function clearView(message) {
@@ -435,8 +435,9 @@ async function openFolder(files) {
 
 function deckFrom(recs, designs, skipped, read, warning = "") {
   if (!recs.length) {
-    leaveDeck();
-    clearView(`<span class="err">No ommat records found in that folder (${esc(read)} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.</span>`);
+    const message = `No ommat records found in that folder (${esc(read)} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.`;
+    if (state) flash(message);
+    else clearView(`<span class="err">${message}</span>`);
     return;
   }
   const distinct = [...new Set(designs.values())];
@@ -486,7 +487,7 @@ function showAt(i) {
 }
 function leaveDeck() { deck = []; $("pager").hidden = true; }
 
-$("dirFile").addEventListener("change", () => { const files = $("dirFile").files; if (files && files.length) openFolder(files).catch((e) => clearView(`<span class="err">Couldn't read that folder: ${esc(e.message)}</span>`)); $("dirFile").value = ""; });
+$("dirFile").addEventListener("change", () => { const files = $("dirFile").files; if (files && files.length) openFolder(files).catch((e) => flash(`Couldn't read that folder: ${esc(e.message)}`)); $("dirFile").value = ""; });
 $("prev").addEventListener("click", () => showAt(at - 1));
 $("next").addEventListener("click", () => showAt(at + 1));
 $("pick").addEventListener("change", () => showAt(+$("pick").value));
@@ -517,10 +518,13 @@ onFile($("desFile"), ({ json, hash }) => {
   loadedDesign = { doc: json, hash };
   try {
     if (deck.length) {
+      // One rule whatever the order: an exact match, then the folder's only design, then this one.
       deck.forEach((d) => {
         if (d.design && !d.guess) return;
+        if (hash && hash === designHash(d.record)) { d.design = json; d.guess = null; return; }
+        if (d.guess === "folder") return;
         d.design = json;
-        d.guess = hash && hash === designHash(d.record) ? null : "loaded";
+        d.guess = "loaded";
       });
       showAt(at);
     } else if (state) showOne(state.record);
@@ -540,7 +544,7 @@ $("pasteGo").addEventListener("click", async () => {
     }
     build(rec, des && des.doc); // check it before anything on screen changes
   } catch (e) { $("pasteErr").textContent = "Couldn't read that: " + e.message; return; }
-  loadedDesign = des;
+  if (des) loadedDesign = des;
   showOne(rec);
   $("pastePanel").hidden = true;
 });

@@ -296,7 +296,9 @@ def test_a_design_that_matches_its_record_is_not_noted(
     assert "matches no record" not in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("first", [b'{"hash": [1]}', b'{"hash": {}}', b"[]", b"3"])
+@pytest.mark.parametrize(
+    "first", [b'{"item": "design", "hash": [1]}', b'{"hash": {}}', b"[]", b"3", b"null"]
+)
 def test_the_command_shows_a_record_whose_design_item_is_malformed(
     tmp_path: Path, first: bytes
 ) -> None:
@@ -311,3 +313,72 @@ def test_an_exact_large_integer_reads_as_ommat_reads_it() -> None:
     from ommat.lens import read_document
 
     assert read_document(b'{"log": [], "n": 9007199254740992}', "x")["n"] == 2.0**53
+
+
+_HARNESS = r"""
+const fs = require("fs"), vm = require("vm");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const data = /<script id="lens-data" type="application\/json">(.*?)<\/script>/s.exec(html)[1];
+const js = /<script>(.*?)<\/script>/s.exec(html)[1];
+const els = {};
+const mk = (id) => ({ id, innerHTML: "", textContent: "", value: "", hidden: false, disabled: false,
+  dataset: {}, classList: { toggle() {}, contains() { return false; } }, setAttribute() {},
+  addEventListener() {}, querySelectorAll() { return []; },
+  insertAdjacentHTML(w, h) { this.innerHTML += h; }, remove() {}, focus() {},
+  closest() { return null; } });
+const doc = { getElementById: (id) => els[id] || (els[id] = mk(id)),
+  addEventListener() {}, activeElement: null };
+doc.getElementById("lens-data").textContent = data;
+const ctx = vm.createContext(
+  { document: doc, window: {}, console, TextEncoder, TextDecoder, JSON });
+vm.runInContext(js, ctx);
+const shown = vm.runInContext(`deck.map((d, i) => { showAt(i); return {
+  name: d.name, guess: d.guess, paired: !!d.design,
+  inputs: Object.fromEntries(
+    [...state.inputs].map(([k, v]) => [k, v.map((x) => [x.node, x.src])])) }; })`, ctx);
+process.stdout.write(JSON.stringify(shown));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_the_page_traces_lineage_from_the_record_and_its_design(tmp_path: Path) -> None:
+    logs = Path(__file__).parent / "idia_logs"
+    triage = (logs / "turn.record.json").read_bytes()
+    triage_design = (logs / "design.json").read_bytes()
+    html = page({"triage": triage, "lamps": _record()}, [triage_design])
+    (tmp_path / "page.html").write_text(html, encoding="utf-8")
+    (tmp_path / "harness.js").write_text(_HARNESS, encoding="utf-8")
+    run = subprocess.run(
+        ["node", str(tmp_path / "harness.js"), str(tmp_path / "page.html")],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    shown = {r["name"]: r for r in json.loads(run.stdout)}
+
+    triage_view = shown["triage"]
+    assert triage_view["paired"]
+    assert triage_view["guess"] is None
+    inputs = {node: {tuple(i) for i in ins} for node, ins in triage_view["inputs"].items()}
+    # A rule's reads: a link the record and the design both give is shown once, as the
+    # record's, which is the stronger evidence.
+    assert ("e:q:triage/hazard", "record") in inputs["e:d:hazard"]
+    assert ("e:q:triage/hazard", "design") not in inputs["e:d:hazard"]
+    # An answer comes from its call, in the record; the call needs what its source needs.
+    call = next(n for n, _ in inputs["e:q:triage/hazard"])
+    assert call.startswith("c:")
+    assert ("e:t:state", "design") in inputs[call]
+    # The policy reads every estimate and the registry's value.
+    assert {n for n, _ in inputs["plan"]} >= {
+        "e:d:asset",
+        "e:d:hazard",
+        "e:d:severity",
+        "e:t:open_orders",
+    }
+
+    # With no design for it, a record shows only its own links, and the grounded entries
+    # still lead to their candidate set.
+    lamps_view = shown["lamps"]
+    assert lamps_view["guess"] == "folder"
+    lamps = {node: {tuple(i) for i in ins} for node, ins in lamps_view["inputs"].items()}
+    assert ("e:d:streets", "record") in lamps['e:q:lamps/out["Elm Row"]']
