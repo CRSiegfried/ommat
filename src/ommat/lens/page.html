@@ -291,7 +291,7 @@ function render() {
   const s = state;
   const design = obj((s.log.find((i) => obj(i).item === "design")));
   const plan = s.plan, verdict = s.verdict ? obj(s.verdict) : null;
-  const vtone = verdict ? (verdict.kind === "passed" ? "good" : "bad") : "warn";
+  const vtone = !verdict || !str(verdict.kind) ? "warn" : verdict.kind === "passed" ? "good" : "bad";
   const designName = s.design && s.design.name;
   const hash = (h) => (str(h) ? esc(h.slice(0, 19)) + "…" : "–");
   $("summary").innerHTML = [
@@ -396,7 +396,7 @@ function show(record, design) { state = build(record, design || null); render();
 
 
 // A folder: every record in it, each paired with its design by hash when the design is there too.
-let deck = [], at = 0, loadedDesign = null; // {doc, hash}, the design opened in the page
+let deck = [], at = 0, deckNote = "", loadedDesign = null; // {doc, hash}, the design opened in the page
 async function sha(data) {
   if (!(window.crypto && crypto.subtle)) return null;
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
@@ -437,22 +437,21 @@ function deckFrom(recs, designs, skipped, read, warning = "") {
   if (!recs.length) {
     const message = `No ommat records found in that folder (${esc(read)} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.`;
     if (state) flash(message);
-    else clearView(`<span class="err">${message}</span>`);
+    else { leaveDeck(); clearView(`<span class="err">${message}</span>`); }
     return;
   }
   const distinct = [...new Set(designs.values())];
   const only = distinct.length === 1 ? distinct[0] : null;
   deck = recs.map((r) => {
     const h = designHash(r.record);
-    const exact = designs.get(h) || (loadedDesign && loadedDesign.hash === h ? loadedDesign.doc : null);
+    const exact = (str(h) && designs.get(h)) || (loadedDesign && str(h) && loadedDesign.hash === h ? loadedDesign.doc : null);
     if (exact) return { ...r, design: exact, guess: null };
     if (only) return { ...r, design: only, guess: "folder" };
     if (loadedDesign) return { ...r, design: loadedDesign.doc, guess: "loaded" };
     return { ...r, design: null, guess: null };
   });
-  const paired = deck.filter((d) => d.design && !d.guess).length;
   $("pick").innerHTML = deck.map((d, i) => `<option value="${i}">${esc(d.name)}</option>`).join("");
-  $("deckNote").textContent = `${paired} of ${deck.length} paired with their design by hash` + (skipped.length ? ` · ${skipped.length} file${skipped.length === 1 ? "" : "s"} skipped` : "") + (warning ? " · " + warning : "");
+  deckNote = (skipped.length ? ` · ${skipped.length} file${skipped.length === 1 ? "" : "s"} skipped` : "") + (warning ? " · " + warning : "");
   $("deckNote").title = skipped.join("\n");
   $("pager").hidden = false;
   showAt(0);
@@ -467,7 +466,8 @@ const GUESSES = {
 function showOne(rec) {
   leaveDeck();
   show(rec, loadedDesign && loadedDesign.doc);
-  if (loadedDesign && loadedDesign.hash !== designHash(rec)) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES.loaded}</div>`);
+  const h = designHash(rec);
+  if (loadedDesign && !(str(h) && loadedDesign.hash === h)) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES.loaded}</div>`);
 }
 
 function showAt(i) {
@@ -477,6 +477,7 @@ function showAt(i) {
   try { show(d.record, d.design); } catch (e) { clearView(`<span class="err">${esc(d.name)}: ${esc(e.message)}</span>`); }
   $("summary").insertAdjacentHTML("afterbegin", `<div class="kv"><span class="k">File</span><span class="v">${esc(d.name)}</span></div>`);
   if (d.guess && state) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES[d.guess]}</div>`);
+  $("deckNote").textContent = `${deck.filter((d) => d.design && !d.guess).length} of ${deck.length} paired with their design by hash` + deckNote;
   $("pick").value = String(at);
   $("count").textContent = `${at + 1} of ${deck.length}`;
   // A pager button about to be disabled hands focus to its pair, so the keyboard keeps its place.
