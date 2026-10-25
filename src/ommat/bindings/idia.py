@@ -89,6 +89,10 @@ def oracle_binding(provider: object, *, state: str | None = None) -> OracleBindi
             f"the idia binding takes a leaf whose probability decimals are 0 to "
             f"{_MAX_DECIMALS}, not {decimals}"
         )
+    if state is not None and (type(state) is not str or not state):
+        raise ValueError(  # spec: The idia binding: state names a need
+            f"the idia binding's state names a need's ref, not {state!r}"
+        )
     return _Binding(provider, state)
 
 

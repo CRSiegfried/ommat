@@ -361,8 +361,17 @@ def test_a_mapping_is_what_json_dumps_gives_in_the_order_given() -> None:
 
 @pytest.mark.parametrize(
     "prompt",
-    [3, ["a"], {"a": b"x"}, {"a": {1, 2}}, {"a": [object()]}, {1: "a"}, {"a": [{None: 1}]}],
-    ids=["number", "list", "bytes", "set", "object", "int key", "nested null key"],
+    [
+        3,
+        ["a"],
+        {"a": b"x"},
+        {"a": {1, 2}},
+        {"a": [object()]},
+        {1: "a"},
+        {"a": [{None: 1}]},
+        {"a": ({2: 1},)},
+    ],
+    ids=["number", "list", "bytes", "set", "object", "int key", "nested null key", "tuple key"],
 )
 def test_any_other_value_is_refused(prompt: object) -> None:
     with pytest.raises(TypeError):

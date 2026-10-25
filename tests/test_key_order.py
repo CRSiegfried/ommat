@@ -184,6 +184,36 @@ def test_a_mapping_returned_out_of_order_is_recorded_with_its_order() -> None:
     assert entry(record, "d:weight_keys")["value"] == ["b", "a", "c"]
 
 
+def test_the_observer_sees_each_item_with_its_order_as_the_closed_record_gives_it() -> None:
+    seen: list[dict[str, Any]] = []
+    loaded = load(weights_design())
+    returned = Seen({"t:weights": dict(RETURNED)})
+    record = decide_sync(
+        loaded, {}, {"default": returned}, observer=lambda i, item: seen.append(item)
+    ).record
+    observed = next(i for i in seen if i.get("ref") == "t:weights")
+    assert list(observed["value"]) == ["b", "a", "c"]
+    assert observed["order"] == {"1": [1, 0, 2]}
+    assert observed == entry(record, "t:weights")
+    assert list(observed) == list(entry(record, "t:weights"))
+
+
+def test_use_answers_refuses_a_state_held_in_another_order_as_another_turn() -> None:
+    from ommat.evaluation import EvaluationRefusal, RefusalReason, use_answers_sync
+
+    design = Design(
+        name="mapped state",
+        state=t.record(tags=t.mapping(t.integer())),
+        policy=Policy(inform, version="1"),
+    )
+    loaded = load(design)
+    one = decide_sync(loaded, {"tags": {"b": 1, "a": 2}}, {}).record
+    other = decide_sync(loaded, {"tags": {"a": 2, "b": 1}}, {}).record
+    with pytest.raises(EvaluationRefusal) as refused:
+        use_answers_sync(one, loaded, other)
+    assert refused.value.reason is RefusalReason.different_turn
+
+
 def test_a_mapping_reads_back_in_its_order_and_replays_with_no_finding() -> None:
     loaded = load(weights_design())
     record = weights_record(loaded)

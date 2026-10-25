@@ -1,10 +1,13 @@
 """The design the stored format-5 record in ``tests/format_5`` ran under, kept in a module of
 its own so its document loads from bytes. It holds what format 6 adds order to: a state record
 declared out of code-point order, a payload, a structured wording and a mapping parameter, each
-out of canonical order, a rule returning a mapping, and a tool returning one."""
+out of canonical order, a rule returning a mapping, rendered sorted in a context entry's text,
+and a tool returning one."""
 
 from ommat import (
     CallResult,
+    Context,
+    ContextEntry,
     Design,
     Parameter,
     Plan,
@@ -15,6 +18,7 @@ from ommat import (
     Source,
     SourceCall,
     Structured,
+    Text,
 )
 from ommat import types as t
 
@@ -57,6 +61,13 @@ DESIGN = Design(
     },
     parameters={"order/weights": Parameter(t.mapping(t.integer()), {"zeta": 2, "alpha": 1})},
     policy=Policy(plan, version="1", reads=[]),
+    context=Context(
+        [
+            ContextEntry(
+                "d:weights", Text("Weights {w}", [{"name": "w", "origin": {"ref": "d:weights"}}])
+            )
+        ]
+    ),
 )
 
 STATE = {"subject": "Lamp", "body": "out"}

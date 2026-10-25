@@ -308,6 +308,25 @@ def test_an_extraction_source_or_an_image_state_sends_as_it_would_without_state(
         assert isinstance(parts[1], ImagePart)
 
 
+@pytest.mark.parametrize("state", [3, "", ["t:state"]])
+def test_a_state_that_names_no_need_is_refused(state: Any) -> None:
+    leaf = Scripted(capabilities=caps(), script=answer_all)
+    with pytest.raises(ValueError, match="state names a need's ref"):
+        oracle_binding(Dispatcher(leaf), state=state)
+
+
+def test_the_state_need_beside_an_image_is_the_json_part_and_the_image_follows() -> None:
+    leaf = Scripted(capabilities=caps(), script=answer_all)
+    binding = oracle_binding(Dispatcher(leaf), state="t:state")
+    png = b"\x89PNG\r\n\x1a\n"
+    needs = {"t:state": {"z": 1, "a": 2}, "t:photo": {"media_type": "image/png", "data": png}}
+    call(binding, source(needs=needs))
+    parts = leaf.calls[0].wire_request.state.parts
+    assert isinstance(parts[0], JsonPart)
+    assert list(cast("dict[str, Any]", parts[0].value)) == ["z", "a"]
+    assert isinstance(parts[1], ImagePart)
+
+
 def test_the_binding_with_state_passes_the_conformance_suite() -> None:
     leaf = Scripted(capabilities=caps(), script=answer_all)
     assert check(oracle_binding(Dispatcher(leaf), state="t:state"), deterministic=True) == []
