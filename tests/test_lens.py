@@ -125,3 +125,108 @@ def test_the_page_s_script_parses(tmp_path: Path) -> None:
     script = tmp_path / "page.js"
     script.write_text(scripts[0], encoding="utf-8")
     subprocess.run(["node", "--check", str(script)], check=True)
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        (b'{"log": [], "x": NaN}', "NaN is not a JSON number"),
+        (b'{"log": [], "x": -Infinity}', "-Infinity is not a JSON number"),
+        (b'{"log": [], "x": ' + b"1" * 5000 + b"}", "not readable JSON"),
+        (b"[" * 100_000 + b"]" * 100_000, "nests too deep|not JSON"),
+        (b'{"log": [], "x": "\xff"}', "not UTF-8"),
+    ],
+)
+def test_page_refuses_a_document_that_is_not_strict_json(document: bytes, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        page([document])
+
+
+@pytest.mark.parametrize(
+    ("records", "skipped"),
+    [(b"{}", ()), ("{}", ()), (None, ()), (5, ()), ([], "abc"), ([], [1])],
+)
+def test_page_refuses_arguments_of_the_wrong_type(records: object, skipped: object) -> None:
+    with pytest.raises(ValueError, match="must be"):
+        page(records, skipped=skipped)  # type: ignore[arg-type]
+
+
+def test_the_data_is_ascii_and_keeps_a_lone_surrogate_as_an_escape() -> None:
+    html = page([b'{"log": [], "x": "\\ud800 \\u2028 caf\\u00e9"}'])
+    html.encode("utf-8")
+    found = re.search(r'<script id="lens-data" type="application/json">(.*?)</script>', html, re.S)
+    assert found is not None
+    found.group(1).encode("ascii")
+    assert _data(html)["records"][0]["record"]["x"] == "\ud800 \u2028 caf\u00e9"
+
+
+def test_no_raw_angle_bracket_is_left_in_the_data() -> None:
+    html = page([_record("<!-- <script> </script")])
+    found = re.search(r'<script id="lens-data" type="application/json">(.*?)</script>', html, re.S)
+    assert found is not None
+    assert "<" not in found.group(1)
+
+
+def test_the_command_refuses_to_overwrite_a_file_it_reads(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    record = tmp_path / "r.json"
+    stored = _record()
+    record.write_bytes(stored)
+    assert main([str(record), "-o", str(record)]) == 1
+    assert main([str(tmp_path), "-o", str(record)]) == 1
+    assert record.read_bytes() == stored
+    assert "is one of the files read" in capsys.readouterr().err
+
+
+def test_the_command_skips_a_bad_file_and_names_why(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "good.json").write_bytes(_record())
+    (tmp_path / "nan.json").write_bytes(b'{"log": [], "x": NaN}')
+    (tmp_path / "latin.json").write_bytes(b'{"log": [], "x": "\xff"}')
+    (tmp_path / "deep.json").write_bytes(b"[" * 100_000 + b"]" * 100_000)
+    out = tmp_path / "lens.html"
+    assert main([str(tmp_path), "-o", str(out)]) == 0
+    assert sorted(_data(out.read_text(encoding="utf-8"))["skipped"]) == [
+        "deep.json",
+        "latin.json",
+        "nan.json",
+    ]
+    err = capsys.readouterr().err
+    assert "nan.json" in err
+    assert "NaN is not a JSON number" in err
+    assert "latin.json is not UTF-8 text" in err
+
+
+def test_the_command_reads_a_linked_file_once(tmp_path: Path) -> None:
+    (tmp_path / "r.json").write_bytes(_record())
+    (tmp_path / "link.json").symlink_to(tmp_path / "r.json")
+    out = tmp_path / "lens.html"
+    assert main([str(tmp_path), "-o", str(out)]) == 0
+    assert len(_data(out.read_text(encoding="utf-8"))["records"]) == 1
+
+
+def test_the_command_notes_a_design_that_matches_no_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "r.json").write_bytes(_record())
+    pretty = json.dumps(json.loads(DESIGN.document), indent=2).encode()
+    (tmp_path / "pretty.json").write_bytes(pretty)
+    assert main([str(tmp_path), "-o", str(tmp_path / "lens.html")]) == 0
+    assert "design pretty.json matches no record" in capsys.readouterr().err
+
+
+def test_the_command_reports_an_output_it_cannot_write(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "r.json").write_bytes(_record())
+    assert main([str(tmp_path / "r.json"), "-o", str(tmp_path / "no" / "lens.html")]) == 1
+    assert "cannot write" in capsys.readouterr().err
+
+
+def test_the_jsonl_reader_takes_crlf_lines(tmp_path: Path) -> None:
+    (tmp_path / "a.jsonl").write_bytes(_record() + b"\r\n" + _record("two") + b"\r\n")
+    out = tmp_path / "lens.html"
+    assert main([str(tmp_path), "-o", str(out)]) == 0
+    assert len(_data(out.read_text(encoding="utf-8"))["records"]) == 2

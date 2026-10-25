@@ -15,7 +15,7 @@ beyond the standard library.
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from importlib.resources import files
 from typing import Any, cast
 
@@ -33,45 +33,63 @@ def page(
     """The page for ``records``, record documents as ``bytes`` (``decision.record.document``),
     named by a mapping's keys or else ``record 1``, ``record 2`` and so on, with ``designs``,
     design documents as ``bytes`` (``loaded.document``), each paired with the records whose
-    ``design`` item holds its hash. ``skipped`` names files a caller passed over, which the page
-    counts. Raises ``ValueError`` for an argument that is not ``bytes``, a record that is not a
-    JSON object holding a ``log`` list, or a design that is not a JSON object."""
+    ``design`` item holds the SHA-256 of its exact bytes. ``skipped`` names files a caller passed
+    over, which the page counts. Raises ``ValueError`` for an argument of the wrong type, a
+    document that is not strict JSON, a record that is not a JSON object holding a ``log`` list,
+    or a design that is not a JSON object."""
     named = (
-        list(records.items())
+        [(str(name), document) for name, document in records.items()]
         if isinstance(records, Mapping)
-        else [(f"record {i}", r) for i, r in enumerate(records, 1)]
+        else [(f"record {i}", r) for i, r in enumerate(_listed(records, "records"), 1)]
     )
     shown: list[dict[str, Any]] = []
     for name, document in named:
-        value = _document(document, f"record {name!r}")
+        value = read_document(document, name)
         if not isinstance(value.get("log"), list):
-            raise ValueError(f"record {name!r} is not a record document: it holds no 'log' list")
-        shown.append({"name": str(name), "record": value})
+            raise ValueError(f"{name} is not a record document: it holds no 'log' list")
+        shown.append({"name": name, "record": value})
     keyed: dict[str, Any] = {}
-    for i, document in enumerate(designs, 1):
-        keyed["sha256:" + hashlib.sha256(_bytes(document, f"design {i}")).hexdigest()] = _document(
-            document, f"design {i}"
-        )
-    data = {"records": shown, "designs": keyed, "skipped": list(skipped), "read": len(shown)}
-    # Every "<" is escaped, so no text in a record can close the script element.
-    embedded = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
+    for i, document in enumerate(_listed(designs, "designs"), 1):
+        value = read_document(document, f"design {i}")
+        keyed["sha256:" + hashlib.sha256(cast(bytes, document)).hexdigest()] = value
+    names = _listed(skipped, "skipped")
+    if not all(type(name) is str for name in names):
+        raise ValueError("skipped must be a sequence of str")
+    data = {"records": shown, "designs": keyed, "skipped": names, "read": len(shown)}
+    # ASCII only, and every "<" escaped, so no text in a record can close the script element
+    # and the page reads the same under any charset.
+    embedded = json.dumps(data, allow_nan=False).replace("<", "\\u003c")
     return _template().replace(_SLOT, embedded, 1)
 
 
-def _bytes(document: object, what: str) -> bytes:
+def read_document(document: object, what: str) -> dict[str, Any]:
+    """``document`` parsed as one strict JSON object, else ``ValueError`` naming ``what``."""
     if type(document) is not bytes:
         raise ValueError(f"{what} must be bytes, not {type(document).__name__}")
-    return document
-
-
-def _document(document: object, what: str) -> dict[str, Any]:
     try:
-        value = json.loads(_bytes(document, what))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        value = json.loads(document, parse_constant=_refuse_constant)
+    except UnicodeDecodeError:
+        raise ValueError(f"{what} is not UTF-8 text") from None
+    except json.JSONDecodeError as error:
         raise ValueError(f"{what} is not JSON: {error}") from None
+    except RecursionError:
+        raise ValueError(f"{what} nests too deep to read") from None
+    except ValueError as error:  # an integer over Python's digit limit
+        raise ValueError(f"{what} is not readable JSON: {error}") from None
     if not isinstance(value, dict):
         raise ValueError(f"{what} is not a JSON object")
     return cast("dict[str, Any]", value)
+
+
+def _refuse_constant(name: str) -> object:
+    # json.loads raises ValueError from here, and also for an integer over its digit limit.
+    raise json.JSONDecodeError(f"{name} is not a JSON number", name, 0)
+
+
+def _listed(values: object, what: str) -> list[Any]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+        raise ValueError(f"{what} must be a sequence, not {type(values).__name__}")
+    return list(cast("Iterable[Any]", values))
 
 
 def _template() -> str:

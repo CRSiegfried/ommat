@@ -151,7 +151,7 @@ pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 pip install "ommat[pydantic-ai] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 
-To look at stored records, write them to files as `decision.record.document`, with the design's `loaded.document` beside them, and run `python -m ommat.lens <file or folder> --open`. The page shows each turn round by round, the answers as percentages, and where each value came from. It holds the records whole, so keep it as you keep them. `ommat.lens` is outside the compatibility promise too.
+To look at stored records, write them to `.json` files as `decision.record.document`, with the design's `loaded.document` beside them, and run `python -m ommat.lens <file or folder> --open`. The page shows each turn round by round, the answers as percentages, and where each value came from. It holds the records whole, so keep it as you keep them. `ommat.lens` is outside the compatibility promise too.
 
 ## Where next
 

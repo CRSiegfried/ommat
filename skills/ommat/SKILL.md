@@ -123,7 +123,7 @@ See the how-to [Hand off what a turn settled](https://github.com/CRSiegfried/omm
 - Assert on `decision.plan.kind`, `decision.verdict.kind` and the replay findings. To read an estimate a turn wrote, an `escalate` plan's working among them, take its entry from the record: `{i["ref"]: i for i in decision.record.log if i["item"] == "entry"}`; each ref is written once.
 - Two design lints run the design with no model: `ommat.helpers.dead_questions(loaded)` reports, per question, whether its answer changed the plan or the verdict at any point it tried (`live`, `no-change-found`, `not-on-grid`, or `not-grounded` for a per-candidate question no point grounded), and `ommat.helpers.unsure_to_execute(loaded)` reports each point where the policy, given a `d:` read set to `Unsure`, returns an `execute` plan. Each takes `values`, a mapping from ref to a list of values, for a read its types and grid cannot fill: `dead_questions` fills `t:state` and what sources provide, `unsure_to_execute` the policy's declared reads, `d:` included.
 
-- To look at a turn, write `decision.record.document` to a file, with `loaded.document` beside it, and run `python -m ommat.lens <file or folder> --open`: each round's calls and entries, the answers as percentages, and each value's lineage. It is outside the compatibility promise.
+- To look at a turn, write each `decision.record.document` to a `.json` file, with `loaded.document` beside them, and run `python -m ommat.lens <file or folder> --open`: each round's calls and entries, the answers as percentages, and each value's lineage. The page holds the records whole, user text included, so keep it as you keep them. `ommat.lens` is outside the compatibility promise.
 
 ## Pitfalls
 

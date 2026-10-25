@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Record Lens</title>
 <style>
@@ -17,9 +18,9 @@
   --down: #7a4fb0;
   --down-soft: #ece4f6;
   --good: #2f7d4f;
-  --warn: #a86a12;
+  --warn: #8a5608;
   --bad: #b23b3b;
-  --bar: #c9dbe5;
+  --bar: #7fa8bd;
   --display: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
   --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -28,13 +29,13 @@
   :root:not([data-theme="light"]) {
     --bg: #11171c; --panel: #182129; --ink: #e5ebf0; --muted: #94a3b0; --line: #2a3742;
     --accent: #5fb2d3; --accent-soft: #173445; --down: #b593e0; --down-soft: #2c2340;
-    --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #2b4656; color-scheme: dark;
+    --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #4f7d94; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #11171c; --panel: #182129; --ink: #e5ebf0; --muted: #94a3b0; --line: #2a3742;
   --accent: #5fb2d3; --accent-soft: #173445; --down: #b593e0; --down-soft: #2c2340;
-  --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #2b4656; color-scheme: dark;
+  --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #4f7d94; color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); }
@@ -47,7 +48,9 @@ h1 { font: 600 26px/1.1 var(--display); margin: 0; letter-spacing: .01em; text-w
 select, button, .file { font: 500 13px var(--body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
 button:hover, .file:hover, select:hover { border-color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.file input { display: none; }
+.file { position: relative; }
+.file input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.file:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .summary { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
 .kv { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
 .k { font: 500 11px var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
@@ -123,7 +126,7 @@ button:disabled { opacity: .4; cursor: default; }
     <div class="row"><button id="pasteGo" type="button">Show this record</button><span class="err" id="pasteErr"></span></div>
   </div>
 
-  <nav class="pager" id="pager" hidden>
+  <nav class="pager" id="pager" aria-label="Records" hidden>
     <button id="prev" type="button">‹ Previous</button>
     <select id="pick" aria-label="Record in this folder"></select>
     <span class="v" id="count"></span>
@@ -134,7 +137,7 @@ button:disabled { opacity: .4; cursor: default; }
   <div class="summary" id="summary"></div>
   <div class="main">
     <div class="flow"><div class="cols" id="cols"></div></div>
-    <aside id="lineage"></aside>
+    <aside id="lineage" aria-label="Lineage" aria-live="polite"></aside>
   </div>
 </div>
 
@@ -144,15 +147,18 @@ button:disabled { opacity: .4; cursor: default; }
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pct = (p) => (typeof p === "number" ? (p * 100).toFixed(p * 100 >= 99.95 || p * 100 < 0.05 ? 0 : 1) + "%" : "–");
+const arr = (x) => (Array.isArray(x) ? x : []);
+const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
+const str = (x) => typeof x === "string";
 
 // A ref's declared base: prefix and name, without a grounded bracket or a field path.
 function parseRef(ref) {
-  const m = /^([qtd]):([^.[\]]+)/.exec(ref || "");
+  const m = /^([qtd]):([^.[\]]+)/.exec(str(ref) ? ref : "");
   if (!m) return { base: ref, candidate: null };
   let rest = ref.slice(m[0].length), candidate = null;
   if (rest.startsWith("[")) {
     // The bracket holds a JSON string; read it with a JSON parser, not by searching for ].
-    let i = 1, s = "";
+    let i = 1;
     for (; i < rest.length; i++) { if (rest[i] === "\\") { i++; continue; } if (rest[i] === '"' && i > 1) break; }
     try { candidate = JSON.parse(rest.slice(1, i + 1)); } catch (e) { candidate = rest.slice(1, i + 1); }
   }
@@ -162,79 +168,87 @@ function parseRef(ref) {
 let state = null;
 
 function build(record, design) {
-  const log = Array.isArray(record) ? record : record.log;
+  const log = Array.isArray(record) ? record : obj(record).log;
   if (!Array.isArray(log)) throw new Error("The record has no log: give the record document or its log.");
-  const unhashed = (!Array.isArray(record) && record.unhashed) || {};
-  const settings = log.find((i) => i.item === "settings") || {};
-  const providers = settings.providers || {};
-  const grounded = settings.grounded || {};
-  const entries = new Map(), calls = new Map();
+  design = design ? obj(design) : null;
+  const items = log.map((it, idx) => [idx, it]).filter(([, it]) => it && typeof it === "object" && str(it.item));
+  const unhashed = obj(!Array.isArray(record) && record.unhashed);
+  const settings = obj((items.find(([, i]) => i.item === "settings") || [])[1]);
+  const providers = obj(settings.providers);
+  const grounded = obj(settings.grounded);
+  const entries = new Map(), calls = new Map(), rounds = new Map();
   let plan = null, verdict = null;
-  const rounds = new Map();
-  log.forEach((it, idx) => {
-    if (it.item === "entry") { entries.set(it.ref, { idx, ...it }); col(it.round).entries.push(it.ref); }
-    else if (it.item === "call") { calls.set(idx, { idx, ...it }); col(it.round).calls.push(idx); }
-    else if (it.item === "plan") plan = { idx, ...it };
+  const col = (n) => { const k = Number.isInteger(n) ? n : "?"; if (!rounds.has(k)) rounds.set(k, { calls: [], entries: [] }); return rounds.get(k); };
+  for (const [idx, it] of items) {
+    if (it.item === "entry" && str(it.ref) && !entries.has(it.ref)) { entries.set(it.ref, { ...it, idx }); col(it.round).entries.push(it.ref); }
+    else if (it.item === "call") { calls.set(idx, { ...it, idx }); col(it.round).calls.push(idx); }
+    else if (it.item === "plan") plan = { ...it, idx };
     else if (it.item === "verdict") verdict = it;
-  });
-  function col(n) { if (!rounds.has(n)) rounds.set(n, { calls: [], entries: [] }); return rounds.get(n); }
+  }
+  const byBase = new Map();
+  for (const r of entries.keys()) { const b = parseRef(r).base; if (!byBase.has(b)) byBase.set(b, []); byBase.get(b).push(r); }
 
   // Node ids: "e:<ref>" for an entry, "c:<index>" for a call, "plan".
-  const inputs = new Map(); // node -> [{node, how, src}]
+  const inputs = new Map(); // node -> Map(from -> {node, how, src})
   const add = (node, from, how, src) => {
     if (!from || from === node) return;
-    if (!inputs.has(node)) inputs.set(node, []);
-    if (!inputs.get(node).some((x) => x.node === from)) inputs.get(node).push({ node: from, how, src });
+    if (!inputs.has(node)) inputs.set(node, new Map());
+    if (!inputs.get(node).has(from)) inputs.get(node).set(from, { node: from, how, src });
   };
   // A ref read, as the nodes holding it: its entry, or each grounded entry of a declared ref.
   const nodesOf = (ref) => {
-    const { base } = parseRef(ref);
+    if (!str(ref)) return [];
     if (entries.has(ref)) return ["e:" + ref];
+    const { base } = parseRef(ref);
     if (entries.has(base)) return ["e:" + base];
-    const out = [];
-    for (const r of entries.keys()) if (parseRef(r).base === base) out.push("e:" + r);
-    return out;
+    return (byBase.get(base) || []).map((r) => "e:" + r);
   };
+  const link = (node, refs, how, src) => { for (const r of arr(refs)) for (const n of nodesOf(r)) add(node, n, how, src); };
+  const sources = obj(design && design.sources), rules = obj(design && design.rules);
   const sourceInputs = (sid) => {
-    const s = design && design.sources && design.sources[sid];
-    if (!s) return [];
-    const refs = [...(s.needs || [])];
-    for (const q of Object.values(s.provides || {})) {
-      if (!q || typeof q !== "object") continue;
-      for (const slot of (q.wording && q.wording.slots) || []) if (slot.origin && slot.origin.ref) refs.push(slot.origin.ref);
-      if (q.text && q.text.ref) refs.push(q.text.ref);
-      if (q.reference_date && q.reference_date.ref) refs.push(q.reference_date.ref);
+    const s = obj(sources[sid]);
+    const refs = [...arr(s.needs)];
+    for (const q of Object.values(obj(s.provides))) {
+      const qq = obj(q);
+      for (const slot of arr(obj(qq.wording).slots)) if (str(obj(obj(slot).origin).ref)) refs.push(slot.origin.ref);
+      if (str(obj(qq.text).ref)) refs.push(qq.text.ref);
+      if (str(obj(qq.reference_date).ref)) refs.push(qq.reference_date.ref);
     }
-    if (s.grounded) refs.push(s.grounded);
+    if (str(s.grounded)) refs.push(s.grounded);
     return refs;
   };
   for (const [ref, e] of entries) {
     const node = "e:" + ref;
     const { base } = parseRef(ref);
-    if (e.call != null && calls.has(e.call)) add(node, "c:" + e.call, "asked in this call", "record");
-    if (grounded[base]) for (const n of nodesOf(grounded[base])) add(node, n, "its candidate set", "record");
-    for (const d of e.derivation || []) for (const r of d.refs || []) for (const n of nodesOf(r)) add(node, n, "helper " + d.helper, "record");
-    if (e.marker) for (const r of (e.marker.cause && e.marker.cause.refs) || []) for (const n of nodesOf(r)) add(node, n, "named in its marker's cause", "record");
+    if (calls.has(e.call)) add(node, "c:" + e.call, "asked in this call", "record");
+    if (str(grounded[base])) link(node, [grounded[base]], "its candidate set", "record");
+    for (const d of arr(e.derivation)) link(node, obj(d).refs, "helper " + obj(d).helper, "record");
+    link(node, obj(obj(e.marker).cause).refs, "named in its marker's cause", "record");
     const provider = providers[base];
-    if (ref.startsWith("d:") && design && design.rules && design.rules[provider]) {
-      for (const r of design.rules[provider].reads || []) for (const n of nodesOf(r)) add(node, n, "rule " + provider + " reads it", "design");
-    }
+    if (ref.startsWith("d:") && str(provider) && Object.hasOwn(rules, provider)) link(node, obj(rules[provider]).reads, "rule " + provider + " reads it", "design");
   }
   for (const [idx, c] of calls) {
-    for (const sid of c.sources || []) for (const r of sourceInputs(sid)) for (const n of nodesOf(r)) add("c:" + idx, n, "source " + sid + " needs it", "design");
+    link("c:" + idx, obj(obj(c.outcome).failed).refs, "named in its failure", "record");
+    for (const sid of arr(c.sources)) if (str(sid) && Object.hasOwn(sources, sid)) link("c:" + idx, sourceInputs(sid), "source " + sid + " needs it", "design");
   }
   if (plan) {
-    for (const d of plan.derivation || []) for (const r of d.refs || []) for (const n of nodesOf(r)) add("plan", n, "helper " + d.helper, "record");
-    if (plan.cause) for (const r of plan.cause.refs || []) for (const n of nodesOf(r)) add("plan", n, "named in the plan's cause", "record");
-    for (const step of plan.steps || []) for (const o of Object.values(step.arguments || {})) if (o && o.ref) for (const n of nodesOf(o.ref)) add("plan", n, "a step's argument", "record");
-    if (design && design.policy) for (const r of design.policy.reads || []) for (const n of nodesOf(r)) add("plan", n, "the policy reads it", "design");
+    for (const d of arr(plan.derivation)) link("plan", obj(d).refs, "helper " + obj(d).helper, "record");
+    link("plan", obj(plan.cause).refs, "named in the plan's cause", "record");
+    for (const step of arr(plan.steps)) {
+      for (const o of Object.values(obj(obj(step).arguments))) link("plan", [obj(o).ref], "a step's argument", "record");
+      for (const q of arr(obj(step).requirements)) link("plan", [obj(q).ref], "a step's requirement", "record");
+    }
+    for (const c of arr(obj(plan.context).entries)) link("plan", [obj(c).ref], "a context entry", "record");
+    for (const f of arr(obj(verdict).failures)) link("plan", [obj(f).ref, obj(obj(f).requirement).ref], "the guard refused on it", "record");
+    if (design) link("plan", obj(design.policy).reads, "the policy reads it", "design");
   }
   const outputs = new Map();
-  for (const [node, ins] of inputs) for (const i of ins) {
+  for (const [node, ins] of inputs) for (const i of ins.values()) {
     if (!outputs.has(i.node)) outputs.set(i.node, []);
     outputs.get(i.node).push({ node, how: i.how, src: i.src });
   }
-  return { log, unhashed, settings, providers, grounded, entries, calls, plan, verdict, rounds, inputs, outputs, design, record };
+  const flat = new Map([...inputs].map(([k, v]) => [k, [...v.values()]]));
+  return { log, unhashed, settings, providers, grounded, entries, calls, plan, verdict, rounds, inputs: flat, outputs, design, record };
 }
 
 function reach(map, start) {
@@ -245,17 +259,19 @@ function reach(map, start) {
 
 function valueHtml(e) {
   if (e.marker) {
-    const c = e.marker.cause || {};
-    const tone = e.marker.kind === "Unavailable" ? "bad" : "warn";
-    return `<div class="marker"><span class="chip ${tone}">${esc(e.marker.kind)}</span><span class="v">${esc(c.code || "")}</span>${(c.refs || []).length ? `<span class="meta">${(c.refs || []).map(esc).join(", ")}</span>` : ""}</div>`;
+    const m = obj(e.marker), c = obj(m.cause);
+    const tone = m.kind === "Unavailable" ? "bad" : "warn";
+    return `<div class="marker"><span class="chip ${tone}">${esc(m.kind ?? "marker")}</span><span class="v">${esc(c.code ?? "")}</span>${arr(c.refs).length ? `<span class="meta">${arr(c.refs).map(esc).join(", ")}</span>` : ""}</div>`;
   }
   const v = e.value;
-  if (v && typeof v === "object" && v.probabilities) {
-    const labels = (v.labels && v.labels.length ? v.labels : Object.keys(v.probabilities));
-    const top = labels.reduce((a, b) => (v.probabilities[b] > v.probabilities[a] ? b : a), labels[0]);
+  if (v === undefined) return `<div class="val">–</div>`;
+  if (v && typeof v === "object" && v.probabilities && typeof v.probabilities === "object") {
+    const probs = v.probabilities;
+    const labels = arr(v.labels).length ? arr(v.labels) : Object.keys(probs);
+    const top = labels.reduce((a, b) => ((probs[b] ?? -1) > (probs[a] ?? -1) ? b : a), labels[0]);
     return `<div class="bars">${labels.map((l) => {
-      const p = v.probabilities[l];
-      return `<div class="bar${l === top ? " top" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${Math.max(0, Math.min(100, (p || 0) * 100))}%"></span></span><span class="pct">${pct(p)}</span></div>`;
+      const p = probs[l], w = typeof p === "number" ? Math.max(0, Math.min(100, p * 100)) : 0;
+      return `<div class="bar${l === top ? " top" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${w}%"></span></span><span class="pct">${pct(p)}</span></div>`;
     }).join("")}</div>`;
   }
   if (v && typeof v === "object" && v.kind === "extraction") {
@@ -265,16 +281,19 @@ function valueHtml(e) {
   return `<div class="val">${esc(JSON.stringify(v, null, 1))}</div>`;
 }
 
+const failureText = (f) => { const x = obj(f); return "step " + (x.step ?? "?") + (str(x.ref) ? " · " + x.ref : ""); };
+
 function render() {
   const s = state;
-  const design = s.log.find((i) => i.item === "design") || {};
-  const plan = s.plan, verdict = s.verdict;
+  const design = obj((s.log.find((i) => obj(i).item === "design")));
+  const plan = s.plan, verdict = s.verdict ? obj(s.verdict) : null;
   const vtone = verdict ? (verdict.kind === "passed" ? "good" : "bad") : "warn";
   const designName = s.design && s.design.name;
+  const hash = (h) => (str(h) ? esc(h.slice(0, 19)) + "…" : "–");
   $("summary").innerHTML = [
     designName ? `<div class="kv"><span class="k">Design</span><span class="v">${esc(designName)}</span></div>` : "",
-    `<div class="kv"><span class="k">Design hash</span><span class="v">${esc((design.hash || "").slice(0, 19))}…</span></div>`,
-    s.record && s.record.hash ? `<div class="kv"><span class="k">Record</span><span class="v">${esc(s.record.hash.slice(0, 19))}…</span></div>` : "",
+    `<div class="kv"><span class="k">Design hash</span><span class="v">${hash(design.hash)}</span></div>`,
+    s.record && str(s.record.hash) ? `<div class="kv"><span class="k">Record</span><span class="v">${hash(s.record.hash)}</span></div>` : "",
     `<div class="kv"><span class="k">Format</span><span class="v">${esc(design.format ?? "?")}</span></div>`,
     plan ? `<div class="kv"><span class="k">Plan</span><span class="chip info">${esc(plan.kind)}</span></div>` : "",
     `<div class="kv"><span class="k">Verdict</span><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "none")}</span></div>`,
@@ -282,49 +301,51 @@ function render() {
     s.design ? "" : `<div class="notice">No design loaded: lineage shows only what the record holds. Open the design to see what each rule and source read.</div>`,
   ].join("");
 
-  const order = [...s.rounds.keys()].sort((a, b) => a - b);
+  const order = [...s.rounds.keys()].sort((a, b) => (a === "?") - (b === "?") || a - b);
   let html = "";
   for (const n of order) {
     const r = s.rounds.get(n);
-    html += `<section class="col"><div class="colhead"><span>Round ${n}</span><span>${r.entries.length} entr${r.entries.length === 1 ? "y" : "ies"}</span></div>`;
+    html += `<section class="col"><div class="colhead"><span>${n === "?" ? "No round" : "Round " + esc(n)}</span><span>${r.entries.length} entr${r.entries.length === 1 ? "y" : "ies"}</span></div>`;
     for (const idx of r.calls) {
       const c = s.calls.get(idx);
-      const un = (s.unhashed.calls || {})[idx] || {};
-      const failed = c.outcome && c.outcome.failed;
-      html += `<button type="button" class="card call" data-node="c:${idx}"><span class="k">Call · ${esc((c.sources || []).join(", "))}</span>
-        <span class="meta">${failed ? `<span class="chip bad">failed ${esc(failed.code)}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
-        <span class="meta">${Object.keys(c.questions || {}).map(esc).join(" · ")}</span></button>`;
+      const un = obj(obj(s.unhashed.calls)[idx]);
+      const failed = obj(c.outcome).failed;
+      html += `<div role="button" tabindex="0" aria-pressed="false" class="card call" data-node="c:${idx}"><span class="k">Call · ${esc(arr(c.sources).join(", "))}</span>
+        <span class="meta">${failed ? `<span class="chip bad">failed ${esc(obj(failed).code ?? "")}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
+        <span class="meta">${Object.keys(obj(c.questions)).map(esc).join(" · ")}</span></div>`;
     }
     for (const ref of r.entries) {
       const e = s.entries.get(ref);
       const { base, candidate } = parseRef(ref);
       const who = s.providers[base] || (ref === "t:state" ? "the state" : "");
-      html += `<button type="button" class="card" data-node="e:${esc(ref)}"><span class="ref">${esc(ref)}</span>
-        <span class="meta">${who ? `<span>from ${esc(who)}</span>` : ""}${candidate != null ? `<span>candidate ${esc(candidate)}</span>` : ""}</span>${valueHtml(e)}</button>`;
+      html += `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="e:${esc(ref)}"><span class="ref">${esc(ref)}</span>
+        <span class="meta">${who ? `<span>from ${esc(who)}</span>` : ""}${candidate != null ? `<span>candidate ${esc(candidate)}</span>` : ""}</span>${valueHtml(e)}</div>`;
     }
     html += `</section>`;
   }
   if (plan) {
-    const steps = (plan.steps || []).map((st, i) => `<div class="val">${i + 1}. ${esc(st.tool)} ${esc(JSON.stringify(st.arguments))}</div>`).join("");
-    const fails = verdict && verdict.failures && verdict.failures.length ? `<div class="meta">${verdict.failures.map((f) => esc(f.code || JSON.stringify(f))).join(" · ")}</div>` : "";
+    const steps = arr(plan.steps).map((st, i) => `<div class="val">${i + 1}. ${esc(obj(st).tool ?? "?")} ${esc(JSON.stringify(obj(st).arguments ?? {}))}</div>`).join("");
+    const fails = verdict && arr(verdict.failures).length ? `<div class="meta">${arr(verdict.failures).map((f) => esc(failureText(f))).join(" · ")}</div>` : "";
     html += `<section class="col"><div class="colhead"><span>Decision</span><span></span></div>
-      <button type="button" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind)}</span>
+      <div role="button" tabindex="0" aria-pressed="false" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind)}</span>
       ${plan.reason ? `<span>${esc(plan.reason)}</span>` : ""}${plan.reply ? `<span>${esc(plan.reply)}</span>` : ""}
-      ${plan.cause ? `<div class="marker"><span class="chip warn">cause</span><span class="v">${esc(plan.cause.code)}</span></div>` : ""}${steps}
-      <span class="meta"><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "no verdict")}</span></span>${fails}</button></section>`;
+      ${plan.cause ? `<div class="marker"><span class="chip warn">cause</span><span class="v">${esc(obj(plan.cause).code ?? "")}</span></div>` : ""}${steps}
+      <span class="meta"><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "no verdict")}</span></span>${fails}</div></section>`;
   }
   $("cols").innerHTML = html;
   select(null);
 }
 
-const label = (node) => node === "plan" ? "plan" : node.startsWith("c:") ? "call · " + (state.calls.get(+node.slice(2)).sources || []).join(", ") : node.slice(2);
+const label = (node) => node === "plan" ? "plan" : node.startsWith("c:") ? "call · " + arr(state.calls.get(+node.slice(2)).sources).join(", ") : node.slice(2);
+const cardOf = (node) => [...$("cols").querySelectorAll("[data-node]")].find((el) => el.dataset.node === node);
 
 function select(node) {
-  const up = node ? reach(state.inputs, node) : new Set();
-  const down = node ? reach(state.outputs, node) : new Set();
-  for (const el of document.querySelectorAll("[data-node]")) {
+  const up = node && state ? reach(state.inputs, node) : new Set();
+  const down = node && state ? reach(state.outputs, node) : new Set();
+  for (const el of $("cols").querySelectorAll("[data-node]")) {
     const n = el.dataset.node;
     el.classList.toggle("sel", n === node);
+    el.setAttribute("aria-pressed", String(n === node));
     el.classList.toggle("up", up.has(n));
     el.classList.toggle("down", down.has(n));
     el.classList.toggle("dim", !!node && n !== node && !up.has(n) && !down.has(n));
@@ -332,19 +353,31 @@ function select(node) {
   const list = (items) => items && items.length
     ? `<ul>${items.map((i) => `<li><button type="button" data-go="${esc(i.node)}">${esc(label(i.node))}</button><span class="how">${esc(i.how)} · ${i.src}</span></li>`).join("")}</ul>`
     : `<p class="meta">None</p>`;
-  $("lineage").innerHTML = node
-    ? `<h2>Lineage</h2><div class="ref">${esc(label(node))}</div>
-       <div class="legend"><span><span class="sw" style="background:var(--accent)"></span>came from</span><span><span class="sw" style="background:var(--down)"></span>fed into</span></div>
+  const legend = `<div class="legend"><span><span class="sw" style="background:var(--accent)"></span>came from</span><span><span class="sw" style="background:var(--down)"></span>fed into</span></div>`;
+  $("lineage").innerHTML = node && state
+    ? `<h2>Lineage</h2><div class="ref">${esc(label(node))}</div>${legend}
        <h3>Came from, directly</h3>${list(state.inputs.get(node))}
        <h3>Fed into, directly</h3>${list(state.outputs.get(node))}
-       <p class="meta">${up.size} upstream and ${down.size} downstream in all. "record" links are in the record itself; "design" links come from the design document.</p>`
-    : `<h2>Lineage</h2><p class="meta">Select a card to see what it came from and what it fed. The plan is the last column.</p>
-       <div class="legend"><span><span class="sw" style="background:var(--accent)"></span>came from</span><span><span class="sw" style="background:var(--down)"></span>fed into</span></div>`;
+       <p class="meta">${up.size} upstream and ${down.size} downstream in all. "record" links are in the record itself; "design" links come from the design document, as declared.</p>`
+    : `<h2>Lineage</h2><p class="meta">Select a card to see what it came from and what it fed. The plan is the last column.</p>${legend}`;
+}
+
+function clearView(message) {
+  state = null;
+  $("cols").innerHTML = "";
+  $("summary").innerHTML = message;
+  select(null);
 }
 
 document.addEventListener("click", (ev) => {
   const go = ev.target.closest("[data-go]");
-  if (go) { select(go.dataset.go); const el = document.querySelector(`[data-node="${CSS.escape(go.dataset.go)}"]`); if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" }); return; }
+  if (go) {
+    const node = go.dataset.go;
+    select(node);
+    const el = cardOf(node);
+    if (el) { el.scrollIntoView({ block: "nearest", inline: "nearest" }); el.focus({ preventScroll: true }); }
+    return;
+  }
   const card = ev.target.closest("[data-node]");
   if (card) select(card.classList.contains("sel") ? null : card.dataset.node);
 });
@@ -353,30 +386,39 @@ function show(record, design) { state = build(record, design || null); render();
 
 
 // A folder: every record in it, each paired with its design by hash when the design is there too.
-let deck = [], at = 0;
-async function sha(text) {
+let deck = [], at = 0, loadedDesign = null;
+async function sha(data) {
   if (!(window.crypto && crypto.subtle)) return null;
-  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+  const b = await crypto.subtle.digest("SHA-256", bytes);
   return "sha256:" + [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 const isRecord = (j) => (j && Array.isArray(j.log)) || (Array.isArray(j) && j.some((i) => i && i.item === "design"));
-const isDesign = (j) => j && !Array.isArray(j) && !j.log && (j.sources || j.policy);
-const designHash = (rec) => { const log = Array.isArray(rec) ? rec : rec.log; const d = log.find((i) => i && i.item === "design"); return d && d.hash; };
+const isDesign = (j) => j && typeof j === "object" && !Array.isArray(j) && !("log" in j) && ("policy" in j || "sources" in j || "rules" in j);
+const designHash = (rec) => { const d = (Array.isArray(rec) ? rec : arr(obj(rec).log)).find((i) => i && i.item === "design"); return d && d.hash; };
 
 async function openFolder(files) {
   const list = [...files].filter((f) => /\.(json|jsonl)$/i.test(f.name))
     .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name));
   const recs = [], designs = new Map(), skipped = [];
+  const keep = async (j, keys) => {
+    let same = null;
+    for (const k of keys) if (k && designs.has(k)) same = designs.get(k);
+    for (const k of keys) if (k) designs.set(k, same || j);
+  };
   for (const f of list) {
-    const name = f.webkitRelativePath || f.name, text = await f.text(), docs = [];
+    const name = f.webkitRelativePath || f.name;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
+    const docs = [];
     if (/\.jsonl$/i.test(f.name)) {
-      text.split("\n").forEach((line, i) => { if (!line.trim()) return; try { docs.push([name + " · line " + (i + 1), JSON.parse(line), line]); } catch (e) { skipped.push(name + " line " + (i + 1)); } });
+      text.split("\n").forEach((line, i) => { if (!line.trim()) return; try { docs.push([name + " · line " + (i + 1), JSON.parse(line), line.trim()]); } catch (e) { skipped.push(name + " · line " + (i + 1)); } });
     } else {
-      try { docs.push([name, JSON.parse(text), text]); } catch (e) { skipped.push(name); continue; }
+      try { docs.push([name, JSON.parse(text), bytes]); } catch (e) { skipped.push(name); continue; }
     }
     for (const [n, j, raw] of docs) {
       if (isRecord(j)) recs.push({ name: n, record: j });
-      else if (isDesign(j)) { designs.set(await sha(raw), j); designs.set(await sha(raw.replace(/\s+$/, "")), j); }
+      else if (isDesign(j)) await keep(j, [await sha(raw), str(raw) ? null : await sha(text.replace(/\s+$/, ""))]);
       else skipped.push(n);
     }
   }
@@ -386,15 +428,19 @@ async function openFolder(files) {
 function deckFrom(recs, designs, skipped, read) {
   if (!recs.length) {
     leaveDeck();
-    $("summary").innerHTML = `<span class="err">No ommat records found in that folder (${read} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.</span>`;
+    clearView(`<span class="err">No ommat records found in that folder (${esc(read)} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.</span>`);
     return;
   }
-  const only = new Set(designs.values()).size === 1 ? [...designs.values()][0] : null;
+  const distinct = [...new Set(designs.values())];
+  const only = distinct.length === 1 ? distinct[0] : null;
   deck = recs.map((r) => {
     const exact = designs.get(designHash(r.record));
-    return { ...r, design: exact || only || loadedDesign, guessed: !exact && !!(only || loadedDesign) };
+    if (exact) return { ...r, design: exact, guess: null };
+    if (only) return { ...r, design: only, guess: "folder" };
+    if (loadedDesign) return { ...r, design: loadedDesign, guess: "loaded" };
+    return { ...r, design: null, guess: null };
   });
-  const paired = deck.filter((d) => d.design && !d.guessed).length;
+  const paired = deck.filter((d) => d.design && !d.guess).length;
   $("pick").innerHTML = deck.map((d, i) => `<option value="${i}">${esc(d.name)}</option>`).join("");
   $("deckNote").textContent = `${paired} of ${deck.length} paired with their design by hash` + (skipped.length ? ` · ${skipped.length} file${skipped.length === 1 ? "" : "s"} skipped` : "");
   $("deckNote").title = skipped.join("\n");
@@ -402,13 +448,18 @@ function deckFrom(recs, designs, skipped, read) {
   showAt(0);
 }
 
+const GUESSES = {
+  folder: "This record's design hash matches no design here, so lineage uses the only design there is, which may differ.",
+  loaded: "This record's design hash matches no design here, so lineage uses the design you opened, which may differ.",
+};
+
 function showAt(i) {
   if (!deck.length) return;
   at = Math.max(0, Math.min(deck.length - 1, i));
   const d = deck[at];
-  try { show(d.record, d.design); } catch (e) { $("cols").innerHTML = ""; $("summary").innerHTML = `<span class="err">${esc(d.name)}: ${esc(e.message)}</span>`; }
+  try { show(d.record, d.design); } catch (e) { clearView(`<span class="err">${esc(d.name)}: ${esc(e.message)}</span>`); }
   $("summary").insertAdjacentHTML("afterbegin", `<div class="kv"><span class="k">File</span><span class="v">${esc(d.name)}</span></div>`);
-  if (d.guessed) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">This record's design hash matches no design in the folder; lineage uses the folder's only design, which may differ.</div>`);
+  if (d.guess && state) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES[d.guess]}</div>`);
   $("pick").value = String(at);
   $("count").textContent = `${at + 1} of ${deck.length}`;
   $("prev").disabled = at === 0;
@@ -416,28 +467,29 @@ function showAt(i) {
 }
 function leaveDeck() { deck = []; $("pager").hidden = true; }
 
-$("dirFile").addEventListener("change", () => { const files = $("dirFile").files; if (files && files.length) openFolder(files).catch((e) => { $("summary").innerHTML = `<span class="err">Couldn't read that folder: ${esc(e.message)}</span>`; }); $("dirFile").value = ""; });
+$("dirFile").addEventListener("change", () => { const files = $("dirFile").files; if (files && files.length) openFolder(files).catch((e) => clearView(`<span class="err">Couldn't read that folder: ${esc(e.message)}</span>`)); $("dirFile").value = ""; });
 $("prev").addEventListener("click", () => showAt(at - 1));
 $("next").addEventListener("click", () => showAt(at + 1));
 $("pick").addEventListener("change", () => showAt(+$("pick").value));
 document.addEventListener("keydown", (ev) => {
+  const card = ev.target.closest && ev.target.closest("[data-node]");
+  if (card && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); card.click(); return; }
   if (!deck.length || ev.altKey || ev.ctrlKey || ev.metaKey) return;
   if (ev.target.closest && ev.target.closest("input, textarea, select")) return;
-  if (ev.key === "ArrowLeft") showAt(at - 1);
-  else if (ev.key === "ArrowRight") showAt(at + 1);
+  if (ev.key === "ArrowLeft") { ev.preventDefault(); showAt(at - 1); }
+  else if (ev.key === "ArrowRight") { ev.preventDefault(); showAt(at + 1); }
 });
 
-let loadedDesign = null;
 const readFile = (input, cb) => input.addEventListener("change", () => {
   const f = input.files && input.files[0]; if (!f) return;
   const r = new FileReader();
-  r.onload = () => { try { cb(JSON.parse(r.result)); } catch (e) { $("summary").innerHTML = `<span class="err">That file is not JSON: ${esc(e.message)}</span>`; } };
+  r.onload = () => { let j; try { j = JSON.parse(r.result); } catch (e) { clearView(`<span class="err">That file is not JSON: ${esc(e.message)}</span>`); return; } cb(j); };
   r.readAsText(f); input.value = "";
 });
-readFile($("recFile"), (rec) => { leaveDeck(); try { show(rec, loadedDesign); } catch (e) { $("summary").innerHTML = `<span class="err">${esc(e.message)}</span>`; } });
+readFile($("recFile"), (rec) => { leaveDeck(); try { show(rec, loadedDesign); } catch (e) { clearView(`<span class="err">${esc(e.message)}</span>`); } });
 readFile($("desFile"), (des) => {
   loadedDesign = des;
-  if (deck.length) { deck.forEach((d) => { if (!d.design || d.guessed) { d.design = des; d.guessed = true; } }); showAt(at); }
+  if (deck.length) { deck.forEach((d) => { if (!d.design || d.guess) { d.design = des; d.guess = "loaded"; } }); showAt(at); }
   else if (state) show(state.record, des);
 });
 $("pasteBtn").addEventListener("click", () => { $("pastePanel").hidden = !$("pastePanel").hidden; });
@@ -455,10 +507,7 @@ $("pasteGo").addEventListener("click", () => {
 
 const DATA = JSON.parse($("lens-data").textContent);
 if (DATA.records.length) deckFrom(DATA.records, new Map(Object.entries(DATA.designs)), DATA.skipped, DATA.read);
-else {
-  $("summary").innerHTML = `<span>No record yet. Open a record file, or a folder of records and their designs, with the buttons above.</span>`;
-  select(null);
-}
+else clearView(`<span>No record yet. Open a record file, or a folder of records and their designs, with the buttons above.</span>`);
 </script>
 </body>
 </html>
