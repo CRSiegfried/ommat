@@ -3,6 +3,7 @@ file, or for every ``.json`` and ``.jsonl`` record and design under a folder."""
 
 import argparse
 import hashlib
+import os
 import sys
 import webbrowser
 from pathlib import Path
@@ -28,29 +29,26 @@ def main(argv: list[str] | None = None) -> int:
 
     path: Path = args.path
     output: Path = args.output
+    skipped: list[str] = []
     if path.is_dir():
-        found = sorted(
-            (p for p in path.rglob("*") if p.suffix.lower() in {".json", ".jsonl"} and p.is_file()),
-            key=lambda p: p.relative_to(path).as_posix(),
-        )
-        base = path
+        found, base = _walk(path, skipped), path
     elif path.is_file():
         found, base = [path], path.parent
     else:
         print(f"error: {path}: no such file or folder", file=sys.stderr)
         return 1
-    if output.resolve() in {file.resolve() for file in found}:
+    if _identity(output) in {_identity(file) for file in found} - {None}:
         print(f"error: {output} is one of the files read; choose another output", file=sys.stderr)
         return 1
 
     records: dict[str, bytes] = {}
     designs: dict[str, tuple[str, bytes]] = {}
-    skipped: list[str] = []
-    seen: set[Path] = set()
+    seen: set[object] = set()
     for file in found:
-        if file.resolve() in seen:
+        identity = _identity(file)
+        if identity is not None and identity in seen:
             continue  # a link to a file already read
-        seen.add(file.resolve())
+        seen.add(identity)
         name = file.relative_to(base).as_posix()
         try:
             data = file.read_bytes()
@@ -94,7 +92,11 @@ def main(argv: list[str] | None = None) -> int:
                 "bytes, as loaded.document gives them",
                 file=sys.stderr,
             )
-    html = page(records, [document for _, document in designs.values()], skipped=skipped)
+    try:
+        html = page(records, [document for _, document in designs.values()], skipped=skipped)
+    except ValueError as error:  # read_document passed each document, so this is a defect
+        print(f"error: cannot build the page: {error}", file=sys.stderr)
+        return 1
     try:
         output.write_text(html, encoding="utf-8")
     except OSError as error:
@@ -104,6 +106,34 @@ def main(argv: list[str] | None = None) -> int:
     if args.open and not webbrowser.open(output.resolve().as_uri()):
         print(f"note: no browser opened; open {output} yourself", file=sys.stderr)
     return 0
+
+
+def _walk(folder: Path, skipped: list[str]) -> list[Path]:
+    """Every .json and .jsonl file under ``folder``, by relative path; a folder it cannot open
+    is skipped and named."""
+
+    def refused(error: OSError) -> None:
+        where = Path(error.filename or folder)
+        name = where.relative_to(folder).as_posix() if where != folder else "."
+        print(f"skipped {name}/: {error.strerror or error}", file=sys.stderr)
+        skipped.append(name + "/")
+
+    found = [
+        Path(root) / name
+        for root, _, names in os.walk(folder, onerror=refused, followlinks=False)
+        for name in names
+        if Path(name).suffix.lower() in {".json", ".jsonl"} and (Path(root) / name).is_file()
+    ]
+    return sorted(found, key=lambda p: p.relative_to(folder).as_posix())
+
+
+def _identity(file: Path) -> tuple[int, int] | None:
+    """The file's device and inode, so a symbolic or hard link to it is the same file."""
+    try:
+        held = file.stat()
+    except OSError:
+        return None
+    return held.st_dev, held.st_ino
 
 
 def _design_hash(document: bytes) -> object:

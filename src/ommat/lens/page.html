@@ -60,7 +60,7 @@ button:hover, .file:hover, select:hover { border-color: var(--accent); }
 .notice { color: var(--warn); font-size: 13px; }
 .main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
 @media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
-.flow { overflow-x: auto; padding-bottom: 6px; }
+.flow { overflow-x: auto; padding: 4px 4px 6px; }
 .cols { display: flex; gap: 14px; align-items: flex-start; min-width: min-content; }
 .col { width: 270px; flex: none; display: grid; gap: 8px; }
 .colhead { font: 600 13px var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
@@ -145,7 +145,9 @@ button:disabled { opacity: .4; cursor: default; }
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Any value to escaped text: a hostile record's object or array shows as JSON, never throws.
+const text = (s) => { if (typeof s === "string") return s; try { return typeof s === "object" && s !== null ? JSON.stringify(s) : String(s); } catch (e) { return "?"; } };
+const esc = (s) => text(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pct = (p) => (typeof p === "number" ? (p * 100).toFixed(p * 100 >= 99.95 || p * 100 < 0.05 ? 0 : 1) + "%" : "–");
 const arr = (x) => (Array.isArray(x) ? x : []);
 const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
@@ -199,7 +201,9 @@ function build(record, design) {
   const nodesOf = (ref) => {
     if (!str(ref)) return [];
     if (entries.has(ref)) return ["e:" + ref];
-    const { base } = parseRef(ref);
+    const { base, candidate } = parseRef(ref);
+    // A grounded ref with a field path reads its own candidate's entry.
+    if (str(candidate) && entries.has(base + "[" + JSON.stringify(candidate) + "]")) return ["e:" + base + "[" + JSON.stringify(candidate) + "]"];
     if (entries.has(base)) return ["e:" + base];
     return (byBase.get(base) || []).map((r) => "e:" + r);
   };
@@ -275,7 +279,7 @@ function valueHtml(e) {
     }).join("")}</div>`;
   }
   if (v && typeof v === "object" && v.kind === "extraction") {
-    const shown = v.value === null ? "none found" : JSON.stringify(v.value);
+    const shown = v.value === null ? "none found" : v.value === undefined ? "–" : JSON.stringify(v.value);
     return `<div class="val">${esc(shown)}</div><div class="meta"><span>confidence ${pct(v.confidence)}</span><span>none: ${pct(v.p_null)}</span>${v.guess != null ? `<span>guess ${esc(JSON.stringify(v.guess))}</span>` : ""}</div>`;
   }
   return `<div class="val">${esc(JSON.stringify(v, null, 1))}</div>`;
@@ -327,7 +331,7 @@ function render() {
     const steps = arr(plan.steps).map((st, i) => `<div class="val">${i + 1}. ${esc(obj(st).tool ?? "?")} ${esc(JSON.stringify(obj(st).arguments ?? {}))}</div>`).join("");
     const fails = verdict && arr(verdict.failures).length ? `<div class="meta">${arr(verdict.failures).map((f) => esc(failureText(f))).join(" · ")}</div>` : "";
     html += `<section class="col"><div class="colhead"><span>Decision</span><span></span></div>
-      <div role="button" tabindex="0" aria-pressed="false" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind)}</span>
+      <div role="button" tabindex="0" aria-pressed="false" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind ?? "?")}</span>
       ${plan.reason ? `<span>${esc(plan.reason)}</span>` : ""}${plan.reply ? `<span>${esc(plan.reply)}</span>` : ""}
       ${plan.cause ? `<div class="marker"><span class="chip warn">cause</span><span class="v">${esc(obj(plan.cause).code ?? "")}</span></div>` : ""}${steps}
       <span class="meta"><span class="chip ${vtone}">${esc(verdict ? verdict.kind : "no verdict")}</span></span>${fails}</div></section>`;
@@ -386,7 +390,7 @@ function show(record, design) { state = build(record, design || null); render();
 
 
 // A folder: every record in it, each paired with its design by hash when the design is there too.
-let deck = [], at = 0, loadedDesign = null;
+let deck = [], at = 0, loadedDesign = null; // {doc, hash}, the design opened in the page
 async function sha(data) {
   if (!(window.crypto && crypto.subtle)) return null;
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
@@ -394,18 +398,14 @@ async function sha(data) {
   return "sha256:" + [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 const isRecord = (j) => (j && Array.isArray(j.log)) || (Array.isArray(j) && j.some((i) => i && i.item === "design"));
-const isDesign = (j) => j && typeof j === "object" && !Array.isArray(j) && !("log" in j) && ("policy" in j || "sources" in j || "rules" in j);
+// As the command reads them: an object with a policy and no log list.
+const isDesign = (j) => j && typeof j === "object" && !Array.isArray(j) && !Array.isArray(j.log) && "policy" in j;
 const designHash = (rec) => { const d = (Array.isArray(rec) ? rec : arr(obj(rec).log)).find((i) => i && i.item === "design"); return d && d.hash; };
 
 async function openFolder(files) {
   const list = [...files].filter((f) => /\.(json|jsonl)$/i.test(f.name))
     .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name));
-  const recs = [], designs = new Map(), skipped = [];
-  const keep = async (j, keys) => {
-    let same = null;
-    for (const k of keys) if (k && designs.has(k)) same = designs.get(k);
-    for (const k of keys) if (k) designs.set(k, same || j);
-  };
+  const recs = [], designs = new Map(), skipped = [], unhashed = [];
   for (const f of list) {
     const name = f.webkitRelativePath || f.name;
     const bytes = new Uint8Array(await f.arrayBuffer());
@@ -418,14 +418,16 @@ async function openFolder(files) {
     }
     for (const [n, j, raw] of docs) {
       if (isRecord(j)) recs.push({ name: n, record: j });
-      else if (isDesign(j)) await keep(j, [await sha(raw), str(raw) ? null : await sha(text.replace(/\s+$/, ""))]);
+      else if (isDesign(j)) { const h = await sha(raw); if (h && !designs.has(h)) designs.set(h, j); else if (!h) unhashed.push(j); }
       else skipped.push(n);
     }
   }
-  deckFrom(recs, designs, skipped, list.length);
+  // Without crypto.subtle nothing pairs by hash; a lone design still serves, marked.
+  if (!designs.size && unhashed.length === 1) designs.set("unhashed", unhashed[0]);
+  deckFrom(recs, designs, skipped, list.length, unhashed.length ? "This browser cannot hash files here, so no design pairs by hash." : "");
 }
 
-function deckFrom(recs, designs, skipped, read) {
+function deckFrom(recs, designs, skipped, read, warning = "") {
   if (!recs.length) {
     leaveDeck();
     clearView(`<span class="err">No ommat records found in that folder (${esc(read)} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.</span>`);
@@ -434,24 +436,32 @@ function deckFrom(recs, designs, skipped, read) {
   const distinct = [...new Set(designs.values())];
   const only = distinct.length === 1 ? distinct[0] : null;
   deck = recs.map((r) => {
-    const exact = designs.get(designHash(r.record));
+    const h = designHash(r.record);
+    const exact = designs.get(h) || (loadedDesign && loadedDesign.hash === h ? loadedDesign.doc : null);
     if (exact) return { ...r, design: exact, guess: null };
+    if (loadedDesign) return { ...r, design: loadedDesign.doc, guess: "loaded" };
     if (only) return { ...r, design: only, guess: "folder" };
-    if (loadedDesign) return { ...r, design: loadedDesign, guess: "loaded" };
     return { ...r, design: null, guess: null };
   });
   const paired = deck.filter((d) => d.design && !d.guess).length;
   $("pick").innerHTML = deck.map((d, i) => `<option value="${i}">${esc(d.name)}</option>`).join("");
-  $("deckNote").textContent = `${paired} of ${deck.length} paired with their design by hash` + (skipped.length ? ` · ${skipped.length} file${skipped.length === 1 ? "" : "s"} skipped` : "");
+  $("deckNote").textContent = `${paired} of ${deck.length} paired with their design by hash` + (skipped.length ? ` · ${skipped.length} file${skipped.length === 1 ? "" : "s"} skipped` : "") + (warning ? " · " + warning : "");
   $("deckNote").title = skipped.join("\n");
   $("pager").hidden = false;
   showAt(0);
 }
 
 const GUESSES = {
-  folder: "This record's design hash matches no design here, so lineage uses the only design there is, which may differ.",
-  loaded: "This record's design hash matches no design here, so lineage uses the design you opened, which may differ.",
+  folder: "No design here matches this record's design hash, so lineage uses the only design there is, which may differ.",
+  loaded: "The design you opened does not match this record's design hash, so its lineage may differ.",
 };
+
+// One record shown on its own, with the design opened in the page, marked when the hashes differ.
+function showOne(rec) {
+  leaveDeck();
+  show(rec, loadedDesign && loadedDesign.doc);
+  if (loadedDesign && loadedDesign.hash !== designHash(rec)) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES.loaded}</div>`);
+}
 
 function showAt(i) {
   if (!deck.length) return;
@@ -473,36 +483,57 @@ $("next").addEventListener("click", () => showAt(at + 1));
 $("pick").addEventListener("change", () => showAt(+$("pick").value));
 document.addEventListener("keydown", (ev) => {
   const card = ev.target.closest && ev.target.closest("[data-node]");
-  if (card && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); card.click(); return; }
-  if (!deck.length || ev.altKey || ev.ctrlKey || ev.metaKey) return;
-  if (ev.target.closest && ev.target.closest("input, textarea, select")) return;
+  if (card && ev.target === card && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); if (!ev.repeat) card.click(); return; }
+  if (deck.length < 2 || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  // Leave the arrows to anything that scrolls or takes text.
+  if (ev.target.closest && ev.target.closest("input, textarea, select, .flow, .val, aside")) return;
   if (ev.key === "ArrowLeft") { ev.preventDefault(); showAt(at - 1); }
   else if (ev.key === "ArrowRight") { ev.preventDefault(); showAt(at + 1); }
 });
 
-const readFile = (input, cb) => input.addEventListener("change", () => {
-  const f = input.files && input.files[0]; if (!f) return;
-  const r = new FileReader();
-  r.onload = () => { let j; try { j = JSON.parse(r.result); } catch (e) { clearView(`<span class="err">That file is not JSON: ${esc(e.message)}</span>`); return; } cb(j); };
-  r.readAsText(f); input.value = "";
+// A file the reader opens: its bytes, their hash and its parsed JSON, or a message on failure.
+async function readJson(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return { json: JSON.parse(new TextDecoder().decode(bytes)), hash: await sha(bytes) };
+}
+const onFile = (input, cb) => input.addEventListener("change", () => {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  readJson(f).then(cb, (e) => clearView(`<span class="err">Couldn't read ${esc(f.name)}: ${esc(e.message)}</span>`));
 });
-readFile($("recFile"), (rec) => { leaveDeck(); try { show(rec, loadedDesign); } catch (e) { clearView(`<span class="err">${esc(e.message)}</span>`); } });
-readFile($("desFile"), (des) => {
-  loadedDesign = des;
-  if (deck.length) { deck.forEach((d) => { if (!d.design || d.guess) { d.design = des; d.guess = "loaded"; } }); showAt(at); }
-  else if (state) show(state.record, des);
+onFile($("recFile"), ({ json }) => { try { showOne(json); } catch (e) { leaveDeck(); clearView(`<span class="err">${esc(e.message)}</span>`); } });
+onFile($("desFile"), ({ json, hash }) => {
+  if (!isDesign(json)) { $("summary").insertAdjacentHTML("afterbegin", `<span class="err">That file is not a design: a design has a policy and no log.</span>`); return; }
+  loadedDesign = { doc: json, hash };
+  try {
+    if (deck.length) {
+      deck.forEach((d) => {
+        if (d.design && !d.guess) return;
+        d.design = json;
+        d.guess = hash && hash === designHash(d.record) ? null : "loaded";
+      });
+      showAt(at);
+    } else if (state) showOne(state.record);
+  } catch (e) { clearView(`<span class="err">${esc(e.message)}</span>`); }
 });
 $("pasteBtn").addEventListener("click", () => { $("pastePanel").hidden = !$("pastePanel").hidden; });
-$("pasteGo").addEventListener("click", () => {
+$("pasteGo").addEventListener("click", async () => {
   $("pasteErr").textContent = "";
+  let rec, des = null;
   try {
-    const rec = JSON.parse($("pasteRec").value);
+    rec = JSON.parse($("pasteRec").value);
     const raw = $("pasteDes").value.trim();
-    loadedDesign = raw ? JSON.parse(raw) : null;
-    leaveDeck();
-    show(rec, loadedDesign);
-    $("pastePanel").hidden = true;
-  } catch (e) { $("pasteErr").textContent = "Couldn't read that: " + e.message; }
+    if (raw) {
+      const doc = JSON.parse(raw);
+      if (!isDesign(doc)) throw new Error("the design has no policy, or holds a log");
+      des = { doc, hash: await sha(raw) };
+    }
+    build(rec, des && des.doc); // check it before anything on screen changes
+  } catch (e) { $("pasteErr").textContent = "Couldn't read that: " + e.message; return; }
+  loadedDesign = des;
+  showOne(rec);
+  $("pastePanel").hidden = true;
 });
 
 const DATA = JSON.parse($("lens-data").textContent);

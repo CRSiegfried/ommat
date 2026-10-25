@@ -15,9 +15,12 @@ beyond the standard library.
 
 import hashlib
 import json
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from importlib.resources import files
 from typing import Any, cast
+
+from ommat._values import MAX_DOCUMENT_DEPTH
 
 __all__ = ["page"]
 
@@ -63,27 +66,70 @@ def page(
 
 
 def read_document(document: object, what: str) -> dict[str, Any]:
-    """``document`` parsed as one strict JSON object, else ``ValueError`` naming ``what``."""
+    """``document`` read as ommat reads a record's bytes, one JSON object in strict UTF-8 with no
+    byte-order mark, no repeated key, only finite numbers and no deeper nesting than a record
+    holds, else ``ValueError`` naming ``what``."""
     if type(document) is not bytes:
         raise ValueError(f"{what} must be bytes, not {type(document).__name__}")
     try:
-        value = json.loads(document, parse_constant=_refuse_constant)
+        source = document.decode("utf-8")
     except UnicodeDecodeError:
         raise ValueError(f"{what} is not UTF-8 text") from None
+    try:
+        value: object = json.loads(
+            source,
+            parse_constant=_refuse_constant,
+            parse_float=_finite,
+            object_pairs_hook=_unrepeated,
+        )
     except json.JSONDecodeError as error:
         raise ValueError(f"{what} is not JSON: {error}") from None
     except RecursionError:
-        raise ValueError(f"{what} nests too deep to read") from None
-    except ValueError as error:  # an integer over Python's digit limit
+        raise ValueError(f"{what} nests deeper than {MAX_DOCUMENT_DEPTH}") from None
+    except ValueError as error:  # an integer over Python's digit limit, or a repeated key
         raise ValueError(f"{what} is not readable JSON: {error}") from None
     if not isinstance(value, dict):
         raise ValueError(f"{what} is not a JSON object")
-    return cast("dict[str, Any]", value)
+    held = cast("dict[str, Any]", value)
+    if _depth(held) > MAX_DOCUMENT_DEPTH:
+        raise ValueError(f"{what} nests deeper than {MAX_DOCUMENT_DEPTH}")
+    return held
 
 
 def _refuse_constant(name: str) -> object:
-    # json.loads raises ValueError from here, and also for an integer over its digit limit.
     raise json.JSONDecodeError(f"{name} is not a JSON number", name, 0)
+
+
+def _finite(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError(f"{text} is out of a JSON number's range")
+    return number
+
+
+def _unrepeated(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    held = dict(pairs)
+    if len(held) != len(pairs):
+        seen: set[str] = set()
+        repeated = next(key for key, _ in pairs if key in seen or seen.add(key))
+        raise ValueError(f"the key {repeated!r} is repeated")
+    return held
+
+
+def _depth(value: object) -> int:
+    deepest, stack = 0, [(value, 1)]
+    while stack:
+        held, depth = stack.pop()
+        children: list[object] = []
+        if isinstance(held, dict):
+            children = list(cast("dict[str, object]", held).values())
+        elif isinstance(held, list):
+            children = cast("list[object]", held)
+        else:
+            continue
+        deepest = max(deepest, depth)
+        stack.extend((child, depth + 1) for child in children)
+    return deepest
 
 
 def _listed(values: object, what: str) -> list[Any]:

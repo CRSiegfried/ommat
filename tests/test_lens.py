@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -133,8 +134,27 @@ def test_the_page_s_script_parses(tmp_path: Path) -> None:
         (b'{"log": [], "x": NaN}', "NaN is not a JSON number"),
         (b'{"log": [], "x": -Infinity}', "-Infinity is not a JSON number"),
         (b'{"log": [], "x": ' + b"1" * 5000 + b"}", "not readable JSON"),
-        (b"[" * 100_000 + b"]" * 100_000, "nests too deep|not JSON"),
+        (b"[" * 100_000 + b"]" * 100_000, "nests deeper than 128"),
         (b'{"log": [], "x": "\xff"}', "not UTF-8"),
+        (b'{"log": [], "x": 1e999}', "out of a JSON number's range"),
+        (b'{"log": ' + b"[" * 130 + b"]" * 130 + b"}", "nests deeper than 128"),
+        (b'{"log": [], "log": 3}', "the key 'log' is repeated"),
+        ('{"log": []}'.encode("utf-16"), "not UTF-8"),
+        (b'\xef\xbb\xbf{"log": []}', "not JSON"),
+        (b'{"log": [], "x": "\xed\xa0\x80"}', "not UTF-8"),
+    ],
+    ids=[
+        "nan",
+        "infinity",
+        "long integer",
+        "deep",
+        "latin-1",
+        "1e999",
+        "129 deep",
+        "repeated key",
+        "utf-16",
+        "bom",
+        "surrogate",
     ],
 )
 def test_page_refuses_a_document_that_is_not_strict_json(document: bytes, message: str) -> None:
@@ -186,10 +206,12 @@ def test_the_command_skips_a_bad_file_and_names_why(
     (tmp_path / "nan.json").write_bytes(b'{"log": [], "x": NaN}')
     (tmp_path / "latin.json").write_bytes(b'{"log": [], "x": "\xff"}')
     (tmp_path / "deep.json").write_bytes(b"[" * 100_000 + b"]" * 100_000)
+    (tmp_path / "inf.json").write_bytes(b'{"log": [], "x": 1e999}')
     out = tmp_path / "lens.html"
     assert main([str(tmp_path), "-o", str(out)]) == 0
     assert sorted(_data(out.read_text(encoding="utf-8"))["skipped"]) == [
         "deep.json",
+        "inf.json",
         "latin.json",
         "nan.json",
     ]
@@ -230,3 +252,43 @@ def test_the_jsonl_reader_takes_crlf_lines(tmp_path: Path) -> None:
     out = tmp_path / "lens.html"
     assert main([str(tmp_path), "-o", str(out)]) == 0
     assert len(_data(out.read_text(encoding="utf-8"))["records"]) == 2
+
+
+def test_the_command_names_a_folder_it_cannot_open(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "r.json").write_bytes(_record())
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "hidden.json").write_bytes(_record())
+    locked.chmod(0)
+    try:
+        if os.access(locked, os.R_OK):
+            pytest.skip("this user reads any folder")
+        out = tmp_path / "lens.html"
+        assert main([str(tmp_path), "-o", str(out)]) == 0
+        assert _data(out.read_text(encoding="utf-8"))["skipped"] == ["locked/"]
+        assert "skipped locked/" in capsys.readouterr().err
+    finally:
+        locked.chmod(0o755)
+
+
+def test_the_command_reads_a_hard_link_once_and_will_not_write_over_one(tmp_path: Path) -> None:
+    stored = _record()
+    (tmp_path / "r.json").write_bytes(stored)
+    os.link(tmp_path / "r.json", tmp_path / "copy.json")
+    out = tmp_path / "lens.html"
+    assert main([str(tmp_path), "-o", str(out)]) == 0
+    assert len(_data(out.read_text(encoding="utf-8"))["records"]) == 1
+    os.link(tmp_path / "r.json", tmp_path / "out.html")
+    assert main([str(tmp_path), "-o", str(tmp_path / "out.html")]) == 1
+    assert (tmp_path / "r.json").read_bytes() == stored
+
+
+def test_a_design_that_matches_its_record_is_not_noted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "r.json").write_bytes(_record())
+    (tmp_path / "design.json").write_bytes(DESIGN.document)
+    assert main([str(tmp_path), "-o", str(tmp_path / "lens.html")]) == 0
+    assert "matches no record" not in capsys.readouterr().err
