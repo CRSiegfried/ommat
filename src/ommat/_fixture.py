@@ -163,7 +163,8 @@ def from_record(record: object, loaded: LoadedDesign) -> OracleBinding:
     ``Record`` or a stored document read through ``read_record``.
 
     Bound under the oracle names whose sources the record answers, beside live bindings under
-    the rest, it answers each asked source from the returned call item that lists it, each ref
+    the rest, it answers each asked source from the returned call item that lists it, a
+    per-candidate question's stored entry found under its declared ref, each ref
     from the entry that call wrote, in the binding's form. It refuses with ``unsupported``,
     each refusal a line of ``warnings``: every ref of a source the record holds no returned
     call for, or whose ``needs`` differ from the record's entries by canonical bytes; a

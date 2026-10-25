@@ -56,7 +56,8 @@ def dead_questions(
 ) -> dict[str, Any]:
     """The report ``{"points": N, "questions": {ref: {"status", "witness"}}}``, keyed by
     every ``q:`` ref a source provides; a ``ValueError`` before any run for a read nothing
-    fills or a slip in ``values``. ``values`` maps a read the lint fills, ``t:state`` or a
+    fills or a slip in ``values``, and during the runs for a ``d:`` set that differs within one
+    assignment. ``values`` maps a read the lint fills, ``t:state`` or a
     field path under it, or a ``t:`` or ``q:`` ref a source provides, to a list of its values;
     a ``d:`` ref is never a key, since rules compute those values."""
     if type(loaded) is not LoadedDesign:

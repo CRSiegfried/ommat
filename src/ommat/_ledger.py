@@ -753,7 +753,7 @@ _SHAPES: dict[str, _Check] = {
 
 
 # ---------------------------------------------------------------------------------------------
-# Grounded refs, refused wherever redaction rewrites one
+# Grounded refs, admitted only where the record holds one under a grounded declared ref
 
 
 def _grounded(ref: Any) -> bool:
