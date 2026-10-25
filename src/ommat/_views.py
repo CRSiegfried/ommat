@@ -362,7 +362,8 @@ class _Walk:
             out["cause"] = self.cause(item["cause"])
         if kind == "entry" and "value" in item:
             tree = classes[declared_ref(item["ref"])]
-            asked = self.sets.get((cast(int, item["call"]), item["ref"]))  # a null call: none
+            # Keyed by the declared ref, as the call item's questions are; a null call: none.
+            asked = self.sets.get((cast(int, item["call"]), declared_ref(item["ref"])))
             if asked is None:
                 out["value"] = self.value(item["value"], tree)
             else:
@@ -507,7 +508,8 @@ class _Walk:
             sums = cast("dict[str, Any]", entry["sums"])
             out["sums"] = {self.ref(k): v for k, v in sums.items()}
         if "truncated" in entry:
-            out["truncated"] = [self.ref(r) for r in cast("list[Any]", entry["truncated"])]
+            truncated = cast("list[Any]", entry["truncated"])
+            out["truncated"] = code_point_sorted(self.ref(r) for r in truncated)
         if "unexpected" in entry:
             out["unexpected"] = self.digest(entry["unexpected"])
         if "warnings" in entry:  # the binding's text, one value

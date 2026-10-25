@@ -341,7 +341,12 @@ class _Loader:
                         refuse(sources, (sid, ref), shown, _PER_CANDIDATE_LABEL_SET)
             for need in _named_needs(source):
                 if _declared_base(need) in per_candidate:
-                    refuse(sources, (sid, need), f"{what}'s need {_q(need)}", _GROUNDED_NEED)
+                    refuse(
+                        sources,
+                        (sid, need),
+                        f"{what}'s need or slot ref {_q(need)}",
+                        _GROUNDED_NEED,
+                    )
             for ref, provided in source.provides.items():
                 if isinstance(provided, Question):
                     continue
@@ -550,11 +555,22 @@ class _Loader:
                         (u.owner, u.ref),
                         f"{u.where} names {_q(u.ref)}, which is not a candidate set",
                     )
+        per_candidate = _per_candidate_refs(self.d)
         for gname, group in self.d.groups.items():
             refs = [r for r in group.refs if _parsed(r) is not None]
             counts = Counter(refs)
             for ref in code_point_sorted({r for r, n in counts.items() if n > 1}):
                 self.fail(3, (gname, ref), f"group {_q(gname)} names {_q(ref)} more than once")
+            # A group's q: refs are all ungrounded, or all grounded over one candidate set.
+            # A bracketed ref is check 4's to refuse.
+            questions = [r for r in refs if r.startswith("q:") and "[" not in r]
+            if len({per_candidate.get(_declared_base(r) or r) for r in questions}) > 1:
+                self.fail(
+                    3,
+                    (gname,),
+                    f"group {_q(gname)} names q: refs grounded over different candidate sets, or "
+                    "grounded and ungrounded ones",
+                )
         form_refused = {ref for ref, _ in self.form_providers}  # check 10 has failed them
         for key, parsed in self.class_keys:
             where = f"the classes block's key {_q(key)}"
@@ -1619,7 +1635,7 @@ def _declared(ref: str) -> _ParsedRef | None:
 
 _PER_CANDIDATE_EXTRACTION = "per-candidate extraction question"
 _PER_CANDIDATE_LABEL_SET = "per-candidate question over a candidate-valued label set"
-_GROUNDED_NEED = "need on a grounded declared ref"
+_GROUNDED_NEED = "need or slot ref on a grounded declared ref"
 
 
 def _per_candidate_refs(design: Design) -> dict[str, str]:

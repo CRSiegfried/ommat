@@ -896,6 +896,8 @@ class _Turn:
         # raises a cancellation falls at a fixed place. A source that
         # is not ready gets its own markers before the budget and the deadline are tested.
         for sid in order:
+            if not expanded[sid].refs:
+                continue  # nothing to ask over an empty set: not called, its `when` not either
             marker = self.need_marker(sid)
             if marker is None:
                 marker = self.requirement_marker(sid)
@@ -1351,11 +1353,13 @@ class _Turn:
         sources done and drain the sorter."""
         asked = self.ran | self.carried
         pending = [s for s in code_point_sorted(self.sources) if s not in asked]
+        # Every expansion before any write: a pending set's provider marked first must not
+        # turn a grounded source's cut marker into the set's need marker.
+        grounding = {sid: self.expanded(sid) for sid in pending}
         for sid in pending:
-            grounding = self.expanded(sid)
-            for ref in grounding.refs:
+            for ref in grounding[sid].refs:
                 # A question left out of its batch keeps its own marker under the cut.
-                kept = self.left_out.get(ref, grounding.markers.get(ref, marker))
+                kept = self.left_out.get(ref, grounding[sid].markers.get(ref, marker))
                 self.write(ref, n, None, kept)
         for sid in held:
             self.sorter.done(sid)

@@ -8,6 +8,7 @@ a cut give the declared ref; the read view's ``{candidate: entry}``; the format-
 
 import copy
 import dataclasses
+import json
 import re
 from collections.abc import Callable, Mapping
 from typing import Any, cast
@@ -268,18 +269,18 @@ REFUSED: list[tuple[Design, str]] = [
     ),
     (
         over_t(GROUNDED, ("h", Source({"q:z": ONCE}, needs=["q:x"]))),
-        "need on a grounded declared ref",
+        "need or slot ref on a grounded declared ref",
     ),
     (
         over_t(GROUNDED, ("h", Source({"q:z": ONCE}, needs=['q:x["a"]']))),
-        "need on a grounded declared ref",
+        "need or slot ref on a grounded declared ref",
     ),
     (
         over_t(
             GROUNDED,
             ("h", Source({"q:z": Question("noul", Text("Is {a}?", [slot("a", ref="q:x")]))})),
         ),
-        "need on a grounded declared ref",
+        "need or slot ref on a grounded declared ref",
     ),
 ]
 
@@ -500,7 +501,7 @@ def test_the_sources_own_when_marker_goes_on_each_grounded_entry() -> None:
     assert ASKED == []
 
 
-def t_set_design() -> Design:
+def t_set_design(grounded_id: str = "lamps") -> Design:
     sources = {
         "lookup": Source(
             {"t:streets": {"type": t.list_(t.string), "candidates": True}},
@@ -508,7 +509,7 @@ def t_set_design() -> Design:
             oracle="tools",
             cost=1,
         ),
-        "lamps": Source(
+        grounded_id: Source(
             {OUT: out_question(set_ref="t:streets")},
             needs=["t:state.text"],
             grounded="t:streets",
@@ -522,15 +523,18 @@ async def tools(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
     return CallResult({"t:streets": batch[0].needs["t:state"]["streets"]})
 
 
-def t_set_turn(budget: float) -> Record:
+def t_set_turn(budget: float, grounded_id: str = "lamps") -> Record:
     ASKED.clear()
     state = {"text": "x", "streets": STREETS[:3]}
     bindings = {"tools": tools, "default": answer}
-    return decide_sync(load(t_set_design()), state, bindings, RunSettings(budget=budget)).record
+    loaded = load(t_set_design(grounded_id))
+    return decide_sync(loaded, state, bindings, RunSettings(budget=budget)).record
 
 
-def test_a_cut_before_the_set_is_on_the_board_marks_the_declared_ref() -> None:
-    record = t_set_turn(0.5)
+# "zlamps" sorts after the set's provider, "lookup", whose cut marker is written first.
+@pytest.mark.parametrize("grounded_id", ["lamps", "zlamps"])
+def test_a_cut_before_the_set_is_on_the_board_marks_the_declared_ref(grounded_id: str) -> None:
+    record = t_set_turn(0.5, grounded_id)
     found = entries(record)
     assert marker(found[OUT]) == ("Unasked", "over-budget", [])
     assert marker(found["t:streets"]) == ("Unasked", "over-budget", [])
@@ -882,3 +886,154 @@ def test_a_rules_read_set_holds_the_grounding_set_with_the_declared_ref() -> Non
     decided(STREETS[:1])
     ((_, members),) = READS
     assert members == STREETS[:1]
+
+
+# ---------------------------------------------------------------------------------------------
+# Review round 1
+
+
+def test_a_group_of_grounded_and_ungrounded_refs_or_two_sets_is_refused() -> None:
+    mixed = over_t(GROUNDED, groups={"g": Group(["q:x", "q:y"])})
+    assert (
+        3,
+        'group "g" names q: refs grounded over different candidate sets, or grounded and '
+        "ungrounded ones",
+    ) in failures(mixed)
+    other = ("g2", Source({"q:z": per(set_ref="t:s2")}, grounded="t:s2"))
+    two_sets = over_t(
+        GROUNDED,
+        other,
+        ("sets2", Source({"t:s2": {"type": t.list_(t.string), "candidates": True}})),
+        groups={"g": Group(["q:x", "q:z"])},
+    )
+    assert any(c == 3 and "different candidate sets" in m for c, m in failures(two_sets))
+    load(over_t(GROUNDED, groups={"g": Group(["q:x"])}))  # all grounded over one set
+
+
+def test_a_grounded_design_round_trips_through_its_document() -> None:
+    loaded = load(design())
+    again = load(loaded.document, functions={"streets": streets, "out": out, "policy": escalate})
+    assert again.design_hash == loaded.design_hash
+    assert dict(again._grounded) == {OUT: SET}  # pyright: ignore[reportPrivateUsage]
+
+
+def reads_its_own_question(r: ReadView) -> object:
+    return r.read(URGENT)
+
+
+def test_a_set_rule_reading_its_grounded_source_is_a_cycle() -> None:
+    rules = {
+        "streets": Rule(
+            SET,
+            t.list_(t.string),
+            reads_its_own_question,
+            version="1",
+            reads=[URGENT],
+            candidates=True,
+        ),
+    }
+    found = failures(design(rules=rules, policy=Policy(escalate, version="1")))
+    assert any(c == 5 for c, _ in found)
+
+
+def test_a_need_on_a_field_of_a_per_candidate_question_is_refused() -> None:
+    reader = ("h", Source({"q:h": ONCE}, needs=["q:x.value"]))
+    assert any(
+        c == 12 and "need or slot ref on a grounded declared ref" in m
+        for c, m in failures(over_t(GROUNDED, reader))
+    )
+
+
+WHEN_CALLS: list[int] = []
+
+
+def counting_when(r: ReadView) -> bool:
+    WHEN_CALLS.append(1)
+    raise RuntimeError("never asked")
+
+
+def test_a_source_with_nothing_to_ask_over_an_empty_set_calls_no_when() -> None:
+    WHEN_CALLS.clear()
+    loaded = load(design(lamps(urgent=False, when=When(counting_when, "1"))))
+    record = decided([], loaded)
+    assert WHEN_CALLS == []
+    assert "exceptions" not in record.unhashed
+    assert q_refs(record) == []
+
+
+REQUIRED: list[object] = []
+
+
+def requires(r: ReadView) -> object:
+    REQUIRED.append(r.require(OUT))
+    return []
+
+
+def test_require_returns_the_dict_holding_a_marker_and_stops_only_on_the_declared_ref() -> None:
+    rules = {
+        **design().rules,
+        "out": Rule("d:out", t.list_(t.string), requires, version="1", reads=[OUT]),
+    }
+    loaded = load(design(rules=rules))
+
+    async def one_refused(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+        refs = [ref for s in batch for ref in s.questions]
+        return CallResult(
+            {
+                ref: Unavailable(Cause("refused", [ref])) if i == 0 else dict(YES)
+                for i, ref in enumerate(refs)
+            }
+        )
+
+    REQUIRED.clear()
+    record = decided(STREETS[:2], loaded, one_refused)
+    (got,) = REQUIRED
+    assert isinstance(got, dict)
+    assert list(cast("dict[str, object]", got)) == STREETS[:2]
+    assert entries(record)["d:out"]["value"] == []
+
+
+async def truncates_two(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+    refs = list(batch[0].questions)
+    return CallResult({r: dict(YES) for r in refs}, truncated=tuple(r for r in refs if r != URGENT))
+
+
+def test_redact_keeps_truncated_in_code_point_order_after_digesting() -> None:
+    record = decided(STREETS[:4], binding=truncates_two)
+    (entry,) = redacted(record)["unhashed"]["calls"].values()
+    assert len(entry["truncated"]) == 4
+    assert entry["truncated"] == code_point_sorted(entry["truncated"])
+
+
+def test_redact_digests_a_candidate_valued_answer_at_a_grounded_entry() -> None:
+    # The engine never writes this (check 12), but redact holds over every record the read gives.
+    record = decided(STREETS[:2], load(design(lamps(urgent=False))))
+
+    def candidate_valued(log: list[dict[str, Any]]) -> None:
+        for item in log:
+            if item["item"] == "call":
+                item["questions"][OUT].update(
+                    kind="choice", labels={"fixed": ["other"], "candidates": SET, "at": 1}
+                )
+            elif item["item"] == "entry" and item["ref"].startswith(OUT + "["):
+                name = decode(item["ref"][len(OUT) + 1 : -1].encode())
+                item["value"] = {
+                    "kind": "choice",
+                    "labels": ["other", name],
+                    "probabilities": {"other": 0.5, name: 0.5},
+                }
+
+    back = read_record(edited(record, candidate_valued))
+    text = redact(back, ROOT).decode()
+    for name in STREETS[:2]:
+        assert json.dumps(name)[1:-1] not in text
+
+
+def test_a_grounded_ref_with_a_field_path_is_refused() -> None:
+    record = decided(STREETS[:1], binding=unexpected)
+
+    def with_field(log: list[dict[str, Any]]) -> None:
+        call = next(i for i in log if i["item"] == "call")
+        call["outcome"]["failed"]["refs"][0] += ".f"
+
+    refused(edited(record, with_field), "is a grounded ref whose declared ref is not grounded")

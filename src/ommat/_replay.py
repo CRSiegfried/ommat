@@ -280,6 +280,10 @@ def _first(log: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
     return next((item for item in log if item["item"] == kind), None)
 
 
+_FORMAT_6_MEMBERS = ("order", "grounded")
+"""The members format 6 adds to an item, which a record before it does not hold."""
+
+
 def _differ(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
     """Two items, or a side holding none, compared by canonical bytes, ``order`` and a settings
     item's ``grounded`` included; an item of a record before format 6 holds neither, and is
@@ -291,7 +295,3 @@ def _differ(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
             a = {k: v for k, v in a.items() if k != member}
             b = {k: v for k, v in b.items() if k != member}
     return encode(a, _ITEM_DEPTH) != encode(b, _ITEM_DEPTH)
-
-
-_FORMAT_6_MEMBERS = ("order", "grounded")
-"""The members format 6 adds to an item, which a record before it does not hold."""
