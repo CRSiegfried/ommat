@@ -563,7 +563,11 @@ class _Loader:
                 self.fail(3, (gname, ref), f"group {_q(gname)} names {_q(ref)} more than once")
             # A group's q: refs are all ungrounded, or all grounded over one candidate set.
             # A bracketed ref is check 4's to refuse.
-            questions = [r for r in refs if r.startswith("q:") and "[" not in r]
+            questions = [
+                r
+                for r in refs
+                if r.startswith("q:") and "[" not in r and _declared_base(r) in self.providers
+            ]
             if len({per_candidate.get(_declared_base(r) or r) for r in questions}) > 1:
                 self.fail(
                     3,

@@ -1037,3 +1037,64 @@ def test_a_grounded_ref_with_a_field_path_is_refused() -> None:
         call["outcome"]["failed"]["refs"][0] += ".f"
 
     refused(edited(record, with_field), "is a grounded ref whose declared ref is not grounded")
+
+
+GROUNDED_REF = grounded_ref(OUT, "Elm Row")
+NAMED = {OUT: SET}  # the settings ground the ref's declared ref, so only the place refuses it
+
+
+NEVER: list[tuple[str, dict[str, Any]]] = [
+    ("plan", {"cause": {"code": "x", "refs": [GROUNDED_REF]}, "steps": [], "context": None}),
+    (
+        "plan",
+        {
+            "cause": None,
+            "context": None,
+            "steps": [{"arguments": {"a": {"ref": GROUNDED_REF}}, "requirements": []}],
+        },
+    ),
+    (
+        "plan",
+        {
+            "cause": None,
+            "context": None,
+            "steps": [{"arguments": {}, "requirements": [{"ref": GROUNDED_REF, "value": 1}]}],
+        },
+    ),
+    (
+        "plan",
+        {
+            "cause": None,
+            "steps": [],
+            "context": {"entries": [{"ref": GROUNDED_REF, "text": "t", "marker": None}]},
+        },
+    ),
+    ("verdict", {"failures": [{"ref": GROUNDED_REF, "requirement": None}]}),
+    (
+        "verdict",
+        {"failures": [{"ref": None, "requirement": {"ref": GROUNDED_REF, "value": 1}}]},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "item"),
+    NEVER,
+    ids=[
+        "plan cause",
+        "step argument",
+        "step requirement",
+        "context entry",
+        "failure",
+        "requirement",
+    ],
+)
+def test_a_plan_or_verdict_never_holds_a_grounded_ref_even_under_a_grounded_declared_ref(
+    kind: str, item: dict[str, Any]
+) -> None:
+    from ommat._ledger import _grounded_refs, _LedgerError  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(_LedgerError, match="never holds"):
+        _grounded_refs(kind, {"item": kind, **item}, NAMED, "item")
+    # The places the ledger admits take it.
+    _grounded_refs("entry", {"item": "entry", "ref": GROUNDED_REF}, NAMED, "item")
