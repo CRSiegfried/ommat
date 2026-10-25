@@ -11,26 +11,25 @@ The binding is a map between the two libraries' shapes. Each source of a batch i
 ``Request``: its questions in the order received, keyed by their refs, each label carrying its
 description; a source asking an extraction sends the text its spans index as the state's first part,
 its reference date in the request's options, and a source asking only label kinds sends its needs as
-one JSON part keyed by ommat's refs. A caller may name, when it builds the binding, the need sent as
-the whole JSON part and the wire key of a need or question in place of its ref, since the state's
-shape and the keys are words the model reads. An image need is an image part after either. The
-sources sent run concurrently under one deadline, the call's ``seconds``. Each answer is mapped to
-the value ommat takes; a provider's refusal is ``refused``, a fault ``invalid-answer``, and each ref
-of a wire request that did not answer ``timed-out`` when its error is idia's ``DeadlineExceeded``,
-else ``raised``. A source the binding cannot send is ``unsupported``, with its reason a line of the
-call's warnings; so is a question alone whose described noul or structured instruction the
-provider's capabilities do not carry, or that idia's ``Question`` refuses, a choice rendered with
-fewer than two labels among them, and the source's other questions are sent. Each outcome's
-provenance is written under ommat's names, idia's ``snapshot`` as ``revision``, ``versions`` as
-``runtime``, ``prompt_sent`` as ``prompt`` and ``client_versions`` as ``clients``, with idia's
-reasons and claims under the same names.
+one JSON part keyed by ommat's refs, or, when the binding is built with ``state`` naming the
+source's one need besides its images, that need's value as the part; each object goes in the order
+the binding receives it, since a model reads the order. An image need is an image part after either.
+The sources sent run concurrently under one deadline, the call's ``seconds``. Each answer is mapped
+to the value ommat takes; a provider's refusal is ``refused``, a fault ``invalid-answer``, and each
+ref of a wire request that did not answer ``timed-out`` when its error is idia's
+``DeadlineExceeded``, else ``raised``. A source the binding cannot send is ``unsupported``, with its
+reason a line of the call's warnings; so is a question alone whose described noul or structured
+instruction the provider's capabilities do not carry, or that idia's ``Question`` refuses, a choice
+rendered with fewer than two labels among them, and the source's other questions are sent. Each
+outcome's provenance is written under ommat's names, idia's ``snapshot`` as ``revision``,
+``versions`` as ``runtime``, ``prompt_sent`` as ``prompt`` and ``client_versions`` as ``clients``,
+with idia's reasons and claims under the same names.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import cast
 
 try:
@@ -61,22 +60,17 @@ _MAX_DECIMALS = 17
 """The most decimal places a call's ``precision`` names."""
 
 
-def oracle_binding(
-    provider: object, *, state: str | None = None, keys: Mapping[str, str] | None = None
-) -> OracleBinding:
+def oracle_binding(provider: object, *, state: str | None = None) -> OracleBinding:
     """An oracle binding over ``provider``, an idia ``Dispatcher`` over one leaf.
 
-    ``state`` names a need whose value a label source sends as the whole JSON part, unwrapped,
-    in place of a part keyed by refs; a source that needs it beside other JSON needs is
-    ``unsupported``. ``keys`` maps a need's or question's ref to the key the provider sees in its
-    place, each key non-empty, holding no colon, so no ref can be one, and no two alike. Either
-    changes what the model reads, so a caller sets them to the shape it measured.
+    ``state`` names a need a label source sends as the whole JSON part, its value unwrapped, in
+    place of a part keyed by refs, so a caller sends the state shape it measured; a label source
+    that needs it beside another need, images aside, is ``unsupported``.
 
     It refuses, with ``ValueError``, any other provider, whose policies idia does not show;
     a dispatcher whose re-ask is on, which would give a question a second answer; one whose
-    overflow policy is not ``Fail``, which could trim the state the model saw; one whose leaf
-    declares probability decimals outside 0 to 17, which no call's ``precision`` can hold;
-    and a ``keys`` that could send two refs under one key."""
+    overflow policy is not ``Fail``, which could trim the state the model saw; and one whose leaf
+    declares probability decimals outside 0 to 17, which no call's ``precision`` can hold."""
     if not isinstance(provider, idia.Dispatcher):
         raise ValueError(  # spec: The idia binding: one leaf per oracle, its policies shown
             f"the idia binding takes a Dispatcher over one leaf, not a {type(provider).__name__}"
@@ -95,17 +89,7 @@ def oracle_binding(
             f"the idia binding takes a leaf whose probability decimals are 0 to "
             f"{_MAX_DECIMALS}, not {decimals}"
         )
-    wire = dict(keys or {})
-    for ref, key in wire.items():
-        if not key or ":" in key:
-            raise ValueError(  # spec: The idia binding: a wire key is never another ref
-                f"the idia binding's key for {ref} is non-empty with no colon, not {key!r}"
-            )
-    if len(set(wire.values())) != len(wire):
-        raise ValueError(  # spec: The idia binding: two refs never share a wire key
-            "the idia binding's keys send no two refs under one key"
-        )
-    return _Binding(provider, state, wire)
+    return _Binding(provider, state)
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +99,6 @@ class _Binding:
 
     provider: idia.Dispatcher
     state: str | None = None
-    keys: dict[str, str] = field(default_factory=dict[str, str])
 
     async def __call__(
         self, batch: tuple[SourceCall, ...], /, *, seconds: float
@@ -141,28 +124,27 @@ class _Binding:
                 sid: group.create_task(_answer(self.provider, request))
                 for sid, request in requests.items()
             }
-        outcomes: list[tuple[idia.Outcome, dict[str, str]]] = []
+        outcomes: list[idia.Outcome] = []
         for source in batch:
             if source.id not in tasks:
                 continue
             response = tasks[source.id].result()
-            refs = {self.keys.get(ref, ref): ref for ref in source.questions}  # wire key to ref
-            outcomes += ((o, refs) for o in response.outcomes)
-            lines += _lines(source.id, response, refs)
+            outcomes += response.outcomes
+            lines += _lines(source.id, response)
             failed = {key: o.error for o in response.outcomes if o.error for key in o.keys}
-            for key in (q.key for q in requests[source.id].questions):  # the questions sent
-                ref, error = refs[key], failed.get(key)
+            for ref in (q.key for q in requests[source.id].questions):  # the questions sent
+                error = failed.get(ref)
                 if error is None:
-                    values[ref] = _value(source.id, ref, response.answers[key], lines)
+                    values[ref] = _value(source.id, ref, response.answers[ref], lines)
                 elif isinstance(error, idia.DeadlineExceeded):
                     values[ref] = Unavailable(Cause("timed-out"))  # spec: The binding protocol
                 else:
                     values[ref] = Unavailable(Cause("raised"))  # spec: The binding protocol
-        sent = [o for o, _ in outcomes if o.attempts]
+        sent = [o for o in outcomes if o.attempts]
         try:
             return call_result(
                 values,
-                [_provenance(o, refs) for o, refs in outcomes],
+                [_provenance(o) for o in outcomes],
                 precision=_precision(sent[0].rounding) if sent else None,
                 warnings=bounded_warnings(lines),
             )
@@ -201,14 +183,14 @@ def _refusal(
             lines.append(f"{source.id}: unsupported {ref}: the provider does not carry {uncarried}")
             continue
         try:
-            questions.append(_question(binding.keys.get(ref, ref), rendered))
+            questions.append(_question(ref, rendered))
         except ValueError as refused:
             values[ref] = Unavailable(Cause("unsupported"))  # spec: The idia binding
             lines.append(f"{source.id}: unsupported {ref}: {refused}")
     if not questions:
         return None
     try:
-        request = _request(binding, source, tuple(questions), deadline)
+        request = _request(source, tuple(questions), deadline, binding.state)
         binding.provider.plan(request)
     except idia.DoesNotFit as unfit:
         return unfit.message
@@ -219,10 +201,10 @@ def _refusal(
 
 
 def _request(
-    binding: _Binding,
     source: SourceCall,
     questions: tuple[idia.Question, ...],
     deadline: idia.Deadline,
+    whole: str | None,
 ) -> idia.Request:
     needs = dict(source.needs)
     images: list[idia.Part] = []
@@ -231,8 +213,7 @@ def _request(
         if image is not None:
             del needs[key]
             images.append(idia.ImagePart(data=image[1], media_type=image[0]))
-    refs = {binding.keys.get(ref, ref): ref for ref in source.questions}  # wire key to ref
-    sent = [source.questions[refs[q.key]] for q in questions]
+    sent = [source.questions[q.key] for q in questions]
     extractions = [q for q in sent if q.kind is AnswerKind.extraction]
     options: dict[str, idia.JsonValue] = {}
     if extractions:
@@ -252,17 +233,14 @@ def _request(
         # spec: The idia binding: the spans index the text, the state's part 0
         first: idia.Part = idia.TextPart(text=source.needs[texts[0]])
     else:
-        if binding.state in needs and len(needs) > 1:
-            others = ", ".join(sorted(set(needs) - {binding.state}))
+        if whole in needs and len(needs) > 1:
+            others = ", ".join(sorted(set(needs) - {whole}))
             raise _Unsendable(  # spec: The idia binding: the state need is the whole JSON part
-                f"it needs {binding.state}, sent as the whole state, beside {others}"
+                f"it needs {whole}, sent as the whole state, beside {others}"
             )
+        sent_as: object = needs[whole] if whole is not None and whole in needs else needs
         try:
-            written = (
-                json_value(needs[binding.state])
-                if binding.state in needs
-                else {binding.keys.get(ref, ref): json_value(v) for ref, v in needs.items()}
-            )
+            written = json_value(sent_as)
         except TypeError as unwritable:
             raise _Unsendable(str(unwritable)) from None  # spec: The idia binding: no bytes in JSON
         first = idia.JsonPart(value=_tuples(written))
@@ -283,14 +261,14 @@ def _uncarried(rendered: RenderedQuestion, capabilities: idia.Capabilities) -> s
     return None
 
 
-def _question(key: str, rendered: RenderedQuestion) -> idia.Question:
-    """The question as idia asks it, under its wire key, in the order received."""
+def _question(ref: str, rendered: RenderedQuestion) -> idia.Question:
+    """The question as idia asks it, keyed by its ref, in the order received."""
     labels = tuple(
         idia.Label(name=name, description=rendered.descriptions[i])
         for i, name in enumerate(rendered.labels)
     )
     return idia.Question(
-        key=key,
+        key=ref,
         kind=cast(idia.Kind, rendered.kind.value),
         instruction=rendered.wording
         if isinstance(rendered.wording, str)
@@ -366,15 +344,15 @@ def _pair(span: idia.Span) -> tuple[int, int]:
     return (span.start, span.end)
 
 
-def _lines(sid: str, response: idia.Response, refs: dict[str, str]) -> list[str]:
-    """The source's lines: each failed attempt, each failed wire request with its refs, status
-    and message, then each warning, in the order idia gives them."""
+def _lines(sid: str, response: idia.Response) -> list[str]:
+    """The source's lines: each failed attempt, each failed wire request with its status and
+    message, then each warning, in the order idia gives them."""
     lines: list[str] = []
     for outcome in response.outcomes:
         for attempt in outcome.failed_attempts:
             lines.append(f"{sid}: failed-attempt: {_error(attempt.error)}")
         if outcome.error is not None:
-            keys = ", ".join(refs[key] for key in outcome.keys)
+            keys = ", ".join(outcome.keys)
             lines.append(f"{sid}: no answer for {keys}: {_error(outcome.error)}")
     for warning in (*response.warnings, *(w for o in response.outcomes for w in o.warnings)):
         field = "" if warning.field is None else f" {warning.field}"
@@ -402,10 +380,10 @@ def _precision(rounding: idia.Rounding) -> int | str:
     return "unrounded" if decimals is None else decimals
 
 
-def _provenance(outcome: idia.Outcome, refs: dict[str, str]) -> RequestProvenance:
+def _provenance(outcome: idia.Outcome) -> RequestProvenance:
     """One wire request's provenance under ommat's names: the profile's details, the prompt as
-    text, the usage figures it reports, idia's reasons and claims, the client versions, and the
-    refs of its keys when idia warns the provider cut it short."""
+    text, the usage figures it reports, idia's reasons and claims, the client versions, and its
+    keys when idia warns the provider cut it short."""
     usage = outcome.usage
     figures = (
         None
@@ -432,5 +410,5 @@ def _provenance(outcome: idia.Outcome, refs: dict[str, str]) -> RequestProvenanc
         calibrated=outcome.calibrated,
         missing={_detail(d): r for d, r in outcome.unreported.items()} or None,
         clients=dict(outcome.client_versions) or None,
-        truncated=tuple(refs[key] for key in outcome.keys) if cut else (),
+        truncated=tuple(outcome.keys) if cut else (),
     )

@@ -245,32 +245,18 @@ def test_a_label_source_sends_its_needs_as_one_json_part_keyed_by_ommats_refs() 
     assert sent.wire_request.questions[1].labels == ()
 
 
-def test_the_state_need_is_sent_as_the_whole_json_part_and_keys_replace_refs() -> None:
+def test_the_state_need_is_sent_as_the_whole_json_part() -> None:
     leaf = Scripted(capabilities=caps(), script=answer_all)
     dispatcher = Dispatcher(leaf, retry=RetryPolicy.without_delay())
-    binding = oracle_binding(dispatcher, state="t:state", keys={"q:route": "route"})
+    binding = oracle_binding(dispatcher, state="t:state")
     turns = {"earlier_turns": ["[user] hi"], "current_turn": "archive it"}
     result = call(binding, source(questions={"q:route": ASSET}, needs={"t:state": turns}))
     (sent,) = leaf.calls
     (part,) = sent.wire_request.state.parts
     assert isinstance(part, JsonPart)
     assert dict(part.value) == {"earlier_turns": ("[user] hi",), "current_turn": "archive it"}  # type: ignore[arg-type]
-    assert [q.key for q in sent.wire_request.questions] == ["route"]
+    assert [q.key for q in sent.wire_request.questions] == ["q:route"]
     assert result.values["q:route"] == {"road": 0.5, "other": 0.5}
-
-
-def test_keys_replace_need_refs_and_keep_the_questions_in_the_order_of_their_refs() -> None:
-    leaf = Scripted(capabilities=caps(), script=answer_all)
-    keys = {"t:state.report": "report", "q:triage/asset": "z", "q:triage/hazard": "a"}
-    binding = oracle_binding(Dispatcher(leaf), keys=keys)
-    questions = {"q:triage/asset": ASSET, "q:triage/hazard": NOUL}
-    result = call(binding, source(questions=questions, needs={"t:state.report": TEXT, "t:x": 1}))
-    (sent,) = leaf.calls
-    (part,) = sent.wire_request.state.parts
-    assert isinstance(part, JsonPart)
-    assert dict(part.value) == {"report": TEXT, "t:x": 1}  # type: ignore[arg-type]
-    assert [q.key for q in sent.wire_request.questions] == ["z", "a"]
-    assert set(result.values) == {"q:triage/asset", "q:triage/hazard"}
 
 
 def test_a_source_needing_the_state_need_beside_another_is_unsupported() -> None:
@@ -284,41 +270,6 @@ def test_a_source_needing_the_state_need_beside_another_is_unsupported() -> None
     )
     assert isinstance(result.values["q:other/x"], dict)
     assert len(leaf.calls) == 1
-
-
-def test_a_renamed_questions_failure_and_truncation_name_its_ref() -> None:
-    warning = Notice(code=idia.WARNING_PROVIDER_TRUNCATED, message="cut short")
-
-    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
-        if wire_request.questions[0].key == "sev":
-            return ProviderError("HTTP 503: down", status_code=503)
-        return Reply(answers=answer_all(wire_request, deadline), warnings=(warning,))
-
-    leaf = Scripted(capabilities=caps(max_questions=1), script=script)
-    keys = {"q:triage/hazard": "haz", "q:triage/severity": "sev"}
-    binding = oracle_binding(Dispatcher(leaf, retry=RetryPolicy.without_delay()), keys=keys)
-    result = call(binding, source(questions={"q:triage/hazard": NOUL, "q:triage/severity": LEVEL}))
-    assert code(result, "q:triage/severity") == "raised"
-    assert result.truncated == ("q:triage/hazard",)
-    assert any(
-        line.startswith("triage: no answer for q:triage/severity:") for line in result.warnings
-    )
-
-
-@pytest.mark.parametrize(
-    ("keys", "message"),
-    [
-        ({"q:a": ""}, "non-empty with no colon"),
-        ({"q:a": "q:b"}, "non-empty with no colon"),
-        ({"q:a": "x", "q:b": "x"}, "no two refs under one key"),
-    ],
-)
-def test_keys_that_could_send_two_refs_under_one_key_are_refused(
-    keys: dict[str, str], message: str
-) -> None:
-    leaf = Scripted(capabilities=caps(), script=answer_all)
-    with pytest.raises(ValueError, match=message):
-        oracle_binding(Dispatcher(leaf), keys=keys)
 
 
 def test_a_q_need_and_a_list_need_are_sent_as_json() -> None:

@@ -4,10 +4,10 @@ format-3 turn with a described label, a call's precision and warnings and an ``u
 marker, built item by item so a test can take any prefix or swap one item."""
 
 import copy
-from typing import Any
+from typing import Any, cast
 
-from ommat._canonical import hash_value
-from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH
+from ommat._canonical import hash_value, order_of, with_order
+from ommat._values import HASH_FORMAT, KEY_ORDER_FORMAT, MAX_DOCUMENT_DEPTH
 
 HASH = "sha256:" + "ab" * 32
 IDENTITY = "sha256:" + "cd" * 32
@@ -265,14 +265,63 @@ def fresh(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return copy.deepcopy(items)
 
 
-def rehashed(doc: dict[str, Any]) -> dict[str, Any]:
+_ORDERED = ("entry", "plan", "verdict")
+
+
+def reordered(item: dict[str, Any]) -> None:
+    """An entry, plan or verdict item of a format-6 or later log given its ``order`` afresh, in
+    place, as the ledger derives it at the append: the stale ``order`` dropped, the item's own
+    members put in canonical order, then ``order_of`` the item, each object read in the order
+    it holds."""
+    rest = {k: v for k, v in item.items() if k != "order"}
+    item.clear()
+    item.update({k: rest[k] for k in sorted(rest)})  # an item's own members are ASCII
+    item["order"] = order_of(item)
+
+
+def _kept(item: dict[str, Any]) -> bool:
+    """Whether an item keeps its ``order``: it holds one that fits it, and every object of it
+    stands in canonical order, as the record's document holds it."""
+    if "order" not in item:
+        return False
+    rest = {k: v for k, v in item.items() if k != "order"}
+    try:
+        with_order(rest, item["order"])
+    except ValueError:
+        return False
+    return order_of(rest) == {}
+
+
+def rehashed(doc: dict[str, Any], *, reorder: bool = True) -> dict[str, Any]:
     """A record document whose log a test edited, its ``hash`` recomputed from the log when its
-    format has one, as a job that edits a record's bytes recomputes it."""
+    format has one, as a job that edits a record's bytes recomputes it. From format 6 each
+    entry, plan and verdict item is given its ``order`` afresh (``reordered``) from the order
+    its objects hold, as ``Record.log`` gives them, except an item read off the record's
+    document: all in canonical order, whose ``order`` still fits, keeps it. With ``reorder``
+    false none is, so a test can hold a stale one."""
     log = doc["log"]
+    fmt = log[0].get("format", 0) if log and type(log[0]) is dict else 0
+    if reorder and type(fmt) is int and fmt >= KEY_ORDER_FORMAT:
+        for found in log:
+            if type(found) is not dict:
+                continue
+            item = cast("dict[str, Any]", found)
+            if item.get("item") in _ORDERED and not _kept(item):
+                reordered(item)
     if log and type(log[0]) is dict and log[0].get("format", 0) >= HASH_FORMAT:
         doc["hash"] = hash_value(log, MAX_DOCUMENT_DEPTH)
     else:
         doc.pop("hash", None)
+    return doc
+
+
+def before_key_order(doc: dict[str, Any], fmt: int = KEY_ORDER_FORMAT - 1) -> dict[str, Any]:
+    """A current record document made format ``fmt``, before format 6: the format number set
+    and each item's ``order`` dropped, its objects left in the order they hold. Its ``hash`` is
+    left to recompute."""
+    doc["log"][0]["format"] = fmt
+    for item in doc["log"]:
+        item.pop("order", None)
     return doc
 
 
@@ -281,11 +330,11 @@ _CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
 
 
 def before_profile(doc: dict[str, Any], fmt: int) -> dict[str, Any]:
-    """A current record document made format ``fmt``: the format number set, each call item's
+    """A current record document made format ``fmt``: ``before_key_order``, then each call item's
     ``revision`` renamed back to ``snapshot``, the profile's other members and its ``calls``
     entries' dropped, and each plan item's ``context``, as a record before format 5 holds them.
     A caller below format 3 also drops what format 3 added. Its ``hash`` is left to recompute."""
-    doc["log"][0]["format"] = fmt
+    before_key_order(doc, fmt)
     for item in doc["log"]:
         if item["item"] == "plan":
             item.pop("context", None)  # a record before format 5 holds no block

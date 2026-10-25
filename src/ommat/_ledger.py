@@ -15,7 +15,16 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ommat._answer import PROBABILITY_KINDS, AnswerKind, ValueType
-from ommat._canonical import decode, decode_written, encode, encode_checked, record_hash
+from ommat._canonical import (
+    _utf16_key,  # pyright: ignore[reportPrivateUsage]
+    decode,
+    decode_written,
+    encode,
+    encode_checked,
+    order_of,
+    record_hash,
+    with_order,
+)
 from ommat._markers import CauseCode, MarkerKind, OutcomeKind, PlanKind, VerdictKind
 from ommat._provenance import (
     DETAILS,
@@ -31,6 +40,7 @@ from ommat._values import (
     DESCRIPTION_FORMAT,
     EXTRACTION_FORMAT,
     HASH_FORMAT,
+    KEY_ORDER_FORMAT,
     LABEL_OVERFLOW_FORMAT,
     MAX_DEPTH,
     MAX_DOCUMENT_DEPTH,
@@ -96,6 +106,49 @@ def _copy(value: Any) -> Any:
     if isinstance(value, str):
         return string_data(value)
     return value
+
+
+_ORDERED = frozenset({"entry", "plan", "verdict"})
+"""The item kinds that hold values, whose ``order`` a format-6 record writes."""
+
+_ORDER = "order"
+
+
+def _with_held_order(item: dict[str, Any]) -> dict[str, Any]:
+    """The checked item with its own members in canonical order and its ``order``: each object
+    of its values not in canonical order, as ``order_of`` gives it (§key-order)."""
+    canonical = {k: item[k] for k in sorted(item, key=_utf16_key)}
+    canonical[_ORDER] = order_of(canonical)
+    return canonical
+
+
+def _in_held_order(item: dict[str, Any]) -> dict[str, Any]:
+    """A decoded item with each object its ``order`` names in that order; an item with none
+    as it is."""
+    order = item.pop(_ORDER, None)
+    if order is None:
+        return item
+    held = cast("dict[str, Any]", with_order(item, order))
+    held[_ORDER] = order
+    return held
+
+
+def _unordered_item(item: object, fmt: int, index: int) -> object:
+    """A read item as the producer gave it: from format 6 an entry, plan or verdict item has
+    its ``order`` taken off and its objects rebuilt in that order, so the append derives it
+    again and the bytes are compared; an ``order`` that does not fit is refused."""
+    if type(item) is not dict or fmt < KEY_ORDER_FORMAT:
+        return cast(object, item)
+    found = cast("dict[str, Any]", item)
+    if found.get("item") not in _ORDERED:
+        return found
+    if _ORDER not in found:
+        raise _LedgerError(f"item {index} has no 'order' member; a format-{fmt} record's has")
+    rest = {k: v for k, v in found.items() if k != _ORDER}
+    try:
+        return with_order(rest, found[_ORDER])
+    except ValueError as unfit:
+        raise _LedgerError(f"item {index}'s order does not fit it: {unfit}") from None
 
 
 def _value_places(item: Any, where: str) -> list[tuple[str, Any]]:
@@ -1119,6 +1172,8 @@ class Ledger:
         _no_grounded_ref(cast(str, kind), stored, where)
         _no_set(cast(str, kind), stored, where)
         commit = self._check_order(cast(str, kind), stored, index, where)
+        if kind in _ORDERED and self._format >= KEY_ORDER_FORMAT:
+            stored = _with_held_order(stored)
         # The copy is the checked item in exact types, so it is encoded with no second walk.
         data = encode_checked(stored)
         try:
@@ -1622,8 +1677,9 @@ class Record:
 
     @property
     def log(self) -> list[dict[str, Any]]:
-        """The log's items as plain objects, decoded afresh at each read."""
-        return [cast("dict[str, Any]", decode_written(data)) for data in self._items]
+        """The log's items as plain objects, decoded afresh at each read, each object of an item
+        that holds an ``order`` in the order it gives."""
+        return [_in_held_order(cast("dict[str, Any]", decode_written(d))) for d in self._items]
 
     @property
     def unhashed(self) -> dict[str, Any]:
@@ -1751,8 +1807,8 @@ def _read(doc: object) -> Record:
             if found is not MISSING:
                 _sized_value(found, f"unhashed 'calls' entry {i}'s {name!r}")
     ledger = Ledger()
-    for item in cast("list[Any]", log):
-        ledger.append(item)
+    for i, item in enumerate(cast("list[Any]", log)):
+        ledger.append(_unordered_item(item, fmt, i))
     for name, value in cast("dict[str, Any]", unhashed).items():
         ledger._set_unhashed(string_data(name), _copy(value))  # pyright: ignore[reportPrivateUsage]
     record = ledger.close()

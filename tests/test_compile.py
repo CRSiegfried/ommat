@@ -244,13 +244,13 @@ def test_the_plan_and_verdict_items_bytes() -> None:
     record, _, _ = returning(None)
     assert encode(plan_item(record)) == (
         b'{"cause":{"code":"invalid-return","refs":["policy"]},"context":null,"derivation":[],'
-        b'"item":"plan","kind":"broken","reason":null,"reply":null,"steps":[]}'
+        b'"item":"plan","kind":"broken","order":{},"reason":null,"reply":null,"steps":[]}'
     )
-    assert encode(record.log[-1]) == b'{"failures":[],"item":"verdict","kind":"passed"}'
+    assert encode(record.log[-1]) == b'{"failures":[],"item":"verdict","kind":"passed","order":{}}'
     record, _, _ = returning(Plan("escalate", [archive()], reason="x"))
     assert encode(plan_item(record)) == (
         b'{"cause":{"code":"invalid-return","refs":["rule:1"]},"context":null,"derivation":[],'
-        b'"item":"plan","kind":"broken","reason":null,"reply":null,"steps":[]}'
+        b'"item":"plan","kind":"broken","order":{},"reason":null,"reply":null,"steps":[]}'
     )
     record, _, _ = returning(execute(archive(x=Binding(5))))
     assert b'"cause":{"code":"invalid-return","refs":["rule:2","step:1"]}' in encode(
@@ -260,11 +260,13 @@ def test_the_plan_and_verdict_items_bytes() -> None:
     assert encode(plan_item(record)) == (
         b'{"cause":{"code":"required","refs":["d:lost.status"]},"context":null,"derivation":[],'
         b'"item":"plan",'
-        b'"kind":"escalate","reason":null,"reply":null,"steps":[]}'
+        b'"kind":"escalate","order":{},"reason":null,"reply":null,"steps":[]}'
     )
     record, _, verdict = returning(GOOD)
     assert encode(plan_item(record)) == (
+        # Each object of the steps in the order the policy and the plan built it.
         b'{"cause":null,"context":null,"derivation":[],"item":"plan","kind":"execute",'
+        b'"order":{"1":[2,0,1],"12":[1,0],"6":[2,0,1],"7":[1,2,0],"8":[1,0],"9":[1,0]},'
         b'"reason":null,"reply":null,"steps":[{"arguments":{"folder":{"literal":"spam"},'
         b'"what":{"ref":"d:route"}},"requirements":[{"ref":"d:route","value":"archive"}],'
         b'"tool":"archive"},{"arguments":{"at":{"path":"items.name","step":1},'
@@ -272,7 +274,7 @@ def test_the_plan_and_verdict_items_bytes() -> None:
         b'"requirements":[{"ref":"d:order","value":{"n":2,"status":"open"}}],"tool":"send"}]}'
     )
     assert verdict == Verdict(VerdictKind.passed)
-    assert encode(record.log[-1]) == b'{"failures":[],"item":"verdict","kind":"passed"}'
+    assert encode(record.log[-1]) == b'{"failures":[],"item":"verdict","kind":"passed","order":{}}'
 
 
 def test_a_valid_plan_is_returned_and_recorded_as_the_policy_wrote_it() -> None:
@@ -933,6 +935,7 @@ def test_a_refused_verdict_keeps_the_policys_plan_and_reads_the_designs_guards()
             {"step": 1, "requirement": {"ref": "d:route", "value": "keep"}, "ref": "d:route"},
             {"step": 2, "requirement": None, "ref": None},
         ],
+        "order": {"1": [2, 1, 0], "3": [2, 1, 0]},
     }
     _, _, verdict = returning(plan, requirements=[Requirement("d:gone", True)], default_deny=False)
     assert verdict.failures == (
@@ -944,7 +947,7 @@ def test_a_refused_verdict_keeps_the_policys_plan_and_reads_the_designs_guards()
 def test_a_compile_built_plan_passes_the_guard_whatever_it_requires() -> None:
     record, _, verdict = run(const(None), requirements=[Requirement("d:gone", True)])
     assert verdict == Verdict(VerdictKind.passed)
-    assert record.log[-1] == {"item": "verdict", "kind": "passed", "failures": []}
+    assert record.log[-1] == {"item": "verdict", "kind": "passed", "failures": [], "order": {}}
 
 
 # ---------------------------------------------------------------------------------------------

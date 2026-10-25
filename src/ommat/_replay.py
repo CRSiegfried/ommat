@@ -275,7 +275,11 @@ def _first(log: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
 
 
 def _differ(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
-    """Two items, or a side holding none, compared by canonical bytes."""
+    """Two items, or a side holding none, compared by canonical bytes, ``order`` included; an
+    item of a record before format 6 holds none, and is compared without it."""
     if a is None or b is None:
         return a is not b
+    if ("order" in a) != ("order" in b):
+        a = {k: v for k, v in a.items() if k != "order"}
+        b = {k: v for k, v in b.items() if k != "order"}
     return encode(a, _ITEM_DEPTH) != encode(b, _ITEM_DEPTH)

@@ -701,7 +701,8 @@ def test_a_cancellation_propagates_with_the_replay_record_ending_in_its_cause() 
 
 def test_a_copy_clearing_a_refused_answer_replays_the_value() -> None:
     record = live(ask=returns({**SPAM, "q:spam": Unavailable(Cause("refused", ["q:spam"]))}))
-    value = {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"no": 0.2, "yes": 0.8}}
+    # In the order a live answer holds it, its probabilities by its labels.
+    value = {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"yes": 0.8, "no": 0.2}}
 
     def change(doc: dict[str, Any]) -> None:
         item = entry(doc["log"], "q:spam")

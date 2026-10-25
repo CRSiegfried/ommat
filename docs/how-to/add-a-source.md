@@ -106,8 +106,8 @@ step's result.
 `batch` is a tuple of `SourceCall`s in source id order. Each holds:
 
 - `id`, the source's id, and `payload`, the source's `payload` from the design;
-- `needs`, each need's value keyed by the need as declared, never a marker, since a source is
-  called only when its needs are determined;
+- `needs`, each need's value keyed by the need as declared, in code-point order, never a
+  marker, since a source is called only when its needs are determined;
 - `refs`, the `t:` refs it provides, in code-point order;
 - `questions`, each `q:` ref's `RenderedQuestion`, in the code-point order of their refs.
 
@@ -127,7 +127,10 @@ store.
 
 The order is part of what ran: a provider may answer a question differently beside other
 questions. A binding that asks one question per request, or frames its own order, names that
-method in `elicitation`.
+method in `elicitation`. Key order is part of what the model reads too: a record value's fields
+stand in its type's declared order, and a payload's objects in the order the design wrote
+them, so send each object in the order you receive it, and write it with `json.dumps`, never
+`sort_keys=True`.
 
 `seconds` is the time the call has. [Seconds and timeouts](#seconds-and-timeouts) says what
 to do with it.
@@ -528,7 +531,7 @@ its spans still index the whole text.
 Each request the call sends is one `RequestProvenance`: the provider, the model, its
 revision and runtime, `elicitation`, the method and its threshold, and `prompt`, what the
 model received beside the text, which the record already holds as a need, written by
-`prompt_text`. The model id and revision are the model's own word, which the binding cannot
+`prompt_text`, which keeps a mapping's keys in the order given. The model id and revision are the model's own word, which the binding cannot
 check, so it claims them; a request that failed reports no model, its `model_reported`
 `not-sent`. Each detail the model cannot give is null, with its reason:
 

@@ -454,9 +454,10 @@ _DROP = object()
         (_set(("q:amount", "p_null"), "low"), "'p_null' is not a number or null"),
         (_set(("q:amount", "span"), [1, 2, 3]), "'span' is not null"),
         (_set(("q:amount", "span"), [1.0, 2]), "'span' is not null"),
-        # Read by its kind, an object of the extraction members is no other kind's answer.
-        (_set(("q:amount", "kind"), "noul"), "has the member 'confidence'"),
-        (_set(("q:amount", "kind"), "estimate"), "has the member 'confidence'"),
+        # Read by its kind, an object of the extraction members is no other kind's answer: the
+        # first member it does not name in the order held is the value type.
+        (_set(("q:amount", "kind"), "noul"), "has the member 'value_type'"),
+        (_set(("q:amount", "kind"), "estimate"), "has the member 'value_type'"),
     ],
 )
 def test_the_ledger_refuses_an_extraction_value_off_its_shape(
@@ -635,23 +636,25 @@ def test_a_format_1_record_reads_back_to_its_own_hash() -> None:
 
 def test_the_append_refuses_a_design_item_of_an_unknown_format() -> None:
     ledger = Ledger()
-    with pytest.raises(_LedgerError, match="the format 6 is not one this ledger knows"):
-        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 6, "helpers": 2})
+    with pytest.raises(_LedgerError, match="the format 7 is not one this ledger knows"):
+        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 7, "helpers": 2})
 
 
 def test_a_record_of_an_unknown_format_is_refused() -> None:
     def change(doc: dict[str, Any]) -> None:
-        doc["log"][0]["format"] = 6
+        doc["log"][0]["format"] = 7
 
-    with pytest.raises(InvalidRecord, match="format 6 is not one this reader knows: 1, 2, 3, 4, 5"):
+    with pytest.raises(
+        InvalidRecord, match="format 7 is not one this reader knows: 1, 2, 3, 4, 5, 6"
+    ):
         read_record(edited(change))
 
 
 # ---------------------------------------------------------------------------------------------
 # The golden extraction record
 
-GOLDEN_X_DESIGN = "sha256:effc8246e28cab29cfb1d58a799791d87173b4e741ac28ff4471f7876ba6a223"
-GOLDEN_X_RECORD = "sha256:279aa1f668c4faa23466fa760abf088037a74bf5d3d7e461091b5139f4161c3a"
+GOLDEN_X_DESIGN = "sha256:0fa38eeaf8a8858bdc77e8097e506c8697944a782b3286f791dd96ce993b1fd2"
+GOLDEN_X_RECORD = "sha256:5a63ccdc6d232c5d3de0bcaa4dae331d3a2c46450318df429bb609242922620a"
 
 
 def test_the_golden_extraction_record() -> None:
@@ -659,7 +662,7 @@ def test_the_golden_extraction_record() -> None:
     assert record.log[0] == {
         "item": "design",
         "hash": GOLDEN_X_DESIGN,
-        "format": 5,
+        "format": 6,
         "helpers": HELPERS,
     }
     assert (record.design_hash, record.record_hash) == (GOLDEN_X_DESIGN, GOLDEN_X_RECORD)
@@ -773,7 +776,7 @@ def test_a_format_1_record_replays_under_its_format_1_design_with_helpers_mismat
     again, findings = replay_sync(record, loaded)
     assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 1, "replayed": HELPERS}]
     assert again is not None
-    assert again.log[0]["format"] == 5  # the engine writes its own format
+    assert again.log[0]["format"] == 6  # the engine writes its own format
 
 
 def test_a_format_1_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
@@ -791,7 +794,7 @@ def test_a_format_1_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
 
     record = decide_sync(loaded, stored_state, {"mail": nothing, "default": nothing}).record
     assert record.log[0]["item"] == "design"
-    assert record.log[0]["format"] == 5  # the engine writes its own format
+    assert record.log[0]["format"] == 6  # the engine writes its own format
 
 
 # ---------------------------------------------------------------------------------------------

@@ -3,7 +3,7 @@ builders that change one declaration of it."""
 
 import dataclasses
 import enum
-from typing import Any
+from typing import Any, cast
 
 from ommat import (
     Design,
@@ -19,6 +19,12 @@ from ommat import (
     When,
 )
 from ommat import types as t
+from ommat._types import (
+    TypeFailure,
+    _sorted_fields,  # pyright: ignore[reportPrivateUsage]
+    parse_type,
+    render,
+)
 
 
 class Mood(enum.StrEnum):
@@ -240,3 +246,50 @@ def bounded(**changes: Any) -> Design:
     }
     fields.update(changes)
     return dataclasses.replace(design, **fields)
+
+
+def document_before_key_order(doc: dict[str, Any], fmt: int = 5) -> dict[str, Any]:
+    """A current decoded design document made format ``fmt``, before format 6: the format
+    number set, each source's ``payload_order``, each parameter leaf's ``order`` and each
+    structured wording's ``order`` dropped, and every type string that spells a record's fields
+    out of code-point order re-spelled in it, as a document before format 6 holds them."""
+    doc["format"] = fmt
+    sources: dict[str, dict[str, Any]] = doc["sources"]
+    for source in sources.values():
+        source.pop("payload_order", None)
+        provides: dict[str, Any] = source["provides"]
+        for provided in provides.values():
+            if isinstance(provided, dict):
+                wording = cast("dict[str, Any]", provided).get("wording")
+                if isinstance(wording, dict):
+                    cast("dict[str, Any]", wording).pop("order", None)
+    _drop_leaf_orders(doc["parameters"])
+    respelled = _sorted_spellings(doc)
+    doc.clear()
+    doc.update(respelled)
+    return doc
+
+
+def _drop_leaf_orders(tree: object) -> None:
+    if type(tree) is not dict:
+        return
+    members = cast("dict[str, Any]", tree)
+    if "type" in members and "value" in members:
+        members.pop("order", None)
+        return
+    for member in members.values():
+        _drop_leaf_orders(member)
+
+
+def _sorted_spellings(value: Any) -> Any:
+    """``value`` with each string that parses as a type holding a record re-spelled with every
+    record's fields in code-point order; every other string as it is."""
+    if type(value) is dict:
+        return {k: _sorted_spellings(v) for k, v in cast("dict[str, Any]", value).items()}
+    if type(value) is list:
+        return [_sorted_spellings(v) for v in cast("list[Any]", value)]
+    if type(value) is str and "record{" in value:
+        parsed = parse_type(value, nullable=True)
+        if not isinstance(parsed, TypeFailure):
+            return render(_sorted_fields(parsed))
+    return value

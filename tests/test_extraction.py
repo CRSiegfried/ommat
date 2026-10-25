@@ -13,6 +13,7 @@ import pytest
 import extraction as x
 import ommat
 import ommat._form
+from designs import document_before_key_order
 from ommat import (
     Answer,
     AnswerKind,
@@ -260,7 +261,7 @@ def only(design: Any, check: int, says: str) -> None:
 def test_a_valid_extraction_design_loads_and_writes_the_questions_object() -> None:
     loaded = x.loaded()
     provides = decode(loaded.document)["sources"]["read"]["provides"]
-    assert decode(loaded.document)["format"] == 5
+    assert decode(loaded.document)["format"] == 6
     assert provides["q:amount"] == {
         "kind": "extraction",
         "wording": {
@@ -577,8 +578,7 @@ def test_an_extraction_design_document_round_trips_to_its_own_hash() -> None:
 
 
 def test_check_11_a_format_1_document_holding_an_extraction_question_is_refused() -> None:
-    doc = decode(x.loaded().document)
-    doc["format"] = 1
+    doc = document_before_key_order(decode(x.loaded().document), 1)
     del doc["context"]  # a design before format 5 holds no block
     doc["rules"]["amount"]["boundaries"] = None
     found = refused(doc)
@@ -591,8 +591,7 @@ def test_check_11_a_format_1_document_holding_an_extraction_question_is_refused(
 
 
 def test_check_11_a_format_1_document_holding_the_extraction_roles_is_refused() -> None:
-    doc = decode(x.loaded().document)
-    doc["format"] = 1
+    doc = document_before_key_order(decode(x.loaded().document), 1)
     del doc["context"]  # a design before format 5 holds no block
     shown = 'rule "amount"\'s boundaries for "q:amount"'
     found = [(f.check, f.message) for f in refused(doc)]

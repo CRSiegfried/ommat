@@ -77,7 +77,87 @@ def encode_checked(value: object) -> bytes:
     return "".join(parts).encode("utf-8")
 
 
-def _encode_into(value: object, out: list[str]) -> None:
+def ordered(value: object) -> str:
+    """The ordered encoding of a value in the value domain: the canonical encoding's forms
+    with each object's members in the order the value holds them, as text; ``_CanonicalError``
+    for a value ``encode`` refuses. It is the text a model reads."""
+    err = domain_error(value, None)
+    if err is not None:
+        raise _CanonicalError(err)
+    parts: list[str] = []
+    _encode_into(value, parts, sort=False)
+    return "".join(parts)
+
+
+def order_of(value: object) -> dict[str, list[int]]:
+    """The order object of plain data: for each object whose members are not in the canonical
+    key order, its index among the objects in pre-order, walked as the canonical encoding
+    writes the data, as decimal text, mapped to its members' positions in the canonical order,
+    listed in the order held. ``{}`` when every object is in canonical order. It holds no key
+    and grows with the data."""
+    found: dict[str, list[int]] = {}
+    _orders(value, [0], found)
+    return found
+
+
+def _canonical_keys(members: dict[str, object]) -> list[str]:
+    return sorted(members, key=lambda k: _utf16_key(string_data(k)))
+
+
+def _orders(value: object, count: list[int], found: dict[str, list[int]]) -> None:
+    if isinstance(value, dict):
+        members = cast("dict[str, object]", value)
+        index = count[0]
+        count[0] += 1
+        canonical = _canonical_keys(members)
+        held = list(members)
+        if held != canonical:
+            position = {k: i for i, k in enumerate(canonical)}
+            found[str(index)] = [position[k] for k in held]
+        for key in canonical:
+            _orders(members[key], count, found)
+    elif isinstance(value, (list, tuple)):
+        for member in cast("Sequence[object]", value):
+            _orders(member, count, found)
+
+
+def with_order(value: object, order: dict[str, list[int]]) -> object:
+    """A fresh copy of plain data with each object ``order`` names in the order it gives,
+    every other object in the canonical key order, the inverse of ``order_of``; ``ValueError``
+    for an order object that is not ``order_of`` of some ordering of the data."""
+    if type(order) is not dict or any(
+        type(k) is not str
+        or type(v) is not list
+        or any(type(p) is not int for p in cast("list[object]", v))
+        for k, v in cast("dict[object, object]", order).items()
+    ):
+        raise ValueError("an order object maps decimal indexes to lists of integers")
+    count = [0]
+    rebuilt = _rebuilt(value, count, order)
+    if order_of(rebuilt) != order:
+        raise ValueError("the order object does not fit its data")
+    return rebuilt
+
+
+def _rebuilt(value: object, count: list[int], order: dict[str, list[int]]) -> object:
+    if isinstance(value, dict):
+        members = cast("dict[str, object]", value)
+        index = count[0]
+        count[0] += 1
+        canonical = _canonical_keys(members)
+        built = {k: _rebuilt(members[k], count, order) for k in canonical}
+        positions = order.get(str(index))
+        if positions is None:
+            return built
+        if sorted(positions) != list(range(len(canonical))):
+            raise ValueError(f"the order of object {index} is not a permutation of its members")
+        return {canonical[i]: built[canonical[i]] for i in positions}
+    if isinstance(value, (list, tuple)):
+        return [_rebuilt(m, count, order) for m in cast("Sequence[object]", value)]
+    return value
+
+
+def _encode_into(value: object, out: list[str], *, sort: bool = True) -> None:
     # The value is in the domain: domain_error has checked its types, cycles and depth, so
     # this recursion is at most max_depth deep.
     if value is None:
@@ -95,20 +175,22 @@ def _encode_into(value: object, out: list[str]) -> None:
     elif isinstance(value, dict):
         # Keys by their string data: domain_error has checked no two share it.
         members = [(string_data(k), v) for k, v in cast("dict[str, object]", value).items()]
+        if sort:
+            members.sort(key=lambda kv: _utf16_key(kv[0]))
         out.append("{")
-        for i, (key, member) in enumerate(sorted(members, key=lambda kv: _utf16_key(kv[0]))):
+        for i, (key, member) in enumerate(members):
             if i:
                 out.append(",")
             out.append(_string(key))
             out.append(":")
-            _encode_into(member, out)
+            _encode_into(member, out, sort=sort)
         out.append("}")
     else:
         out.append("[")
         for i, member in enumerate(cast("list[object] | tuple[object, ...]", value)):
             if i:
                 out.append(",")
-            _encode_into(member, out)
+            _encode_into(member, out, sort=sort)
         out.append("]")
 
 

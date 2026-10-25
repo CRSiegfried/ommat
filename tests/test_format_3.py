@@ -19,7 +19,7 @@ from typing import Any, cast
 import pytest
 
 from counting import SmallBounds
-from designs import bounded, minimal, slot, with_source
+from designs import bounded, document_before_key_order, minimal, slot, with_source
 from ledger_logs import DESCRIBED, UNHASHED, fresh, rehashed
 from ommat import (
     CallResult,
@@ -102,7 +102,7 @@ def test_a_format_2_record_replays_under_its_format_2_design_with_no_finding() -
     again, findings = replay_sync(format_2_record(), format_2_design())
     assert findings == []
     assert again is not None
-    assert again.log[0]["format"] == 5  # the engine writes its own format
+    assert again.log[0]["format"] == 6  # the engine writes its own format
     assert decode(again.document)["hash"] == again.record_hash
 
 
@@ -138,7 +138,7 @@ def test_a_format_2_design_decides_a_turn_at_the_engines_format() -> None:
     record = decide_sync(
         format_2_design(), stored_state, {"mail": nothing, "default": nothing}
     ).record
-    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 5, "helpers": 2}
+    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 6, "helpers": 2}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -259,7 +259,7 @@ def test_a_described_design_loads_and_writes_its_labels_as_declared() -> None:
     loaded = load(described())
     asked = decode(loaded.document)["sources"]["ask"]["provides"]["q:tone"]
     assert asked["labels"] == [WARM, "cold"]
-    assert decode(loaded.document)["format"] == 5
+    assert decode(loaded.document)["format"] == 6
     assert loaded._labels["q:tone"] == (("warm", "cold"), ("Friendly or grateful", None))
     assert loaded._labels["q:other"] == (("yes", "no"), (None, None))
 
@@ -435,8 +435,7 @@ def check_11(doc: dict[str, Any]) -> str:
 
 @pytest.mark.parametrize("fmt", [1, 2])
 def test_check_11_refuses_a_described_label_in_an_earlier_format(fmt: int) -> None:
-    doc = document_of(described())
-    doc["format"] = fmt
+    doc = document_before_key_order(document_of(described()), fmt)
     del doc["context"]  # a design before format 5 holds no block
     assert f"has a described label, which format {fmt} does not have" in check_11(doc)
 
@@ -451,8 +450,7 @@ def test_check_11_refuses_a_described_label_with_a_member_missing_or_extra() -> 
 
 
 def test_a_format_2_document_with_undescribed_labels_loads() -> None:
-    doc = document_of(described(tone_question(["warm", "cold"])))
-    doc["format"] = 2
+    doc = document_before_key_order(document_of(described(tone_question(["warm", "cold"]))), 2)
     del doc["context"]  # a design before format 5 holds no block
     loaded = load(doc)
     assert decode(loaded.document)["format"] == 2
@@ -1118,8 +1116,8 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden described record
 
-GOLDEN_DESIGN = "sha256:9506decd9b111935642c317d76a76c282d361e299c111a0c4040b39625ecdf20"
-GOLDEN_RECORD = "sha256:f8fdaeda825788bda6cfc389e77df8af1dac87c43b0f4a3bd241121b803af05f"
+GOLDEN_DESIGN = "sha256:081ef00e43ac1398f073913450bbcffa703ea27bf3e2d525ed4ebb56a56fe3a1"
+GOLDEN_RECORD = "sha256:ac309a45253de211fd2cd7fc8ab50299bfdc24fba120282dcd9ecf81602ecc1b"
 
 
 def golden() -> Record:

@@ -150,20 +150,20 @@ STATE: dict[str, Any] = {
 SPAM = {"q:spam": {"yes": 0.9, "no": 0.1}, "t:body": "text of the mail"}
 REPLIES: dict[str, object] = {"ask": returns(SPAM), "look": returns({"t:size": 4})}
 
-GOLDEN_DESIGN = "sha256:29228237a6c1350faabe6c5aeb64c239247a961cf1afd62e9341dd0a14379320"
-GOLDEN_RECORD = "sha256:5b992c67e874e15e6ff697184d114a549ac3453413a07c84fa173dc04ea84d75"
-GOLDEN_BROKEN = "sha256:aeda75ea8baf625a43e3a066ee2af16f42338924b29a65350f6eae19fa3e925e"
+GOLDEN_DESIGN = "sha256:2d8310e5bb19c7dee779be11220a26625cb8638853173e46c09214e4f94f3283"
+GOLDEN_RECORD = "sha256:14170c7ae0396d39767ce2d2869df1dccb5db2eb212d027c5c0e4dade731b8fd"
+GOLDEN_BROKEN = "sha256:06635cdf9bb71206c293ce51e956da0577bbf5d811ef6759ddd094b698e9fc2d"
 GOLDEN_CANCELLED = (
-    "sha256:c7489cb711580adfb665291dda17aec29e8a86139ac79de46fde9eeddf3fdbfb",
-    "sha256:71cc13622a76d61e6cc17ef0586ece3aa2ed97501a0f064a508f06e728e42ebc",
+    "sha256:a6b9ac143bb9989785df7ab031056bf19a25a28929f82e9a90a34592f4082bdf",
+    "sha256:9b99880a08247d66a4ebf53af254feef8c51b189345893af48141822d3a72f12",
 )
 GOLDEN_REFUSED = (
-    "sha256:2469b6966de1d9d08e129b919b81cd6c8e51009d438572c153889f86f7d101c7",
-    "sha256:847840e24b21e23744c332bc75f27f90c141c48b419fc6adf5c7fd77f7acba89",
+    "sha256:ebea89ceb2510b4df52d3fcbd54dfba5323bf8d837e94a0ec56ebf54fbb66e84",
+    "sha256:0c70703182d1f824d11fe55cd7835c420d20f02de58457151521e64e504fbe2b",
 )
 GOLDEN_ESCALATE = (
-    "sha256:863acb4b477bd8eb86c7ee6a8d939189026aee94644a48cfa48be81f19eef973",
-    "sha256:e7874d66d5805ead90a94a3e83bf8e60e4bc4c52bbeba392d6a5bca8c32d7478",
+    "sha256:a534c5743b2ebaa5268f63fa2e3194a63f15a04fb29d30478648584ecdb85a07",
+    "sha256:dc09c60e83d9e44e744a149df3163243b9674d055b66b7cd997345748a19d336",
 )
 """Each a pair: the design hash, then the record hash."""
 
@@ -344,6 +344,7 @@ def test_the_golden_refused_verdict() -> None:
         "failures": [
             {"step": "plan", "requirement": {"ref": "d:route", "value": "no"}, "ref": "d:route"}
         ],
+        "order": {"1": [2, 1, 0]},
     }
     view = escalation(record)
     assert view is not None
@@ -393,7 +394,7 @@ def test_the_golden_hashes_hold_under_every_hash_seed(seed: str) -> None:
 
 def test_the_design_and_settings_items_bytes() -> None:
     log = go().record.log
-    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 5, "helpers": 2}
+    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 6, "helpers": 2}
     assert log[1] == {
         "item": "settings",
         "settings": {
@@ -880,6 +881,7 @@ BROKEN_ITEM: dict[str, Any] = {
     "reply": None,
     "cause": {"code": "raised", "refs": ["codec"]},
     "context": None,
+    "order": {},
 }
 
 
@@ -1027,7 +1029,7 @@ def test_a_raising_codec_is_a_broken_entry_with_its_text_under_the_plan_index() 
     record = decision.record
     assert record.log[2:] == [
         BROKEN_ITEM,
-        {"item": "verdict", "kind": "passed", "failures": []},
+        {"item": "verdict", "kind": "passed", "failures": [], "order": {}},
     ]
     assert decision.plan.kind is PlanKind.broken
     assert decision.plan.cause == Cause(CauseCode.raised, ["codec"])

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from designs import document_before_key_order
 from ledger_logs import before_profile, rehashed
 from ommat import (
     CallResult,
@@ -117,7 +118,7 @@ def test_a_described_noul_replays_and_from_record_answers_it() -> None:
 
 def test_a_described_noul_before_format_4_is_refused_in_a_document_and_a_record() -> None:
     loaded = load(design(DESCRIBED))
-    doc = {**json.loads(loaded.document), "format": 3}
+    doc = document_before_key_order(json.loads(loaded.document), 3)
     del doc["context"]  # a design before format 5 holds no block
     with pytest.raises(InvalidDesign) as raised:
         load(json.dumps(doc).encode())
@@ -161,9 +162,11 @@ def test_a_structured_wordings_string_values_render_and_its_keys_stay() -> None:
     assert wording == expected
 
 
-def test_a_structured_wording_renders_in_canonical_key_order() -> None:
-    d = slotted({"b": "two", "a": "one"})
-    assert list(asked_wording(d, {"body": ""})) == ["a", "b"]
+def test_a_structured_wording_renders_in_its_template_order() -> None:
+    d = slotted({"b": "two", "a": "one", "c": {"y": 1, "x": 2}})
+    wording = asked_wording(d, {"body": ""})
+    assert list(wording) == ["b", "a", "c"]
+    assert list(wording["c"]) == ["y", "x"]
 
 
 def test_changing_the_template_after_load_reaches_no_turn() -> None:
@@ -207,7 +210,7 @@ def test_a_structured_wording_has_its_own_identity_and_a_text_keeps_its_own() ->
 
 def test_a_structured_wording_before_format_4_is_refused() -> None:
     loaded = load(slotted({"task": "Does it name a sender?"}))
-    doc = {**json.loads(loaded.document), "format": 3}
+    doc = document_before_key_order(json.loads(loaded.document), 3)
     del doc["context"]  # a design before format 5 holds no block
     with pytest.raises(InvalidDesign) as raised:
         load(json.dumps(doc).encode())

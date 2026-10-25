@@ -4,6 +4,19 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+
+- `ommat.bindings.idia.oracle_binding(provider, *, state=None)`: `state` names a need that a label source sends as the whole JSON part, its value alone in place of an object keyed by refs, so a caller sends the state shape it measured a provider on. A label source that needs `state` beside another need, images aside, is `unsupported`, its reason a `warnings` line; an extraction source sends as before. As a shipped binding under 0.x, outside the compatibility promise, it changes in this minor release.
+
+### Changed
+
+- Key order is kept from declaration to wire to record, since the order of an object's keys is part of what a model reads. `ommat.types.record(b=..., a=...)` spells `record{b: ..., a: ...}`, its fields in the order declared, where it sorted them; a record value's fields stand in its type's order, and every other object keeps the order its author or producer gave it.
+- Records and design documents are format 6. A design document holds a source's `payload_order`, a parameter leaf's `order` and, when its template is out of canonical order, a structured wording's `order`; a record's `entry`, `plan` and `verdict` items each hold `order`, an order object the ledger derives, beside canonical bytes that still sort. Every design built in Python has a new design hash, so every record hash changes too, and golden hashes must be updated. `read_record` reads record formats 1 to 6 and `load` loads design documents of formats 1 to 6 to their own hash, each under its own format's rules: a design before format 6 spells a record's fields in code-point order, and a record before format 6 holds no `order`.
+- `Record.log`, the observer and replay give each object in the order its item's `order` holds; replay compares items with `order` included, so a rerun that holds an object in another order is a finding. `from_record` compares a need with the record's by its ordered encoding.
+- `prompt_text(prompt)` writes a mapping as `json.dumps(prompt)`, its keys in the order given at every depth, where it sorted them with `sort_keys=True`. A prompt in a call item now holds the order the model read.
+- The conversation renderers no longer write sorted JSON: `handoff_text`'s step arguments and `to_chat_completions`' arguments and content are in the ordered encoding, each object in the order the view holds it, where they were canonical JSON. A slot that renders an object, and a structured wording, keep their declared order the same way.
+- The idia binding sends each object in the order it receives it. Its tests' `Recorded` logs from before idia kept the order sent are re-keyed offline by idia; their prompts keep sorted keys until recorded again live.
+
 ## [0.4.0] - 2026-10-23
 
 ### Added

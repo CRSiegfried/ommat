@@ -230,7 +230,15 @@ def test_a_design_with_no_source_stops_after_round_0_with_no_round_item() -> Non
     loaded = make(rules={"size": rule("size", subject_len, "t:state.subject", outputs=t.integer())})
     record, _ = run(loaded, {})
     assert body(record) == [
-        {"item": "entry", "ref": "d:size", "round": 0, "call": None, "value": 5, "derivation": []}
+        {
+            "item": "entry",
+            "ref": "d:size",
+            "round": 0,
+            "call": None,
+            "value": 5,
+            "derivation": [],
+            "order": {},
+        }
     ]
 
 
@@ -280,6 +288,7 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
             "round": 1,
             "call": 3,
             "value": answer("noul", ["yes", "no"], NOUL),
+            "order": {"2": [1, 0]},
         },
         {
             "item": "entry",
@@ -287,8 +296,9 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
             "round": 1,
             "call": 3,
             "value": answer("choice", ["warm", "cold"], TONE),
+            "order": {"2": [1, 0]},
         },
-        {"item": "entry", "ref": "t:body", "round": 1, "call": 3, "value": "text"},
+        {"item": "entry", "ref": "t:body", "round": 1, "call": 3, "value": "text", "order": {}},
         {
             "item": "entry",
             "ref": "d:route",
@@ -298,6 +308,7 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
             "derivation": [
                 {"helper": "pick_with_margin", "refs": ["q:spam"], "rested_on": ["q:spam"]}
             ],
+            "order": {},
         },
         {"item": "round", "round": 1, "cost": 2, "deadline": False},
     ]
@@ -2778,7 +2789,8 @@ def test_a_bytes_parameters_identity_value_is_its_record_form() -> None:
         (3, "3"),
         (True, "true"),
         (None, "null"),
-        ({"b": 1, "a": "x"}, '{"a":"x","b":1}'),
+        ({"b": 1, "a": "x"}, '{"b":1,"a":"x"}'),
+        ({"a": "x", "b": 1}, '{"a":"x","b":1}'),
         (b"\x00\x01", '"AAE"'),
         ({"blob": b"\x00\x01"}, '{"blob":"AAE"}'),
         ({"l": [b"\x00\x01", ("a",)]}, '{"l":["AAE",["a"]]}'),
@@ -2788,7 +2800,7 @@ def test_a_slot_value_renders_by_the_declared_text_rule(value: object, rendered:
     assert _interpret._text(value) == rendered
 
 
-def test_a_record_slot_renders_as_its_canonical_encoding() -> None:
+def test_a_record_slot_renders_in_the_order_its_value_holds() -> None:
     sources = {
         "ask": slotted("Is {p}?", slot("p", ref="t:profile")),
         "look": look(),
@@ -2796,7 +2808,8 @@ def test_a_record_slot_renders_as_its_canonical_encoding() -> None:
     binding = Scripted({"look": returns(dict(LOOKED)), "ask": returns({"q:spam": NOUL})})
     turn(make(sources), {"default": binding}, STATE)
     (call,) = [b[0] for b in binding.batches if b[0].id == "ask"]
-    assert call.questions["q:spam"].wording == 'Is {"age":3,"home":{"city":"Oslo"},"name":"Ann"}?'
+    # The profile's fields as declared and returned, not in canonical key order.
+    assert call.questions["q:spam"].wording == 'Is {"name":"Ann","age":3,"home":{"city":"Oslo"}}?'
 
 
 # ---------------------------------------------------------------------------------------------

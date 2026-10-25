@@ -44,7 +44,7 @@ from ommat._answer import (
     span_bound,
 )
 from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
-from ommat._canonical import decode, encode, hash_value
+from ommat._canonical import decode, encode, hash_value, ordered, with_order
 from ommat._component import (
     Called,
     at,
@@ -711,13 +711,13 @@ def _render(template: str, values: Mapping[str, object]) -> str:
 
 def _text(value: object) -> str:
     """A slot value by the declared-text closed rule: a string as itself, a list as its
-    members' renderings joined by ``, ``, any other value as its canonical encoding, a
-    ``bytes`` value as its record form's."""
+    members' renderings joined by ``, ``, any other value as its ordered encoding, each object in
+    the order it holds, a ``bytes`` value as its record form's."""
     if type(value) is str:
         return value
     if type(value) in (list, tuple):
         return ", ".join(_text(member) for member in cast("Sequence[object]", value))
-    return encode(_record_form(value)).decode("utf-8")
+    return ordered(_record_form(value))
 
 
 def _record_form(value: object, *, bytes_form: Callable[[bytes], object] = b64url_encode) -> object:
@@ -1138,9 +1138,10 @@ class _Turn:
                 q = source.provides[ref]
                 if isinstance(q, Question):
                     kind = AnswerKind(q.kind)
-                    # A structured wording renders from the document, its keys in canonical
-                    # order, so a design and its document ask alike.
-                    declared = self.document[sid]["provides"][ref]["wording"]["template"]
+                    # A structured wording renders from the document, each object in the order
+                    # the document holds, so a design and its document ask alike.
+                    written = self.document[sid]["provides"][ref]["wording"]
+                    declared = with_order(written["template"], written.get("order", {}))
                     wording = _render_wording(declared, self.slot_values(q, needs))
                     if kind is AnswerKind.extraction:
                         questions[ref], passed_labels[ref] = q, ()

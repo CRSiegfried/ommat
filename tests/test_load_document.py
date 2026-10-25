@@ -625,8 +625,8 @@ def test_a_member_that_is_not_what_load_computes(
     change: Callable[[dict[str, Any]], None], names: tuple[str, ...], says: str
 ) -> None:
     doc = doc_of(full())
-    doc["parameters"]["a"] = {"type": t.number(), "value": 1}
-    doc["parameters"]["b"] = {"type": t.number(), "value": 1}
+    doc["parameters"]["a"] = {"type": t.number(), "value": 1, "order": {}}
+    doc["parameters"]["b"] = {"type": t.number(), "value": 1, "order": {}}
     change(doc)
     found = refused(written(doc))
     assert [(f.check, f.names, says in f.message) for f in found] == [(11, names, True)]
@@ -810,6 +810,7 @@ def test_a_document_is_held_to_no_size_bound_across_its_values(small_bounds: Sma
     doc = doc_of(gated())
     half = _WIDE[:10]  # within the bounds; over them summed
     doc["sources"]["intent"]["payload"] = half
+    doc["sources"]["intent"]["payload_order"] = {}  # a list holds no object to order
     doc["sources"]["lookup"]["payload"] = list(half)  # a copy: a parsed document shares none
     loaded = load(doc)
     assert decode(loaded._payload_bytes["lookup"]) == half
@@ -841,6 +842,7 @@ def test_a_parsed_document_sharing_a_container_is_refused_before_any_other_walk(
 def test_a_parsed_document_may_repeat_a_string_or_an_empty_container() -> None:
     doc = doc_of(gated())
     doc["sources"]["intent"]["payload"] = {"a": (), "b": (), "c": {}, "d": {}}
+    doc["sources"]["intent"]["payload_order"] = {}  # in canonical order
     doc["sources"]["lookup"]["payload"] = doc["sources"]["intent"]["payload"]["a"]
     load(doc)
     loaded = load(gated())
@@ -916,7 +918,7 @@ def test_a_label_set_document_loads_at_format_4() -> None:
 
 @pytest.mark.parametrize("fmt", [1, 2, 3])
 def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -> None:
-    doc: dict[str, Any] = {**label_set_doc(), "format": fmt}
+    doc = designs.document_before_key_order(label_set_doc(), fmt)
     del doc["context"]  # a design before format 5 holds no block
     (failure,) = refused(written(doc))
     assert failure.check == 11

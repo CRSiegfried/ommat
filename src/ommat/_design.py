@@ -115,8 +115,8 @@ class Text:
 class Structured:
     """A question's wording as a JSON object or array: each string value a template, rendered
     as a ``Text`` template is from one slot list; keys and other values literal, never
-    rendered. An object's members are written, rendered and sent in the canonical order of
-    their keys. Slots as ``Text``'s."""
+    rendered. An object's members are written, rendered and sent in the order the template
+    holds them, a model reading that order. Slots as ``Text``'s."""
 
     template: Any
     slots: Sequence[Mapping[str, Any]] = ()

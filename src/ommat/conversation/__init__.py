@@ -14,7 +14,7 @@ does not import this package, and this module takes nothing beyond the standard 
 
 from typing import Any, cast
 
-from ommat._canonical import encode
+from ommat._canonical import ordered
 from ommat.conversation._exchanges import BOOKKEEPING_ID, check_turn, exchanges
 
 __all__ = ["drop_earlier_bookkeeping", "handoff_text", "is_bookkeeping", "to_chat_completions"]
@@ -142,4 +142,4 @@ def _bookkept(call_id: object) -> bool:
 
 
 def _json(value: object) -> str:
-    return encode(value).decode("utf-8")
+    return ordered(value)

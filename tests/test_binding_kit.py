@@ -339,7 +339,7 @@ def test_a_str_or_none_is_as_given() -> None:
     assert prompt_text(text) is text
 
 
-def test_a_mapping_is_sorted_key_json_byte_for_byte() -> None:
+def test_a_mapping_keeps_its_key_order_byte_for_byte() -> None:
     prompt = MappingProxyType(
         {
             "model": "m",
@@ -348,14 +348,15 @@ def test_a_mapping_is_sorted_key_json_byte_for_byte() -> None:
         }
     )
     assert prompt_text(prompt) == (
-        '{"answers": [2.5, null, true], "input": [{"content": {"a": "\\u00e9", "z": 1}, '
-        '"role": "user"}], "model": "m"}'
+        '{"model": "m", "input": [{"role": "user", "content": {"z": 1, "a": "\\u00e9"}}], '
+        '"answers": [2.5, null, true]}'
     )
 
 
-def test_a_mapping_is_what_json_dumps_gives_with_sorted_keys() -> None:
+def test_a_mapping_is_what_json_dumps_gives_in_the_order_given() -> None:
     prompt = {"b": [{"d": 1, "c": [1, 2]}], "a": "x"}
-    assert prompt_text(prompt) == json.dumps(prompt, sort_keys=True)
+    assert prompt_text(prompt) == json.dumps(prompt)
+    assert prompt_text({"a": "x", "b": [{"c": [1, 2], "d": 1}]}) != prompt_text(prompt)
 
 
 @pytest.mark.parametrize(

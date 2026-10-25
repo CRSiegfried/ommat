@@ -80,7 +80,7 @@ class MappingOf:
 
 @dataclass(frozen=True, slots=True)
 class RecordOf:
-    """A record type; field names are distinct segments in code-point order."""
+    """A record type; field names are distinct segments in their declared order."""
 
     fields: tuple[tuple[str, "Type"], ...]
 
@@ -408,7 +408,7 @@ def make_record(fields: Sequence[tuple[str, Type]]) -> RecordOf:
         inner = ft.inner if isinstance(ft, Nullable) else ft
         if isinstance(inner, AnswerType):
             raise _Invalid(f"record field {quote(name)} is any type but answer")
-    return RecordOf(tuple(sorted(fields, key=lambda f: f[0])))
+    return RecordOf(tuple(fields))
 
 
 def make_nullable(inner: Type) -> Nullable:
@@ -450,8 +450,12 @@ def _build(node: _Raw) -> Type:
     return Named(cast(str, node[1]))
 
 
-def parse_type(text: str, *, nullable: bool) -> Type | TypeFailure:
+def parse_type(text: str, *, nullable: bool, sorted_fields: bool = False) -> Type | TypeFailure:
     """Parse a type string strictly; ``nullable`` says whether ``T or null`` may stand whole.
+
+    A record's fields stand in the order written, which is the order declared. With
+    ``sorted_fields``, as for a design document before format 6, a record whose fields are not
+    in code-point order is not canonical, its canonical spelling the sorted one.
 
     ``T or null`` may be the whole of a ``t:`` ref's type, an ``outputs`` type, a record
     field's type or a type definition's body; the caller says which position
@@ -471,7 +475,7 @@ def parse_type(text: str, *, nullable: bool) -> Type | TypeFailure:
         return TypeFailure(
             FailureKind.ill_formed, f"type {quote(text)} admits null where null is not allowed"
         )
-    canonical = render(built)
+    canonical = render(_sorted_fields(built) if sorted_fields else built)
     if canonical != text:
         return TypeFailure(
             FailureKind.not_canonical,
@@ -479,6 +483,19 @@ def parse_type(text: str, *, nullable: bool) -> Type | TypeFailure:
             canonical=canonical,
         )
     return built
+
+
+def _sorted_fields(t: Type) -> Type:
+    """``t`` with every record's fields in code-point order, at every depth."""
+    if isinstance(t, RecordOf):
+        return RecordOf(tuple(sorted(((n, _sorted_fields(ft)) for n, ft in t.fields))))
+    if isinstance(t, ListOf):
+        return ListOf(_sorted_fields(t.item))
+    if isinstance(t, MappingOf):
+        return MappingOf(_sorted_fields(t.value))
+    if isinstance(t, Nullable):
+        return Nullable(_sorted_fields(t.inner))
+    return t
 
 
 # --- rendering ----------------------------------------------------------------------------

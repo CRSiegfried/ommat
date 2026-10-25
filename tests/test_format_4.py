@@ -215,13 +215,13 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
     assert any("t:c/size" in line for line in lines)
 
 
-GOLDEN_DESIGN = "sha256:efc53e8f4535d44b0796727dff9ca411c1ee9e5fd11aedc78e2ac2a7da788534"
-GOLDEN_RECORD = "sha256:c2d1316d36dec27302fb5848553b7974ae1c7c54cbdfc7b5732226b1e7d52435"
+GOLDEN_DESIGN = "sha256:532bcbfcb74394fa5bbbeb424410effa79ebcb0b5dd858b65ead94176c85e1f2"
+GOLDEN_RECORD = "sha256:0f1a688937f5a679583e2173adbfa5ee190cffec5edd49141e8163f98511e5f7"
 
 
 def test_the_golden_per_ref_record() -> None:
     record = per_ref_turn()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 5, "helpers": 2}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 6, "helpers": 2}
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)
     assert decode(record.document)["hash"] == GOLDEN_RECORD
 
@@ -301,7 +301,7 @@ def test_a_format_3_record_replays_under_its_format_3_design_with_no_finding() -
     again, findings = replay_sync(format_3_record(), format_3_design())
     assert findings == []
     assert again is not None
-    assert again.log[0]["format"] == 5  # the engine writes its own format
+    assert again.log[0]["format"] == 6  # the engine writes its own format
 
 
 def test_a_format_3_record_under_the_format_4_design_is_design_mismatch_alone() -> None:

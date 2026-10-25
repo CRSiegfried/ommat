@@ -17,7 +17,7 @@ from types import MappingProxyType
 from typing import Any, NamedTuple, cast
 
 from ommat._answer import AnswerKind, ValueType
-from ommat._canonical import decode, encode
+from ommat._canonical import decode, encode, ordered
 from ommat._design import (
     Context,
     ContextEntry,
@@ -544,8 +544,8 @@ class _Form:
             return None
         if not self.slots(wording.slots, where, names):
             return None
-        # A plain copy: nothing the caller changes after load reaches a turn.
-        return Structured(decode(encode(template)), wording.slots)
+        # A plain copy in the order written: nothing the caller changes after load reaches a turn.
+        return Structured(decode(ordered(template).encode("utf-8")), wording.slots)
 
     def text(self, text: object, where: str, names: tuple[str, ...]) -> Text | None:
         if not isinstance(text, Text):

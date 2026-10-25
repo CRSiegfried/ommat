@@ -465,16 +465,16 @@ def test_type_fills_labels_in_order_booleans_and_null_last() -> None:
     assert [p.record for p in fills["t:f"]] == [False, True]
 
 
-def test_a_record_fills_its_fields_in_type_order_the_last_varying_fastest() -> None:
+def test_a_record_fills_its_fields_in_declared_order_the_last_varying_fastest() -> None:
     loaded = design({"t:r": t.record(b=t.boolean, a=t.label("x", "y"))})
     points = [p.record for p in fill(loaded, ["t:r"], None)["t:r"]]
     assert points == [
-        {"a": "x", "b": False},
-        {"a": "x", "b": True},
-        {"a": "y", "b": False},
-        {"a": "y", "b": True},
+        {"b": False, "a": "x"},
+        {"b": False, "a": "y"},
+        {"b": True, "a": "x"},
+        {"b": True, "a": "y"},
     ]
-    assert [list(cast("dict[str, object]", p)) for p in points] == [["a", "b"]] * 4
+    assert [list(cast("dict[str, object]", p)) for p in points] == [["b", "a"]] * 4
 
 
 def test_an_empty_record_fills_to_one_empty_object() -> None:

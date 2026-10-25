@@ -78,7 +78,7 @@ def src_hash(fn: Callable[..., Any]) -> str:
 def test_a_minimal_design_writes_every_member_with_its_default() -> None:
     loaded = load(minimal())
     assert decode(loaded.document) == {
-        "format": 5,
+        "format": 6,
         "name": None,
         "state": "record{}",
         "sources": {},
@@ -145,11 +145,13 @@ def test_a_source_and_its_questions() -> None:
         "cost": 2,
         "feedback": True,
         "grounded": None,
+        # The payload's members as declared, model, tags, mood, by their canonical positions.
+        "payload_order": {"0": [0, 2, 1]},
     }
     assert doc["sources"]["lookup"] == {
         "provides": {
             "t:lookup": {"type": "string", "candidates": False},
-            "t:profile": {"type": "record{age: integer, name: string}", "candidates": False},
+            "t:profile": {"type": "record{name: string, age: integer}", "candidates": False},
         },
         "needs": ["t:state"],
         "when": None,
@@ -160,6 +162,7 @@ def test_a_source_and_its_questions() -> None:
         "cost": 0,
         "feedback": False,
         "grounded": None,
+        "payload_order": {},
     }
 
 
@@ -219,15 +222,15 @@ def test_requirements_default_deny_tools_parameters_types_and_groups() -> None:
     assert doc["default_deny"] is False
     assert doc["tools"] == {"archive": {}, "send": {}}
     assert doc["parameters"] == {
-        "intent/bar": {"type": "number [0, 1]", "value": 0.9},
-        "list/cap": {"type": "list<string>", "value": ["a", "b"]},
-        "blob": {"type": "bytes", "value": "AAE"},
-        "mood": {"type": 'label{"calm", "wild"}', "value": "calm"},
-        "weights": {"type": "mapping<string, number>", "value": {"a": 1}},
+        "intent/bar": {"type": "number [0, 1]", "value": 0.9, "order": {}},
+        "list/cap": {"type": "list<string>", "value": ["a", "b"], "order": {}},
+        "blob": {"type": "bytes", "value": "AAE", "order": {}},
+        "mood": {"type": 'label{"calm", "wild"}', "value": "calm", "order": {}},
+        "weights": {"type": "mapping<string, number>", "value": {"a": 1}, "order": {}},
     }
     assert doc["types"] == {"verdict": 'label{"no", "yes"}'}
     assert doc["groups"] == {"intents": ["q:intent/email", "q:intent/tone"]}
-    assert doc["state"] == "record{sender: record{address: string}, subject: string}"
+    assert doc["state"] == "record{subject: string, sender: record{address: string}}"
     assert doc["name"] == "mail"
 
 
@@ -349,9 +352,10 @@ def test_each_t_and_d_refs_declared_type_is_held_parsed() -> None:
         "d:route": Label(("no", "yes")),  # the definition `verdict`, resolved
         "d:score": Interval("number", 0, 1),
         "t:lookup": Scalar("string"),
-        "t:profile": RecordOf((("age", Scalar("integer")), ("name", Scalar("string")))),
+        # Each record's fields in declared order.
+        "t:profile": RecordOf((("name", Scalar("string")), ("age", Scalar("integer")))),
         "t:state": RecordOf(
-            (("sender", RecordOf((("address", Scalar("string")),))), ("subject", Scalar("string")))
+            (("subject", Scalar("string")), ("sender", RecordOf((("address", Scalar("string")),))))
         ),
     }
     assert list(loaded._types) == sorted(loaded._types)

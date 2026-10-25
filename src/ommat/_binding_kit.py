@@ -191,14 +191,14 @@ def image_need(value: object) -> tuple[str, bytes] | None:
 
 def prompt_text(prompt: object) -> str | None:
     """A prompt as the record's text: a ``str`` or ``None`` as given; a mapping as
-    ``json.dumps(prompt, sort_keys=True)`` with its other defaults, nested mappings as objects
-    and sequences in order. Any other value, within a mapping or in place of one, is a
-    ``TypeError``."""
+    ``json.dumps(prompt)`` with its defaults, each mapping's keys in the order given at every
+    depth and sequences in order, so the text keeps the order the model read. Any other value,
+    within a mapping or in place of one, is a ``TypeError``."""
     if prompt is None or isinstance(prompt, str):
         return prompt
     if not isinstance(prompt, Mapping):
         raise TypeError(f"a prompt {described(prompt)} is not a str, a mapping or None")
-    return json.dumps(prompt, default=_object, sort_keys=True)
+    return json.dumps(prompt, default=_object)
 
 
 def _object(value: object) -> object:

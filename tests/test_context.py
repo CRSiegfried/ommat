@@ -15,6 +15,7 @@ from typing import Any, cast
 
 import pytest
 
+from designs import document_before_key_order
 from ommat import (
     Binding,
     Context,
@@ -503,7 +504,7 @@ def one(ref: str, text: Text | Any) -> Context:
 def test_the_document_holds_the_block_and_loads_back_to_its_own_hash() -> None:
     ld = loaded()
     doc = decode(ld.document)
-    assert doc["format"] == 5
+    assert doc["format"] == 6
     assert doc["context"]["entries"][0] == {
         "ref": "d:refund",
         "text": {"template": "Refund requested: {r}", "slots": [slot("r", ref="d:refund")]},
@@ -513,8 +514,7 @@ def test_the_document_holds_the_block_and_loads_back_to_its_own_hash() -> None:
 
 
 def test_a_design_before_format_5_with_a_context_member_is_refused_at_check_11() -> None:
-    doc = decode(loaded().document)
-    doc["format"] = 4
+    doc = document_before_key_order(decode(loaded().document), 4)
     with pytest.raises(InvalidDesign, match='has the member "context"'):
         load(doc, functions={"policy": policy, "refund": refund, "status": status})
 
@@ -620,9 +620,10 @@ def test_handoff_text_gives_the_view_s_lines_in_order() -> None:
         "Plan: execute",
         "Verdict: passed",
         "Reason: the customer asked for a refund",
-        'Step 1: refund_order {"note":{"value":"asked"},'
-        '"order":{"ref":"t:state.order.id","value":"42"}}',
-        'Step 2: notify {"receipt":{"path":"receipt","step":1}}',
+        # The step's arguments in the order the policy gave them.
+        'Step 1: refund_order {"order":{"ref":"t:state.order.id","value":"42"},'
+        '"note":{"value":"asked"}}',
+        'Step 2: notify {"receipt":{"step":1,"path":"receipt"}}',
         "Refund requested: yes",
         "Order 42 is delivered",
         "Status delivered at bar 0.6",

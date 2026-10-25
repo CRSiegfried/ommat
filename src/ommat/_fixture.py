@@ -17,7 +17,7 @@ from typing import Any, cast
 from ommat._answer import AnswerKind, ValueType
 from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
 from ommat._binding_kit import bounded_warnings
-from ommat._canonical import _CanonicalError, encode
+from ommat._canonical import _CanonicalError, encode, ordered
 from ommat._component import base
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
@@ -27,7 +27,7 @@ from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
 from ommat._refs import _RefError, parse_ref
 from ommat._typed import decoded
-from ommat._values import clipped, type_name
+from ommat._values import KEY_ORDER_FORMAT, clipped, type_name
 
 _C = CauseCode
 _RETURNED_MARKERS = frozenset(
@@ -192,6 +192,8 @@ class _FromRecord:
         log = record.log  # read once: every read decodes afresh
         self._recorded = RecordedCalls(log)
         self._entries = {cast(str, i["ref"]): i for i in log if i["item"] == "entry"}
+        # A record before format 6 holds no order, so its needs are compared without it.
+        self._held = log[0]["format"] >= KEY_ORDER_FORMAT
         self._types = loaded._types
         self._note = f"answered from record {record.record_hash}"
 
@@ -251,15 +253,19 @@ class _FromRecord:
                     lines.append(f"{clipped(ref)}: recorded {code}, no answer to give")
 
     def _differs(self, need: str, value: object) -> bool:
-        """Whether a need's live value differs by canonical bytes from the record's entry at
-        its base, read through its field path; a marker, a missing entry or path, a need that is
-        not a ref and a value outside the value domain differ."""
+        """Whether a need's live value differs from the record's entry at its base, read through
+        its field path, by its ordered encoding, or by canonical bytes for a record before format
+        6; a marker, a missing entry or path, a need that is not a ref and a value outside the
+        value domain differ."""
         try:
             entry = self._entries.get(base(need))
             if entry is None or "value" not in entry:
                 return True
             stored = walk(entry["value"], parse_ref(need).fields, need)
-            return encode(stored) != encode(_record_form(value))
+            live = _record_form(value)
+            if self._held:
+                return ordered(stored) != ordered(live)
+            return encode(stored) != encode(live)
         except (_RefError, _ViewError, _CanonicalError):
             return True
 

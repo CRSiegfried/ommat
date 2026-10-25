@@ -26,7 +26,7 @@ from typing import Any, cast
 from ommat._canonical import encode, keyed_digest, turn_key
 from ommat._design import Requirement
 from ommat._guard import GuardFailure, Verdict
-from ommat._ledger import Record
+from ommat._ledger import Record, _with_held_order  # pyright: ignore[reportPrivateUsage]
 from ommat._markers import PlanKind, VerdictKind
 from ommat._refs import declared_ref
 from ommat._resolve import board_entries, board_value
@@ -355,6 +355,8 @@ class _Walk:
         # Every other member is open: markers, causes, derivation, rows, slots, a context
         # entry's ref and marker and the block's switches, the verdict's
         # other members, the run settings and the call item's other members.
+        if "order" in item:  # derived afresh over the item as the view writes it
+            out = _with_held_order({k: v for k, v in out.items() if k != "order"})
         return out
 
     def answer(self, value: Any, tree: Any, fixed: frozenset[str], set_tree: Any) -> Any:

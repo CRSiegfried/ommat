@@ -316,7 +316,8 @@ def test_chat_completions_gives_each_round_decide_and_the_pending_calls() -> Non
     assert [(c["id"], c["function"]["name"]) for c in pending] == [
         (s["id"], s["tool"]) for s in v["pending"]
     ]
-    assert pending[0]["function"]["arguments"] == '{"folder":"old","order":"o-1"}'
+    # The step's arguments in the order the policy gave them.
+    assert pending[0]["function"]["arguments"] == '{"order":"o-1","folder":"old"}'
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -346,7 +347,7 @@ def test_a_failed_call_s_result_is_its_marker_answers_and_nothing_else() -> None
 
 
 @pytest.mark.parametrize("path", PATHS)
-def test_chat_completions_bytes_are_stable_and_canonical(path: str) -> None:
+def test_chat_completions_bytes_are_stable_and_in_held_order(path: str) -> None:
     record = turn(path).record
     once = to_chat_completions(transcript(record))
     again = to_chat_completions(transcript(read_record(record.document)))
@@ -355,9 +356,8 @@ def test_chat_completions_bytes_are_stable_and_canonical(path: str) -> None:
         strings = [m.get("content")] + [c["function"]["arguments"] for c in m.get("tool_calls", [])]
         for s in strings:
             if s is not None:
-                assert s == json.dumps(
-                    json.loads(s), sort_keys=True, separators=(",", ":"), ensure_ascii=False
-                )
+                # The canonical forms, each object's members in the order it holds.
+                assert s == json.dumps(json.loads(s), separators=(",", ":"), ensure_ascii=False)
 
 
 def test_none_renders_as_no_messages() -> None:
@@ -647,7 +647,7 @@ def test_a_path_walking_into_a_value_that_is_no_record_raises() -> None:
 def test_handoff_text_gives_steps_alone_with_the_plan_switch_off() -> None:
     record = turn("clear", load(design(context=Context([], plan=False, record=False)))).record
     assert handoff_text(handoff(record)).splitlines() == [
-        'Step 1: archive {"folder":{"value":"old"},"order":{"ref":"t:order.id","value":"o-1"}}',
+        'Step 1: archive {"order":{"ref":"t:order.id","value":"o-1"},"folder":{"value":"old"}}',
         'Step 2: notify {"receipt":{"value":"done"}}',
     ]
 

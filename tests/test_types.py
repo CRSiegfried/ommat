@@ -205,17 +205,12 @@ NOT_CANONICAL = [
     ("mapping<string,number>", "mapping<string, number>"),
     ("mapping<string,  number>", "mapping<string, number>"),
     ("mapping< string, number>", "mapping<string, number>"),
-    ("record{b: string, a: string}", "record{a: string, b: string}"),
     ("record{a:string}", "record{a: string}"),
     ("record{a : string}", "record{a: string}"),
     ("record{ a: string }", "record{a: string}"),
     ("record{a: string,b: string}", "record{a: string, b: string}"),
     ("record{ }", "record{}"),
     ("record {}", "record{}"),
-    (
-        "record{z: record{b: string, a: string}, a: integer}",
-        "record{a: integer, z: record{a: string, b: string}}",
-    ),
     ("list<number [0,1]>", "list<number [0, 1]>"),
     ("string  or null", "string or null"),
     ("string\tor null", "string or null"),
@@ -234,6 +229,32 @@ def test_a_type_spelled_otherwise_fails_with_the_canonical_spelling(
     assert failure.canonical == canonical
     assert canonical in failure.message
     assert render(p(canonical)) == canonical
+
+
+SORTED_BEFORE_FORMAT_6 = [
+    ("record{b: string, a: string}", "record{a: string, b: string}"),
+    (
+        "record{z: record{b: string, a: string}, a: integer}",
+        "record{a: integer, z: record{a: string, b: string}}",
+    ),
+    ("list<record{b: string, a: string}>", "list<record{a: string, b: string}>"),
+]
+
+
+@pytest.mark.parametrize(("text", "canonical"), SORTED_BEFORE_FORMAT_6)
+def test_a_record_spells_its_fields_as_declared(text: str, canonical: str) -> None:
+    assert render(p(text)) == text
+
+
+@pytest.mark.parametrize(("text", "canonical"), SORTED_BEFORE_FORMAT_6)
+def test_before_format_6_a_record_out_of_code_point_order_is_not_canonical(
+    text: str, canonical: str
+) -> None:
+    failure = parse_type(text, nullable=True, sorted_fields=True)
+    assert isinstance(failure, TypeFailure)
+    assert failure.kind is FailureKind.not_canonical
+    assert failure.canonical == canonical
+    assert parse_type(canonical, nullable=True, sorted_fields=True) == p(canonical)
 
 
 MALFORMED = [
@@ -429,7 +450,7 @@ CONSTRUCTED: list[tuple[str, str]] = [
     (t.list_(t.list_(t.label("a"))), 'list<list<label{"a"}>>'),
     (t.mapping(t.number(0, 1)), "mapping<string, number [0, 1]>"),
     (t.record(), "record{}"),
-    (t.record(b=t.string, a=t.nullable(t.integer())), "record{a: integer or null, b: string}"),
+    (t.record(b=t.string, a=t.nullable(t.integer())), "record{b: string, a: integer or null}"),
     (t.record(sender=t.record(address=t.string)), "record{sender: record{address: string}}"),
     (t.nullable(t.string), "string or null"),
     (t.nullable(t.record(a=t.bytes_)), "record{a: bytes} or null"),

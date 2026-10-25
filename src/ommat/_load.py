@@ -24,7 +24,17 @@ from types import MappingProxyType
 from typing import Any, cast
 
 from ommat._answer import AnswerKind, ValueType
-from ommat._canonical import _DecodeError, _DuplicateKey, decode, document_depth, encode, sha256_ref
+from ommat._canonical import (
+    _DecodeError,
+    _DuplicateKey,
+    decode,
+    document_depth,
+    encode,
+    order_of,
+    ordered,
+    sha256_ref,
+    with_order,
+)
 from ommat._design import (
     _BUILT_BY_LOAD,
     Context,
@@ -92,6 +102,7 @@ from ommat._values import (
     DESIGN_FORMAT,
     DESIGN_FORMATS,
     EXTRACTION_FORMAT,
+    KEY_ORDER_FORMAT,
     MAX_DOCUMENT_DEPTH,
     MISSING,
     NOUL_DESCRIPTION_FORMAT,
@@ -781,7 +792,7 @@ class _Loader:
         if not isinstance(text, str):
             self.fail(10, names, f"{where} declares no type string")
             return None
-        parsed = parse_type(text, nullable=nullable)
+        parsed = parse_type(text, nullable=nullable, sorted_fields=self.format < KEY_ORDER_FORMAT)
         if isinstance(parsed, TypeFailure):
             self.fail(10, names, f"{where}: {parsed.message}")
             return None
@@ -1350,11 +1361,13 @@ class _Loader:
             else:
                 value = leaf.value
             parameters[path] = {"type": leaf.type, "value": value}
+            if self.format >= KEY_ORDER_FORMAT:
+                parameters[path]["order"] = order_of(value)
         return {
             "format": self.format,
             "name": d.name,
             "state": d.state,
-            "sources": {sid: _source(s) for sid, s in d.sources.items()},
+            "sources": {sid: _source(s, self.format) for sid, s in d.sources.items()},
             "rules": {rid: _rule(cast(Rule, r)) for rid, r in d.rules.items()},
             "policy": {
                 "form": "function",
@@ -1524,11 +1537,18 @@ class _Loader:
                 ref for ref in providers if ref[:2] in ("t:", "d:") and self.is_set(ref)
             ),
             classes_bytes=encode(classes, MAX_DOCUMENT_DEPTH),
+            # Each in the order the document holds, which the turn hands on.
             payload_bytes=MappingProxyType(
-                {s: encode(v["payload"]) for s, v in decoded["sources"].items()}
+                {
+                    s: _held_bytes(v["payload"], v.get("payload_order"))
+                    for s, v in decoded["sources"].items()
+                }
             ),
             leaf_bytes=MappingProxyType(
-                {p: encode(v["value"]) for p, v in decoded["parameters"].items()}
+                {
+                    p: _held_bytes(v["value"], v.get("order"))
+                    for p, v in decoded["parameters"].items()
+                }
             ),
             # Load's own copies, from the document, never the caller's objects.
             requirement_bytes=MappingProxyType(
@@ -1774,11 +1794,15 @@ def _holds_identifier(tree: object) -> bool:
     return False
 
 
-def _text(text: Text | Structured) -> dict[str, Any]:
-    return {
+def _text(text: Text | Structured, fmt: int = 0) -> dict[str, Any]:
+    written: dict[str, Any] = {
         "template": text.template,
         "slots": [{"name": s["name"], "origin": dict(s["origin"])} for s in text.slots],
     }
+    order = order_of(text.template) if fmt >= KEY_ORDER_FORMAT else {}
+    if order:  # written only when the template is out of canonical order, so its identity holds
+        written["order"] = order
+    return written
 
 
 def _fixed(labels: object) -> tuple[Any, ...]:
@@ -1803,14 +1827,14 @@ def _declared_labels(labels: object) -> Any:
     return [_label(v) for v in cast("tuple[object, ...]", labels)]
 
 
-def _source(source: Source) -> dict[str, Any]:
+def _source(source: Source, fmt: int) -> dict[str, Any]:
     provides: dict[str, Any] = {}
     for ref, provided in source.provides.items():
         if isinstance(provided, Question):
             labels = provided.labels
             provides[ref] = {
                 "kind": str(provided.kind),
-                "wording": _text(provided.wording),
+                "wording": _text(provided.wording, fmt),
                 # As declared: a described label is its object of name and description.
                 "labels": None if labels is None else _declared_labels(labels),
             }
@@ -1836,6 +1860,7 @@ def _source(source: Source) -> dict[str, Any]:
         "cost": source.cost,
         "feedback": source.feedback,
         "grounded": source.grounded,
+        **({"payload_order": order_of(source.payload)} if fmt >= KEY_ORDER_FORMAT else {}),
     }
 
 
@@ -2209,10 +2234,15 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
             yield from _missing_or_extra(entry, frozenset({"ref", "text"}), f"{where}'s entry", ())
             if isinstance(entry.get("text"), dict):
                 yield from _text_failures(entry["text"], f"{where}'s entry text", ())
+    leaf_members = frozenset({"type", "value"})
+    if fmt >= KEY_ORDER_FORMAT:
+        leaf_members |= {"order"}
     for path, leaf in _objects(doc["parameters"]):
-        yield from _missing_or_extra(
-            leaf, frozenset({"type", "value"}), f"parameter {_q(path)}", (path,)
-        )
+        yield from _missing_or_extra(leaf, leaf_members, f"parameter {_q(path)}", (path,))
+        if "order" in leaf_members and "order" in leaf:
+            yield from _order_failures(
+                leaf.get("value"), leaf["order"], f"parameter {_q(path)}", (path,)
+            )
     for name, plan in _objects(doc["plans"]):
         where = f"plan declaration {_q(name)}"
         yield from _missing_or_extra(plan, _PLAN, where, (name,))
@@ -2289,7 +2319,10 @@ def _source_failures(
     sid: str, source: dict[str, Any], fmt: int
 ) -> Iterator[tuple[tuple[str, ...], str]]:
     where, names = f"source {_q(sid)}", (sid,)
-    yield from _missing_or_extra(source, _SOURCE, where, names)
+    members = _SOURCE | {"payload_order"} if fmt >= KEY_ORDER_FORMAT else _SOURCE
+    yield from _missing_or_extra(source, members, where, names)
+    if "payload_order" in members and "payload_order" in source:
+        yield from _order_failures(source.get("payload"), source["payload_order"], where, names)
     for ref, provided in _objects(source.get("provides")):
         at, shown = (sid, ref), f"{where}'s {_q(ref)}"
         if not ref.startswith("q:"):
@@ -2304,7 +2337,9 @@ def _source_failures(
             members = _EXTRACTION if extraction else _QUESTION
             yield from _missing_or_extra(provided, members, shown, at)
         if isinstance(provided.get("wording"), dict):
-            yield from _text_failures(provided["wording"], f"{shown}'s wording", at)
+            yield from _text_failures(
+                provided["wording"], f"{shown}'s wording", at, ordered=fmt >= KEY_ORDER_FORMAT
+            )
         declared: object = provided.get("labels")
         listed = declared
         template = _object(provided.get("wording"))
@@ -2339,9 +2374,17 @@ def _source_failures(
 
 
 def _text_failures(
-    text: dict[str, Any], where: str, names: tuple[str, ...]
+    text: dict[str, Any], where: str, names: tuple[str, ...], *, ordered: bool = False
 ) -> Iterator[tuple[tuple[str, ...], str]]:
-    yield from _missing_or_extra(text, frozenset({"template", "slots"}), where, names)
+    members = frozenset({"template", "slots"})
+    structured = type(text.get("template")) in (dict, list)
+    if ordered and structured and "order" in text:
+        members |= {"order"}
+        if text["order"] == {}:
+            yield names, f"{where} writes an empty order, which it leaves out"
+        else:
+            yield from _order_failures(text.get("template"), text["order"], where, names)
+    yield from _missing_or_extra(text, members, where, names)
     for slot in _items(text.get("slots")):
         yield from _missing_or_extra(slot, frozenset({"name", "origin"}), f"{where}'s slot", names)
         origin = _object(slot.get("origin"))
@@ -2349,6 +2392,34 @@ def _text_failures(
             len(origin) == 1 and set(origin) <= {"ref", "param", "candidate"}
         ):
             yield names, f"{where} has a slot whose origin is not one of ref, param or candidate"
+
+
+def _order_failures(
+    value: object, order: object, where: str, names: tuple[str, ...]
+) -> Iterator[tuple[tuple[str, ...], str]]:
+    """Check 11: an order object fits the value it orders (§key-order)."""
+    try:
+        with_order(value, cast("dict[str, list[int]]", order))
+    except ValueError as unfit:
+        yield names, f"{where}'s order does not fit its value: {unfit}"
+
+
+def _ordered_value(value: object, order: object) -> Any:
+    """A document value in the order its order object gives; one that does not fit is left as
+    it is, check 11 having refused its document."""
+    if order is None:
+        return value
+    try:
+        return with_order(value, cast("dict[str, list[int]]", order))
+    except ValueError:
+        return value
+
+
+def _held_bytes(value: object, order: object) -> bytes:
+    """A document value in the order its order object gives, as ordered bytes."""
+    if order is not None:
+        value = with_order(value, cast("dict[str, list[int]]", order))
+    return ordered(value).encode("utf-8")
 
 
 def _unresolved(*args: Any, **kwargs: Any) -> Any:
@@ -2462,7 +2533,7 @@ def _text_of(value: object) -> Any:
         return value
     text = cast("dict[str, Any]", value)
     if type(text.get("template")) in (dict, list):  # a structured wording
-        return Structured(text["template"], text["slots"])
+        return Structured(_ordered_value(text["template"], text.get("order")), text["slots"])
     return Text(text["template"], text["slots"])
 
 
@@ -2498,7 +2569,7 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
             requirement=s["requirement"] if r is None else SourceRequirement(r["ref"], r["values"]),
             oracle=s["oracle"],
             timeout=s["timeout"],
-            payload=s["payload"],
+            payload=_ordered_value(s["payload"], s.get("payload_order")),
             cost=s["cost"],
             feedback=s["feedback"],
             grounded=s["grounded"],
@@ -2556,7 +2627,10 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
         requirements=requirements,
         default_deny=doc["default_deny"],
         tools=list(cast("dict[str, Any]", tools)) if isinstance(tools, dict) else tools,
-        parameters=block(doc["parameters"], lambda _, v: Parameter(v["type"], v["value"])),
+        parameters=block(
+            doc["parameters"],
+            lambda _, v: Parameter(v["type"], _ordered_value(v["value"], v.get("order"))),
+        ),
         types=doc["types"],
         plans=block(
             doc["plans"],

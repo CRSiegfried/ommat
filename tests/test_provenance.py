@@ -15,7 +15,7 @@ import pytest
 import rfc8785
 
 from counting import SmallBounds
-from ledger_logs import before_profile, rehashed
+from ledger_logs import before_key_order, before_profile, rehashed
 from ommat import (
     CallResult,
     Cause,
@@ -274,7 +274,7 @@ def refused(doc: dict[str, Any], says: str) -> None:
 
 
 def test_a_format_5_call_item_holding_snapshot_or_lacking_a_profile_member_is_refused() -> None:
-    doc = doc_of(turn(**PROFILE))
+    doc = before_key_order(doc_of(turn(**PROFILE)))
     with_snapshot = copy.deepcopy(doc)
     with_snapshot["log"][3]["snapshot"] = None
     refused(with_snapshot, "holds snapshot, which a format-5 record does not")
@@ -334,7 +334,7 @@ def test_a_request_id_or_clients_past_the_size_bounds_is_refused_at_the_read(
 
 
 def test_a_calls_entrys_missing_is_read_against_the_profiles_lists() -> None:
-    doc = doc_of(turn(**PROFILE))
+    doc = before_key_order(doc_of(turn(**PROFILE)))
     for missing, says in (
         ({"snapshot": "not-pinned"}, "names no detail"),
         ({"revision": "lost"}, "is not a reason of the provenance profile"),
@@ -544,7 +544,7 @@ def test_a_format_4_record_redacts_with_its_snapshot_open_and_replays_at_format_
     rerun, findings = replay_sync(old, LOADED)
     assert findings == []
     assert rerun is not None
-    assert rerun.log[0]["format"] == 5
+    assert rerun.log[0]["format"] == 6
     assert call_item(rerun)["revision"] is None  # replay calls no model
 
 
@@ -586,7 +586,7 @@ def test_a_stored_format_4_design_loads_to_its_own_hash_and_its_record_replays()
     rerun, findings = replay_sync(read_record((FORMAT_4 / "record.json").read_bytes()), loaded)
     assert findings == []
     assert rerun is not None
-    assert rerun.log[0] == {"item": "design", "hash": FORMAT_4_DESIGN, "format": 5, "helpers": 2}
+    assert rerun.log[0] == {"item": "design", "hash": FORMAT_4_DESIGN, "format": 6, "helpers": 2}
 
 
 def call_item_of(view: dict[str, Any]) -> dict[str, Any]:
