@@ -134,11 +134,18 @@ def _block(
     for combo in itertools.product(*(range(len(entries[n])) for n in names)):
         chosen = dict(zip(names, combo, strict=True))
         given = {**point, **{n: entries[n][i] for n, i in chosen.items()}}
-        done = (
-            probe
-            if probe is not None and not any(combo)
-            else _run(loaded, _At(given, firsts), keys)
-        )
+        if probe is not None and not any(combo):
+            done = probe
+        else:
+            done = _run(loaded, given, keys)
+            # A d: set the probe fixed holds for the whole assignment, or the lint cannot fill
+            # the entries a run asks (§candidate-sets).
+            for set_ref, value in done[2].items():
+                if set_ref in sets and encode(value) != encode(sets[set_ref]):
+                    raise ValueError(
+                        f"the candidate set {set_ref!r} changes within one assignment of the "
+                        "other reads, so the lint cannot fix its grounded entries"
+                    )
         shown = {ref: fresh(given[ref].record) for ref in code_point_sorted(given)}
         shown.update(done[1])  # a candidate-valued question as its run's record wrote it
         out.append(_Ran(done[0], at, chosen, shown))

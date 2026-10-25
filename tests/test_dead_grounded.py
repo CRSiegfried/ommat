@@ -5,6 +5,8 @@ report keyed by the declared ref whose points name each grounded entry."""
 
 from typing import Any, cast
 
+import pytest
+
 from designs import roles
 from ommat import Answer, Design, Parameter, Plan, Policy, Question, Rule, Source, Text, load
 from ommat import types as t
@@ -179,3 +181,40 @@ def test_a_d_set_that_is_always_empty_is_not_grounded() -> None:
     report = dead_questions(load(d))
     assert report["questions"]["q:role"] == {"status": "not-grounded", "witness": None}
     assert report["points"] == PLAIN * 2
+
+
+def second_set(r: Any) -> list[str]:
+    """``["x"]`` once candidate ``a`` of ``q:one`` is answered yes, else none: a set that moves
+    with another per-candidate question's entry."""
+    got: Any = r.read("q:one")
+    a = cast("dict[str, Any]", got).get("a") if isinstance(got, dict) else None
+    return ["x"] if isinstance(a, Answer) and a.probabilities["yes"] >= BAR else []
+
+
+def by_two(r: Any) -> Plan:
+    return Plan("escalate", reason="r")
+
+
+def test_a_d_set_that_changes_within_an_assignment_is_refused() -> None:
+    design = Design(
+        name="moving",
+        state=t.record(),
+        sources={
+            "one": Source({"q:one": Question("noul", wording("t:s1"))}, grounded="t:s1"),
+            "s1": Source({"t:s1": {"type": t.list_(t.string), "candidates": True}}),
+            "two": Source({"q:two": Question("noul", wording("d:s2"))}, grounded="d:s2"),
+        },
+        rules={
+            "s2": Rule(
+                "d:s2",
+                t.list_(t.string),
+                second_set,
+                version="1",
+                reads=["q:one"],
+                candidates=True,
+            ),
+        },
+        policy=Policy(by_two, version="1"),
+    )
+    with pytest.raises(ValueError, match="'d:s2' changes within one assignment"):
+        dead_questions(load(design), values={"t:s1": [["a"]]})
