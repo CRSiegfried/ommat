@@ -324,11 +324,24 @@ class _Loader:
             self.fail(12, names, f"{what} is a {form}, which this engine does not implement")
 
         sources, rules = self.refused_sources, self.refused_rules
+        per_candidate = _per_candidate_refs(self.d)
         for sid, source in self.d.sources.items():
             what = f"source {_q(sid)}"
             if source.grounded is not None:
-                refuse(sources, (sid,), what, "grounded declaration")
                 self.grounded.add(sid)
+                if any(not isinstance(p, Question) for p in source.provides.values()):
+                    refuse(sources, (sid,), what, "grounded source of t: refs")
+                for ref, question in _questions(source):
+                    if ref not in per_candidate:
+                        continue
+                    shown = f"{what}'s {_q(ref)}"
+                    if question.kind == AnswerKind.extraction:
+                        refuse(sources, (sid, ref), shown, _PER_CANDIDATE_EXTRACTION)
+                    elif isinstance(question.labels, Mapping):
+                        refuse(sources, (sid, ref), shown, _PER_CANDIDATE_LABEL_SET)
+            for need in _named_needs(source):
+                if _declared_base(need) in per_candidate:
+                    refuse(sources, (sid, need), f"{what}'s need {_q(need)}", _GROUNDED_NEED)
             for ref, provided in source.provides.items():
                 if isinstance(provided, Question):
                     continue
@@ -342,7 +355,7 @@ class _Loader:
             elif rule.candidates and self.of_records(rule.outputs):
                 refuse(rules, (rid,), what, _RECORD_SET)
             if rule.grounded is not None:
-                refuse(rules, (rid,), what, "grounded declaration")
+                refuse(rules, (rid,), what, "grounded rule")
                 self.grounded.add(rid)
         if isinstance(self.d.policy, PolicyTable):
             refuse(set(), ("policy",), "the policy", "policy table")
@@ -424,6 +437,8 @@ class _Loader:
             self.provide(ref, provider, "", checked=False)
         for sid, source in self.sources():
             where = f"source {_q(sid)}"
+            if source.grounded is not None:
+                self.use(sid, f"{where}'s grounding", "grounding", source.grounded)
             for ref in source.needs:
                 self.use(sid, where, "need", ref)
             for ref, slot in _slots(source):
@@ -515,20 +530,20 @@ class _Loader:
     def check_3(self) -> None:
         for u in self.uses:
             if u.role == "candidate":
-                self.fail(
-                    3,
-                    (u.owner, u.ref),
-                    f"{u.where} has a candidate slot, but its source is not grounded",
-                )
+                grounding = self.d.sources[u.owner].grounded
+                if grounding is not None and grounding != u.ref:
+                    self.fail(
+                        3,
+                        (u.owner, u.ref),
+                        f"{u.where} has a candidate slot naming {_q(u.ref)}, not its source's "
+                        f"grounding set {_q(grounding)}",
+                    )
                 continue
-            if u.parsed.candidate is not None:
-                found = any(p in self.grounded for p in self.providers.get(u.base, []))
-            else:
-                found = u.base in self.providers
+            found = u.base in self.providers
             if not found:
                 names = (u.owner, u.ref) if u.owner else (u.ref,)
                 self.fail(3, names, f"{u.where} names {_q(u.ref)}, which has no provider")
-            elif u.role == "label-set" and u.parsed.level in ("t", "d"):
+            elif u.role in ("label-set", "grounding") and u.parsed.level in ("t", "d"):
                 if u.parsed.candidate is not None or u.parsed.fields or not self.is_set(u.ref):
                     self.fail(
                         3,
@@ -620,6 +635,7 @@ class _Loader:
                     message += f", and {_q(rule.provides)} would be rule {_q(parsed.name)}'s"
                 self.fail(4, (rid, rule.provides), message)
         allowed = {
+            "grounding": ("d", "t"),
             "slot": ("d", "t"),
             "label-set": ("d", "t"),
             "text": ("d", "t"),
@@ -634,14 +650,23 @@ class _Loader:
                 4, (flagged,), f"{where} has a candidate slot; a context entry's slots hold none"
             )
         # The clause is on the slot list, so it stands whether or not the slot's ref passes
-        # check 7. No source here is grounded: check 12 refuses grounded ones.
+        # check 7.
         for sid, where, _ in self.candidates:
-            self.fail(
-                4,
-                (sid,),
-                f"{where} has a candidate slot; a source's slots hold candidate only when it is "
-                "grounded",
-            )
+            if self.d.sources[sid].grounded is None:
+                self.fail(
+                    4,
+                    (sid,),
+                    f"{where} has a candidate slot; a source's slots hold candidate only when it "
+                    "is grounded",
+                )
+        holding = {sid for sid, _, _ in self.candidates}
+        for sid, source in self.sources():
+            if source.grounded is not None and sid not in holding:
+                self.fail(
+                    4,
+                    (sid,),
+                    f"source {_q(sid)} is grounded, but no question of it holds a candidate slot",
+                )
         for u in self.uses:
             if u.role == "candidate":
                 continue
@@ -654,7 +679,7 @@ class _Loader:
                 self.fail(
                     4, names, f"{u.where} flags {_q(u.ref)}, which is not t:state or a d: ref"
                 )
-            elif u.role in ("flagged", "context-slot") and u.parsed.candidate is not None:
+            elif u.parsed.candidate is not None:
                 self.fail(4, names, f"{u.where} names {_q(u.ref)}, a grounded ref")
 
     # --- check 1 ---------------------------------------------------------------------------
@@ -1323,9 +1348,15 @@ class _Loader:
         providers = self.provider_map()
         preds: dict[str, set[str]] = {n: set() for n in (*self.d.sources, *self.d.rules)}
         for u in self.uses:
-            if u.role in ("need", "slot", "label-set", "text", "read", "source-requirement") and (
-                u.base != _STATE
-            ):
+            if u.role in (
+                "need",
+                "slot",
+                "label-set",
+                "grounding",
+                "text",
+                "read",
+                "source-requirement",
+            ) and (u.base != _STATE):
                 preds[u.owner].add(providers[u.base])
         graph = {n: frozenset(preds[n]) for n in code_point_sorted(preds)}
         # Every predecessor is a key, or graphlib would add it as a root.
@@ -1532,6 +1563,7 @@ class _Loader:
             grid=_grid(decoded),
             labels=MappingProxyType(self.label_parts()),
             label_sets=MappingProxyType(self.label_sets()),
+            grounded=MappingProxyType(dict(sorted(_per_candidate_refs(self.d).items()))),
             label_at=MappingProxyType(self.label_at()),
             candidate_sets=frozenset(
                 ref for ref in providers if ref[:2] in ("t:", "d:") and self.is_set(ref)
@@ -1583,6 +1615,60 @@ def _declared(ref: str) -> _ParsedRef | None:
     if parsed is None:
         return None
     return parsed if parsed.candidate is None and not parsed.fields else None
+
+
+_PER_CANDIDATE_EXTRACTION = "per-candidate extraction question"
+_PER_CANDIDATE_LABEL_SET = "per-candidate question over a candidate-valued label set"
+_GROUNDED_NEED = "need on a grounded declared ref"
+
+
+def _per_candidate_refs(design: Design) -> dict[str, str]:
+    """Each per-candidate question's declared ref and its grounding set: a question of a
+    grounded source that holds a candidate slot (§candidate-sets)."""
+    out: dict[str, str] = {}
+    for source in design.sources.values():
+        if not isinstance(cast(object, source), Source) or not isinstance(source.grounded, str):
+            continue
+        for ref, question in _questions(source):
+            if any(tag == "candidate" for tag, _ in _origins(question)):
+                out[ref] = source.grounded
+    return out
+
+
+def _origins(question: Question) -> Iterator[tuple[object, object]]:
+    """Each slot origin of a question's wording as a tag and its value, skipping any of a form
+    check 10 refuses, since check 12 runs before it."""
+    slots = getattr(question.wording, "slots", ())
+    if not isinstance(slots, Sequence):
+        return
+    for slot in cast("Sequence[object]", slots):
+        origin = (
+            cast("Mapping[str, object]", slot).get("origin") if isinstance(slot, Mapping) else None
+        )
+        if isinstance(origin, Mapping) and len(cast("Mapping[str, object]", origin)) == 1:
+            yield next(iter(cast("Mapping[object, object]", origin).items()))
+
+
+def _named_needs(source: Source) -> Iterator[str]:
+    """A source's needs and its questions' slot refs, as strings."""
+    needs = cast(object, source.needs)
+    if isinstance(needs, Sequence) and not isinstance(needs, str):
+        for need in cast("Sequence[object]", needs):
+            if isinstance(need, str):
+                yield need
+    for _, question in _questions(source):
+        for tag, value in _origins(question):
+            if tag == "ref" and isinstance(value, str):
+                yield value
+
+
+def _declared_base(ref: str) -> str | None:
+    """A ref's declared ref, its bracket and field path removed, or ``None`` for no ref."""
+    try:
+        parsed = parse_ref(ref)
+    except ValueError:
+        return None
+    return f"{parsed.level}:{parsed.name}"
 
 
 def _questions(source: Source) -> Iterator[tuple[str, Question]]:

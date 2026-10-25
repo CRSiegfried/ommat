@@ -4,6 +4,7 @@ pass it, and a binding that breaks each rule fails the check that names it."""
 
 import asyncio
 import dataclasses
+import json
 from typing import Any
 
 import pytest
@@ -111,7 +112,14 @@ def test_every_batch_interpret_builds_over_the_example_designs_passes() -> None:
 
 def test_the_suites_batches_hold_each_kind_alone_and_then_together() -> None:
     batches = _default_batches()
-    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 1, 1, 1, 1, 6]
+    assert [len(b) for b in batches] == [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6]
+    (per_candidate,) = batches[9]
+    grounded = [r for r in per_candidate.questions if "[" in r]
+    assert len(grounded) == 4
+    assert list(per_candidate.questions) == sorted(per_candidate.questions)
+    for ref in grounded:  # each wording names its candidate
+        candidate = json.loads(ref[ref.index("[") + 1 : -1])
+        assert candidate in per_candidate.questions[ref].wording
     first, second = (b[0].questions["q:pick/sender"].labels for b in batches[6:8])
     assert batches[8][0].questions["q:pick/sender"].labels[-2:] == ("none", "several")
     (wording,) = batches[5]

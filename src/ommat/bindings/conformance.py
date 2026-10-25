@@ -66,6 +66,7 @@ from ommat._provenance import (
     usage_conforms,
     versions_conform,
 )
+from ommat._refs import code_point_sorted, grounded_ref
 from ommat._typed import is_a
 from ommat._values import MAX_INTEGER, described, string_data
 
@@ -215,11 +216,34 @@ def _label_sets() -> list[Batch]:
     ]
 
 
+_CANDIDATES = ('Elm "Row"', "Quay \\ Street", "Bridge\tLane", 'Æsk "Close"')
+"""Candidates in an order that is not their grounded refs' code-point order, each needing an
+escape in a grounded ref, one non-ASCII."""
+
+
+def _per_candidate() -> Batch:
+    """One source asking a question per candidate, each under its grounded ref and worded with
+    its candidate, beside a question asked once, as interpret renders them."""
+    questions = {
+        grounded_ref("q:streets/asset", candidate): RenderedQuestion(
+            AnswerKind.choice,
+            f"What does the report say of {candidate}?",
+            ("lighting", "other"),
+        )
+        for candidate in _CANDIDATES
+    }
+    questions["q:streets/named"] = RenderedQuestion(
+        AnswerKind.noul, "Does the report name a street?", ("yes", "no")
+    )
+    ordered = {ref: questions[ref] for ref in code_point_sorted(questions)}
+    return (SourceCall("streets", None, {"t:state.text": _TEXT}, (), ordered),)
+
+
 def _default_batches() -> list[Batch]:
     """The suite's own batches: each source alone, then one question over three label sets,
-    then all of the sources in one batch."""
+    then a source asking a question per candidate, then all of the sources in one batch."""
     sources = _sources()
-    return [*((s,) for s in sources), *_label_sets(), sources]
+    return [*((s,) for s in sources), *_label_sets(), _per_candidate(), sources]
 
 
 def check(

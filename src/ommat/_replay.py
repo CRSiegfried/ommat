@@ -213,8 +213,8 @@ def _call_findings(
             if call is None:
                 continue
             index, recorded = call
-            # The asked refs coincide with the source's provides, since load refuses grounded
-            # declarations.
+            # The asked refs are the ones the binding was given, a per-candidate question's
+            # grounded refs among them.
             refs.update(r for r in asked[sid] if (index, r) not in calls.entries)
             before = cast("dict[str, Any]", recorded["questions"])
             now = cast("dict[str, Any]", item["questions"])

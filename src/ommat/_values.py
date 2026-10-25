@@ -93,6 +93,10 @@ KEY_ORDER_FORMAT = 6
 code-point order, and which holds a payload's, a parameter value's and a structured template's
 order; and the first record format whose entry, plan and verdict items hold their ``order``."""
 
+GROUNDED_FORMAT = 6
+"""The first record format whose ``settings`` item names each grounded declared ref's set,
+under ``grounded``, and whose log may hold a grounded ref."""
+
 
 def string_data(value: str) -> str:
     """The exact ``str`` holding a string's data, whatever its class overrides."""

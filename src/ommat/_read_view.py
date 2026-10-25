@@ -10,9 +10,10 @@ compile's, not the view's.
 A ``when``'s view is given the state's type, its definitions resolved at every depth, and
 reads ``t:state`` by any field path that type gives: one naming a record field at each depth.
 
-Not built: reading a grounded declaration's declared ref, since candidate
-sets are outside this engine and load's check 12 refuses them; a declared read with a grounded
-bracket is an engine defect here.
+A read of a per-candidate question's declared ref returns its need marker when one was written,
+else a ``dict`` from each candidate of its set, in the set's order, to its grounded entry; the
+set's ref is read by any component that reads such a ref. A declared read with a grounded
+bracket is an engine defect here, since load refuses one.
 """
 
 import enum
@@ -21,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, NoReturn, cast
 
 from ommat._markers import Undetermined
-from ommat._refs import parse_ref
+from ommat._refs import grounded_ref, parse_ref
 from ommat._types import Type, TypeFailure, read_type
 from ommat._values import described, guarded_repr, string_data
 
@@ -179,6 +180,7 @@ class ReadView:
         "_board",
         "_closed",
         "_depth",
+        "_grounded",
         "_leaves",
         "_log",
         "_params",
@@ -197,14 +199,18 @@ class ReadView:
         leaves: Mapping[str, object],
         *,
         state: Type | None = None,
+        grounded: Mapping[str, str] | None = None,
     ) -> None:
         self._role = role
+        self._grounded: Mapping[str, str] = {} if grounded is None else grounded
         if (role.kind is ComponentKind.when) != (state is not None):
             raise _ViewError("a when's view, and only a when's, takes the state's type")
         self._state = state
         declared = {string_data(r) for r in reads}
         if role.kind is ComponentKind.when:
             declared.add(_STATE)
+        # A per-candidate question's set is read with it (§candidate-sets).
+        declared |= {self._grounded[r] for r in declared if r in self._grounded}
         self._reads: dict[str, _Path] = {}
         for ref in sorted(declared):
             try:
@@ -214,7 +220,14 @@ class ReadView:
             if p.candidate is not None:
                 raise _ViewError(f"the declared read {ref!r} is grounded, outside this engine")
             path = _Path(f"{p.level}:{p.name}", p.fields)
-            if path.base not in board:
+            if path.base in self._grounded:
+                if path.fields:
+                    raise _ViewError(
+                        f"the declared read {ref!r} has a field path; load refuses one"
+                    )
+                if path.base not in board and self._grounded[path.base] not in board:
+                    raise _ViewError(f"the board holds no set for the declared read {ref!r}")
+            elif path.base not in board:
                 raise _ViewError(f"the board holds no entry for the declared read {ref!r}")
             self._reads[ref] = path
         self._params = frozenset(string_data(p) for p in params)
@@ -243,7 +256,20 @@ class ReadView:
             path = self._state_path(key)
         if path is None:
             self._stop(_UndeclaredStop(UndeclaredRead.of(ref, Access.read)))
+        if path.base in self._grounded and path.base not in self._board:
+            return self._per_candidate(path.base)
         return walk(self._board[path.base], path.fields, string_data(ref))
+
+    def _per_candidate(self, declared: str) -> dict[str, object]:
+        """A per-candidate question's entries by candidate, in its set's order."""
+        members = cast("Sequence[str]", self._board[self._grounded[declared]])
+        out: dict[str, object] = {}
+        for candidate in members:
+            grounded = grounded_ref(declared, candidate)
+            if grounded not in self._board:
+                raise _ViewError(f"the board holds no entry for {grounded!r}")
+            out[candidate] = self._board[grounded]
+        return out
 
     def _state_path(self, ref: str) -> _Path | None:
         """A ``when``'s read of ``t:state`` by a field path naming a record field at each depth

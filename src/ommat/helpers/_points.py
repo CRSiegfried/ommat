@@ -8,7 +8,9 @@ filled from the first of: its grid points, from load's grid and the parameter bl
 the cross product of its fields' fills, each field filled by the same order under its field
 path. An extraction read's points cross its value points, from its grid's ``value`` axis or
 its list in ``values``, with its ``p_null`` and ``confidence`` points, then add the two null
-points. A ``q:`` read's points end with ``Unavailable`` ``refused``.
+points. A ``q:`` read's points end with ``Unavailable`` ``refused``. A per-candidate question
+is filled once, on its declared ref, and each grounded entry takes those points with a marker
+of its own last.
 
 Every point is computed exactly over each boundary's ``Fraction(repr(x))`` and rounded once
 to the nearest ``float``. A point is held in two forms: the record form a report shows and
@@ -530,6 +532,11 @@ def _extracted(q: Question, value: object, p_null: float | None, confidence: flo
         cast(Any, q.value_type), q.is_list, fresh(value), None, p_null, confidence, None
     )
     return Point(extraction_document(answer), binding_form(answer))
+
+
+def entry_points(points: Sequence[Point], ref: str) -> list[Point]:
+    """A grounded entry's points: its declared question's, the marker last naming ``ref``."""
+    return [*points[:-1], _refused(ref)]
 
 
 def _refused(ref: str) -> Point:

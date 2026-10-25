@@ -107,6 +107,12 @@ def declared_ref(ref: str) -> str:
     return f"{p.level}:{p.name}" + "".join("." + f for f in p.fields)
 
 
+def grounded_ref(declared: str, candidate: str) -> str:
+    """The ref of a per-candidate entry: the declared ref, then the candidate as RFC 8785
+    serializes a string, in brackets (§grounded-ref-form)."""
+    return f"{declared}[{encode(candidate).decode('utf-8')}]"
+
+
 def is_declared_name(value: object) -> bool:
     """Whether ``value`` is in the name grammar: segments joined by ``/``, no prefix."""
     return isinstance(value, str) and _NAME_RE.fullmatch(value) is not None

@@ -566,6 +566,7 @@ class LoadedDesign:
     ``extraction``, a candidate-valued label set's fixed part alone; ``_label_sets``, each
     candidate-valued question's set ref, and ``_label_at`` how many of its fixed labels come
     before the candidates; ``_candidate_sets``, the refs declared candidate sets;
+    ``_grounded``, each per-candidate question's declared ref and its grounding set's ref;
     ``_requirement_bytes``, each source requirement's values as
     canonical bytes, by source id; ``_context_bytes``, the context block's document object or
     null. The class trees, payloads, leaf values and plan-level
@@ -582,6 +583,7 @@ class LoadedDesign:
         "_document",
         "_graph",
         "_grid",
+        "_grounded",
         "_groups",
         "_hash",
         "_label_at",
@@ -610,6 +612,7 @@ class LoadedDesign:
     _label_sets: Mapping[str, str]
     _label_at: Mapping[str, int]
     _candidate_sets: frozenset[str]
+    _grounded: Mapping[str, str]
     _classes_bytes: bytes
     _context_bytes: bytes
     _payload_bytes: Mapping[str, bytes]

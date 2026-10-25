@@ -109,7 +109,8 @@ step's result.
 - `needs`, each need's value keyed by the need as declared, in code-point order, never a
   marker, since a source is called only when its needs are determined;
 - `refs`, the `t:` refs it provides, in code-point order;
-- `questions`, each `q:` ref's `RenderedQuestion`, in the code-point order of their refs.
+- `questions`, each `q:` ref's `RenderedQuestion`, in the code-point order of their refs, a
+  [per-candidate](#ask-a-question-per-candidate) question's under each of its grounded refs.
 
 A `RenderedQuestion` holds `kind`, `wording`, `labels`, the label names, and `descriptions`,
 aligned with them. An extraction question also holds `value_type`, `is_list`, `text`, the
@@ -712,3 +713,59 @@ escalate | the report names no street | passed
 In the second report the best street scores 0.7, below the rule's bar of 0.8, so `d:street`
 is `Unsure` and the plan informs with the list. The third names none: the list is `[]` and the
 plan escalates. Each replay rebuilds its plan with no model call.
+
+## Ask a question per candidate
+
+To ask one question about each member of a list, such as each street a report names, ground the
+source over a candidate set: a `list<string>` that a rule declared with `candidates=True`
+provides, or a source's `t:` ref declared `{"type": list<string>, "candidates": True}`. A
+question whose wording holds a slot with the origin `{"candidate": ref}` is asked once per
+candidate; the source's other questions are asked once, in the same request:
+
+```python
+SOURCES = {
+    "lamps": Source(
+        {
+            "q:lamps/out": Question(
+                "noul",
+                Text(
+                    "Does the report say a lamp is out on {street}?",
+                    [{"name": "street", "origin": {"candidate": "d:streets"}}],
+                ),
+            ),
+            "q:lamps/urgent": Question("noul", Text("Does the report call it urgent?")),
+        },
+        needs=["t:state.text"],
+        grounded="d:streets",
+    ),
+}
+```
+
+Over the streets `["Quay Street", "Elm Row"]`, the binding gets three questions:
+`q:lamps/out["Elm Row"]` and `q:lamps/out["Quay Street"]`, each worded with its street, and
+`q:lamps/urgent`. A grounded ref is the declared ref with the candidate as a JSON string in
+brackets; parse it with a JSON parser, not by searching for `]`. Return an answer under each
+key you were given. The set reaches the binding only in the wordings, unless the source
+declares it a need. An empty set asks nothing for the question.
+
+A rule reads the declared ref and gets a `dict` from each candidate, in the set's order, to its
+`Answer` or marker, or one marker when the set held a marker:
+
+```python
+def out_streets(r: ReadView) -> object:
+    """The streets the model is sure have a lamp out, in the set's order."""
+    answers = r.read("q:lamps/out")
+    if isinstance(answers, MARKERS):
+        return answers
+    return [
+        street
+        for street, answer in answers.items()
+        if not isinstance(answer, MARKERS) and answer.probabilities["yes"] >= 0.8
+    ]
+```
+
+Declare `reads=["q:lamps/out"]`; reading it also reads the set. A choice helper such as
+`pick_with_margin` reads one ref's answer, and no rule can read a grounded ref, so a helper
+cannot be applied to one candidate's answer: work on the `Answer` objects in the `dict`, and
+abstain on a tie yourself if the rule needs to. Load refuses an extraction asked per candidate,
+a per-candidate `choice` over a candidate-valued label set, and a need on `q:lamps/out`.

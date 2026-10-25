@@ -28,7 +28,7 @@ from ommat._design import Requirement
 from ommat._guard import GuardFailure, Verdict
 from ommat._ledger import Record, _with_held_order  # pyright: ignore[reportPrivateUsage]
 from ommat._markers import PlanKind, VerdictKind
-from ommat._refs import declared_ref
+from ommat._refs import code_point_sorted, declared_ref, grounded_ref, parse_ref
 from ommat._resolve import board_entries, board_value
 from ommat._typed import is_a
 from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH, type_name
@@ -164,7 +164,8 @@ def transcript(record: Record) -> dict[str, Any] | None:
         answers = written.get(index, {})
         for source in cast("list[str]", item["sources"]):
             n += 1
-            asks = [r for r, provider in providers.items() if provider == source and r in answers]
+            # A per-candidate entry is its declared ref's source's.
+            asks = code_point_sorted(r for r in answers if providers.get(declared_ref(r)) == source)
             call = {
                 "id": f"{stem}_c{n}",
                 "source": source,
@@ -253,6 +254,8 @@ def redact(record: Record, root_key: bytes) -> bytes:
     for item in log:
         if item["item"] == "settings":
             classes = cast("dict[str, Any]", item["classes"])
+            walk.grounded = cast("dict[str, str]", item.get("grounded", {}))
+    walk.classes = classes
     walk.sets = _candidate_sets(log, classes)
     view = {
         "log": [walk.item(item, classes) for item in log],
@@ -306,6 +309,30 @@ class _Walk:
     def __init__(self, key: bytes) -> None:
         self.key = key
         self.sets: dict[tuple[int, str], tuple[frozenset[str], Any]] = {}
+        self.grounded: dict[str, str] = {}
+        self.classes: dict[str, Any] = {}
+
+    def ref(self, ref: Any) -> Any:
+        """A ref with any grounded bracket's candidate replaced by its keyed digest under the
+        class of the set the ``settings`` item's ``grounded`` names, open passing; any other
+        ref, or a role name, as it is."""
+        if type(ref) is not str:
+            return ref
+        try:
+            parsed = parse_ref(ref)
+        except ValueError:  # a role name, rule:N or step:N
+            return ref
+        if parsed.candidate is None:
+            return ref
+        declared = f"{parsed.level}:{parsed.name}"
+        if self.classes[self.grounded[declared]] == _OPEN:
+            return ref
+        written = grounded_ref(declared, self.digest(parsed.candidate))
+        return written + "".join(f".{field}" for field in parsed.fields)
+
+    def cause(self, cause: dict[str, Any]) -> dict[str, Any]:
+        """A cause with each grounded ref of its ``refs`` rewritten."""
+        return {**cause, "refs": [self.ref(r) for r in cast("list[Any]", cause["refs"])]}
 
     def digest(self, value: Any) -> str:
         """A keyed digest of the canonical bytes of a value or of text ``unhashed`` holds,
@@ -322,6 +349,16 @@ class _Walk:
     def item(self, item: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
         kind = item["item"]
         out = dict(item)
+        if kind == "entry":
+            out["ref"] = self.ref(item["ref"])
+            if "marker" in item:
+                marker = cast("dict[str, Any]", item["marker"])
+                out["marker"] = {**marker, "cause": self.cause(marker["cause"])}
+        elif kind == "call" and type(item["outcome"]) is dict:
+            failed = cast("dict[str, Any]", item["outcome"])["failed"]
+            out["outcome"] = {"failed": self.cause(failed)}
+        elif kind == "cause":
+            out["cause"] = self.cause(item["cause"])
         if kind == "entry" and "value" in item:
             tree = classes[declared_ref(item["ref"])]
             asked = self.sets.get((cast(int, item["call"]), item["ref"]))  # a null call: none
@@ -463,9 +500,13 @@ class _Walk:
         return out
 
     def call(self, entry: dict[str, Any]) -> dict[str, Any]:
-        # ``sums`` and ``truncated`` pass open: their refs are declared refs, as the record
-        # refuses a grounded one.
+        # ``sums`` and ``truncated`` pass open but for a grounded ref's candidate.
         out = dict(entry)
+        if "sums" in entry:
+            sums = cast("dict[str, Any]", entry["sums"])
+            out["sums"] = {self.ref(k): v for k, v in sums.items()}
+        if "truncated" in entry:
+            out["truncated"] = [self.ref(r) for r in cast("list[Any]", entry["truncated"])]
         if "unexpected" in entry:
             out["unexpected"] = self.digest(entry["unexpected"])
         if "warnings" in entry:  # the binding's text, one value

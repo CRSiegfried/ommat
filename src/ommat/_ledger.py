@@ -39,6 +39,7 @@ from ommat._values import (
     CONTEXT_FORMAT,
     DESCRIPTION_FORMAT,
     EXTRACTION_FORMAT,
+    GROUNDED_FORMAT,
     HASH_FORMAT,
     KEY_ORDER_FORMAT,
     LABEL_OVERFLOW_FORMAT,
@@ -410,6 +411,10 @@ def _questions(value: Any, where: str) -> None:
             raise _LedgerError(f"{where} has the key {ref!r}, which is not a q: ref")
         if parsed.fields:
             raise _LedgerError(f"{where} has the key {ref!r}, which has a field path")
+        if parsed.candidate is not None:
+            raise _LedgerError(
+                f"{where} has the key {ref!r}, a grounded ref; it is keyed by declared ref"
+            )
         at = f"{where}[{ref!r}]"
         kind = member_named(cast(object, question), "kind")
         if kind == AnswerKind.extraction:
@@ -696,7 +701,10 @@ _CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
 
 _SHAPES: dict[str, _Check] = {
     "design": _shape({"hash": _STR, "format": _INT, "helpers": _INT}),
-    "settings": _shape({"settings": _run_settings, "providers": _OBJECT, "classes": _OBJECT}),
+    "settings": _shape(
+        {"settings": _run_settings, "providers": _OBJECT, "classes": _OBJECT},
+        {"grounded": _OBJECT},
+    ),
     "entry": cast(_Check, _entry_shape),
     "call": _shape(
         {
@@ -803,11 +811,25 @@ def _context_entries(item: dict[str, Any]) -> list[dict[str, Any]]:
     return [] if context is None else cast("list[dict[str, Any]]", context["entries"])
 
 
-def _no_grounded_ref(kind: str, item: dict[str, Any], where: str) -> None:
+_ADMITTING = frozenset({"entry", "call", "cause"})
+"""The item kinds whose ref places may hold a grounded ref: an entry's ref and its marker's
+cause, a call's outcome's cause and the cancellation's cause."""
+
+
+def _grounded_refs(
+    kind: str, item: dict[str, Any], grounded: Mapping[str, str], where: str
+) -> None:
+    """Refuse a grounded ref outside the places a record admits one, or whose declared ref is
+    not a key of the ``settings`` item's ``grounded``."""
     for place, ref in _ref_places(kind, item):
-        if _grounded(ref):
+        if not _grounded(ref):
+            continue
+        if kind not in _ADMITTING:
+            raise _LedgerError(f"{where}: {place} {ref!r} is a grounded ref, which it never holds")
+        if declared_ref(ref) not in grounded:
             raise _LedgerError(
-                f"{where}: {place} {ref!r} is a grounded ref, which a record holds nowhere"
+                f"{where}: {place} {ref!r} is a grounded ref whose declared ref is not grounded "
+                "in the settings"
             )
 
 
@@ -989,7 +1011,9 @@ def _missing(value: Any, where: str) -> None:
             raise _LedgerError(f"{where}[{name!r}] is not a reason of the provenance profile")
 
 
-def _sums_keys(entry: dict[str, Any], questions: Mapping[str, str], where: str) -> None:
+def _sums_keys(
+    entry: dict[str, Any], questions: Mapping[str, str], grounded: Mapping[str, str], where: str
+) -> None:
     """Refuse a ``sums`` key or a ``truncated`` ref that names no key of its call item's
     ``questions``, looked up with any grounded bracket removed, and in this engine a grounded one.
     The entry has passed its shape check."""
@@ -1006,10 +1030,10 @@ def _sums_keys(entry: dict[str, Any], questions: Mapping[str, str], where: str) 
                 f"{where}'s {member!r} has the {what} {clipped(key)}, which names no key of its "
                 "call item's questions"
             )
-        if _grounded(key):
+        if _grounded(key) and declared_ref(key) not in grounded:
             raise _LedgerError(
-                f"{where}'s {member!r} {what} {clipped(key)} is a grounded ref, which a record "
-                "holds nowhere"
+                f"{where}'s {member!r} {what} {clipped(key)} is a grounded ref whose declared ref "
+                "is not grounded in the settings"
             )
 
 
@@ -1033,12 +1057,57 @@ _KEYED_KINDS: dict[str, frozenset[str]] = {
 _INDEX_KEY = re.compile(r"0|[1-9][0-9]*")
 
 
+def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
+    """Refuse a ``settings`` item's ``grounded`` before format 6 or its absence from it, and a
+    map that is not keyed by declared refs that are keys of ``providers``, each naming a set
+    that is a key of ``providers``, not itself grounded, whose class tree is a class name."""
+    if fmt < GROUNDED_FORMAT:
+        if "grounded" in item:
+            raise _LedgerError(f"{where} holds grounded, which a format-{fmt} record does not")
+        return
+    if "grounded" not in item:
+        raise _LedgerError(f"{where} has no 'grounded' member")
+    grounded = cast("dict[str, Any]", item["grounded"])
+    providers = cast("dict[str, Any]", item["providers"])
+    classes = cast("dict[str, Any]", item["classes"])
+    for key, set_ref in grounded.items():
+        if not _declared(key) or key not in providers:
+            raise _LedgerError(
+                f"{where}'s grounded has the key {key!r}, not a provided declared ref"
+            )
+        if (
+            type(set_ref) is not str
+            or not _declared(set_ref)
+            or set_ref not in providers
+            or set_ref in grounded
+        ):
+            raise _LedgerError(
+                f"{where}'s grounded names {set_ref!r} for {key!r}, not an ungrounded provided ref"
+            )
+        if type(classes.get(set_ref)) is not str:
+            raise _LedgerError(
+                f"{where}'s grounded names {set_ref!r}, whose class tree is not a class name"
+            )
+
+
+def _declared(ref: object) -> bool:
+    """Whether ``ref`` is a ref with no grounded bracket and no field path."""
+    if type(ref) is not str:
+        return False
+    try:
+        parsed = parse_ref(ref)
+    except ValueError:
+        return False
+    return parsed.candidate is None and not parsed.fields
+
+
 def _check_unhashed(
     member: str,
     value: Any,
     kinds: list[str],
     questions: Mapping[int, Mapping[str, str]],
     fmt: int,
+    grounded: Mapping[str, str],
 ) -> None:
     """Refuse a known ``unhashed`` member whose shape is not the observer's, or a key of a keyed
     member that is not a decimal log index naming an item of ``kinds``, the log's item kinds
@@ -1068,7 +1137,7 @@ def _check_unhashed(
             _KEYED_ENTRY[member](entry, f"{where}[{key!r}]")
             if member == "calls":
                 _call_entry_format(entry, fmt, f"{where}[{key!r}]")
-                _sums_keys(entry, questions[index], f"{where}[{key!r}]")
+                _sums_keys(entry, questions[index], grounded, f"{where}[{key!r}]")
 
 
 def _call_entry_format(entry: dict[str, Any], fmt: int, where: str) -> None:
@@ -1136,6 +1205,7 @@ class Ledger:
         self._phase = _EMPTY
         self._providers: dict[str, bytes] = {}
         self._classes: dict[str, Any] = {}
+        self._grounded: dict[str, str] = {}
         self._round = 0
         self._round_ended = False
         self._round_has_entry = False
@@ -1177,7 +1247,7 @@ class Ledger:
         shape(stored, where)
         if kind != "design":
             self._check_format(cast(str, kind), stored, where)
-        _no_grounded_ref(cast(str, kind), stored, where)
+        _grounded_refs(cast(str, kind), stored, self._grounded, where)
         _no_set(cast(str, kind), stored, where)
         commit = self._check_order(cast(str, kind), stored, index, where)
         if kind in _ORDERED and self._format >= KEY_ORDER_FORMAT:
@@ -1218,6 +1288,8 @@ class Ledger:
                 )
         if kind == "plan":
             self._check_context(item, fmt, where)
+        if kind == "settings":
+            _check_grounded(item, fmt, where)
         if kind != "call":
             return
         if fmt >= PRECISION_FORMAT and "precision" not in item:
@@ -1338,9 +1410,14 @@ class Ledger:
             k: encode(v, _ITEM_DEPTH) for k, v in cast("dict[str, Any]", item["providers"]).items()
         }
         classes = _copy(item["classes"])
+        grounded = cast("dict[str, str]", _copy(item.get("grounded", {})))
         bound = cast(int, item["settings"]["round_bound"])
         return self._set(
-            _phase=_SETTLED, _providers=providers, _classes=classes, _round_bound=bound
+            _phase=_SETTLED,
+            _providers=providers,
+            _classes=classes,
+            _grounded=grounded,
+            _round_bound=bound,
         )
 
     def _require_round_ended(self, where: str) -> None:
@@ -1529,6 +1606,15 @@ class Ledger:
             raise _LedgerError(f"{where}: {ref!r} is not contiguous with its node's entries")
         else:
             ended = self._node  # the node this entry ends, if any
+        if key in self._grounded:
+            if ref == key and "value" in item:
+                raise _LedgerError(
+                    f"{where}: {ref!r} is grounded, so its declared ref holds a marker or nothing"
+                )
+            if ref != key and key in self._written:
+                raise _LedgerError(
+                    f"{where}: {ref!r} is written beside the marker at its declared ref {key!r}"
+                )
         tree = self._classes.get(key)
         if tree is None:
             raise _LedgerError(f"{where}: {key!r} has no class tree in the settings' classes")
@@ -1592,7 +1678,7 @@ class Ledger:
     def _set_unhashed(self, member: str, value: Any) -> None:
         # The value is in the domain: a write checks its copy, whose keyed and turn members the
         # shapes keep shallow, and the read checks each member before any append.
-        _check_unhashed(member, value, self._kinds, self._questions, self._format)
+        _check_unhashed(member, value, self._kinds, self._questions, self._format, self._grounded)
         self._unhashed = {**self._unhashed, member: value}
 
     def prefix_hash(self, n: int) -> str:

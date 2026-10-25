@@ -387,6 +387,7 @@ async def _turn(
                 "settings": run.item(),
                 "providers": dict(loaded._providers),
                 "classes": loaded._classes,
+                "grounded": dict(loaded._grounded),
             }
         )
         value = state

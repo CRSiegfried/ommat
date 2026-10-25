@@ -76,7 +76,7 @@ from ommat._read_view import (
     UndeclaredRead,
     _Stop,
 )
-from ommat._refs import code_point_sorted
+from ommat._refs import code_point_sorted, declared_ref, grounded_ref
 from ommat._sorter import TurnSorter
 from ommat._typed import is_a, typed
 from ommat._types import Type, b64url_encode
@@ -256,6 +256,17 @@ async def _call(
 
 # ---------------------------------------------------------------------------------------------
 # The batch and how its call is judged
+
+
+@dataclass(frozen=True, slots=True)
+class _Expanded:
+    """A source's refs in a round: ``refs`` in code-point order, a per-candidate question's
+    grounded; ``markers``, a per-candidate question's need marker by declared ref when its set
+    holds one; ``candidates``, each grounded ref's candidate."""
+
+    refs: tuple[str, ...]
+    markers: dict[str, Undetermined]
+    candidates: dict[str, str]
 
 
 @dataclass(slots=True)
@@ -827,7 +838,14 @@ class _Turn:
         the returned value."""
         r = self.rules[rid]
         leaves = {path: self.loaded._leaf_value(path) for path in r.params}
-        view = ReadView(Role(ComponentKind.rule, rid), r.reads, r.params, self.board, leaves)
+        view = ReadView(
+            Role(ComponentKind.rule, rid),
+            r.reads,
+            r.params,
+            self.board,
+            leaves,
+            grounded=self.loaded._grounded,
+        )
         called = call(self.loaded._callables[rid], view)
         stop, error, returned = called.stop, called.error, called.returned
         unnamed: str | None = None
@@ -872,6 +890,8 @@ class _Turn:
         ready: list[str] = []
         left: dict[str, dict[str, Undetermined]] = {}
         labels: dict[str, tuple[tuple[str, ...], tuple[str | None, ...]]] = {}
+        # Each source's refs this round, a per-candidate question's grounded over its set.
+        expanded = {sid: self.expanded(sid) for sid in order}
         # Readiness in source id order, before the TaskGroup, so a function `when` that
         # raises a cancellation falls at a fixed place. A source that
         # is not ready gets its own markers before the budget and the deadline are tested.
@@ -885,13 +905,14 @@ class _Turn:
                 marked[sid] = marker
                 continue
             out = self.label_markers(sid, labels)
+            out.update(expanded[sid].markers)
             if out:
                 left[sid] = out
                 self.left_out.update(out)
             # A source with no ref left to ask is not called, and is outside the frontier.
-            if len(out) < len(self.sources[sid].provides):
+            if len(out) < len(expanded[sid].refs):
                 ready.append(sid)
-        batches = self.batches(ready, left, labels)
+        batches = self.batches(ready, left, labels, expanded)
         cut = self.cut_before(batches, n)
         if cut is not None:
             batches = []  # the frontier is not asked, whole
@@ -929,11 +950,11 @@ class _Turn:
                 calls[sid] = (index, judged)
             cost += batch.cost
         for sid in order:
-            provided = self.sources[sid].provides
+            provided = expanded[sid].refs
             whole = len(left.get(sid, ())) == len(provided)
             if sid not in marked and sid not in calls and not whole:
                 continue  # in a frontier the cut left unasked: the end marks it
-            for i, ref in enumerate(code_point_sorted(provided)):
+            for i, ref in enumerate(provided):
                 if sid in marked:
                     index = self.write(ref, n, None, marked[sid])
                     if i == 0 and sid in texts:  # keyed under the lowest ref
@@ -1059,6 +1080,7 @@ class _Turn:
         ready: list[str],
         left: Mapping[str, Mapping[str, Undetermined]],
         labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]],
+        expanded: Mapping[str, "_Expanded"],
     ) -> list[_Batch]:
         """The live frontier's batches: the ready sources naming one oracle form one, each
         source with no oracle one of its own, in order of their first source id. ``ready`` is in
@@ -1074,7 +1096,34 @@ class _Turn:
             else:
                 keyed[key] = [sid]
                 groups.append(keyed[key])
-        return [self.batch(tuple(group), left, labels) for group in groups]
+        return [self.batch(tuple(group), left, labels, expanded) for group in groups]
+
+    def expanded(self, sid: str) -> "_Expanded":
+        """A source's refs this round, in code-point order: each per-candidate question
+        grounded over its set's candidates, or its declared ref alone when the set is off the
+        board or holds a marker, with that marker naming the set; nothing over an empty set."""
+        refs: list[str] = []
+        markers: dict[str, Undetermined] = {}
+        candidates: dict[str, str] = {}
+        for ref in self.sources[sid].provides:
+            set_ref = self.loaded._grounded.get(ref)
+            if set_ref is None or set_ref not in self.board:
+                refs.append(ref)
+                continue
+            value = self.board[set_ref]
+            # Never a truth test on the set's value: a marker's `__bool__` raises.
+            if is_a(value, Unavailable):
+                markers[ref] = Unavailable(Cause(_C.need_unavailable, [set_ref]))
+                refs.append(ref)
+            elif is_a(value, Undetermined):
+                markers[ref] = Unasked(Cause(_C.need_undetermined, [set_ref]))
+                refs.append(ref)
+            else:
+                for candidate in cast("Sequence[str]", value):
+                    grounded = grounded_ref(ref, candidate)
+                    candidates[grounded] = candidate
+                    refs.append(grounded)
+        return _Expanded(tuple(code_point_sorted(refs)), markers, candidates)
 
     def label_markers(
         self, sid: str, labels: dict[str, tuple[tuple[str, ...], tuple[str | None, ...]]]
@@ -1124,6 +1173,7 @@ class _Turn:
         sids: tuple[str, ...],
         left: Mapping[str, Mapping[str, Undetermined]],
         labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]],
+        expanded: Mapping[str, "_Expanded"],
     ) -> _Batch:
         refs: list[str] = []
         questions: dict[str, Question] = {}
@@ -1134,7 +1184,8 @@ class _Turn:
         for sid in sids:
             source = self.sources[sid]
             # A question left out of the batch is neither passed nor among its refs.
-            provided = [r for r in code_point_sorted(source.provides) if r not in left.get(sid, {})]
+            grounding = expanded[sid]
+            provided = [r for r in grounding.refs if r not in left.get(sid, {})]
             sets.update(r for r in provided if r in self.loaded._candidate_sets)
             # A fresh copy per source, so no source's change reaches another's.
             needs = {
@@ -1143,21 +1194,23 @@ class _Turn:
             }
             rendered: dict[str, RenderedQuestion] = {}
             for ref in provided:
-                q = source.provides[ref]
+                name = declared_ref(ref)  # a per-candidate entry's question is its declared ref's
+                q = source.provides[name]
                 if isinstance(q, Question):
                     kind = AnswerKind(q.kind)
                     # A structured wording renders from the document, each object in the order
                     # the document holds, so a design and its document ask alike.
-                    written = self.document[sid]["provides"][ref]["wording"]
+                    written = self.document[sid]["provides"][name]["wording"]
                     declared = with_order(written["template"], written.get("order", {}))
-                    wording = _render_wording(declared, self.slot_values(q, needs))
+                    values = self.slot_values(q, needs, grounding.candidates.get(ref))
+                    wording = _render_wording(declared, values)
                     if kind is AnswerKind.extraction:
                         questions[ref], passed_labels[ref] = q, ()
                         rendered[ref] = self.extraction(ref, q, wording, needs, texts)
                         continue
                     # The names; each description beside its name, aligned; a candidate-valued
                     # set's rendered from the set's entry.
-                    passed, descriptions = labels.get(ref) or self.loaded._labels[ref]
+                    passed, descriptions = labels.get(name) or self.loaded._labels[name]
                     questions[ref], passed_labels[ref] = q, passed
                     rendered[ref] = RenderedQuestion(
                         kind, wording, passed, descriptions=descriptions
@@ -1205,9 +1258,12 @@ class _Turn:
             reference_date=date,
         )
 
-    def slot_values(self, q: Question, needs: Mapping[str, object]) -> dict[str, object]:
+    def slot_values(
+        self, q: Question, needs: Mapping[str, object], candidate: str | None = None
+    ) -> dict[str, object]:
         """Each slot's value by name: a board ref's from the source's needs, where load added
-        it, and a parameter's from the parameter block."""
+        it, a parameter's from the parameter block, and a candidate slot's the candidate the
+        entry is asked about."""
         values: dict[str, object] = {}
         for slot in q.wording.slots:
             tag, origin = next(iter(slot["origin"].items()))
@@ -1215,8 +1271,10 @@ class _Turn:
                 values[slot["name"]] = needs[origin]
             elif tag == "param":
                 values[slot["name"]] = self.loaded._leaf_value(origin)
-            else:  # pragma: no cover - load refuses a candidate slot
-                raise _InterpretError(f"a {tag} slot reached interpret")
+            elif candidate is not None:  # a candidate slot of a per-candidate entry
+                values[slot["name"]] = candidate
+            else:  # pragma: no cover - load holds a candidate slot to a grounded question
+                raise _InterpretError(f"a {tag} slot reached interpret with no candidate")
         return values
 
     def identity(self, ref: str) -> str:
@@ -1258,7 +1316,8 @@ class _Turn:
 
     def call_item(self, batch: _Batch, judged: _Judged, n: int) -> dict[str, object]:
         questions: dict[str, object] = {}
-        for ref in code_point_sorted(batch.questions):
+        # A per-candidate question's entries share one entry, under its declared ref.
+        for ref in code_point_sorted({declared_ref(r) for r in batch.questions}):
             # The kind and labels, or value type and list flag, are those the identity hashes.
             declared = self.document[self.loaded._providers[ref]]["provides"][ref]
             asked: dict[str, object] = {
@@ -1293,9 +1352,11 @@ class _Turn:
         asked = self.ran | self.carried
         pending = [s for s in code_point_sorted(self.sources) if s not in asked]
         for sid in pending:
-            for ref in code_point_sorted(self.sources[sid].provides):
+            grounding = self.expanded(sid)
+            for ref in grounding.refs:
                 # A question left out of its batch keeps its own marker under the cut.
-                self.write(ref, n, None, self.left_out.get(ref, marker))
+                kept = self.left_out.get(ref, grounding.markers.get(ref, marker))
+                self.write(ref, n, None, kept)
         for sid in held:
             self.sorter.done(sid)
         self.drain(n)

@@ -25,7 +25,7 @@ from ommat._interpret import _record_form
 from ommat._ledger import Record, read_record
 from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
-from ommat._refs import _RefError, parse_ref
+from ommat._refs import _RefError, declared_ref, parse_ref
 from ommat._typed import decoded
 from ommat._values import KEY_ORDER_FORMAT, clipped, type_name
 
@@ -228,7 +228,9 @@ class _FromRecord:
         stored = cast("dict[str, Any]", item["questions"])
         for ref in refs:
             if ref in source.questions:
-                why = _differing(source.questions[ref], stored.get(ref), self._entries)
+                why = _differing(
+                    source.questions[ref], stored.get(declared_ref(ref)), self._entries
+                )
                 if why:
                     values[ref] = unsupported
                     lines.append(f"{clipped(ref)}: {why}")
