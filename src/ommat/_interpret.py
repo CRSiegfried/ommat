@@ -25,6 +25,7 @@ handed plain data.
 """
 
 import asyncio
+import contextvars
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -709,6 +710,11 @@ def _render(template: str, values: Mapping[str, object]) -> str:
     return "".join(out)
 
 
+SORTED_TEXT: contextvars.ContextVar[bool] = contextvars.ContextVar("sorted_text", default=False)
+"""Set by replay over a record before format 6, whose engine wrote slot text in canonical key
+order, so its rerun renders as the turn did."""
+
+
 def _text(value: object) -> str:
     """A slot value by the declared-text closed rule: a string as itself, a list as its
     members' renderings joined by ``, ``, any other value as its ordered encoding, each object in
@@ -717,6 +723,8 @@ def _text(value: object) -> str:
         return value
     if type(value) in (list, tuple):
         return ", ".join(_text(member) for member in cast("Sequence[object]", value))
+    if SORTED_TEXT.get():
+        return encode(_record_form(value)).decode("utf-8")
     return ordered(_record_form(value))
 
 

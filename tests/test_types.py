@@ -238,6 +238,15 @@ SORTED_BEFORE_FORMAT_6 = [
         "record{a: integer, z: record{a: string, b: string}}",
     ),
     ("list<record{b: string, a: string}>", "list<record{a: string, b: string}>"),
+    (
+        "mapping<string, record{b: string, a: string}>",
+        "mapping<string, record{a: string, b: string}>",
+    ),
+    ("record{b: string, a: string} or null", "record{a: string, b: string} or null"),
+    (
+        "record{b: record{d: string, c: string} or null, a: string}",
+        "record{a: string, b: record{c: string, d: string} or null}",
+    ),
 ]
 
 

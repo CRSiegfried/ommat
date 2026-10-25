@@ -2338,7 +2338,7 @@ def _source_failures(
             yield from _missing_or_extra(provided, members, shown, at)
         if isinstance(provided.get("wording"), dict):
             yield from _text_failures(
-                provided["wording"], f"{shown}'s wording", at, ordered=fmt >= KEY_ORDER_FORMAT
+                provided["wording"], f"{shown}'s wording", at, held=fmt >= KEY_ORDER_FORMAT
             )
         declared: object = provided.get("labels")
         listed = declared
@@ -2374,11 +2374,11 @@ def _source_failures(
 
 
 def _text_failures(
-    text: dict[str, Any], where: str, names: tuple[str, ...], *, ordered: bool = False
+    text: dict[str, Any], where: str, names: tuple[str, ...], *, held: bool = False
 ) -> Iterator[tuple[tuple[str, ...], str]]:
     members = frozenset({"template", "slots"})
     structured = type(text.get("template")) in (dict, list)
-    if ordered and structured and "order" in text:
+    if held and structured and "order" in text:
         members |= {"order"}
         if text["order"] == {}:
             yield names, f"{where} writes an empty order, which it leaves out"

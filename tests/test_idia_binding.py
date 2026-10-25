@@ -8,6 +8,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -255,8 +256,61 @@ def test_the_state_need_is_sent_as_the_whole_json_part() -> None:
     (part,) = sent.wire_request.state.parts
     assert isinstance(part, JsonPart)
     assert dict(part.value) == {"earlier_turns": ("[user] hi",), "current_turn": "archive it"}  # type: ignore[arg-type]
+    assert list(cast("dict[str, Any]", part.value)) == ["earlier_turns", "current_turn"]
     assert [q.key for q in sent.wire_request.questions] == ["q:route"]
     assert result.values["q:route"] == {"road": 0.5, "other": 0.5}
+
+
+def test_the_state_need_keeps_its_order_at_every_depth() -> None:
+    leaf = Scripted(capabilities=caps(), script=answer_all)
+    binding = oracle_binding(Dispatcher(leaf), state="t:state")
+    value = {"z": {"y": 1, "b": 2}, "a": [{"q": 1, "c": 2}]}
+    call(binding, source(needs={"t:state": value}))
+    (part,) = leaf.calls[0].wire_request.state.parts
+    assert isinstance(part, JsonPart)
+    sent = cast("dict[str, Any]", part.value)
+    assert list(sent) == ["z", "a"]
+    assert list(sent["z"]) == ["y", "b"]
+    assert list(sent["a"][0]) == ["q", "c"]
+
+
+@pytest.mark.parametrize(
+    ("needs", "sent"),
+    [
+        ({"t:other": {"b": 1}}, {"t:other": {"b": 1}}),  # state names a need the source lacks
+        ({"t:state": None}, None),  # a null value is the whole part
+        ({"t:state": "text"}, "text"),
+    ],
+    ids=["missing", "null", "string"],
+)
+def test_the_state_need_sends_what_it_names_or_the_keyed_part(needs: Any, sent: Any) -> None:
+    leaf = Scripted(capabilities=caps(), script=answer_all)
+    binding = oracle_binding(Dispatcher(leaf), state="t:state")
+    call(binding, source(needs=needs))
+    (part,) = leaf.calls[0].wire_request.state.parts
+    assert isinstance(part, JsonPart)
+    assert (dict(part.value) if isinstance(part.value, Mapping) else part.value) == sent
+
+
+def test_an_extraction_source_or_an_image_state_sends_as_it_would_without_state() -> None:
+    for state in ("t:state.report", "t:photo"):
+        leaf = Scripted(capabilities=caps(), script=answer_all)
+        binding = oracle_binding(Dispatcher(leaf), state=state)
+        image = {"media_type": "image/png", "data": b"\x89PNG\r\n\x1a\n"}
+        call(
+            binding,
+            source(
+                needs={"t:state.report": TEXT, "t:photo": image}, questions={"q:x/at": extraction()}
+            ),
+        )
+        parts = leaf.calls[0].wire_request.state.parts
+        assert isinstance(parts[0], TextPart)
+        assert isinstance(parts[1], ImagePart)
+
+
+def test_the_binding_with_state_passes_the_conformance_suite() -> None:
+    leaf = Scripted(capabilities=caps(), script=answer_all)
+    assert check(oracle_binding(Dispatcher(leaf), state="t:state"), deterministic=True) == []
 
 
 def test_a_source_needing_the_state_need_beside_another_is_unsupported() -> None:

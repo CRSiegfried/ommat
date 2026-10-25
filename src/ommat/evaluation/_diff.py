@@ -19,7 +19,7 @@ from ommat._canonical import encode
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
 from ommat._ledger import _ITEM_DEPTH, InvalidRecord, Record, read_record
-from ommat._replay import _STATE, FindingKind, _replay_with
+from ommat._replay import _STATE, FindingKind, _differ, _replay_with
 from ommat._values import type_name
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 
@@ -54,8 +54,10 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
                 turn=r.record_hash,
             )
     mine, theirs = logs
+    # Compared as replay compares items: an item of a record before format 6, holding no
+    # order, is compared without the other's.
     for what, a, b in (("state entry", *states), ("settings item", mine[1], theirs[1])):
-        if encode(a, _ITEM_DEPTH) != encode(b, _ITEM_DEPTH):
+        if _differ(a, b):
             raise EvaluationRefusal(
                 f"other's {what} is not record's, so it is another turn",
                 reason=_R.different_turn,

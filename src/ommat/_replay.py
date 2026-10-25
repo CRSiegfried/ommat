@@ -27,10 +27,11 @@ from ommat._canonical import decode, encode
 from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings
 from ommat._design import LoadedDesign
 from ommat._fixture import FixtureBinding, RecordedCalls
+from ommat._interpret import SORTED_TEXT
 from ommat._ledger import _ITEM_DEPTH, Observer, Record
 from ommat._refs import code_point_sorted
 from ommat._typed import decoded
-from ommat._values import CONTEXT_FORMAT, type_name
+from ommat._values import CONTEXT_FORMAT, KEY_ORDER_FORMAT, type_name
 from ommat.helpers import HELPERS
 
 _STATE = "t:state"
@@ -101,9 +102,14 @@ async def _replay_with(
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
     bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))
     value = decoded(state["value"], loaded._types[_STATE])
-    decision = await _turn(
-        loaded, value, bindings, run, codec=None, clock=None, cut=_cut(log), observer=observer
-    )
+    # A record before format 6 rendered slot text sorted; its rerun renders it so too.
+    token = SORTED_TEXT.set(log[0]["format"] < KEY_ORDER_FORMAT)
+    try:
+        decision = await _turn(
+            loaded, value, bindings, run, codec=None, clock=None, cut=_cut(log), observer=observer
+        )
+    finally:
+        SORTED_TEXT.reset(token)
     rerun = decision.record
     return rerun, _findings(log, rerun.log, loaded, calls, fixture.asked, answers)
 

@@ -13,7 +13,7 @@ version.
 
 import datetime
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import cast
 
@@ -192,13 +192,27 @@ def image_need(value: object) -> tuple[str, bytes] | None:
 def prompt_text(prompt: object) -> str | None:
     """A prompt as the record's text: a ``str`` or ``None`` as given; a mapping as
     ``json.dumps(prompt)`` with its defaults, each mapping's keys in the order given at every
-    depth and sequences in order, so the text keeps the order the model read. Any other value,
-    within a mapping or in place of one, is a ``TypeError``."""
+    depth and sequences in order, so the text keeps the order the model read. A key that is not
+    a ``str``, which JSON would write as one and so could repeat, and any other value, within a
+    mapping or in place of one, is a ``TypeError``."""
     if prompt is None or isinstance(prompt, str):
         return prompt
     if not isinstance(prompt, Mapping):
         raise TypeError(f"a prompt {described(prompt)} is not a str, a mapping or None")
+    _string_keys(cast(object, prompt))
     return json.dumps(prompt, default=_object)
+
+
+def _string_keys(value: object) -> None:
+    """``TypeError`` for a mapping key, at any depth, that is not a ``str``."""
+    if isinstance(value, Mapping):
+        for key, member in cast("Mapping[object, object]", value).items():
+            if not isinstance(key, str):
+                raise TypeError(f"a prompt holds the key {described(key)}, not a str")
+            _string_keys(member)
+    elif isinstance(value, (list, tuple)):
+        for member in cast("Sequence[object]", value):
+            _string_keys(member)
 
 
 def _object(value: object) -> object:

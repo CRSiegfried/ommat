@@ -136,17 +136,25 @@ def _in_held_order(item: dict[str, Any]) -> dict[str, Any]:
 def _unordered_item(item: object, fmt: int, index: int) -> object:
     """A read item as the producer gave it: from format 6 an entry, plan or verdict item has
     its ``order`` taken off and its objects rebuilt in that order, so the append derives it
-    again and the bytes are compared; an ``order`` that does not fit is refused."""
+    again and the bytes are compared; an ``order`` that does not fit, or that orders the item's
+    own members, which the ledger keeps in canonical order, is refused. The item is copied in
+    exact types first, so no code of a key runs."""
     if type(item) is not dict or fmt < KEY_ORDER_FORMAT:
         return cast(object, item)
-    found = cast("dict[str, Any]", item)
-    if found.get("item") not in _ORDERED:
+    found = cast("dict[str, Any]", _copy(item))
+    kind = found.get("item")
+    if type(kind) is not str or kind not in _ORDERED:
         return found
     if _ORDER not in found:
         raise _LedgerError(f"item {index} has no 'order' member; a format-{fmt} record's has")
+    order = found[_ORDER]
+    if type(order) is dict and "0" in order:
+        raise _LedgerError(
+            f"item {index}'s order orders its own members, which are in canonical order"
+        )
     rest = {k: v for k, v in found.items() if k != _ORDER}
     try:
-        return with_order(rest, found[_ORDER])
+        return with_order(rest, cast("dict[str, list[int]]", order))
     except ValueError as unfit:
         raise _LedgerError(f"item {index}'s order does not fit it: {unfit}") from None
 

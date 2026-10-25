@@ -281,12 +281,57 @@ def test_a_format_5_record_replays_with_no_finding_though_the_replay_holds_order
 
 def test_read_record_refuses_an_order_that_does_not_fit() -> None:
     record = weights_record(load(weights_design()))
-    for order in ({"1": [0, 1]}, {"1": [0, 0, 1]}, {"7": [0]}, {"0": [1, 0, 2, 3, 4, 5]}):
+    orders: list[object] = [{"1": [0, 1]}, {"1": [0, 0, 1]}, {"7": [0]}, {"1": "x"}, []]
+    for order in orders:
         doc: dict[str, Any] = {"log": record.log, "unhashed": record.unhashed}
         index, item = next((n, i) for n, i in enumerate(doc["log"]) if i.get("ref") == "t:weights")
         item["order"] = order
         with pytest.raises(InvalidRecord, match=f"item {index}'s order does not fit it"):
             read_record(rehashed(doc, reorder=False))
+
+
+def test_read_record_refuses_an_order_of_an_items_own_members() -> None:
+    # A valid permutation of the item's own members: the ledger keeps them in canonical order,
+    # so such an order is never derived, and two documents must not read as one record.
+    record = weights_record(load(weights_design()))
+    doc: dict[str, Any] = {"log": record.log, "unhashed": record.unhashed}
+    index, item = next((n, i) for n, i in enumerate(doc["log"]) if i.get("ref") == "t:weights")
+    own: list[int] = list(range(len(item) - 1))[::-1]
+    item["order"] = {**item["order"], "0": own}
+    with pytest.raises(InvalidRecord, match=f"item {index}'s order orders its own members"):
+        read_record(rehashed(doc, reorder=False))
+
+
+@pytest.mark.parametrize("kind", [["entry"], {"a": 1}, 3])
+def test_read_record_refuses_an_item_kind_that_is_not_a_string_as_invalid(kind: object) -> None:
+    record = weights_record(load(weights_design()))
+    doc: dict[str, Any] = {"log": record.log, "unhashed": record.unhashed}
+    next(i for i in doc["log"] if i.get("ref") == "t:weights")["item"] = kind
+    with pytest.raises(InvalidRecord):
+        read_record(rehashed(doc, reorder=False))
+
+
+class _Loud(str):
+    """A key whose comparisons raise, so a read that compares a key by its own code fails."""
+
+    __hash__ = str.__hash__
+
+    def __eq__(self, other: object) -> bool:
+        raise AssertionError("a key's code ran")
+
+    def __ne__(self, other: object) -> bool:
+        raise AssertionError("a key's code ran")
+
+
+def test_read_record_runs_no_code_of_a_str_subclass_key() -> None:
+    record = weights_record(load(weights_design()))
+    doc: dict[str, Any] = {"log": record.log, "unhashed": record.unhashed}
+    item = next(i for i in doc["log"] if i.get("ref") == "t:weights")
+    rebuilt = {(_Loud(k) if k in ("item", "order", "value") else k): v for k, v in item.items()}
+    doc["log"][doc["log"].index(item)] = rebuilt
+    doc["hash"] = record.record_hash
+    read = read_record(doc)
+    assert read.record_hash == record.record_hash
 
 
 def test_read_record_refuses_an_order_in_a_format_5_record() -> None:
@@ -468,6 +513,50 @@ def test_each_order_reaches_the_call_the_rule_and_the_wording(from_document: boo
     assert entry(record, "d:param_keys")["value"] == ["zeta", "alpha"]
 
 
+@pytest.mark.parametrize(
+    ("leaf_type", "value"),
+    [
+        (t.mapping(t.bytes_), {"zeta": b"\x00z", "alpha": b"a"}),
+        (t.mapping(t.string), {"zeta": "z", "alpha": "a"}),
+    ],
+    ids=["bytes", "string"],
+)
+def test_a_mapping_leaf_of_any_scalar_keeps_its_order_through_its_document(
+    leaf_type: str, value: Any
+) -> None:
+    design = Design(
+        name="leaf",
+        state=t.record(),
+        parameters={"weights": Parameter(leaf_type, value)},
+        policy=Policy(inform, version="1"),
+    )
+    loaded = load(design)
+    assert decode(loaded.document)["parameters"]["weights"]["order"] == {"0": [1, 0]}
+    again = load(loaded.document, functions={"policy": inform})
+    assert again.design_hash == loaded.design_hash
+    assert list(again._leaf_value("weights")) == ["zeta", "alpha"]  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_template_of_a_list_of_objects_keeps_each_objects_order() -> None:
+    template = [{"z": "first", "a": {"y": "x", "b": "c"}}, {"q": "second", "c": "d"}]
+    design = Design(
+        name="list",
+        state=t.record(),
+        sources={"ask": Source({"q:it": Question("noul", Structured(template))})},
+        policy=Policy(inform, version="1"),
+    )
+    loaded = load(design)
+    again = load(loaded.document, functions={"policy": inform})
+    assert again.design_hash == loaded.design_hash
+    seen = Seen()
+    decide_sync(again, {}, {"default": seen})
+    (call,) = seen.batches[0]
+    wording = call.questions["q:it"].wording
+    assert isinstance(wording, list)
+    assert [list(o) for o in wording] == [["z", "a"], ["q", "c"]]
+    assert list(wording[0]["a"]) == ["y", "b"]
+
+
 def test_an_in_order_structured_template_writes_no_order_and_keeps_its_identity() -> None:
     loaded = load(ordered_design(IN_ORDER))
     wording = decode(loaded.document)["sources"]["ask"]["provides"]["q:it"]["wording"]
@@ -610,3 +699,75 @@ def test_from_record_compares_a_need_by_canonical_bytes_before_format_6() -> Non
     assert marker_code(answered_from(old, loaded, {"a": 2, "b": 1, "c": 4}), "q:fine") == (
         "unsupported"
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# A record before format 6 beside the engine's own
+
+
+def built_mapping(r: Any) -> dict[str, int]:
+    return {"b": 1, "a": 2}
+
+
+def informed(r: Any) -> Plan:
+    return Plan("inform", reply="ok")
+
+
+def context_design() -> LoadedDesign:
+    from ommat import Context, ContextEntry
+
+    slot = [{"name": "m", "origin": {"ref": "d:built"}}]
+    return load(
+        Design(
+            name="context",
+            state=t.record(),
+            sources={
+                "ask": Source(
+                    {"q:fine": Question("noul", Text("Is {m} fine?", slot))}, needs=["d:built"]
+                )
+            },
+            rules={"built": Rule("d:built", t.mapping(t.integer()), built_mapping, version="1")},
+            policy=Policy(informed, version="1"),
+            context=Context([ContextEntry("d:built", Text("M={m}", slot))]),
+        )
+    )
+
+
+def test_slot_text_renders_a_mapping_in_the_order_the_rule_built_it() -> None:
+    record = decide_sync(context_design(), {}, {"default": Seen()}).record
+    plan = next(i for i in record.log if i["item"] == "plan")
+    assert plan["context"]["entries"][0]["text"] == 'M={"b":1,"a":2}'
+
+
+def test_a_format_5_record_whose_slot_text_was_sorted_replays_with_no_finding() -> None:
+    loaded = context_design()
+    record = decide_sync(loaded, {}, {"default": Seen()}).record
+    doc = before_key_order({"log": record.log, "unhashed": record.unhashed})
+    for item in doc["log"]:  # as the format-5 engine rendered it: sorted
+        if item["item"] == "plan":
+            item["context"]["entries"][0]["text"] = 'M={"a":2,"b":1}'
+    old = read_record(rehashed(doc))
+    rerun, findings = replay_sync(old, loaded)
+    assert findings == []
+    assert rerun is not None
+    plan = next(i for i in rerun.log if i["item"] == "plan")
+    assert plan["context"]["entries"][0]["text"] == 'M={"a":2,"b":1}'
+    # The flag is the replay's alone: a live turn after it renders in held order again.
+    again = decide_sync(loaded, {}, {"default": Seen()}).record
+    assert (
+        next(i for i in again.log if i["item"] == "plan")["context"]["entries"][0]["text"]
+        == 'M={"b":1,"a":2}'
+    )
+
+
+def test_use_answers_takes_a_format_5_and_a_format_6_record_of_one_turn() -> None:
+    from ommat.evaluation import use_answers_sync
+
+    loaded = load(weights_design())
+    six = weights_record(loaded)
+    five = read_record(rehashed(before_key_order({"log": six.log, "unhashed": six.unhashed})))
+    # No pairing is refused as another turn: an item before format 6 is compared without the
+    # other's order. Findings may follow, since a format-5 record holds its mappings sorted.
+    for record, other in ((five, six), (six, five), (five, five), (six, six)):
+        use_answers_sync(record, loaded, other)
+    assert use_answers_sync(six, loaded, six)["findings"] == []

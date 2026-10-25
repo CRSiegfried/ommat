@@ -59,15 +59,15 @@ def handoff_text(handoff: dict[str, Any] | None) -> str:
 def to_chat_completions(
     view: dict[str, Any] | None, *, turn: str | int | None = None
 ) -> list[dict[str, Any]]:
-    """A ``transcript`` view as Chat Completions messages, ``[]`` for ``None``: per group of
-    calls an assistant message with null ``content`` and its ``tool_calls``, then a ``tool``
-    message per call with a result. Every argument and result is canonical JSON, so a record
-    renders to the same bytes each time. Raises ``ValueError`` for a tool name no provider
-    takes: a source or pending tool named ``decide``, a pending tool outside ``[A-Za-z0-9_-]``,
-    or a name over 64 characters. ``turn``, exactly a ``str`` or an ``int`` the canonical
-    encoding takes, else ``ValueError``, gives every id a stem hashed from the record hash and
-    the turn, so one record rendered for two turns of a conversation repeats no id; ``None``
-    keeps the transcript's ids."""
+    """A ``transcript`` view as Chat Completions messages, ``[]`` for ``None``: per group of calls
+    an assistant message with null ``content`` and its ``tool_calls``, then a ``tool`` message per
+    call with a result. Every argument and result is in the ordered encoding, each object in the
+    order the record holds it, so a record renders to the same bytes each time. Raises
+    ``ValueError`` for a tool name no provider takes: a source or pending tool named ``decide``,
+    a pending tool outside ``[A-Za-z0-9_-]``, or a name over 64 characters. ``turn``, exactly a
+    ``str`` or an ``int`` the canonical encoding takes, else ``ValueError``, gives every id a
+    stem hashed from the record hash and the turn, so one record rendered for two turns of a
+    conversation repeats no id; ``None`` keeps the transcript's ids."""
     check_turn(turn)
     if view is None:
         return []
