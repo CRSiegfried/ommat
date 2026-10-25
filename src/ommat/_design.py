@@ -279,7 +279,9 @@ class Group:
 @dataclass(frozen=True, slots=True)
 class Source:
     """A source. ``provides`` maps each ``q:`` ref to its ``Question``
-    and each ``t:`` ref to its type, or to a mapping of ``type`` and ``candidates``."""
+    and each ``t:`` ref to its type, or to a mapping of ``type`` and ``candidates``.
+    ``grounded`` names a ``list<string>`` candidate set; each question whose wording holds a
+    ``{"candidate": <that set>}`` slot is then asked once per candidate."""
 
     provides: Mapping[str, Any]
     needs: Sequence[str] = ()
