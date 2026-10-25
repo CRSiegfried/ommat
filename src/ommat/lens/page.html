@@ -225,10 +225,10 @@ function build(record, design) {
     const node = "e:" + ref;
     const { base } = parseRef(ref);
     if (calls.has(e.call)) add(node, "c:" + e.call, "asked in this call", "record");
-    if (str(grounded[base])) link(node, [grounded[base]], "its candidate set", "record");
+    if (Object.hasOwn(grounded, base) && str(grounded[base])) link(node, [grounded[base]], "its candidate set", "record");
     for (const d of arr(e.derivation)) link(node, obj(d).refs, "helper " + obj(d).helper, "record");
     link(node, obj(obj(e.marker).cause).refs, "named in its marker's cause", "record");
-    const provider = providers[base];
+    const provider = Object.hasOwn(providers, base) ? providers[base] : undefined;
     if (ref.startsWith("d:") && str(provider) && Object.hasOwn(rules, provider)) link(node, obj(rules[provider]).reads, "rule " + provider + " reads it", "design");
   }
   for (const [idx, c] of calls) {
@@ -321,7 +321,7 @@ function render() {
     for (const ref of r.entries) {
       const e = s.entries.get(ref);
       const { base, candidate } = parseRef(ref);
-      const who = s.providers[base] || (ref === "t:state" ? "the state" : "");
+      const who = (Object.hasOwn(s.providers, base) && s.providers[base]) || (ref === "t:state" ? "the state" : "");
       html += `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="e:${esc(ref)}"><span class="ref">${esc(ref)}</span>
         <span class="meta">${who ? `<span>from ${esc(who)}</span>` : ""}${candidate != null ? `<span>candidate ${esc(candidate)}</span>` : ""}</span>${valueHtml(e)}</div>`;
     }
@@ -364,6 +364,12 @@ function select(node) {
        <h3>Fed into, directly</h3>${list(state.outputs.get(node))}
        <p class="meta">${up.size} upstream and ${down.size} downstream in all. "record" links are in the record itself; "design" links come from the design document, as declared.</p>`
     : `<h2>Lineage</h2><p class="meta">Select a card to see what it came from and what it fed. The plan is the last column.</p>${legend}`;
+}
+
+// A problem with something the reader opened: said once at the top, the view left as it was.
+function flash(message) {
+  const old = $("flash"); if (old) old.remove();
+  $("summary").insertAdjacentHTML("afterbegin", `<span class="err" id="flash">${message}</span>`);
 }
 
 function clearView(message) {
@@ -439,8 +445,8 @@ function deckFrom(recs, designs, skipped, read, warning = "") {
     const h = designHash(r.record);
     const exact = designs.get(h) || (loadedDesign && loadedDesign.hash === h ? loadedDesign.doc : null);
     if (exact) return { ...r, design: exact, guess: null };
-    if (loadedDesign) return { ...r, design: loadedDesign.doc, guess: "loaded" };
     if (only) return { ...r, design: only, guess: "folder" };
+    if (loadedDesign) return { ...r, design: loadedDesign.doc, guess: "loaded" };
     return { ...r, design: null, guess: null };
   });
   const paired = deck.filter((d) => d.design && !d.guess).length;
@@ -472,8 +478,11 @@ function showAt(i) {
   if (d.guess && state) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES[d.guess]}</div>`);
   $("pick").value = String(at);
   $("count").textContent = `${at + 1} of ${deck.length}`;
+  // A pager button about to be disabled hands focus to its pair, so the keyboard keeps its place.
+  const focused = document.activeElement;
   $("prev").disabled = at === 0;
   $("next").disabled = at === deck.length - 1;
+  if (focused && focused.disabled) (focused === $("prev") ? $("next") : $("prev")).focus();
 }
 function leaveDeck() { deck = []; $("pager").hidden = true; }
 
@@ -500,11 +509,11 @@ const onFile = (input, cb) => input.addEventListener("change", () => {
   const f = input.files && input.files[0];
   input.value = "";
   if (!f) return;
-  readJson(f).then(cb, (e) => clearView(`<span class="err">Couldn't read ${esc(f.name)}: ${esc(e.message)}</span>`));
+  readJson(f).then(cb, (e) => flash(`Couldn't read ${esc(f.name)}: ${esc(e.message)}`));
 });
-onFile($("recFile"), ({ json }) => { try { showOne(json); } catch (e) { leaveDeck(); clearView(`<span class="err">${esc(e.message)}</span>`); } });
+onFile($("recFile"), ({ json }) => { try { build(json, null); } catch (e) { flash(esc(e.message)); return; } showOne(json); });
 onFile($("desFile"), ({ json, hash }) => {
-  if (!isDesign(json)) { $("summary").insertAdjacentHTML("afterbegin", `<span class="err">That file is not a design: a design has a policy and no log.</span>`); return; }
+  if (!isDesign(json)) { flash("That file is not a design: a design has a policy and no log."); return; }
   loadedDesign = { doc: json, hash };
   try {
     if (deck.length) {
