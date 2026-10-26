@@ -470,8 +470,9 @@ class _Form:
                     names, f"{where} hold a role that is not reflective, formative or unknown"
                 )
                 continue
-            if target is not None:
-                out.append(MappingProxyType({"target": target, "role": role}))
+            if target is None:  # its failure is reported
+                continue
+            out.append(MappingProxyType({"target": target, "role": role}))
         return tuple(out)
 
     def extraction(self, q: Question, where: str, names: tuple[str, ...]) -> bool:

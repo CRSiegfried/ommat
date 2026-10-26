@@ -227,6 +227,7 @@ class Question:
 
 
 def _latents(value: object) -> Any:
+    """A question's latent targets as a tuple of read-only mappings, as ``_latent`` holds each."""
     members = _sequence(value)
     if type(members) is tuple:
         return tuple(_latent(v) for v in cast("tuple[object, ...]", members))

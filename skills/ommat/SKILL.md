@@ -81,16 +81,16 @@ From format 7, targets name, for a reader, the property a question asks about or
 from ommat import Question, Target, Text
 
 targets = {
-    "tg:danger": Target("Whether the report describes a danger to people", values="yes or no"),
+    "tg:danger": Target("Whether people are at risk where the report was made", values="yes or no"),
     "tg:priority": Target("How soon a crew should go out"),
 }
 danger = Question(
     "noul",
-    Text("Does the report describe a danger to people?"),
+    Text("Could someone be hurt where this report was made?"),
     target="tg:danger",  # each id is a key of the design's targets
     latent_targets=[{"target": "tg:priority", "role": "formative"}],  # or reflective, unknown
 )
-# Design(..., targets=targets), and a rule names what it estimates: Rule(..., target="tg:priority")
+# Design(..., targets=targets); a rule names what it estimates: Rule(..., target="tg:priority")
 ```
 
 ## Handing off to the next model

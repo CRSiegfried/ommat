@@ -77,9 +77,19 @@ def test_a_design_declaring_targets_writes_them_and_round_trips_byte_for_byte() 
     assert again.design_hash == loaded.design_hash
 
 
-def test_targets_are_in_the_design_hash() -> None:
-    assert load(targeted()).design_hash != load(targeted(rule_target=None)).design_hash
-    assert load(targeted()).design_hash != load(targeted(latent=())).design_hash
+@pytest.mark.parametrize(
+    "other",
+    [
+        targeted(target=None),
+        targeted(latent=()),
+        targeted(latent=({"target": "tg:distress", "role": "formative"},)),
+        targeted(rule_target=None),
+        targeted(targets={**TARGETS, "tg:distress": Target("How calm the traveller is")}),
+        targeted(targets={**TARGETS, "tg:distress": Target("How upset", values="0 to 3")}),
+    ],
+)
+def test_every_target_member_is_in_the_design_hash(other: Design) -> None:
+    assert load(other).design_hash != load(targeted()).design_hash
 
 
 def test_a_role_is_held_as_its_member_and_latent_targets_are_written_unordered() -> None:
@@ -103,7 +113,10 @@ def test_a_target_listed_under_two_roles_loads() -> None:
         {"target": "tg:distress", "role": "formative"},
     )
     asked = json.loads(load(targeted(latent=latent)).document)["sources"]["ask"]["provides"]
-    assert len(asked["q:ask/urgent"]["latent_targets"]) == 2
+    assert asked["q:ask/urgent"]["latent_targets"] == [
+        {"role": "formative", "target": "tg:distress"},
+        {"role": "reflective", "target": "tg:distress"},
+    ]
 
 
 def test_a_design_with_targets_and_no_link_loads() -> None:
@@ -216,7 +229,7 @@ def test_a_questions_identity_leaves_its_targets_out() -> None:
         assert asked["questions"]["q:ask/urgent"]["identity"] == expected
 
 
-def test_no_turn_reads_a_target() -> None:
+def test_targets_leave_the_plan_and_the_entries_unchanged() -> None:
     plain = decide_sync(load(DESIGN), STATE, {"default": binding})
     with_targets = decide_sync(load(targeted()), STATE, {"default": binding})
     assert with_targets.plan == plain.plan
@@ -228,6 +241,7 @@ def test_a_question_and_a_rule_default_to_no_target() -> None:
     question = Question("noul", Text("Is it urgent?"))
     assert (question.target, question.latent_targets) == (None, ())
     assert Rule("d:x", "string", urgent).target is None
+    assert Table("d:x", "string", "U", [], []).target is None
 
 
 @pytest.mark.parametrize(
@@ -281,6 +295,16 @@ def document(**edits: Any) -> dict[str, Any]:
             'lists its own target "tg:urgency" as latent',
         ),
         (
+            {
+                "latent_targets": [
+                    {"role": "formative", "target": "tg:distress"},
+                    {"role": "formative", "target": "tg:distress"},
+                ]
+            },
+            1,
+            'lists the target "tg:distress" twice as formative',
+        ),
+        (
             {"latent_targets": [{"role": "causal", "target": "tg:distress"}]},
             10,
             "hold a role that is not reflective, formative or unknown",
@@ -323,7 +347,6 @@ def test_a_role_names_its_member_and_any_other_string_stays_a_string() -> None:
     assert [str(r) for r in TargetRole] == ["reflective", "formative", "unknown"]
 
 
-def test_a_design_and_a_target_default_as_declared() -> None:
+def test_a_design_declares_no_target_and_a_target_no_values_by_default() -> None:
     assert dict(dataclasses.replace(DESIGN).targets) == {}
     assert Target("s").values is None
-    assert Table("d:x", "string", "U", [], []).target is None
