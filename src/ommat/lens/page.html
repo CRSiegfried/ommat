@@ -63,14 +63,15 @@ button:hover, .file:hover, select:hover { border-color: var(--accent); }
 .flow { overflow-x: auto; padding: 4px 4px 6px; }
 .cols { display: flex; gap: 14px; align-items: flex-start; min-width: min-content; }
 .col { width: 270px; flex: none; display: grid; gap: 8px; }
+.cols.design .col { width: 210px; } /* five columns fit beside the lineage panel */
 .colhead { font: 600 13px var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; display: grid; gap: 6px; cursor: pointer; text-align: left; width: 100%; font: inherit; color: inherit; }
 .card:hover { border-color: var(--accent); }
 .card.call { border-style: dashed; }
-.card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.card.sel { outline: 2px solid var(--accent); outline-offset: 1px; box-shadow: inset 4px 0 0 var(--accent); }
 .card.up { background: var(--accent-soft); border-color: var(--accent); }
 .card.down { background: var(--down-soft); border-color: var(--down); }
-.card.dim { opacity: .45; }
+.card.dim { opacity: .6; }
 .ref { font: 500 12.5px var(--mono); overflow-wrap: anywhere; }
 .meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .bars { display: grid; gap: 3px; }
@@ -91,7 +92,7 @@ aside li { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 aside li button { background: none; border: none; padding: 0; color: var(--accent); font: 500 12.5px var(--mono); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .how { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
 .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); }
-.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid var(--muted); }
 textarea { width: 100%; min-height: 110px; font: 12px var(--mono); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 .paste { display: grid; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .paste .row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -102,7 +103,7 @@ button:disabled { opacity: .4; cursor: default; }
 @media (prefers-reduced-motion: no-preference) { .card { transition: background .15s, border-color .15s, opacity .15s; } }
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; align-items: end; border-bottom: 1px solid var(--line); }
 .tabs button { border-radius: 6px 6px 0 0; border-bottom: none; margin-bottom: -1px; }
-.tabs button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); border-bottom: 1px solid var(--accent-soft); }
+.tabs button[aria-current="page"] { background: var(--accent-soft); border-color: var(--accent); border-bottom: 1px solid var(--accent-soft); }
 .tabs .spacer { flex: 1; }
 .tabs select { margin-bottom: 4px; max-width: 100%; }
 .bar .track { position: relative; }
@@ -122,16 +123,19 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .colhead { order: -1; }
 .card { content-visibility: auto; contain-intrinsic-size: auto 72px; }
 .card.hide { display: none; }
-.stub { order: 1000; font: 500 12px var(--body); color: var(--muted); background: none; border: 1px dashed var(--line); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
+.stub { order: 8; font: 500 12px var(--body); color: var(--muted); background: none; border: 1px dashed var(--line); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
 .stub:hover { border-color: var(--accent); color: var(--ink); }
-/* Compact: the selected card in full, its direct links with their meta, the rest one line. */
-#cols.compact .card:not(.sel) .val, #cols.compact .card:not(.sel) .bar:not(.top) { display: none; }
-#cols.compact .card:not(.sel):not(.near) .meta { display: none; }
+/* Compact: the selected card in full; every other card keeps its value on one line, its bars,
+   a call's outcome, the verdict and its boundary notes; direct links keep their meta. */
+#cols.compact .card:not(.sel) .val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: none; }
+#cols.compact .card:not(.sel) .meta.labels { display: none; }
+#cols.compact .card:not(.sel):not(.near) .meta:not(.notes) { display: none; }
 /* Labels past the top few fold into one "Other" bar until the card is selected. */
 .bar.extra { display: none; }
 .card.sel .bar.extra { display: grid; }
 .card.sel .bar.other { display: none; }
 .bar.other .lab { font-style: italic; color: var(--muted); }
+.bar.other .fill { opacity: .45; } /* several labels' mass, never read as one label's */
 .card .qx { display: none; }
 .card.sel .qx { display: inline; }
 .card.sel .qmore { display: none; }
@@ -162,12 +166,12 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
     <div class="row"><button id="pasteGo" type="button">Show this record</button><span class="err" id="pasteErr"></span></div>
   </div>
 
-  <nav class="tabs" id="tabs" role="tablist" aria-label="Views">
-    <button type="button" role="tab" data-tab="design" aria-selected="false">Design</button>
-    <button type="button" role="tab" data-tab="turn" aria-selected="true">Turn</button>
-    <button type="button" role="tab" data-tab="turns" aria-selected="false">Turns</button>
+  <nav class="tabs" id="tabs" aria-label="Views">
+    <button type="button" data-tab="design">Design</button>
+    <button type="button" data-tab="turn" aria-current="page">Turn</button>
+    <button type="button" data-tab="turns">Turns</button>
     <span class="spacer"></span>
-    <select id="viewMode" aria-label="When a card is selected"><option value="filter">Selection filters the rest</option><option value="dim">Selection dims the rest</option></select>
+    <select id="viewMode" aria-label="When a card is selected" title="What a selection does to the cards it does not reach"><option value="filter">Selection filters the rest</option><option value="dim">Selection dims the rest</option></select>
     <select id="density" aria-label="Card density"><option value="auto">Density: auto</option><option value="full">Density: full</option><option value="compact">Density: compact</option></select>
     <select id="designPick" aria-label="Design shown" hidden></select>
     <select id="turnsBy" aria-label="Group turns by" hidden></select>
@@ -218,9 +222,10 @@ function parseRef(ref) {
 let state = null; // the Turn view's graph, from one record
 let dstate = null; // the Design view's graph, from one design document
 let tab = "turn", selected = null, designKey = null, turnsBy = "";
+let designTurn = null; // the record whose design designKey last followed
 let mode = "filter", density = "auto"; // what a selection does to the rest, and card density
 const openCols = new Set(); // the columns whose folded cards the reader opened
-const TOP_LABELS = 3; // labels shown before the rest fold into "Other"
+const TOP_LABELS = 2; // labels shown before the rest fold into "Other": the leader and runner-up
 const known = new Map(); // every design the page holds: key (its hash, or "opened") -> {doc, name}
 const addKnown = (key, doc) => { if (!known.has(key) || key === "opened") known.set(key, { doc, name: `${text(obj(doc).name ?? "unnamed")} · ${key.startsWith("sha256:") ? key.slice(7, 15) + "…" : key}` }); };
 const keyOf = (doc) => { for (const [k, v] of known) if (v.doc === doc) return k; addKnown("opened", doc); return "opened"; };
@@ -273,6 +278,7 @@ function build(record, design) {
       for (const slot of arr(obj(qq.wording).slots)) if (str(obj(obj(slot).origin).ref)) refs.push(slot.origin.ref);
       if (str(obj(qq.text).ref)) refs.push(qq.text.ref);
       if (str(obj(qq.reference_date).ref)) refs.push(qq.reference_date.ref);
+      if (qq.labels && typeof qq.labels === "object" && !Array.isArray(qq.labels) && str(qq.labels.candidates)) refs.push(qq.labels.candidates);
     }
     if (str(s.grounded)) refs.push(s.grounded);
     return refs;
@@ -305,6 +311,10 @@ function build(record, design) {
     for (const c of arr(obj(plan.context).entries)) link("plan", [obj(c).ref], "a context entry", "record");
     for (const f of arr(obj(verdict).failures)) link("plan", [obj(f).ref, obj(obj(f).requirement).ref], "the guard refused on it", "record");
     if (design) link("plan", obj(design.policy).reads, "the policy reads it", "design");
+    for (const c of arr(obj(design && design.context).entries)) {
+      link("plan", [obj(c).ref], "a context entry", "design");
+      link("plan", arr(obj(obj(c).text).slots).map((sl) => obj(obj(sl).origin).ref), "a context entry's wording", "design");
+    }
   }
   const outputs = new Map();
   for (const [node, ins] of inputs) for (const i of ins.values()) {
@@ -354,6 +364,7 @@ function buildDesign(doc) {
       }
       link(node, [obj(q.text).ref, obj(q.reference_date).ref], "the text it reads");
       if (str(s.grounded)) link(node, [s.grounded], "its candidate set");
+      if (q.labels && typeof q.labels === "object" && !Array.isArray(q.labels)) link(node, [q.labels.candidates], "its candidate-valued labels");
       link(node, [obj(s.requirement).ref], "source " + sid + " is gated on it");
     }
   }
@@ -370,6 +381,14 @@ function buildDesign(doc) {
   linkParams("plan", policy.params, "the policy reads it");
   linkParams("plan", boundaryPaths(policy.boundaries), "a declared boundary");
   arr(design.requirements).forEach((q, i) => { link("req:" + i, [obj(q).ref], "it names this ref"); add("plan", "req:" + i, "guards every execute plan"); });
+  for (const c of arr(obj(design.context).entries)) {
+    link("plan", [obj(c).ref], "a context entry");
+    for (const slot of arr(obj(obj(c).text).slots)) {
+      const o = obj(obj(slot).origin);
+      if (str(o.ref)) link("plan", [o.ref], "a context entry's wording");
+      if (str(o.param)) linkParams("plan", [o.param], "a context entry's wording");
+    }
+  }
 
   const outputs = new Map();
   for (const [node, ins] of inputs) for (const i of ins.values()) {
@@ -416,29 +435,38 @@ function targetHtml(t) {
     ...t.latent.map((l) => `<span class="tg">bears on ${esc(l.target)} (${esc(l.role)})</span>`)].join("");
 }
 
-// The values a design's boundaries fields name for one read, by role, each [path, value]; a path
-// two components name is shown once. Null when no field names the read.
+// The values a design's boundaries fields name for one read, by role, each [path, value], a plain
+// read's also with the key it bounds, field path included; a path two components name is shown
+// once. Null when no field names the read.
 function boundsOf(design, base) {
   const params = obj(obj(design).parameters);
   const out = { bar: [], thresholds: [], margin: [], null: [], confidence: [], value: [], plain: [], mass: [] };
   const seen = new Set();
-  const put = (role, p) => { if (str(p) && !seen.has(role + " " + p)) { seen.add(role + " " + p); out[role].push([p, Object.hasOwn(params, p) ? obj(params[p]).value : undefined]); } };
+  const put = (role, p, key) => { if (str(p) && !seen.has(role + " " + key + " " + p)) { seen.add(role + " " + key + " " + p); out[role].push([p, Object.hasOwn(params, p) ? obj(params[p]).value : undefined, key]); } };
   let any = false;
   const fields = [...Object.values(obj(obj(design).rules)).map((r) => obj(r).boundaries), obj(obj(design).policy).boundaries];
   for (const f of fields) for (const [key, entry] of Object.entries(obj(f))) {
     if (parseRef(key).base !== base) continue;
     any = true;
-    if (Array.isArray(entry)) { for (const p of entry) put("plain", p); continue; }
-    for (const role of ["bar", "thresholds", "margin", "null", "confidence", "value"]) for (const p of arr(obj(entry)[role])) put(role, p);
+    if (Array.isArray(entry)) { for (const p of entry) put("plain", p, key); continue; }
+    for (const role of ["bar", "thresholds", "margin", "null", "confidence", "value"]) for (const p of arr(obj(entry)[role])) put(role, p, key);
     for (const m of arr(obj(entry).mass)) out.mass.push({ labels: arr(obj(m).labels), bounds: arr(obj(m).bounds).map((p) => [p, Object.hasOwn(params, p) ? obj(params[p]).value : undefined]) });
   }
   return any ? out : null;
 }
 const num = (x) => typeof x === "number" && Number.isFinite(x);
 
+// A difference or sum of probabilities without float noise: 0.6 - 0.4 is 0.2.
+const exact = (x) => Number(x.toPrecision(12));
+// A percentage, with three decimals when it lies within rounding of a bound it is judged against.
+const pctNear = (x, bounds) => (bounds.some((b) => num(b) && Math.abs(x - b) < 0.0005) ? (x * 100).toFixed(3) + "%" : pct(x));
+// A probability as a percentage; any other bound, a count or an age, as the number it is.
+const amount = (x) => (num(x) ? String(x) : x === undefined ? "–" : JSON.stringify(x) ?? "–");
+
 function reach(map, start) {
   const seen = new Set(), stack = [start];
   while (stack.length) for (const x of map.get(stack.pop()) || []) if (!seen.has(x.node)) { seen.add(x.node); stack.push(x.node); }
+  seen.delete(start); // a cycle leads back to it
   return seen;
 }
 
@@ -451,24 +479,25 @@ function valueHtml(e, b, paired) {
   const asked = v && typeof v === "object" && (v.probabilities || v.kind === "extraction");
   if (!b) return held + (asked ? `<div class="meta"><span class="none">no boundaries declared</span></div>` : "");
   const notes = [];
-  const named = (pairs, word) => pairs.forEach(([p, x]) => notes.push(`${word} ${esc(num(x) ? pct(x) : JSON.stringify(x ?? null))} <span title="${esc(p)}">(${esc(p)})</span>`));
+  const named = (pairs, word, shown = pct) => pairs.forEach(([p, x]) => notes.push(`<span title="${esc(p)} = ${esc(amount(x))}">${word} ${esc(num(x) ? shown(x) : amount(x))}</span> <span title="${esc(p)}">(${esc(p)})</span>`));
   if (v && typeof v === "object" && v.probabilities && typeof v.probabilities === "object") {
     const ps = Object.values(v.probabilities).filter(num).sort((x, y) => y - x);
-    if (ps.length > 1) notes.push(`lead ${pct(ps[0] - ps[1])}`);
+    const lead = ps.length ? exact(ps[0] - (ps[1] ?? 0)) : null; // a lone label leads by its own p
+    if (lead !== null) notes.push(`<span title="${esc(lead)}">lead ${pctNear(lead, b.margin.map(([, x]) => x))}</span>`);
     named(b.margin, "margin");
     named(b.bar, "bar");
     for (const m of b.mass) {
-      const mass = m.labels.reduce((s, l) => s + (num(v.probabilities[l]) ? v.probabilities[l] : 0), 0);
-      m.bounds.forEach(([p, x]) => notes.push(`mass ${esc(m.labels.join("+"))} ${pct(mass)} vs ${num(x) ? pct(x) : esc(JSON.stringify(x ?? null))} <span title="${esc(p)}">(${esc(p)})</span>`));
+      const mass = Math.min(1, exact(m.labels.reduce((s, l) => s + (num(v.probabilities[l]) ? v.probabilities[l] : 0), 0)));
+      m.bounds.forEach(([p, x]) => notes.push(`mass ${esc(m.labels.join("+"))} <span title="${esc(mass)}">${pctNear(mass, [x])}</span> vs ${num(x) ? pct(x) : esc(JSON.stringify(x ?? null))} <span title="${esc(p)}">(${esc(p)})</span>`));
     }
-    if (b.thresholds.length) notes.push("thresholds ticked per label");
+    if (b.thresholds.length) notes.push(`thresholds ticked per label (${b.thresholds.map(([p]) => esc(p)).join(", ")})`);
   } else {
     named(b.null, "none bar");
     named(b.confidence, "confidence bar");
-    named(b.value, "value bound");
+    named(b.value, "value bound", amount);
   }
-  named(b.plain, "compared with");
-  return held + (notes.length ? `<div class="meta">${notes.map((n) => `<span>${n}</span>`).join("")}</div>` : "");
+  for (const [p, x, key] of b.plain) notes.push(`${esc(key)} compared with ${esc(amount(x))} <span title="${esc(p)}">(${esc(p)})</span>`);
+  return held + (notes.length ? `<div class="meta notes">${notes.map((n) => `<span>${n}</span>`).join("")}</div>` : "");
 }
 
 // A long list of items as its first few, the rest folded behind "+n more" until the card is
@@ -479,7 +508,8 @@ function foldList(items, keep, sep = "") {
 }
 
 // The labels to fold into "Other": none for a short list, else every label past the top few by
-// probability, except one a boundary ticks or a mass bound names, which always shows.
+// probability, except one a threshold or a mass bound names, which always shows. A bar ticks every
+// label alike, so it exempts none.
 function foldedLabels(labels, probs, bounded) {
   if (labels.length <= TOP_LABELS + 1) return new Set();
   const shown = new Set([...labels].sort((a, c) => (num(probs[c]) ? probs[c] : -1) - (num(probs[a]) ? probs[a] : -1)).slice(0, TOP_LABELS));
@@ -498,19 +528,20 @@ function valueOnly(e, b) {
     const probs = v.probabilities;
     const labels = arr(v.labels).length ? arr(v.labels) : Object.keys(probs);
     const top = labels.reduce((a, b) => ((probs[b] ?? -1) > (probs[a] ?? -1) ? b : a), labels[0]);
-    const ticks = (l) => (b ? [...b.bar.map(([, x]) => x), ...b.thresholds.map(([, x]) => (num(x) ? x : obj(x)[l]))].filter(num) : []);
-    const folded = foldedLabels(labels, probs, (l) => ticks(l).length > 0 || (b ? b.mass.some((m) => m.labels.includes(l)) : false));
+    const ticks = (l) => (b ? [...b.bar.map(([p, x]) => [x, p]), ...b.thresholds.map(([p, x]) => [num(x) ? x : obj(x)[l], p])].filter(([x]) => num(x)) : []);
+    const bound = (l) => !!b && (b.thresholds.some(([, x]) => num(x) || num(obj(x)[l])) || b.mass.some((m) => m.labels.includes(l)));
+    const folded = foldedLabels(labels, probs, bound);
     const barHtml = (l, p, extra, other) => {
       const w = typeof p === "number" ? Math.max(0, Math.min(100, p * 100)) : 0;
-      const marks = other ? "" : ticks(l).map((x) => `<span class="tick" style="left:calc(${Math.max(0, Math.min(100, x * 100))}% - 1px)" title="${esc(pct(x))}"></span>`).join("");
-      return `<div class="bar${l === top && !other ? " top" : ""}${extra ? " extra" : ""}${other ? " other" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${w}%"></span>${marks}</span><span class="pct">${pct(p)}</span></div>`;
+      const marks = other ? "" : ticks(l).map(([x, path]) => `<span class="tick" style="left:calc(${Math.max(0, Math.min(100, x * 100))}% - 1px)" title="${esc(path)} = ${esc(x)}"></span>`).join("");
+      return `<div class="bar${l === top && !other ? " top" : ""}${extra ? " extra" : ""}${other ? " other" : ""}${!other && bound(l) ? " bound" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${w}%"></span>${marks}</span><span class="pct" title="${esc(amount(p))}">${pct(p)}</span></div>`;
     };
-    const rest = folded.size ? barHtml(`+${folded.size} label${folded.size === 1 ? "" : "s"}`, [...folded].reduce((s, l) => s + (num(probs[l]) ? probs[l] : 0), 0), false, true) : "";
+    const rest = folded.size ? barHtml(`+${folded.size} label${folded.size === 1 ? "" : "s"}`, exact([...folded].reduce((s, l) => s + (num(probs[l]) ? probs[l] : 0), 0)), false, true) : "";
     return `<div class="bars">${labels.map((l) => barHtml(l, probs[l], folded.has(l), false)).join("")}${rest}</div>`;
   }
   if (v && typeof v === "object" && v.kind === "extraction") {
     const shown = v.value === null ? "none found" : v.value === undefined ? "–" : JSON.stringify(v.value);
-    return `<div class="val">${esc(shown)}</div><div class="meta"><span>confidence ${pct(v.confidence)}</span><span>none: ${pct(v.p_null)}</span>${v.guess != null ? `<span>guess ${esc(JSON.stringify(v.guess))}</span>` : ""}</div>`;
+    return `<div class="val">${esc(shown)}</div><div class="meta notes"><span>confidence ${pct(v.confidence)}</span><span>none: ${pct(v.p_null)}</span>${v.guess != null ? `<span>guess ${esc(JSON.stringify(v.guess))}</span>` : ""}</div>`;
   }
   return `<div class="val">${esc(JSON.stringify(v, null, 1))}</div>`;
 }
@@ -545,7 +576,7 @@ function render() {
       const un = obj(obj(s.unhashed.calls)[idx]);
       const failed = obj(c.outcome).failed;
       html += `<div role="button" tabindex="0" aria-pressed="false" class="card call" data-node="c:${idx}"><span class="k">Call · ${esc(arr(c.sources).join(", "))}</span>
-        <span class="meta">${failed ? `<span class="chip bad">failed ${esc(obj(failed).code ?? "")}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
+        <span class="meta notes">${failed ? `<span class="chip bad">failed ${esc(obj(failed).code ?? "")}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
         <span class="meta">${foldList(Object.entries(obj(c.questions)).map(([r, q]) => `<span title="question identity ${esc(obj(q).identity ?? "none")}">${esc(r)}${str(obj(q).identity) ? " · " + esc(q.identity.slice(7, 15)) + "…" : ""}</span>`), 4)}</span></div>`;
     }
     for (const ref of r.entries) {
@@ -559,13 +590,14 @@ function render() {
   }
   if (plan) {
     const steps = arr(plan.steps).map((st, i) => `<div class="val">${i + 1}. ${esc(obj(st).tool ?? "?")} ${esc(JSON.stringify(obj(st).arguments ?? {}))}</div>`).join("");
-    const fails = verdict && arr(verdict.failures).length ? `<div class="meta">${arr(verdict.failures).map((f) => esc(failureText(f))).join(" · ")}</div>` : "";
+    const fails = verdict && arr(verdict.failures).length ? `<div class="meta notes">${arr(verdict.failures).map((f) => esc(failureText(f))).join(" · ")}</div>` : "";
     html += `<section class="col"><div class="colhead"><span>Decision</span><span></span></div>
       <div role="button" tabindex="0" aria-pressed="false" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind ?? "?")}</span>
       ${plan.reason ? `<span>${esc(plan.reason)}</span>` : ""}${plan.reply ? `<span>${esc(plan.reply)}</span>` : ""}
       ${plan.cause ? `<div class="marker"><span class="chip warn">cause</span><span class="v">${esc(obj(plan.cause).code ?? "")}</span></div>` : ""}${steps}
-      <span class="meta"><span class="chip ${vtone}">${esc(verdict ? verdict.kind ?? "?" : "no verdict")}</span></span>${fails}</div></section>`;
+      <span class="meta notes"><span class="chip ${vtone}">${esc(verdict ? verdict.kind ?? "?" : "no verdict")}</span></span>${fails}</div></section>`;
   }
+  $("cols").classList.toggle("design", false);
   $("cols").innerHTML = html;
   select(null);
 }
@@ -584,6 +616,7 @@ function renderDesign() {
     `<div class="kv"><span class="k">Questions</span><span class="v">${count("question")}</span></div>`,
     `<div class="kv"><span class="k">Rules</span><span class="v">${count("rule")}</span></div>`,
     `<div class="kv"><span class="k">Policy</span><span class="v">${esc(obj(d.policy).form ?? "?")}</span></div>`,
+    state && state.guess && key && known.get(key).doc === state.design ? `<div class="notice">${GUESSES[state.guess]}</div>` : "",
   ].join("");
   const card = (node, body) => `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="${esc(node)}">${body}</div>`;
   const column = (title, cards) => `<section class="col"><div class="colhead"><span>${title}</span><span>${cards.length}</span></div>${cards.join("") || `<p class="meta">None declared</p>`}</section>`;
@@ -591,26 +624,30 @@ function renderDesign() {
   const links = g.links;
   const targets = of("target").map(([node, n]) => card(node, `<span class="ref">${esc(n.id)}</span><span>${esc(n.t.statement ?? "")}</span>
     ${n.t.values != null ? `<span class="meta">values: ${esc(n.t.values)}</span>` : ""}
-    <span class="meta"><span>asked by ${(links.asks.get(n.id) || []).length}</span><span>borne on by ${(links.bears.get(n.id) || []).length}</span><span>estimated by ${(links.est.get(n.id) || []).length}</span></span>`));
+    <span class="meta"><span>asked by ${(links.asks.get(n.id) || []).length}</span><span>borne on by ${new Set((links.bears.get(n.id) || []).map((x) => x.ref)).size}</span><span>estimated by ${(links.est.get(n.id) || []).length}</span></span>`));
   const asked = [card("e:t:state", `<span class="ref">t:state</span><span class="meta"><span>the input state</span></span>${d.state != null ? `<div class="val">${esc(d.state)}</div>` : ""}`),
     ...[...g.nodes].filter(([, n]) => n.kind === "question" || n.kind === "tool").map(([node, n]) => {
       const s = obj(obj(d.sources)[n.sid]);
       const ref = node.slice(2);
       const head = `<span class="ref">${esc(ref)}</span><span class="meta"><span>source ${esc(n.sid)}</span>${n.kind === "question" ? `<span>${esc(n.q.kind ?? "?")}</span>` : `<span>tool result</span>`}${s.when ? `<span>when: ${esc(obj(s.when).form ?? "declared")}</span>` : ""}${s.requirement ? `<span>gated on ${esc(obj(s.requirement).ref)}</span>` : ""}${str(s.grounded) ? `<span>over ${esc(s.grounded)}</span>` : ""}</span>`;
       if (n.kind === "tool") return card(node, head);
-      const labels = Array.isArray(n.q.labels) ? n.q.labels.map((l) => (str(l) ? l : obj(l).name)) : n.q.labels && typeof n.q.labels === "object" ? ["(candidate-valued)"] : [];
+      const lab = (l) => (str(l) ? l : obj(l).name);
+      const cv = n.q.labels && typeof n.q.labels === "object" && !Array.isArray(n.q.labels) ? n.q.labels : null;
+      const labels = Array.isArray(n.q.labels) ? n.q.labels.map(lab).filter(str)
+        : cv ? [...arr(cv.fixed).map(lab).filter(str), `(the candidates of ${text(cv.candidates ?? "?")}${num(cv.at) ? " after label " + cv.at : ""})`] : [];
       return card(node, `${head}${str(obj(n.q.wording).template) ? `<div class="val">${esc(n.q.wording.template)}</div>` : ""}
-        ${labels.length ? `<span class="meta"><span>${foldList(labels.map(esc), 6, " · ")}</span></span>` : ""}<span class="meta">${targetHtml(targetsOf(d, ref))}</span>`);
+        ${labels.length ? `<span class="meta labels"><span>${foldList(labels.map(esc), 6, " · ")}</span></span>` : ""}<span class="meta">${targetHtml(targetsOf(d, ref))}</span>`);
     })];
   const ruleCards = of("rule").map(([node, n]) => card(node, `<span class="ref">${esc(node.slice(2))}</span>
     <span class="meta"><span>rule ${esc(n.rid)}</span><span>${esc(n.r.form ?? "?")}</span>${n.r.outputs != null ? `<span>${esc(n.r.outputs)}</span>` : ""}</span>
-    <span class="meta">reads ${arr(n.r.reads).map(esc).join(", ") || "nothing"}</span>
+    <span class="meta">${n.r.form === "table" ? `<span class="none" title="This engine refuses tables at load (check 12).">a table: not traced</span>` : `reads ${arr(n.r.reads).map(esc).join(", ") || "nothing"}`}</span>
     <span class="meta">${targetHtml(targetsOf(d, node.slice(2)))}${n.r.boundaries ? `<span>boundaries declared</span>` : `<span class="none">no boundaries declared</span>`}</span>`));
   const policy = obj(d.policy);
-  const decide = [card("plan", `<span class="ref">policy · ${esc(policy.form ?? "?")}</span><span class="meta">reads ${arr(policy.reads).map(esc).join(", ") || "nothing"}</span>
+  const decide = [card("plan", `<span class="ref">policy · ${esc(policy.form ?? "?")}</span><span class="meta">${policy.form === "table" ? `<span class="none">a table: not traced</span>` : `reads ${arr(policy.reads).map(esc).join(", ") || "nothing"}`}</span>
       ${policy.boundaries ? `<span class="meta">boundaries declared</span>` : ""}<span class="meta">plans: ${Object.keys(obj(d.plans)).map(esc).join(", ") || "none declared"}</span>`),
     ...of("req").map(([node, n]) => card(node, `<span class="ref">requires ${esc(n.q.ref)}</span><span class="meta">= ${esc(JSON.stringify(n.q.value ?? null))} · every execute plan</span>`))];
   const paramCards = of("param").map(([node, n]) => card(node, `<span class="ref">${esc(n.path)}</span><span class="meta">${esc(n.p.type ?? "")}</span><div class="val">${esc(JSON.stringify(n.p.value ?? null))}</div>`));
+  $("cols").classList.toggle("design", true);
   $("cols").innerHTML = column("Targets", targets) + column("State and sources", asked) + column("Rules", ruleCards) + column("Policy", decide) + column("Parameters", paramCards);
 }
 
@@ -618,8 +655,6 @@ const graph = () => (tab === "design" ? dstate : state);
 const label = (node) => graph().label(node);
 const cardOf = (node) => [...$("cols").querySelectorAll("[data-node]")].find((el) => el.dataset.node === node);
 
-// A target's selection lights its declared links and all that follows them; any other card lights
-// what it came from and what it fed.
 // Each card's place under a selection: 0 the selection, then its direct links, then the rest of
 // its lineage, each kind together; a node absent from the map is not linked to it.
 function rankOf(g, node, tlinks, up, down) {
@@ -632,6 +667,10 @@ function rankOf(g, node, tlinks, up, down) {
     tlinks.bears.forEach((x) => put("e:" + x.ref, 2));
     tlinks.est.forEach((r) => put("e:" + r, 3));
   } else {
+    // A question's or rule's own targets are declared links too, though no read joins them.
+    const t = g.kind === "design" && node.startsWith("e:") ? targetsOf(g.design, node.slice(2)) : null;
+    if (t && t.target) put("g:" + t.target, 1);
+    if (t) t.latent.forEach((l) => put("g:" + text(l.target), 2));
     (g.inputs.get(node) || []).forEach((i) => put(i.node, 1));
     (g.outputs.get(node) || []).forEach((i) => put(i.node, 2));
     up.forEach((n) => put(n, 3));
@@ -644,14 +683,20 @@ function rankOf(g, node, tlinks, up, down) {
 // those declaring others, so a missing link never reads as "unrelated".
 function stubText(g, node, folded, open) {
   const verb = open ? "Hide" : "Show";
-  if (g.kind === "design" && node.startsWith("g:")) {
-    const none = folded.filter((n) => { const t = targetsOf(g.design, n.slice(2)); return t && !t.target && !t.latent.length; }).length;
-    const other = folded.length - none;
-    return [other ? `${other} with no link declared to ${node.slice(2)}` : "", none ? `${none} declaring no target` : ""].filter(Boolean).map((x) => `${verb} ${x}`).join(" · ");
-  }
-  return `${verb} ${folded.length} ${g.kind === "design" ? "with no declared link to it" : "not on its lineage"}`;
+  const onTarget = g.kind === "design" && node.startsWith("g:");
+  const targets = folded.filter((n) => n.startsWith("g:")).length, rest = folded.filter((n) => !n.startsWith("g:"));
+  const parts = targets ? [onTarget ? `${targets} other target${targets === 1 ? "" : "s"}` : `${targets} target${targets === 1 ? "" : "s"} it declares no link to`] : [];
+  if (rest.length && onTarget) {
+    const none = rest.filter((n) => { if (!n.startsWith("e:")) return false; const t = targetsOf(g.design, n.slice(2)); return t && !t.target && !t.latent.length; }).length;
+    if (rest.length - none) parts.push(`${rest.length - none} with no link declared to ${node.slice(2)}`);
+    if (none) parts.push(`${none} declaring no target link`);
+  } else if (rest.length) parts.push(`${rest.length} ${g.kind === "design" ? "with no declared link to it" : "not on its lineage"}`);
+  return parts.length > 1 ? `${verb} ${folded.length}: ${parts.join(", ")}` : `${verb} ${parts[0]}`;
 }
 
+// A target's selection lights its declared links and all that follows them; any other card lights
+// what it came from and what it fed. Each column's matches come first, and in Filter mode the rest
+// fold into the column's stub.
 function select(node) {
   const g = graph();
   if (!g || (g.kind === "design" && node && !g.nodes.has(node))) node = null;
@@ -669,6 +714,7 @@ function select(node) {
   }
   const rank = rankOf(g, node, tlinks, up, down);
   let hidden = 0;
+  const active = document.activeElement, refocus = active && active.dataset ? active.dataset.openCol : undefined;
   [...$("cols").querySelectorAll("section.col")].forEach((col, i) => {
     for (const old of col.querySelectorAll(".stub")) old.remove();
     const folded = [];
@@ -687,18 +733,25 @@ function select(node) {
     }
     if (folded.length) {
       hidden += openCols.has(i) ? 0 : folded.length;
-      col.insertAdjacentHTML("beforeend", `<button type="button" class="stub" data-open-col="${i}">${esc(stubText(g, node, folded, openCols.has(i)))}</button>`);
+      // Open, the stub stands between the matches and the cards it let out, so it can close them.
+      col.insertAdjacentHTML("beforeend", `<button type="button" class="stub" data-open-col="${i}" aria-expanded="${openCols.has(i)}"${openCols.has(i) ? "" : ' style="order:1000"'}>${esc(stubText(g, node, folded, openCols.has(i)))}</button>`);
+      if (refocus === String(i)) col.querySelector(".stub").focus();
     }
   });
   applyDensity();
   const go = (n, how) => `<li><button type="button" data-go="${esc(n)}">${esc(label(n))}</button>${how ? `<span class="how">${esc(how)}</span>` : ""}</li>`;
-  const list = (items) => items && items.length ? `<ul>${items.map((i) => go(i.node, i.how + " · " + i.src)).join("")}</ul>` : `<p class="meta">None</p>`;
+  const list = (items) => items && items.length ? `<ul>${items.map((i) => go(i.node, i.how + " · " + i.src)).join("")}</ul>` : `<p class="meta">${g && g.kind === "design" ? "None declared" : "None"}</p>`;
+  // A target link names a target the design may not declare; only a declared one is a card.
+  const goTarget = (id, how) => (g.nodes.has("g:" + id) ? go("g:" + id, how) : `<li><span class="v">${esc(id)}</span><span class="how">${esc(how)} · not declared in targets</span></li>`);
   const refs = (rs, how) => rs.length ? `<ul>${rs.map((r) => go("e:" + r, how)).join("")}</ul>` : `<p class="meta">None declared</p>`;
   const dimWord = g && g.kind === "design" ? "no link declared" : "not on its lineage";
-  const legend = `<div class="legend"><span><span class="sw" style="background:var(--accent)"></span>${tlinks ? "linked" : "came from"}</span><span><span class="sw" style="background:var(--down)"></span>fed into</span><span><span class="sw" style="background:var(--line)"></span>dimmed: ${dimWord}</span></div>`;
+  const dimmed = node && (mode === "dim" || openCols.size) ? `<span><span class="sw" style="background:var(--line)"></span>dimmed: ${dimWord}</span>` : "";
+  const legend = `<div class="legend"><span><span class="sw" style="background:var(--accent)"></span>${tlinks ? "linked" : "came from"}</span><span><span class="sw" style="background:var(--down)"></span>fed into</span>${dimmed}</div>`;
   let jump = "";
   if (node && g.kind === "turn" && g.design && (node === "plan" || node.startsWith("e:"))) jump = `<button type="button" class="jump" data-jump="design">Open in Design</button>`;
   if (node && g.kind === "design" && state && turnNode(node)) jump = `<button type="button" class="jump" data-jump="turn">Show in this turn</button>`;
+  const asked = node && g.kind === "turn" && node.startsWith("e:q:") ? identityOf(g, node.slice(2)) : null;
+  if (asked && deck.length > 1) jump += `${jump ? " " : ""}<button type="button" class="jump" data-compare="${esc(asked)}">Compare across turns</button>`;
   let body;
   if (!node) body = `<p class="meta">Select a card to see what it came from and what it fed.${g && g.kind === "design" ? " Select a target to see every question and rule declared against it." : " The plan is the last column."}</p>`;
   else if (tlinks) {
@@ -708,10 +761,10 @@ function select(node) {
     body = `<h3>Asked about by</h3>${refs(tlinks.asks, "asks about it")}
       <h3>Borne on by</h3>${tlinks.bears.length ? `<ul>${tlinks.bears.map((x) => go("e:" + x.ref, x.role)).join("")}</ul>` : `<p class="meta">None declared</p>`}
       <h3>Estimated by</h3>${refs(tlinks.est, "a rule estimates it")}
-      <p class="meta">${down.size} downstream through declared reads. Links are only those declared: ${untargeted} question${untargeted === 1 ? "" : "s"} and rules in this design declare no target, which says nothing about whether they bear on it.</p>`;
+      <p class="meta">${down.size} downstream through declared reads. Links are only those declared: ${untargeted} of this design's questions and rules declare no target link, which says nothing about whether they bear on it.</p>`;
   } else {
     const t = g.kind === "design" && node.startsWith("e:") ? targetsOf(g.design, node.slice(2)) : null;
-    body = `${t ? `<h3>Targets</h3>${t.target || t.latent.length ? `<ul>${t.target ? go("g:" + t.target, t.rule ? "estimates" : "asks about") : ""}${t.latent.map((l) => go("g:" + l.target, "bears on · " + l.role)).join("")}</ul>` : `<p class="meta">None declared</p>`}` : ""}
+    body = `${t ? `<h3>Targets</h3>${t.target || t.latent.length ? `<ul>${t.target ? goTarget(t.target, t.rule ? "estimates" : "asks about") : ""}${t.latent.map((l) => goTarget(text(l.target), "bears on · " + text(l.role))).join("")}</ul>` : `<p class="meta">None declared</p>`}` : ""}
       <h3>Came from, directly</h3>${list(g.inputs.get(node))}
       <h3>Fed into, directly</h3>${list(g.outputs.get(node))}
       <p class="meta">${up.size} upstream and ${down.size} downstream in all. "record" links are in the record itself; "design" links come from the design document, as declared.</p>`;
@@ -720,10 +773,20 @@ function select(node) {
   $("lineage").innerHTML = `<h2>Lineage</h2>${node ? `<div class="ref">${esc(label(node))}</div>` : ""}${legend}${filtered}${jump}${body}`;
 }
 
+// The question identity a turn's call recorded for one of its entries, or null.
+function identityOf(g, ref) {
+  const e = g.entries.get(ref), q = obj(obj(g.calls.get(e && e.call)).questions);
+  const id = obj(q[ref] ?? q[parseRef(ref).base]).identity;
+  return str(id) ? id : null;
+}
+
 // Compact when asked, or by default once a column holds more than 40 cards.
 function applyDensity() {
   const most = Math.max(0, ...[...$("cols").querySelectorAll("section.col")].map((c) => c.querySelectorAll("[data-node]").length));
-  $("cols").classList.toggle("compact", density === "compact" || (density === "auto" && most > 40));
+  const compact = density === "compact" || (density === "auto" && most > 40);
+  $("cols").classList.toggle("compact", compact);
+  const auto = $("density").options && $("density").options[0];
+  if (auto) auto.text = "Density: auto" + (density === "auto" ? (compact ? " (compact)" : " (full)") : "");
 }
 
 // The same thing's node in the other view: a turn's grounded entry is its declared ref's card in
@@ -758,7 +821,7 @@ function clearView(message) {
 
 // The tab bar, the pager and the two layouts, shown for the current tab.
 function chrome() {
-  for (const b of $("tabs").querySelectorAll("[data-tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  for (const b of $("tabs").querySelectorAll("[data-tab]")) { if (b.dataset.tab === tab) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); }
   $("pager").hidden = !(tab === "turn" && deck.length);
   $("mainView").hidden = tab === "turns";
   $("turnsView").hidden = tab !== "turns";
@@ -769,6 +832,7 @@ function chrome() {
 
 function setTab(next, node = null) {
   tab = next;
+  openCols.clear(); // column indices belong to the view they were opened in
   chrome();
   if (tab === "design") showDesign(node);
   else if (tab === "turns") renderTurns();
@@ -808,12 +872,12 @@ function renderTurns() {
     ids.get(id).turns.add(r.i);
   }
   $("turnsBy").innerHTML = [`<option value="">Group by design hash</option>`,
-    ...[...ids].map(([id, x]) => `<option value="${esc(id)}">Question ${esc([...x.refs].join(", "))} · ${esc(id.slice(7, 15))}… (${x.turns.size} turn${x.turns.size === 1 ? "" : "s"})</option>`)].join("");
+    ...[...ids].map(([id, x]) => `<option value="${esc(id)}" title="${esc(id)}">Question ${esc([...x.refs].join(", "))} (${x.turns.size} turn${x.turns.size === 1 ? "" : "s"})</option>`)].join("");
   if (!ids.has(turnsBy)) turnsBy = "";
   $("turnsBy").value = turnsBy;
-  const designs = new Set(rows.map((r) => r.hash));
+  const designs = new Set(rows.map((r) => r.hash).filter(str));
   $("summary").innerHTML = `<div class="kv"><span class="k">Turns</span><span class="v">${rows.length}</span></div><div class="kv"><span class="k">Design hashes</span><span class="v">${designs.size}</span></div><div class="kv"><span class="k">Question identities</span><span class="v">${ids.size}</span></div>`;
-  if (!rows.length) { $("turnsView").innerHTML = `<p class="meta" style="padding:12px">No records yet. Open a folder of records.</p>`; return; }
+  if (!rows.length) { $("turnsView").innerHTML = `<p class="meta" style="padding:12px">${state ? "The Turns view lists a folder's records; this record was opened on its own." : "No records yet."} Open a folder of records to compare turns.</p>`; return; }
   const short = (h) => (str(h) ? esc(h.slice(0, 19)) + "…" : "no design hash");
   const markOf = (e) => `${esc(obj(e.marker).kind ?? "marker")} ${esc(obj(obj(e.marker).cause).code ?? "")}`;
   let html;
@@ -835,24 +899,26 @@ function renderTurns() {
       }
     }
   } else {
-    const refs = ids.get(turnsBy).refs;
-    html = `<table><thead><tr><th>File</th><th>Ref</th><th>Leading</th><th>p</th><th>Runner-up</th><th>Lead</th><th>Read by</th></tr></thead><tbody>`;
+    html = `<table><thead><tr><th>File</th><th>Ref</th><th>Leading, or value</th><th>p, or confidence</th><th>Runner-up, or none</th><th>Lead</th><th>Read by (derivation)</th></tr></thead><tbody>`;
     for (const r of rows) {
       if (!r.g || !ids.get(turnsBy).turns.has(r.i)) continue;
       for (const [ref, e] of r.g.entries) {
-        if (!refs.has(ref) && !refs.has(parseRef(ref).base)) continue;
-        const readers = [...r.g.entries].filter(([dr, de]) => dr.startsWith("d:") && arr(de.derivation).some((x) => arr(obj(x).refs).includes(ref)))
-          .map(([dr, de]) => `${esc(dr)} = ${de.marker ? markOf(de) : esc(JSON.stringify(de.value))}`).join("<br>") || "–";
+        // The answer's own call names its identity: one turn may ask another question at this ref.
+        if (identityOf(r.g, ref) !== turnsBy) continue;
+        const named = [ref, parseRef(ref).base]; // a per-candidate pick names the declared ref
+        const readers = [...r.g.entries].filter(([dr, de]) => dr.startsWith("d:") && arr(de.derivation).some((x) => arr(obj(x).refs).some((n) => named.includes(n))))
+          .map(([dr, de]) => `${esc(dr)} = ${de.marker ? markOf(de) : esc(JSON.stringify(de.value) ?? "–")}`).join("<br>") || "–";
         let cells;
         const v = e.value;
         if (e.marker) cells = `<td colspan="4">${markOf(e)}</td>`;
         else if (v && typeof v === "object" && v.probabilities && typeof v.probabilities === "object") {
           const ranked = Object.entries(v.probabilities).filter(([, p]) => num(p)).sort((a, b) => b[1] - a[1]);
           const [a, b] = [ranked[0] || ["–", null], ranked[1] || ["–", null]];
-          cells = `<td>${esc(a[0])}</td><td class="num">${pct(a[1])}</td><td>${esc(b[0])} ${b[1] != null ? pct(b[1]) : ""}</td><td class="num">${a[1] != null && b[1] != null ? pct(a[1] - b[1]) : "–"}</td>`;
+          const lead = a[1] == null ? "–" : pct(exact(a[1] - (b[1] ?? 0))); // a lone label leads by its own p
+          cells = `<td>${esc(a[0])}</td><td class="num">${pct(a[1])}</td><td>${esc(b[0])} ${b[1] != null ? pct(b[1]) : ""}</td><td class="num">${lead}</td>`;
         } else if (v && typeof v === "object" && v.kind === "extraction") {
           cells = `<td>${esc(v.value === null ? "none found" : JSON.stringify(v.value))}</td><td class="num">${pct(v.confidence)}</td><td>none ${pct(v.p_null)}</td><td>–</td>`;
-        } else cells = `<td colspan="4">${esc(JSON.stringify(v))}</td>`;
+        } else cells = `<td colspan="4">${esc(JSON.stringify(v) ?? "–")}</td>`;
         html += `<tr data-row="${r.i}" data-at="e:${esc(ref)}"><td>${esc(r.d.name)}</td><td>${esc(ref)}</td>${cells}<td>${readers}</td></tr>`;
       }
     }
@@ -863,16 +929,19 @@ function renderTurns() {
 document.addEventListener("click", (ev) => {
   const tabBtn = ev.target.closest("[data-tab]");
   if (tabBtn) {
-    if (tabBtn.dataset.tab === "design" && state && state.design) designKey = keyOf(state.design);
+    // The Design tab follows the turn on show, unless the reader picked a design since it changed.
+    if (tabBtn.dataset.tab === "design" && state && state.design && state.record !== designTurn) { designKey = keyOf(state.design); designTurn = state.record; }
     setTab(tabBtn.dataset.tab, tab === "turn" && tabBtn.dataset.tab === "design" ? designNode(selected) : tab === "design" && tabBtn.dataset.tab === "turn" ? turnNode(selected) : null);
     return;
   }
   const jump = ev.target.closest("[data-jump]");
   if (jump) {
-    if (jump.dataset.jump === "design") { const node = designNode(selected); designKey = keyOf(state.design); setTab("design", node); }
+    if (jump.dataset.jump === "design") { const node = designNode(selected); designKey = keyOf(state.design); designTurn = state.record; setTab("design", node); }
     else setTab("turn", turnNode(selected));
     return;
   }
+  const compare = ev.target.closest("[data-compare]");
+  if (compare) { turnsBy = compare.dataset.compare; setTab("turns"); return; }
   const stub = ev.target.closest("[data-open-col]");
   if (stub) {
     const i = +stub.dataset.openCol;
@@ -936,13 +1005,21 @@ async function openFolder(files) {
 }
 
 function deckFrom(recs, designs, skipped, read, warning = "") {
+  if (!recs.length && designs.size) { // a folder of designs alone opens on the Design view
+    for (const [k, doc] of designs) addKnown(k, doc);
+    designKey = [...designs.keys()][0];
+    designTurn = state ? state.record : null;
+    setTab("design");
+    return;
+  }
   if (!recs.length) {
     const message = `No ommat records found in that folder (${esc(read)} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.`;
-    if (state) flash(message);
+    if (state || dstate || tab !== "turn") flash(message);
     else { leaveDeck(); clearView(`<span class="err">${message}</span>`); }
     return;
   }
-  for (const [k, doc] of designs) addKnown(k, doc);
+  // One object per design: a design the page already holds keeps its object, so keyOf finds it.
+  for (const [k, doc] of [...designs]) { addKnown(k, doc); if (known.has(k)) designs.set(k, known.get(k).doc); }
   const distinct = [...new Set(designs.values())];
   const only = distinct.length === 1 ? distinct[0] : null;
   deck = recs.map((r) => {
@@ -973,14 +1050,14 @@ function showOne(rec) {
   chrome();
   show(rec, loadedDesign && loadedDesign.doc);
   const h = designHash(rec);
-  if (loadedDesign && !(str(h) && loadedDesign.hash === h)) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES.loaded}</div>`);
+  if (loadedDesign && !(str(h) && loadedDesign.hash === h)) { state.guess = "loaded"; $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES.loaded}</div>`); }
 }
 
 function showAt(i) {
   if (!deck.length) return;
   at = Math.max(0, Math.min(deck.length - 1, i));
   const d = deck[at];
-  try { show(d.record, d.design); } catch (e) { clearView(`<span class="err">${esc(d.name)}: ${esc(e.message)}</span>`); }
+  try { show(d.record, d.design); state.guess = d.guess; } catch (e) { clearView(`<span class="err">${esc(d.name)}: ${esc(e.message)}</span>`); }
   $("summary").insertAdjacentHTML("afterbegin", `<div class="kv"><span class="k">File</span><span class="v">${esc(d.name)}</span></div>`);
   if (d.guess && state) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES[d.guess]}</div>`);
   $("deckNote").textContent = `${deck.filter((d) => d.design && !d.guess).length} of ${deck.length} paired with their design by hash` + deckNote;
@@ -1020,9 +1097,11 @@ const onFile = (input, cb) => input.addEventListener("change", () => {
   readJson(f).then(cb, (e) => flash(`Couldn't read ${esc(f.name)}: ${esc(e.message)}`));
 });
 onFile($("recFile"), ({ json }) => { try { build(json, null); } catch (e) { flash(esc(e.message)); return; } showOne(json); });
-onFile($("desFile"), ({ json, hash }) => {
-  if (!isDesign(json)) { flash("That file is not a design: a design has a policy and no log."); return; }
+onFile($("desFile"), ({ json: read, hash }) => {
+  if (!isDesign(read)) { flash("That file is not a design: a design has a policy and no log."); return; }
+  const json = hash && known.has(hash) ? known.get(hash).doc : read; // one object per design, so keyOf finds it
   loadedDesign = { doc: json, hash };
+  designTurn = null; // the turn's design may have changed: the Design tab follows it again
   addKnown(hash || "opened", json);
   try {
     // One rule whatever the order: an exact match, then the folder's only design, then this one.
@@ -1033,7 +1112,8 @@ onFile($("desFile"), ({ json, hash }) => {
       d.design = json;
       d.guess = "loaded";
     });
-    if (tab === "design" || (!deck.length && !state)) { designKey = hash || "opened"; setTab("design"); }
+    if (tab === "design" || (!deck.length && !state)) { designKey = hash || "opened"; designTurn = state ? state.record : null; setTab("design"); }
+    else if (tab === "turns") setTab("turns");
     else if (deck.length) showAt(at);
     else if (state) showOne(state.record);
   } catch (e) { clearView(`<span class="err">${esc(e.message)}</span>`); }
@@ -1048,7 +1128,8 @@ $("pasteGo").addEventListener("click", async () => {
     if (raw) {
       const doc = JSON.parse(raw);
       if (!isDesign(doc)) throw new Error("the design has no policy, or holds a log");
-      des = { doc, hash: await sha(raw) };
+      const hash = await sha(raw);
+      des = { doc: hash && known.has(hash) ? known.get(hash).doc : doc, hash };
     }
     build(rec, des && des.doc); // check it before anything on screen changes
   } catch (e) { $("pasteErr").textContent = "Couldn't read that: " + e.message; return; }

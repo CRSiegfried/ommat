@@ -335,21 +335,22 @@ def test_an_exact_large_integer_reads_as_ommat_reads_it() -> None:
 
 
 _SETUP = r"""
-const fs = require("fs"), vm = require("vm");
+const fs = require("fs"), vm = require("vm"), { webcrypto } = require("crypto");
 const html = fs.readFileSync(process.argv[2], "utf8");
 const data = /<script id="lens-data" type="application\/json">(.*?)<\/script>/s.exec(html)[1];
 const js = /<script>(.*?)<\/script>/s.exec(html)[1];
 const els = {};
 const mk = (id) => ({ id, innerHTML: "", textContent: "", value: "", hidden: false, disabled: false,
   dataset: {}, classList: { toggle() {}, contains() { return false; } }, setAttribute() {},
-  addEventListener() {}, querySelectorAll() { return []; },
+  addEventListener(t, f) { (this.on ||= {})[t] = f; }, querySelectorAll() { return []; },
   insertAdjacentHTML(w, h) { this.innerHTML += h; }, remove() {}, focus() {},
   closest() { return null; } });
 const doc = { getElementById: (id) => els[id] || (els[id] = mk(id)),
-  addEventListener() {}, activeElement: null };
+  addEventListener(t, f) { (this.on ||= {})[t] = f; }, activeElement: null };
 doc.getElementById("lens-data").textContent = data;
 const ctx = vm.createContext(
-  { document: doc, window: {}, console, TextEncoder, TextDecoder, JSON });
+  { document: doc, window: { crypto: webcrypto }, crypto: webcrypto, console, TextEncoder,
+    TextDecoder, JSON, setTimeout });
 vm.runInContext(js, ctx);
 """
 
@@ -440,6 +441,13 @@ def _targeted() -> LoadedDesign:
     )
 
 
+_EVALUATE = r"""
+// An expression may return a promise, as a file the page opens is read asynchronously.
+Promise.resolve(vm.runInContext(process.argv[3], ctx))
+  .then((value) => process.stdout.write(JSON.stringify(value)));
+"""
+
+
 def _run(html: str, tmp_path: Path, expression: str) -> Any:
     """``expression``'s JSON value, evaluated in the page's script under node after it ran."""
     (tmp_path / "page.html").write_text(html, encoding="utf-8")
@@ -451,11 +459,6 @@ def _run(html: str, tmp_path: Path, expression: str) -> Any:
         check=True,
     )
     return json.loads(run.stdout)
-
-
-_EVALUATE = r"""
-process.stdout.write(JSON.stringify(vm.runInContext(process.argv[3], ctx)));
-"""
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
@@ -470,9 +473,10 @@ def test_a_design_alone_opens_on_the_design_view_with_its_declared_links(tmp_pat
           const out = { tab, kinds,
             asks: dstate.links.asks.get("tg:urgency"), bears: dstate.links.bears.get("tg:distress"),
             est: dstate.links.est.get("tg:urgency"), question: ins("e:q:ask/urgent"),
-            rule: ins("e:d:urgent"), policy: ins("plan"), cols: $("cols").innerHTML };
+            rule: ins("e:d:urgent"), policy: ins("plan") };
           select("g:tg:urgency"); out.urgency = $("lineage").innerHTML;
           select("g:tg:cost"); out.cost = $("lineage").innerHTML;
+          mode = "dim"; select("g:tg:cost"); out.costDim = $("lineage").innerHTML; mode = "filter";
           select("e:q:ask/urgent"); out.asked = $("lineage").innerHTML;
           return out; })()""",
     )
@@ -498,7 +502,8 @@ def test_a_design_alone_opens_on_the_design_view_with_its_declared_links(tmp_pat
     assert "q:ask/urgent" in shown["urgency"]
     # A target nothing declares a link to says so, and never calls the rest unrelated.
     assert shown["cost"].count("None declared") == 3
-    assert "no link declared" in shown["cost"]
+    assert "says nothing about whether they bear on it" in shown["cost"]
+    assert "dimmed: no link declared" in shown["costDim"]
     assert "unrelated" not in shown["cost"] + shown["urgency"]
     assert "bears on · reflective" in shown["asked"]
 
@@ -594,13 +599,327 @@ def test_labels_past_the_top_few_fold_into_other_unless_a_boundary_names_them(
           const value = { kind: "choice", labels, probabilities: probs };
           const html = valueOnly({ value }, bounds);
           return { plain: [...foldedLabels(labels, probs, none)],
-            short: [...foldedLabels(["x", "y", "z", "w"], { x: 1 }, none)],
+            short: [...foldedLabels(["x", "y", "z"], { x: 1 }, none)],
             ticked: [...foldedLabels(labels, probs, (l) => l === "a")],
             html, extra: (html.match(/ extra/g) || []).length }; })()""",
     )
-    assert shown["plain"] == ["a", "e", "f"]  # b, c and d, the first of the tie, show
-    assert shown["short"] == []  # four labels fold nothing: "Other" would hide one
-    assert shown["ticked"] == ["e", "f"]  # a carries a threshold tick, so it always shows
-    assert shown["extra"] == 2
-    assert "+2 labels" in shown["html"]
+    assert shown["plain"] == ["a", "d", "e", "f"]  # the leader b and the runner-up c show
+    assert shown["short"] == []  # three labels fold nothing: "Other" would hide one
+    assert shown["ticked"] == ["d", "e", "f"]  # a carries a threshold tick, so it always shows
+    assert shown["extra"] == 3
+    assert "+3 labels" in shown["html"]
     assert 'class="bar other"' in shown["html"]
+
+
+# Fake columns of fake cards for ``select``: each card records its classes, order and
+# attributes, and each column the stubs ``select`` inserts.
+_COLUMNS = r"""
+const mkCard = (node) => { const c = { dataset: { node }, cls: new Set(), style: {}, attrs: {} };
+  c.classList = { toggle: (k, on) => (on ? c.cls.add(k) : c.cls.delete(k)),
+    contains: (k) => c.cls.has(k) };
+  c.setAttribute = (k, v) => { c.attrs[k] = v; }; return c; };
+const mkCol = (nodes) => { const col = { cards: nodes.map(mkCard), stubs: [] };
+  col.querySelectorAll = (sel) => (sel === ".stub"
+    ? col.stubs.map((h) => ({ remove: () => col.stubs.splice(col.stubs.indexOf(h), 1) }))
+    : col.cards);
+  col.insertAdjacentHTML = (where, html) => col.stubs.push(html);
+  col.querySelector = () => ({ focus() {} }); return col; };
+const useColumns = (lists) => { const cols = lists.map(mkCol);
+  $("cols").querySelectorAll = (sel) => (sel === "section.col"
+    ? cols : cols.flatMap((c) => c.cards));
+  const on = new Set(); $("cols").classList = { toggle: (k, v) => (v ? on.add(k) : on.delete(k)),
+    contains: (k) => on.has(k) }; return { cols, on }; };
+const seen = (cols) => cols.map((c) => ({ stubs: [...c.stubs],
+  cards: Object.fromEntries(c.cards.map(
+    (k) => [k.dataset.node, { order: k.style.order, cls: [...k.cls].sort() }])) }));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_select_orders_folds_and_opens_columns_as_the_mode_says(tmp_path: Path) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        _COLUMNS
+        + """;(() => {
+          const out = {};
+          const { cols, on } = useColumns([["g:tg:urgency", "g:tg:distress", "g:tg:cost"],
+            ["e:t:state", "e:q:ask/urgent"], ["e:d:urgent"], ["plan"],
+            ["p:urgent/bar", "p:urgent/margin"]]);
+          select("g:tg:urgency"); out.filter = seen(cols); out.panel = $("lineage").innerHTML;
+          openCols.add(0); select(selected); out.opened = seen(cols);
+          select("e:d:urgent"); out.cleared = openCols.size;
+          mode = "dim"; select("g:tg:urgency"); out.dim = seen(cols); mode = "filter";
+          density = "auto";
+          const big = useColumns([Array.from({ length: 41 }, (_, i) => "e:x" + i)]);
+          applyDensity(); out.auto41 = big.on.has("compact");
+          density = "full"; applyDensity(); out.full41 = big.on.has("compact");
+          const small = useColumns([["e:a"]]); density = "auto"; applyDensity();
+          out.auto1 = small.on.has("compact");
+          return out; })()""",
+    )
+    targets, asked, rules, policy, params = shown["filter"]
+    assert targets["cards"]["g:tg:urgency"] == {"order": "0", "cls": ["sel"]}
+    assert asked["cards"]["e:q:ask/urgent"] == {"order": "1", "cls": ["near", "up"]}
+    assert rules["cards"]["e:d:urgent"]["order"] == "3"
+    assert policy["cards"]["plan"] == {"order": "4", "cls": ["down"]}
+    assert asked["cards"]["e:t:state"]["cls"] == ["dim", "hide"]
+    assert targets["stubs"] == [
+        '<button type="button" class="stub" data-open-col="0" aria-expanded="false" '
+        'style="order:1000">Show 2 other targets</button>'
+    ]
+    assert "Show 1 with no link declared to tg:urgency" in asked["stubs"][0]
+    assert "Show 2 with no link declared to tg:urgency" in params["stubs"][0]
+    assert rules["stubs"] == []
+    assert policy["stubs"] == []
+    assert "Filtered: 5 cards folded" in shown["panel"]
+    # Opened, the column's cards show, dimmed, and its stub closes them from above them.
+    opened = shown["opened"][0]
+    assert opened["cards"]["g:tg:cost"]["cls"] == ["dim"]
+    assert 'aria-expanded="true"' in opened["stubs"][0]
+    assert "Hide 2 other targets" in opened["stubs"][0]
+    assert "order:1000" not in opened["stubs"][0]
+    assert shown["cleared"] == 0  # a new selection closes every opened column
+    # Dim mode folds nothing and inserts no stub.
+    assert all(c["stubs"] == [] for c in shown["dim"])
+    assert shown["dim"][1]["cards"]["e:t:state"]["cls"] == ["dim"]
+    assert shown["auto41"] is True
+    assert shown["full41"] is False
+    assert shown["auto1"] is False
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_bar_alone_does_not_stop_labels_folding_and_a_plain_bound_is_a_number(
+    tmp_path: Path,
+) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const labels = ["a", "b", "c", "d", "e", "f"];
+          const value = { kind: "choice", labels,
+            probabilities: { a: 0.05, b: 0.4, c: 0.3, d: 0.1, e: 0.1, f: 0.05 } };
+          const bounds = { bar: [["p/bar", 0.5]], thresholds: [], margin: [], mass: [],
+            null: [], confidence: [], value: [], plain: [] };
+          const design = { rules: { r: { boundaries: { "t:profile.age": ["age/limit"] } } },
+            policy: {}, parameters: { "age/limit": { value: 18 } } };
+          return { barred: valueOnly({ value }, bounds),
+            plain: valueHtml({ value: { age: 20 } }, boundsOf(design, "t:profile"), true) };
+          })()""",
+    )
+    assert 'class="bar other"' in shown["barred"]
+    # The bar ticks every label, the folded ones too, which show once the card is selected.
+    assert shown["barred"].count('class="tick"') == 6
+    assert "t:profile.age compared with 18" in shown["plain"]
+    assert "1800%" not in shown["plain"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_the_design_links_its_context_block_and_candidate_valued_labels(tmp_path: Path) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const g = buildDesign({ policy: {}, rules: {}, parameters: { p1: {} },
+            sources: {
+              s: { provides: { "q:x": { labels: { fixed: ["a"], candidates: "t:set" } } } },
+              look: { provides: { "t:set": {} } } },
+            context: { entries: [{ ref: "t:set",
+              text: { slots: [{ origin: { param: "p1" } }] } }] } });
+          const ins = (n) => (g.inputs.get(n) || []).map((x) => [x.node, x.how]);
+          return { question: ins("e:q:x"), plan: ins("plan") }; })()""",
+    )
+    assert ["e:t:set", "its candidate-valued labels"] in shown["question"]
+    assert ["e:t:set", "a context entry"] in shown["plan"]
+    assert ["p:p1", "a context entry's wording"] in shown["plan"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_selected_question_keeps_its_own_targets_and_a_stub_names_each_reason(
+    tmp_path: Path,
+) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        _COLUMNS
+        + """;(() => {
+          const { cols } = useColumns([["g:tg:urgency", "g:tg:distress", "g:tg:cost"],
+            ["e:t:state", "e:q:ask/urgent"], ["e:d:urgent"], ["plan"]]);
+          select("e:q:ask/urgent");
+          const g = buildDesign({ policy: {}, rules: {}, targets: { "tg:x": {}, "tg:y": {} },
+            sources: { s: { provides: { "q:a": { target: "tg:x" }, "q:b": {} } } } });
+          return { cols: seen(cols),
+            two: stubText(g, "g:tg:x", ["e:q:b", "e:t:state"], false),
+            open: stubText(g, "g:tg:x", ["e:q:b", "e:t:state"], true) }; })()""",
+    )
+    targets = shown["cols"][0]
+    # The question asks about tg:urgency and bears on tg:distress: declared links, never folded.
+    assert targets["cards"]["g:tg:urgency"]["order"] == "1"
+    assert targets["cards"]["g:tg:distress"]["order"] == "2"
+    assert targets["cards"]["g:tg:cost"]["cls"] == ["dim", "hide"]
+    assert "Show 1 target it declares no link to" in targets["stubs"][0]
+    assert shown["two"] == "Show 2: 1 with no link declared to tg:x, 1 declaring no target link"
+    assert shown["open"].startswith("Hide 2: ")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_design_opened_again_is_one_design_and_a_turn_offers_to_compare_its_question(
+    tmp_path: Path,
+) -> None:
+    targeted = _targeted()
+    one = decide_sync(targeted, FORMAT_6_STATE, {"default": format_6_binding}).record
+    two = decide_sync(targeted, {"request": "a lost bag"}, {"default": format_6_binding}).record
+    identity = json.loads(one.document)["log"][3]["questions"]["q:ask/urgent"]["identity"]
+    shown = _run(
+        page({"a": one.document, "b": two.document}, [targeted.document]),
+        tmp_path,
+        """(() => {
+          const [key, doc] = [...known][0], clone = JSON.parse(JSON.stringify(doc.doc));
+          deckFrom(deck.map((d) => ({ name: d.name, record: d.record })),
+            new Map([[key, clone]]), [], 2);
+          const out = { known: known.size, key: keyOf(state.design) };
+          select("e:q:ask/urgent"); out.panel = $("lineage").innerHTML;
+          return out; })()""",
+    )
+    assert shown["known"] == 1
+    assert shown["key"].startswith("sha256:")
+    assert f'data-compare="{identity}"' in shown["panel"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_compare_guess_legend_and_exact_leads_behave_as_the_spec_says(tmp_path: Path) -> None:
+    targeted = _targeted()
+    one = decide_sync(targeted, FORMAT_6_STATE, {"default": format_6_binding}).record
+    two = decide_sync(targeted, {"request": "a lost bag"}, {"default": format_6_binding}).record
+    identity = json.loads(one.document)["log"][3]["questions"]["q:ask/urgent"]["identity"]
+    plain = load(FORMAT_6).document  # the only design here, and not the records' own
+    shown = _run(
+        page({"a": one.document, "b": two.document}, [plain]),
+        tmp_path,
+        """(() => {
+          const out = {};
+          turnsBy = IDENTITY; setTab("turns"); out.compared = $("turnsView").innerHTML;
+          setTab("design"); out.guessed = $("summary").innerHTML;
+          setTab("turn"); mode = "dim"; select(null); out.idle = $("lineage").innerHTML;
+          mode = "filter";
+          out.none = identityOf(state, "t:state");
+          const margin = { bar: [], thresholds: [["t/th", { yes: 0.7 }]], margin: [["m", 0.2]],
+            mass: [], null: [], confidence: [], value: [], plain: [] };
+          out.alone = valueHtml({ value: { kind: "choice", labels: ["a"],
+            probabilities: { a: 0.7 } } }, margin, true);
+          out.edge = valueHtml({ value: { kind: "noul", labels: ["yes", "no"],
+            probabilities: { yes: 0.6, no: 0.4 } } }, margin, true);
+          out.missing = amount(undefined);
+          const g = build({ log: [{ item: "design" }, { item: "settings", providers: {} },
+            { item: "entry", ref: "t:set", round: 0, value: ["x"] },
+            { item: "call", round: 1, sources: ["s"], questions: {} },
+            { item: "plan", kind: "inform" }] },
+            { policy: { reads: [] }, rules: {}, context: { entries: [{ ref: "t:set" }] },
+              sources: { s: { needs: [],
+                provides: { "q:x": { labels: { candidates: "t:set" } } } } } });
+          const ins = (n) => (g.inputs.get(n) || []).map((x) => [x.node, x.src]);
+          out.call = ins("c:3"); out.plan = ins("plan");
+          return out; })()""".replace("IDENTITY", json.dumps(identity)),
+    )
+    assert shown["compared"].count("data-row=") == 2
+    assert "may differ" in shown["guessed"]  # the Design view says the design is a guess too
+    assert "dimmed" not in shown["idle"]  # nothing selected, nothing dimmed
+    assert shown["none"] is None  # the state entry has no call, so no identity
+    assert "lead 70.0%" in shown["alone"]  # a lone label leads by its own probability
+    # 0.6 over 0.4 leads by exactly 0.2, on the margin, so it shows the digits that tell.
+    assert 'title="0.2"' in shown["edge"]
+    assert "lead 20.000%" in shown["edge"]
+    assert "thresholds ticked per label (t/th)" in shown["edge"]
+    assert 'title="t/th = 0.7"' in shown["edge"]
+    assert shown["missing"] == "\u2013"  # an en dash: no parameter, no value
+    assert ["e:t:set", "design"] in shown["call"]  # a candidate-valued label set
+    assert ["e:t:set", "design"] in shown["plan"]  # the design's context entry
+
+
+# A click on an element the page's handler finds by ``closest``: the selector it asks for first
+# among ``data`` gets the element, and the rest find nothing.
+_CLICK = r"""
+const click = (data) => document.on.click({ target: { closest: (sel) => {
+  const key = Object.keys(data).find((k) => sel === "[data-" + k + "]");
+  return key ? { dataset: { [key.replace(/-(.)/g, (_, c) => c.toUpperCase())]: data[key] } } : null;
+} } });
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_clicks_keep_a_picked_or_opened_design_and_the_jumps_and_stubs_work(
+    tmp_path: Path,
+) -> None:
+    targeted = _targeted()
+    record = decide_sync(targeted, FORMAT_6_STATE, {"default": format_6_binding}).record
+    other = load(FORMAT_6).document
+    shown = _run(
+        page({"a": record.document}, [targeted.document, other]),
+        tmp_path,
+        _CLICK
+        + _COLUMNS
+        + """;(async () => {
+          const out = {}, own = designKey;
+          click({ tab: "design" }); out.follows = designKey;
+          const picked = [...known.keys()].find((k) => k !== designKey);
+          designKey = picked; setTab("design");
+          click({ tab: "turn" }); click({ tab: "design" }); out.picked = designKey === picked;
+          // A design opened on the Design tab stays shown through Turn and back.
+          const bytes = new TextEncoder().encode(JSON.stringify({ policy: {}, name: "x" }));
+          $("desFile").files = [{ arrayBuffer: async () => bytes.buffer }];
+          $("desFile").on.change();
+          await new Promise((r) => setTimeout(r, 20));
+          out.opened = [designKey, dstate.design.name];
+          click({ tab: "turn" }); click({ tab: "design" });
+          out.kept = [designKey, dstate.design.name];
+          // Where the browser cannot hash, the opened design is kept under "opened".
+          window.crypto = undefined;
+          const plain = new TextEncoder().encode(JSON.stringify({ policy: {}, name: "y" }));
+          $("desFile").files = [{ arrayBuffer: async () => plain.buffer }];
+          $("desFile").on.change();
+          await new Promise((r) => setTimeout(r, 20));
+          click({ tab: "turn" }); click({ tab: "design" });
+          out.unhashed = [designKey, dstate.design.name];
+          click({ tab: "turn" }); select("e:q:ask/urgent");
+          click({ jump: "design" }); out.jumped = [tab, selected, designKey === out.follows];
+          click({ jump: "turn" }); out.back = [tab, selected];
+          useColumns([["e:t:state", "e:q:ask/urgent"]]);
+          select("e:q:ask/urgent"); click({ "open-col": "0" }); out.open = [...openCols];
+          click({ "open-col": "0" }); out.shut = [...openCols];
+          return out; })()""",
+    )
+    assert shown["follows"].startswith("sha256:")  # the Design tab first shows the turn's own
+    assert shown["picked"] is True  # a design picked since stays shown through Turn and back
+    # A browser hashes the file it opens, and the Design view shows that design, not the turn's.
+    assert shown["opened"][0].startswith("sha256:")
+    assert shown["opened"][1] == "x"
+    assert shown["kept"] == shown["opened"]
+    assert shown["unhashed"] == ["opened", "y"]
+    assert shown["jumped"] == ["design", "e:q:ask/urgent", True]
+    assert shown["back"] == ["turn", "e:q:ask/urgent"]
+    assert shown["open"] == [0]
+    assert shown["shut"] == []
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_table_is_shown_as_not_traced_and_a_mass_on_its_bound_shows_its_digits(
+    tmp_path: Path,
+) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          dstate = buildDesign({ policy: { form: "table", inputs: ["d:t"] },
+            rules: { t: { form: "table", provides: "d:t", inputs: ["q:a"] } },
+            sources: { s: { provides: { "q:a": {} } } } });
+          renderDesign();
+          const mass = { bar: [], thresholds: [], margin: [], null: [], confidence: [],
+            value: [], plain: [], mass: [{ labels: ["a", "b"], bounds: [["m/b", 0.5]] }] };
+          return { cols: $("cols").innerHTML,
+            mass: valueHtml({ value: { kind: "choice", labels: ["a", "b", "c"],
+              probabilities: { a: 0.3, b: 0.2, c: 0.5 } } }, mass, true) }; })()""",
+    )
+    assert shown["cols"].count("not traced") == 2
+    assert "reads nothing" not in shown["cols"]
+    assert "mass a+b" in shown["mass"]
+    assert "50.000%" in shown["mass"]
