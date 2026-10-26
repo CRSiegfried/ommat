@@ -5,16 +5,26 @@ design; and the reference runner, ``run_plan``, which the caller runs after deci
 ``__all__`` lists are public, under the same deprecation rule as ``ommat.__all__``.
 
 ``HELPERS`` is the helper library's version, which the record's ``design`` item carries; it
-counts the choice helpers and combinators alone, never a lint or the runner.
+counts the library's helpers, ``determined`` among them, and combinators alone, never a lint
+or the runner.
 
 The choice helpers are in ``_choice``, the combinators in ``_combinator``, and the mechanics
 each of them is built on in ``_call``. The lints are in ``_dead`` and ``_unsure``, over the
 points both share in ``_points``.
 """
 
-from ommat.helpers._choice import extract, mass, pick_with_margin, pick_with_thresholds, size
+from ommat.helpers._choice import (
+    extract,
+    mass,
+    pick_each_with_margin,
+    pick_each_with_thresholds,
+    pick_with_margin,
+    pick_with_thresholds,
+    size,
+)
 from ommat.helpers._combinator import agree, collect, first, priority, unique
 from ommat.helpers._dead import dead_questions
+from ommat.helpers._determined import determined
 from ommat.helpers._runner import BindingNotFound, RunRefusal, run_plan
 from ommat.helpers._unsure import unsure_to_execute
 
@@ -24,9 +34,12 @@ __all__ = [
     "agree",
     "collect",
     "dead_questions",
+    "determined",
     "extract",
     "first",
     "mass",
+    "pick_each_with_margin",
+    "pick_each_with_thresholds",
     "pick_with_margin",
     "pick_with_thresholds",
     "priority",
@@ -36,4 +49,4 @@ __all__ = [
     "unsure_to_execute",
 ]
 
-HELPERS = 2
+HELPERS = 3

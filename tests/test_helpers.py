@@ -87,10 +87,11 @@ def items(r: ReadView) -> list[tuple[str, tuple[object, ...], tuple[object, ...]
 # The helper version and the package's place
 
 
-def test_the_helper_version_is_2() -> None:
-    # Version 2 covers the extract helper: a record that calls it under version 1 would replay
-    # with nothing to say why.
-    assert ommat.helpers.HELPERS == 2
+def test_the_helper_version_is_3() -> None:
+    # Version 2 covers the extract helper and version 3 the per-candidate picks and
+    # determined: a record that calls one under an older version would replay with nothing
+    # to say why.
+    assert ommat.helpers.HELPERS == 3
     assert type(ommat.helpers.HELPERS) is int
 
 
@@ -99,6 +100,9 @@ def test_helpers_is_not_in_the_engines_api() -> None:
     names = {
         "pick_with_margin",
         "pick_with_thresholds",
+        "pick_each_with_margin",
+        "pick_each_with_thresholds",
+        "determined",
         "size",
         "mass",
         "extract",

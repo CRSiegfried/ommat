@@ -1044,7 +1044,6 @@ NAMED = {OUT: SET}  # the settings ground the ref's declared ref, so only the pl
 
 
 NEVER: list[tuple[str, dict[str, Any]]] = [
-    ("plan", {"cause": {"code": "x", "refs": [GROUNDED_REF]}, "steps": [], "context": None}),
     (
         "plan",
         {
@@ -1081,7 +1080,6 @@ NEVER: list[tuple[str, dict[str, Any]]] = [
     ("kind", "item"),
     NEVER,
     ids=[
-        "plan cause",
         "step argument",
         "step requirement",
         "context entry",
@@ -1089,7 +1087,7 @@ NEVER: list[tuple[str, dict[str, Any]]] = [
         "requirement",
     ],
 )
-def test_a_plan_or_verdict_never_holds_a_grounded_ref_even_under_a_grounded_declared_ref(
+def test_a_plan_or_verdict_holds_a_grounded_ref_only_in_a_cause(
     kind: str, item: dict[str, Any]
 ) -> None:
     from ommat._ledger import _grounded_refs, _LedgerError  # pyright: ignore[reportPrivateUsage]
@@ -1098,3 +1096,28 @@ def test_a_plan_or_verdict_never_holds_a_grounded_ref_even_under_a_grounded_decl
         _grounded_refs(kind, {"item": kind, **item}, NAMED, "item")
     # The places the ledger admits take it.
     _grounded_refs("entry", {"item": "entry", "ref": GROUNDED_REF}, NAMED, "item")
+
+
+_MARKER = {"kind": "Unsure", "cause": {"code": "abstained", "refs": [GROUNDED_REF]}}
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"cause": {"code": "x", "refs": [GROUNDED_REF]}, "steps": [], "context": None},
+        {
+            "cause": None,
+            "steps": [],
+            "context": {"entries": [{"ref": "d:pick", "text": None, "marker": _MARKER}]},
+        },
+    ],
+    ids=["plan cause", "context entry's marker"],
+)
+def test_a_plan_s_causes_may_name_a_grounded_ref(item: dict[str, Any]) -> None:
+    # A cause's refs admit a grounded ref wherever the cause stands (§ledger), so a marker
+    # naming one candidate, passed on into a flagged context entry, does not break the turn.
+    from ommat._ledger import _grounded_refs, _LedgerError  # pyright: ignore[reportPrivateUsage]
+
+    _grounded_refs("plan", {"item": "plan", **item}, NAMED, "item")
+    with pytest.raises(_LedgerError, match="not grounded in the settings"):
+        _grounded_refs("plan", {"item": "plan", **item}, {}, "item")

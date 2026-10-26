@@ -98,15 +98,17 @@ def test_a_format_2_record_reads_back_to_its_own_hash_with_no_hash_member() -> N
     assert "precision" not in call
 
 
-def test_a_format_2_record_replays_under_its_format_2_design_with_no_finding() -> None:
+def test_a_format_2_record_replays_under_its_format_2_design_with_the_helper_version_alone() -> (
+    None
+):
     again, findings = replay_sync(format_2_record(), format_2_design())
-    assert findings == []
+    assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}]
     assert again is not None
     assert again.log[0]["format"] == 6  # the engine writes its own format
     assert decode(again.document)["hash"] == again.record_hash
 
 
-def test_a_format_2_record_under_the_current_design_is_design_mismatch_alone() -> None:
+def test_a_format_2_record_under_the_current_design_is_design_and_helper_mismatch() -> None:
     from test_decide import LOADED
 
     _, findings = replay_sync(format_2_record(), LOADED)
@@ -115,7 +117,8 @@ def test_a_format_2_record_under_the_current_design_is_design_mismatch_alone() -
             "kind": FindingKind.design_mismatch,
             "recorded": FORMAT_2_DESIGN,
             "replayed": LOADED.design_hash,
-        }
+        },
+        {"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3},
     ]
 
 
@@ -138,7 +141,7 @@ def test_a_format_2_design_decides_a_turn_at_the_engines_format() -> None:
     record = decide_sync(
         format_2_design(), stored_state, {"mail": nothing, "default": nothing}
     ).record
-    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 6, "helpers": 2}
+    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 6, "helpers": 3}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1117,7 +1120,7 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # The golden described record
 
 GOLDEN_DESIGN = "sha256:081ef00e43ac1398f073913450bbcffa703ea27bf3e2d525ed4ebb56a56fe3a1"
-GOLDEN_RECORD = "sha256:8d204e903c040d9d5d53c500ee1256128a06bff8e990adae906072692a07f3c1"
+GOLDEN_RECORD = "sha256:71cd4f1b2b3165bbf50f81d2d0df44e1388cb4c4995a3c7d25ad50f232bd11dc"
 
 
 def golden() -> Record:

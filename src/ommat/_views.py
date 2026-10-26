@@ -331,6 +331,14 @@ class _Walk:
         written = grounded_ref(declared, self.digest(parsed.candidate))
         return written + "".join(f".{field}" for field in parsed.fields)
 
+    def context_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """A context entry: its text digested, its marker's cause rewritten."""
+        out = {**entry, "text": self.text(entry["text"])}
+        if entry["marker"] is not None:
+            marker = cast("dict[str, Any]", entry["marker"])
+            out["marker"] = {**marker, "cause": self.cause(marker["cause"])}
+        return out
+
     def cause(self, cause: dict[str, Any]) -> dict[str, Any]:
         """A cause with each grounded ref of its ``refs`` rewritten."""
         return {**cause, "refs": [self.ref(r) for r in cast("list[Any]", cause["refs"])]}
@@ -374,15 +382,14 @@ class _Walk:
             out["reason"] = self.text(item["reason"])
             out["reply"] = self.text(item["reply"])
             out["steps"] = [self.step(step, classes) for step in item["steps"]]
+            if item["cause"] is not None:  # a cause may name a grounded ref (§ledger)
+                out["cause"] = self.cause(item["cause"])
             context = item.get("context")
             if context is not None:
                 out["context"] = {
                     **context,
                     "design": self.text(context["design"]),
-                    "entries": [
-                        {**e, "text": self.text(e["text"])}
-                        for e in cast("list[dict[str, Any]]", context["entries"])
-                    ],
+                    "entries": [self.context_entry(e) for e in context["entries"]],
                 }
         elif kind == "verdict":
             out["failures"] = [
@@ -391,8 +398,8 @@ class _Walk:
                 else f
                 for f in cast("list[dict[str, Any]]", item["failures"])
             ]
-        # Every other member is open: markers, causes, derivation, rows, slots, a context
-        # entry's ref and marker and the block's switches, the verdict's
+        # Every other member is open, a cause's refs but their grounded refs: markers,
+        # derivation, rows, slots, a context entry's ref and the block's switches, the verdict's
         # other members, the run settings and the call item's other members.
         if "order" in item:  # derived afresh over the item as the view writes it
             out = _with_held_order({k: v for k, v in out.items() if k != "order"})

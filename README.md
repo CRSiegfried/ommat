@@ -158,6 +158,7 @@ To look at stored records, write them to `.json` files as `decision.record.docum
 - [Write your first design](docs/tutorials/write-a-design.md), the tutorial to start with.
 - [Decide with real models through idia](docs/tutorials/decide-with-idia.md), which binds a design to model providers.
 - [Add a source](docs/how-to/add-a-source.md), which answers a new oracle through idia or a binding of your own.
+- [Gate a source on an earlier estimate](docs/how-to/gate-a-source.md), which asks a later question only when an estimate holds a value, without sending the estimate to the model.
 - [Hand off what a turn settled](docs/how-to/hand-off-context.md), which gives the next model in a conversation the plan and the estimates you choose, and the turn's calls as Chat Completions or Pydantic AI messages.
 - [The spec](docs/spec/README.md), what ommat does and leaves out.
 - [CHANGELOG.md](CHANGELOG.md), each release.

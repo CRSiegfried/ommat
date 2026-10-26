@@ -641,9 +641,12 @@ def _attempts(value: object, invalid: dict[str, str]) -> int | None:
     return None
 
 
-def _rule_marker(value: object, loaded: LoadedDesign) -> Undetermined | None:
+def _rule_marker(
+    value: object, loaded: LoadedDesign, board: Mapping[str, object]
+) -> Undetermined | None:
     """A returned marker that is exactly one of the three, holding a well-formed ``Cause``
-    whose refs each take a form a cause's refs take, rebuilt; else ``None``."""
+    whose refs each take a form a cause's refs take, a grounded ref only when its entry is on
+    the board, rebuilt; else ``None``."""
     kind = cast("type[Undetermined]", type(value))
     if kind not in _MARKER_KINDS:
         return None
@@ -657,8 +660,10 @@ def _rule_marker(value: object, loaded: LoadedDesign) -> Undetermined | None:
     members = cast("tuple[object, ...]", refs)
     if not all(type(r) is str and is_scalar_string(r) for r in members):
         return None
-    if not all(names_cause_ref(loaded, cast(str, r)) for r in members):
-        return None  # a ref of no declared form could carry the input's text
+    # A ref of no declared form could carry the input's text; a grounded ref is a board ref
+    # (§marker-causes) only when the turn wrote its entry, so no rule names a made-up candidate.
+    if not all(names_cause_ref(loaded, cast(str, r)) or cast(str, r) in board for r in members):
+        return None
     return kind(Cause(code, cast("tuple[str, ...]", members)))
 
 
@@ -865,7 +870,7 @@ class _Turn:
         else:
             # Never a truth test on what a rule returned: a marker's `__bool__` raises.
             if is_a(returned, Undetermined):
-                value: Written | None = _rule_marker(returned, self.loaded)
+                value: Written | None = _rule_marker(returned, self.loaded, self.board)
             else:
                 value = typed(returned, self.loaded._types[r.provides])
                 if value is not None and r.candidates and not _distinct(value[0]):

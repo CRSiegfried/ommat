@@ -151,19 +151,19 @@ SPAM = {"q:spam": {"yes": 0.9, "no": 0.1}, "t:body": "text of the mail"}
 REPLIES: dict[str, object] = {"ask": returns(SPAM), "look": returns({"t:size": 4})}
 
 GOLDEN_DESIGN = "sha256:2d8310e5bb19c7dee779be11220a26625cb8638853173e46c09214e4f94f3283"
-GOLDEN_RECORD = "sha256:1a0583c6e98cf1697e59a25aed33db9948fdc0b18aff7ddfd76fd4bc8a51a8fe"
-GOLDEN_BROKEN = "sha256:550987c5d276641c8b5dfccc8cf0b6ecbbd92e675bb88c38a8219c685aeeb6f1"
+GOLDEN_RECORD = "sha256:67d98c42c2738f77af9f0f8fb7e5653e85da250b51bd7a267bafc5a32947ca75"
+GOLDEN_BROKEN = "sha256:b0e7e28065d12d9982a0bfb8a72e04622a35cbbca29222268e8511583a8b9948"
 GOLDEN_CANCELLED = (
     "sha256:a6b9ac143bb9989785df7ab031056bf19a25a28929f82e9a90a34592f4082bdf",
-    "sha256:2fbeed16488fd052df4761ba6df14caae403e470707eefdc7c1572bc65ba4982",
+    "sha256:c5a6ba5ce46708fb0cb9643531bf797e15942f1dba28de570c7589e85dccca41",
 )
 GOLDEN_REFUSED = (
     "sha256:ebea89ceb2510b4df52d3fcbd54dfba5323bf8d837e94a0ec56ebf54fbb66e84",
-    "sha256:d0a9fc08d98c66ab03291ac6f14b699cc1faa7dea07690b25d5287e9d77f62ee",
+    "sha256:1aaa1c91d5701bc45ad7a1273bf7a41968eec8c936b67dffdfad8ff3de865175",
 )
 GOLDEN_ESCALATE = (
     "sha256:a534c5743b2ebaa5268f63fa2e3194a63f15a04fb29d30478648584ecdb85a07",
-    "sha256:34a6330925d7ce856b741181f1489f92add199370ffac48967cd87eb7f06c047",
+    "sha256:397b10bd2fdd87bf78fe027e4782bb5e3f2cb5bdabffdd8e50937398925de6b8",
 )
 """Each a pair: the design hash, then the record hash."""
 
@@ -394,7 +394,7 @@ def test_the_golden_hashes_hold_under_every_hash_seed(seed: str) -> None:
 
 def test_the_design_and_settings_items_bytes() -> None:
     log = go().record.log
-    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 6, "helpers": 2}
+    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 6, "helpers": 3}
     assert log[1] == {
         "item": "settings",
         "settings": {

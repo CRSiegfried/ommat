@@ -233,7 +233,11 @@ function build(record, design) {
   }
   for (const [idx, c] of calls) {
     link("c:" + idx, obj(obj(c.outcome).failed).refs, "named in its failure", "record");
-    for (const sid of arr(c.sources)) if (str(sid) && Object.hasOwn(sources, sid)) link("c:" + idx, sourceInputs(sid), "source " + sid + " needs it", "design");
+    for (const sid of arr(c.sources)) {
+      if (!str(sid) || !Object.hasOwn(sources, sid)) continue;
+      link("c:" + idx, sourceInputs(sid), "source " + sid + " needs it", "design");
+      link("c:" + idx, [obj(obj(sources[sid]).requirement).ref], "source " + sid + " is gated on it", "design");
+    }
   }
   if (plan) {
     for (const d of arr(plan.derivation)) link("plan", obj(d).refs, "helper " + obj(d).helper, "record");

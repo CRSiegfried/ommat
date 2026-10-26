@@ -765,17 +765,18 @@ def _grounded(ref: Any) -> bool:
         return False
 
 
-def _cause_refs(cause: Any, place: str) -> list[tuple[str, Any]]:
-    return [(f"{place}'s refs", r) for r in cast("dict[str, Any]", cause)["refs"]]
+def _cause_refs(cause: Any, place: str) -> list[tuple[str, Any, bool]]:
+    return [(f"{place}'s refs", r, True) for r in cast("dict[str, Any]", cause)["refs"]]
 
 
-def _ref_places(kind: str, item: dict[str, Any]) -> list[tuple[str, Any]]:
+def _ref_places(kind: str, item: dict[str, Any]) -> list[tuple[str, Any, bool]]:
     """Each place of an item that redaction rewrites a grounded ref in: an entry's ref, a
-    cause's refs, an origin's ref, a requirement's ref and a failure's ref. The item has
-    passed its shape check."""
-    places: list[tuple[str, Any]] = []
+    cause's refs, an origin's ref, a requirement's ref and a failure's ref, each with whether
+    it may hold a grounded ref: an entry's ref and every cause's refs, wherever the cause
+    stands, may. The item has passed its shape check."""
+    places: list[tuple[str, Any, bool]] = []
     if kind == "entry":
-        places.append(("its ref", item["ref"]))
+        places.append(("its ref", item["ref"], True))
         if "marker" in item:
             places += _cause_refs(item["marker"]["cause"], "its marker's cause")
     elif kind == "call" and type(item["outcome"]) is dict:
@@ -786,21 +787,21 @@ def _ref_places(kind: str, item: dict[str, Any]) -> list[tuple[str, Any]]:
         if item["cause"] is not None:
             places += _cause_refs(item["cause"], "its cause")
         for i, entry in enumerate(_context_entries(item)):
-            places.append((f"context entry {i}'s ref", entry["ref"]))
+            places.append((f"context entry {i}'s ref", entry["ref"], False))
             if entry["marker"] is not None:
                 places += _cause_refs(entry["marker"]["cause"], f"context entry {i}'s marker")
         for n, step in enumerate(cast("list[dict[str, Any]]", item["steps"]), 1):
             for name, origin in cast("dict[str, Any]", step["arguments"]).items():
                 if type(origin) is dict and "ref" in origin:
                     ref: Any = cast("dict[str, Any]", origin)["ref"]
-                    places.append((f"step {n}'s argument {name!r}", ref))
+                    places.append((f"step {n}'s argument {name!r}", ref, False))
             for r in cast("list[dict[str, Any]]", step["requirements"]):
-                places.append((f"step {n}'s requirement", r["ref"]))
+                places.append((f"step {n}'s requirement", r["ref"], False))
     elif kind == "verdict":
         for i, failure in enumerate(cast("list[dict[str, Any]]", item["failures"])):
-            places.append((f"failure {i}'s ref", failure["ref"]))
+            places.append((f"failure {i}'s ref", failure["ref"], False))
             if failure["requirement"] is not None:
-                places.append((f"failure {i}'s requirement", failure["requirement"]["ref"]))
+                places.append((f"failure {i}'s requirement", failure["requirement"]["ref"], False))
     return places
 
 
@@ -811,20 +812,15 @@ def _context_entries(item: dict[str, Any]) -> list[dict[str, Any]]:
     return [] if context is None else cast("list[dict[str, Any]]", context["entries"])
 
 
-_ADMITTING = frozenset({"entry", "call", "cause"})
-"""The item kinds whose ref places may hold a grounded ref: an entry's ref and its marker's
-cause, a call's outcome's cause and the cancellation's cause."""
-
-
 def _grounded_refs(
     kind: str, item: dict[str, Any], grounded: Mapping[str, str], where: str
 ) -> None:
     """Refuse a grounded ref outside the places a record admits one, or whose declared ref is
     not a key of the ``settings`` item's ``grounded``."""
-    for place, ref in _ref_places(kind, item):
+    for place, ref, admitted in _ref_places(kind, item):
         if not _grounded(ref):
             continue
-        if kind not in _ADMITTING:
+        if not admitted:
             raise _LedgerError(f"{where}: {place} {ref!r} is a grounded ref, which it never holds")
         if declared_ref(ref) not in grounded:
             raise _LedgerError(

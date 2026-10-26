@@ -7,12 +7,14 @@ own work. Its tests and sums are exact over the decimals RFC 8785 writes: a numb
 as ``Fraction(repr(x))``.
 """
 
+from collections.abc import Callable
 from fractions import Fraction
 from typing import cast
 
 from ommat._answer import Answer, ExtractionAnswer
 from ommat._markers import Cause, CauseCode, Undetermined, Unsure
 from ommat._read_view import ReadView
+from ommat._refs import grounded_ref
 from ommat._values import quote
 from ommat.helpers._call import called
 from ommat.helpers._numbers import exact
@@ -72,6 +74,33 @@ def _lacked(helper: str, answer: Answer, labels: tuple[str, ...] | list[str]) ->
             raise ValueError(f"{helper} was given the label {label!r}, which the answer lacks")
 
 
+def _by_margin(answer: Answer, bar: Fraction, margin: Fraction) -> str | None:
+    """The top label, when it is at or above ``bar`` and leads the second-highest, 0 for a
+    one-label answer, by at least ``margin``; else ``None``. A tie at the top is ``None``."""
+    probs = {label: exact(p) for label, p in answer.probabilities.items()}
+    top_label = max(probs, key=probs.__getitem__)
+    top = probs[top_label]
+    second = max((p for label, p in probs.items() if label != top_label), default=Fraction(0))
+    if top >= bar and top > second and top - second >= margin:
+        return top_label
+    return None
+
+
+def _by_thresholds(answer: Answer, bars: dict[str, Fraction], margin: Fraction) -> str | None:
+    """Of the labels at or above their own bar, the most probable, when it leads the
+    second-highest of every other label by at least ``margin``; else ``None``."""
+    probs = {label: exact(p) for label, p in answer.probabilities.items()}
+    qualifying = [label for label in probs if label in bars and probs[label] >= bars[label]]
+    if not qualifying:
+        return None
+    best_label = max(qualifying, key=probs.__getitem__)
+    best = probs[best_label]
+    second = max((p for label, p in probs.items() if label != best_label), default=Fraction(0))
+    if best > second and best - second >= margin:
+        return best_label
+    return None
+
+
 def pick_with_margin(r: ReadView, ref: str, bar: float, margin: float) -> str | Undetermined:
     """The top label of the answer at ``ref``, when its probability is at or above ``bar``
     and leads the second-highest, 0 for a one-label answer, by at least ``margin``; else
@@ -85,14 +114,9 @@ def pick_with_margin(r: ReadView, ref: str, bar: float, margin: float) -> str | 
             call.rested_on([ref])
             return value
         answer = _answer("pick_with_margin", ref, value)
-        probs = {label: exact(p) for label, p in answer.probabilities.items()}
-        top_label = max(probs, key=probs.__getitem__)
-        top = probs[top_label]
-        second = max((p for label, p in probs.items() if label != top_label), default=Fraction(0))
         call.rested_on([ref])
-        if top >= bar_ and top > second and top - second >= margin_:
-            return top_label
-        return Unsure(Cause(CauseCode.abstained, [ref]))
+        picked = _by_margin(answer, bar_, margin_)
+        return picked if picked is not None else Unsure(Cause(CauseCode.abstained, [ref]))
 
 
 def pick_with_thresholds(
@@ -113,17 +137,80 @@ def pick_with_thresholds(
             return value
         answer = _answer("pick_with_thresholds", ref, value)
         _lacked("pick_with_thresholds", answer, list(bars))
-        probs = {label: exact(p) for label, p in answer.probabilities.items()}
-        qualifying = [label for label in probs if label in bars and probs[label] >= bars[label]]
         call.rested_on([ref])
-        if not qualifying:
-            return Unsure(Cause(CauseCode.abstained, [ref]))
-        best_label = max(qualifying, key=probs.__getitem__)
-        best = probs[best_label]
-        second = max((p for label, p in probs.items() if label != best_label), default=Fraction(0))
-        if best > second and best - second >= margin_:
-            return best_label
-        return Unsure(Cause(CauseCode.abstained, [ref]))
+        picked = _by_thresholds(answer, bars, margin_)
+        return picked if picked is not None else Unsure(Cause(CauseCode.abstained, [ref]))
+
+
+def _candidates(helper: str, ref: str, value: object) -> dict[str, Answer | Undetermined]:
+    """The read of a per-candidate question's declared ref, each candidate's entry an answer
+    or a marker; anything else raises."""
+    if type(value) is not dict:
+        raise TypeError(
+            f"{helper} read {quote(ref)}, which is not a per-candidate question's declared ref"
+        )
+    entries = cast("dict[str, object]", value)
+    for candidate, entry in entries.items():
+        if not isinstance(entry, Undetermined):
+            _answer(helper, grounded_ref(ref, candidate), entry)
+    return cast("dict[str, Answer | Undetermined]", entries)
+
+
+def pick_each_with_margin(
+    r: ReadView, ref: str, bar: float, margin: float
+) -> dict[str, str | Undetermined] | Undetermined:
+    """Over a per-candidate question's declared ref, a new ``dict`` in the set's order from
+    each candidate to ``pick_with_margin``'s result for its entry: its pick, or ``Unsure``
+    with ``abstained`` naming the candidate's grounded ref, or the entry's marker unchanged.
+    The set's need marker is returned unchanged, and an empty set gives ``{}``. Every entry is
+    tested before any is picked."""
+    with called(r, "pick_each_with_margin", [ref]) as call:
+        (value,) = call.values
+        bar_ = _unit("pick_each_with_margin", "bar", bar)
+        margin_ = _unit("pick_each_with_margin", "margin", margin)
+        if isinstance(value, Undetermined):
+            call.rested_on([ref])
+            return value
+        entries = _candidates("pick_each_with_margin", ref, value)
+        call.rested_on([ref])
+        return {
+            candidate: _each(ref, candidate, entry, lambda a: _by_margin(a, bar_, margin_))
+            for candidate, entry in entries.items()
+        }
+
+
+def pick_each_with_thresholds(
+    r: ReadView, ref: str, thresholds: dict[str, float], margin: float
+) -> dict[str, str | Undetermined] | Undetermined:
+    """As ``pick_each_with_margin``, by ``pick_with_thresholds``: every answered candidate's
+    answer must hold each label in ``thresholds``."""
+    with called(r, "pick_each_with_thresholds", [ref]) as call:
+        (value,) = call.values
+        bars = _thresholds_arg("pick_each_with_thresholds", thresholds)
+        margin_ = _unit("pick_each_with_thresholds", "margin", margin)
+        if isinstance(value, Undetermined):
+            call.rested_on([ref])
+            return value
+        entries = _candidates("pick_each_with_thresholds", ref, value)
+        for entry in entries.values():
+            if not isinstance(entry, Undetermined):
+                _lacked("pick_each_with_thresholds", entry, list(bars))
+        call.rested_on([ref])
+        return {
+            candidate: _each(ref, candidate, entry, lambda a: _by_thresholds(a, bars, margin_))
+            for candidate, entry in entries.items()
+        }
+
+
+def _each(
+    ref: str, candidate: str, entry: Answer | Undetermined, pick: Callable[[Answer], str | None]
+) -> str | Undetermined:
+    if isinstance(entry, Undetermined):
+        return entry
+    picked = pick(entry)
+    if picked is None:
+        return Unsure(Cause(CauseCode.abstained, [grounded_ref(ref, candidate)]))
+    return picked
 
 
 def size(r: ReadView, ref: str) -> int | Undetermined:

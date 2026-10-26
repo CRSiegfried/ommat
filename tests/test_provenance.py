@@ -20,6 +20,7 @@ from ommat import (
     CallResult,
     Cause,
     Design,
+    FindingKind,
     InvalidRecord,
     Plan,
     Policy,
@@ -584,9 +585,11 @@ def test_a_stored_format_4_design_loads_to_its_own_hash_and_its_record_replays()
     assert loaded.design_hash == FORMAT_4_DESIGN
     assert loaded.document == data
     rerun, findings = replay_sync(read_record((FORMAT_4 / "record.json").read_bytes()), loaded)
-    assert findings == []
+    assert findings == [
+        {"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}
+    ]  # a record of an older helper version
     assert rerun is not None
-    assert rerun.log[0] == {"item": "design", "hash": FORMAT_4_DESIGN, "format": 6, "helpers": 2}
+    assert rerun.log[0] == {"item": "design", "hash": FORMAT_4_DESIGN, "format": 6, "helpers": 3}
 
 
 def call_item_of(view: dict[str, Any]) -> dict[str, Any]:

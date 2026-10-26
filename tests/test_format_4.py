@@ -216,12 +216,12 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
 
 
 GOLDEN_DESIGN = "sha256:532bcbfcb74394fa5bbbeb424410effa79ebcb0b5dd858b65ead94176c85e1f2"
-GOLDEN_RECORD = "sha256:32d9649d123618e9bc38c9993395eb5e3b96e164a81ff9eead516746c70d7f0b"
+GOLDEN_RECORD = "sha256:28ab9460760cebdf5cbd1c030f7cf7b92f15b1803ea30c228887fde24dd97fde"
 
 
 def test_the_golden_per_ref_record() -> None:
     record = per_ref_turn()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 6, "helpers": 2}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 6, "helpers": 3}
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)
     assert decode(record.document)["hash"] == GOLDEN_RECORD
 
@@ -297,14 +297,16 @@ def test_a_format_3_record_reads_back_to_its_own_hash() -> None:
     assert record.log[0] == {"item": "design", "hash": FORMAT_3_DESIGN, "format": 3, "helpers": 2}
 
 
-def test_a_format_3_record_replays_under_its_format_3_design_with_no_finding() -> None:
+def test_a_format_3_record_replays_under_its_format_3_design_with_the_helper_version_alone() -> (
+    None
+):
     again, findings = replay_sync(format_3_record(), format_3_design())
-    assert findings == []
+    assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}]
     assert again is not None
     assert again.log[0]["format"] == 6  # the engine writes its own format
 
 
-def test_a_format_3_record_under_the_format_4_design_is_design_mismatch_alone() -> None:
+def test_a_format_3_record_under_the_format_4_design_is_design_and_helper_mismatch() -> None:
     from test_decide import LOADED as SLICE
 
     _, findings = replay_sync(format_3_record(), SLICE)
@@ -313,7 +315,8 @@ def test_a_format_3_record_under_the_format_4_design_is_design_mismatch_alone() 
             "kind": FindingKind.design_mismatch,
             "recorded": FORMAT_3_DESIGN,
             "replayed": SLICE.design_hash,
-        }
+        },
+        {"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3},
     ]
 
 

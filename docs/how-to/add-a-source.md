@@ -674,6 +674,8 @@ applies to it: the rule gets the list, and `[]` when the model found none. For a
 does give a `p_null`, a rule can call `extract` first and then read the answer whole for its
 confidence.
 
+
+To ask a later source only when an estimate holds a value, without sending the estimate to the model, see [Gate a source on an earlier estimate](gate-a-source.md).
 ## Run it
 
 The driver wraps the model to count its calls, so the run shows that replay makes none; wrap a

@@ -4,7 +4,7 @@ rules: record fields spelled in code-point order, no order members, and values h
 import json
 from pathlib import Path
 
-from ommat import load, read_record, replay_sync
+from ommat import FindingKind, load, read_record, replay_sync
 
 FORMAT_5 = Path(__file__).parent / "format_5"
 FORMAT_5_DESIGN = "sha256:9b9822d9596a2c25ac054f52b109b75db04958a2c0dcd0d32239a1f5ae34e9a9"
@@ -37,12 +37,12 @@ def test_a_stored_format_5_record_reads_to_its_own_hash_its_values_sorted() -> N
     assert plan["context"]["entries"][0]["text"] == 'Weights {"alpha":1,"zeta":2}'
 
 
-def test_a_stored_format_5_record_replays_under_its_design_with_no_finding() -> None:
+def test_a_stored_format_5_record_replays_under_its_design_with_the_helper_version_alone() -> None:
     loaded = load((FORMAT_5 / "design.json").read_bytes())
     rerun, findings = replay_sync(read_record((FORMAT_5 / "record.json").read_bytes()), loaded)
-    assert findings == []
+    assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}]
     assert rerun is not None
-    assert rerun.log[0] == {"item": "design", "hash": FORMAT_5_DESIGN, "format": 6, "helpers": 2}
+    assert rerun.log[0] == {"item": "design", "hash": FORMAT_5_DESIGN, "format": 6, "helpers": 3}
     state = next(i for i in rerun.log if i["item"] == "entry" and i["ref"] == "t:state")
     assert list(state["value"]) == ["body", "subject"]  # the format-5 design's spelling
     # The rule builds zeta first; the rerun renders the slot sorted, as the format-5 engine did.
