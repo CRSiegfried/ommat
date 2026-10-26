@@ -1,12 +1,16 @@
-"""The record lens: stored records rendered as one HTML page a person reads, outside the
-compatibility promise while it is validated.
+"""The record lens: stored records and designs rendered as one HTML page a person reads, outside
+the compatibility promise while it is validated.
 
-``page(records, designs=())`` returns a self-contained page that shows each record round by
-round: its calls and entries, each choice's probabilities and an extraction's confidence as
-percentages, each marker by kind and cause, then the plan and the verdict. Selecting an entry, a
-call or the plan shows its lineage: the links the record holds, and, with the design the record
-ran under, each rule's and the policy's declared reads, marked as declared. A design pairs with a
-record by its hash. ``python -m ommat.lens PATH`` writes the page for a record file or a folder.
+``page(records, designs=())`` returns a self-contained page with three views. Design shows a
+design document with or without a record: its targets, questions, rules, policy reads,
+requirements and parameters, and the lineage of any card, a target's declared links included.
+Turn shows each record round by round: its calls and entries, each choice's probabilities and an
+extraction's confidence as percentages against the boundaries its design declares, each marker by
+kind and cause, then the plan and the verdict, and the lineage of any entry, call or the plan: the
+links the record holds, and, with the design the record ran under, each rule's and the policy's
+declared reads, marked as declared. Turns lists the records grouped by design hash or by a
+question's identity. A design pairs with a record by its hash. ``python -m ommat.lens PATH``
+writes the page for a record or design file or a folder.
 
 The page embeds the records whole, user text included, so keep it as you keep them, and loads
 nothing from the network. ``import ommat`` does not import this package, and it takes nothing

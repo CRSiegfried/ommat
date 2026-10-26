@@ -1,4 +1,4 @@
-"""``python -m ommat.lens PATH [-o FILE] [--open]``: write the record lens page for a record
+"""``python -m ommat.lens PATH [-o FILE] [--open]``: write the lens page for a record or design
 file, or for every ``.json`` and ``.jsonl`` record and design under a folder."""
 
 import argparse
@@ -16,11 +16,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m ommat.lens",
         description=(
-            "Write an HTML page showing ommat records round by round, with lineage. The page "
+            "Write an HTML page showing an ommat design and its records: the design's lineage "
+            "by target or ref, each record round by round, and the records as a table. The page "
             "holds the records whole, user text included: keep it as you keep them."
         ),
     )
-    parser.add_argument("path", type=Path, help="a record file, or a folder of records and designs")
+    parser.add_argument(
+        "path", type=Path, help="a record or design file, or a folder of records and designs"
+    )
     parser.add_argument(
         "-o", "--output", type=Path, default=Path("ommat-lens.html"), help="the page to write"
     )
@@ -81,12 +84,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"skipped {reason}", file=sys.stderr)
             skipped.append(label)
 
-    if not records:
-        print(f"error: {path}: no ommat record found", file=sys.stderr)
+    if not records and not designs:
+        print(f"error: {path}: no ommat record or design found", file=sys.stderr)
         return 1
     used = {_design_hash(document) for document in records.values()}
     for key, (label, _) in designs.items():
-        if key not in used:
+        if records and key not in used:
             print(
                 f"note: design {label} matches no record; a record pairs with its design's exact "
                 "bytes, as loaded.document gives them",

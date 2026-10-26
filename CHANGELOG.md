@@ -6,6 +6,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Added
 
+- The lens's Design and Turns views. `ommat.lens` shows a design with or without a record: its targets, questions, rules, policy, requirements and parameters, and the lineage of any card, a target's questions, latent links by role and estimating rules included, the rest dimmed as having no link declared. A turn's entries show their targets, and its answers the bars, thresholds, margins and mass bounds their design declares. The Turns view tables the records by design hash or by question identity. `python -m ommat.lens` writes a page for a design alone.
+
 - Targets: a design may declare `targets={id: Target(statement, values=None)}`, the properties of the state its questions and rules are about. A `Question` takes `target`, the target it asks about, and `latent_targets`, each `{"target": id, "role": TargetRole}` with the role `reflective`, `formative` or `unknown`; a `Rule` takes `target`, the target it estimates. They guide a reader and gate nothing: no turn reads one, and a question's identity leaves them out. Load refuses an undeclared target id, a question's own target as latent, a link repeated under one role and a member of another form. `Target` and `TargetRole` are public.
 
 ### Changed
