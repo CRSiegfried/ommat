@@ -19,7 +19,9 @@ abstains, and every other entry over its points. A run is reported, under the en
 ref, when it wrote the entry as that answer, an entry of a rule on the lineage lists a
 returned per-candidate pick over the question, and its ``plan`` item is ``execute``. A
 per-candidate question no lineage rule reads holds its first point, and a ``d:`` set that
-changes within one assignment raises ``ValueError``, as the dead-question lint's does.
+changes within one assignment raises ``ValueError``, as the dead-question lint's does. Its
+runs cross the picked questions' entries once per entry in turn, so they grow with the
+candidates as the dead-question lint's cross product does.
 """
 
 import itertools
@@ -150,7 +152,7 @@ def _per_candidate(
         if any(grounded[ref] not in sets for ref in firsts):  # a d: set: run the probe
             runs += 1
             sets.update(_run(loaded, _At(point, firsts), keys)[2])
-        # A question no lineage rule picks over holds its first point: only the picked
+        # A question no lineage rule reads holds its first point: only the picked
         # questions' other entries can change what a pick returns.
         entries = {
             grounded_ref(ref, c): entry_points(fills[ref], grounded_ref(ref, c))[

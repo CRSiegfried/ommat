@@ -303,3 +303,12 @@ def test_a_set_that_moves_with_the_entries_raises() -> None:
     values = {SET: [["a", "b"]], "d:kept": [["a"]], "d:kept_b": [["a"]]}
     with pytest.raises(ValueError, match="changes within one assignment"):
         unsure_to_execute(load(chained), values=values)
+
+
+@pytest.mark.parametrize(("folders", "runs"), [(["a", "b"], 6), (["a", "b", "c"], 27)])
+def test_the_runs_are_each_entry_times_the_others_cross_product(
+    folders: list[str], runs: int
+) -> None:
+    # Each of E entries in turn at the abstention point, the other E - 1 over three points.
+    report = unsure_to_execute(load(design()), values={SET: [folders], "d:kept": [["a"]]})
+    assert report["points"] == 1 + runs
