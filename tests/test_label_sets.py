@@ -642,7 +642,8 @@ def test_a_candidate_set_with_no_values_is_unfilled_before_any_run() -> None:
 def test_the_unsure_lint_runs_over_a_candidate_valued_design() -> None:
     from ommat.helpers import unsure_to_execute
 
-    report = unsure_to_execute(load(lint_design()), values={"d:sender": ["ana@x.org", "none"]})
+    values = {**SETS, "d:sender": ["ana@x.org", "none"]}
+    report = unsure_to_execute(load(lint_design()), values=values)
     assert report["execute"] == []
 
 

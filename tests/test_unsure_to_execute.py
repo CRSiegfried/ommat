@@ -2,7 +2,9 @@
 """The ``Unsure``-to-execute lint, ``unsure_to_execute``: each ``d:``
 base ref set to ``Unsure`` in turn while the other reads range over their points, the
 policy called alone on a fresh board, what counts as ``execute``, the ``ValueError``s before
-any call, and a report of plain data. The points are tested in ``test_lint_points.py``."""
+any call, and a report of plain data. The rules read no question, so the abstention search,
+tested in ``test_unsure_abstention.py``, finds no target. The points are tested in
+``test_lint_points.py``."""
 
 import contextlib
 import copy
@@ -17,12 +19,10 @@ from ommat import (
     Parameter,
     Plan,
     Policy,
-    Question,
     Requirement,
     Rule,
     Source,
     Step,
-    Text,
     Undetermined,
     load,
 )
@@ -53,18 +53,18 @@ def lean(r: Any) -> Plan:
 
 
 SOURCES = {
-    "ask": Source({"q:go": Question("noul", Text("Go?"))}),
+    "ask": Source({"t:go": t.boolean}),
     "look": Source({"t:count": t.integer(0, 10), "t:name": t.string}),
 }
 RULES = {
-    "ok": Rule("d:ok", t.boolean, yes, version="1", reads=["t:count", "q:go"]),
-    "level": Rule("d:level", t.number(0, 1), half, version="1", reads=["q:go"]),
+    "ok": Rule("d:ok", t.boolean, yes, version="1", reads=["t:count", "t:go"]),
+    "level": Rule("d:level", t.number(0, 1), half, version="1", reads=["t:go"]),
     "info": Rule(
         "d:info",
         t.record(a=t.boolean, b=t.label("x", "y")),
         yes,
         version="1",
-        reads=["q:go"],
+        reads=["t:go"],
     ),
 }
 PARAMETERS = {
@@ -117,8 +117,8 @@ def escalate(r: Any) -> Plan:
 
 def test_each_execute_on_unsure_is_reported_with_its_read_and_point_in_order() -> None:
     report = unsure_to_execute(LOADED)
-    level = unsure("q:go")
-    ok = unsure("q:go", "t:count")  # the writing rule's declared reads, in code-point order
+    level = unsure("t:go")
+    ok = unsure("t:count", "t:go")  # the writing rule's declared reads, in code-point order
     assert report == {
         "points": 2 * 3 + 3 * 3,
         "execute": [
@@ -141,7 +141,7 @@ def test_the_policy_reads_the_marker_and_the_other_reads_live() -> None:
     assert len(CALLS) == 15
     first = CALLS[0]
     assert type(first["level"]).__name__ == "Unsure"
-    assert first["level"].cause.refs == ("q:go",)  # type: ignore[attr-defined]
+    assert first["level"].cause.refs == ("t:go",)  # type: ignore[attr-defined]
     assert (first["ok"], first["count"]) == (False, 0)
     assert all(type(c["count"]) is int for c in CALLS)
 
@@ -172,7 +172,7 @@ def test_a_d_field_path_read_sets_its_base_ref_and_every_read_under_it_shows_the
     assert report == {
         "points": 1,
         "execute": [
-            {"read": "d:info", "point": {"d:info.a": unsure("q:go"), "d:info.b": unsure("q:go")}}
+            {"read": "d:info", "point": {"d:info.a": unsure("t:go"), "d:info.b": unsure("t:go")}}
         ],
     }
     a, b = seen[0]
@@ -184,8 +184,8 @@ def test_a_read_under_another_is_filled_as_its_field_and_shown_through_it() -> N
     report = lint(execute, ("d:ok", "t:state", "t:state.flag"))
     assert report["points"] == 2
     assert [item["point"] for item in report["execute"]] == [
-        {"d:ok": unsure("q:go", "t:count"), "t:state": {"flag": False}, "t:state.flag": False},
-        {"d:ok": unsure("q:go", "t:count"), "t:state": {"flag": True}, "t:state.flag": True},
+        {"d:ok": unsure("t:count", "t:go"), "t:state": {"flag": False}, "t:state.flag": False},
+        {"d:ok": unsure("t:count", "t:go"), "t:state": {"flag": True}, "t:state.flag": True},
     ]
 
 
@@ -241,7 +241,7 @@ def test_the_plan_rules_and_the_guard_are_not_applied() -> None:
 
     loaded = load(design(breaking, ("d:ok",), requirements=[Requirement("d:ok", True)]))
     assert unsure_to_execute(loaded)["execute"] == [
-        {"read": "d:ok", "point": {"d:ok": unsure("q:go", "t:count")}}
+        {"read": "d:ok", "point": {"d:ok": unsure("t:count", "t:go")}}
     ]
 
 

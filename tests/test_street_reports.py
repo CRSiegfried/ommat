@@ -247,7 +247,8 @@ def test_its_lints_pass(loaded: LoadedDesign) -> None:
         "d:seen_at": ["21:00:00"],
         "t:open_orders": [[], ["Alder Lane"]],
     }
-    assert unsure_to_execute(loaded, values=reads)["execute"] == []
+    # Its rules read the questions, so the lint also runs turns: it needs the free inputs too.
+    assert unsure_to_execute(loaded, values={**inputs, **reads})["execute"] == []
 
 
 # --- the policy's table, row by row -------------------------------------------------------
