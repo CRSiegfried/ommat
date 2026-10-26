@@ -22,6 +22,7 @@ from ommat import (
     replay_sync,
 )
 from ommat import types as t
+from ommat.helpers import pick_each_with_margin
 
 MARKERS = (Unsure, Unavailable, Unasked)
 
@@ -45,14 +46,10 @@ SOURCES = {
 
 def out_streets(r: ReadView) -> object:
     """The streets the model is sure have a lamp out, in the set's order."""
-    answers = r.read("q:lamps/out")
-    if isinstance(answers, MARKERS):
-        return answers
-    return [
-        street
-        for street, answer in answers.items()
-        if not isinstance(answer, MARKERS) and answer.probabilities["yes"] >= 0.8
-    ]
+    picks = pick_each_with_margin(r, "q:lamps/out", 0.8, 0.2)
+    if not isinstance(picks, dict):
+        return picks  # the set's own marker
+    return [street for street, pick in picks.items() if pick == "yes"]
 
 
 RULES = {

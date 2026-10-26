@@ -1,18 +1,24 @@
 """The per-candidate picks: ``pick_each_with_margin`` and ``pick_each_with_thresholds`` over a
 per-candidate question's declared ref, each candidate's pick, abstention or marker in the set's
-order, and the record a rule passing one candidate's abstention on writes, a flagged context
-entry included."""
+order; the record a rule passing one candidate's abstention on writes, a flagged context entry
+included; and the board check on a returned cause naming a grounded ref."""
 
+import json
+from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
 
 from designs import slot
+from ledger_logs import rehashed
 from ommat import (
     CallResult,
+    Cause,
+    CauseCode,
     Context,
     ContextEntry,
     Design,
+    LoadedDesign,
     Plan,
     Policy,
     Question,
@@ -32,7 +38,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._refs import grounded_ref
-from ommat.helpers import pick_each_with_margin, pick_each_with_thresholds
+from ommat.helpers import determined, pick_each_with_margin, pick_each_with_thresholds
 
 OUT = "q:lamps/out"
 SET = "d:streets"
@@ -42,7 +48,10 @@ PICKS: list[object] = []
 
 
 def streets(r: ReadView) -> object:
-    return r.read("t:state.streets")
+    names = r.read("t:state.streets")
+    if names == ["raise"]:
+        raise RuntimeError("no streets")
+    return names
 
 
 def lit(r: ReadView) -> object:
@@ -56,36 +65,62 @@ def lit(r: ReadView) -> object:
 def first_doubt(r: ReadView) -> object:
     """The first street's pick, its abstention passed on whole."""
     picks = pick_each_with_thresholds(r, OUT, {"yes": 0.8, "no": 0.8}, 0.2)
-    if not isinstance(picks, dict) or not picks:
+    PICKS.append(picks)
+    if not isinstance(picks, dict):
+        return picks
+    if not picks:
         return "no"
     return next(iter(picks.values()))
+
+
+def both(r: ReadView) -> object:
+    got = determined(r, "d:lit", "d:doubt")
+    if not isinstance(got, tuple):
+        return got
+    return "yes" if got[0] else "no"
 
 
 def escalate(r: ReadView) -> Plan:
     return Plan("escalate", reason="checked")
 
 
-DESIGN = Design(
-    name="lamps",
-    state=t.record(text=t.string, streets=t.list_(t.string)),
-    sources={
-        "lamps": Source(
-            {OUT: Question("noul", Text("Is a lamp out on {s}?", [slot("s", candidate=SET)]))},
-            needs=["t:state.text"],
-            grounded=SET,
-        )
-    },
-    rules={
-        "streets": Rule(
-            SET, t.list_(t.string), streets, version="1", reads=["t:state.streets"], candidates=True
-        ),
-        "lit": Rule("d:lit", t.list_(t.string), lit, version="1", reads=[OUT]),
-        "doubt": Rule("d:doubt", t.label("yes", "no"), first_doubt, version="1", reads=[OUT]),
-    },
-    policy=Policy(escalate, version="1", reads=["d:lit", "d:doubt"]),
-    context=Context([ContextEntry("d:doubt", Text("Doubt: {d}", [slot("d", ref="d:doubt")]))]),
+SOURCE = Source(
+    {OUT: Question("noul", Text("Is a lamp out on {s}?", [slot("s", candidate=SET)]))},
+    needs=["t:state.text"],
+    grounded=SET,
 )
-LOADED = load(DESIGN)
+
+
+def design(
+    lit_rule: Callable[[ReadView], object] = lit,
+    doubt_rule: Callable[[ReadView], object] = first_doubt,
+    lit_reads: tuple[str, ...] = (OUT,),
+) -> Design:
+    return Design(
+        name="lamps",
+        state=t.record(text=t.string, streets=t.list_(t.string)),
+        sources={"lamps": SOURCE},
+        rules={
+            "streets": Rule(
+                SET,
+                t.list_(t.string),
+                streets,
+                version="1",
+                reads=["t:state.streets"],
+                candidates=True,
+            ),
+            "lit": Rule("d:lit", t.list_(t.string), lit_rule, version="1", reads=list(lit_reads)),
+            "doubt": Rule("d:doubt", t.label("yes", "no"), doubt_rule, version="1", reads=[OUT]),
+            "both": Rule(
+                "d:both", t.label("yes", "no"), both, version="1", reads=["d:lit", "d:doubt"]
+            ),
+        },
+        policy=Policy(escalate, version="1", reads=["d:both"]),
+        context=Context([ContextEntry("d:doubt", Text("Doubt: {d}", [slot("d", ref="d:doubt")]))]),
+    )
+
+
+LOADED = load(design())
 
 ANSWERS: dict[str, dict[str, float]] = {
     "Quay Street": {"yes": 0.95, "no": 0.05},
@@ -104,10 +139,10 @@ async def answer(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult
     return CallResult(out)
 
 
-def decided(names: list[str]) -> Record:
+def decided(names: list[str], loaded: LoadedDesign = LOADED) -> Record:
     PICKS.clear()
     state = {"text": "Lamps out", "streets": names}
-    return decide_sync(LOADED, state, {"default": answer}).record
+    return decide_sync(loaded, state, {"default": answer}).record
 
 
 def entries(record: Record) -> dict[str, dict[str, Any]]:
@@ -116,7 +151,7 @@ def entries(record: Record) -> dict[str, dict[str, Any]]:
 
 def test_each_candidate_gets_its_pick_its_abstention_or_its_marker_in_the_set_s_order() -> None:
     record = decided(["Elm Row", "Quay Street", "Back Lane", "Bridge Lane"])
-    (held,) = PICKS
+    held, _ = PICKS
     assert isinstance(held, dict)
     picks = cast("dict[str, object]", held)
     assert list(picks) == ["Elm Row", "Quay Street", "Back Lane", "Bridge Lane"]
@@ -134,6 +169,12 @@ def test_the_derivation_names_the_declared_ref_alone() -> None:
     record = decided(STREETS)
     (call,) = entries(record)["d:lit"]["derivation"]
     assert call == {"helper": "pick_each_with_margin", "refs": [OUT], "rested_on": [OUT]}
+    (call,) = entries(record)["d:both"]["derivation"]
+    assert call == {
+        "helper": "determined",
+        "refs": ["d:lit", "d:doubt"],
+        "rested_on": ["d:lit", "d:doubt"],
+    }
 
 
 def test_a_rule_passing_one_candidate_s_abstention_on_into_the_context_records_cleanly() -> None:
@@ -153,60 +194,80 @@ def test_a_rule_passing_one_candidate_s_abstention_on_into_the_context_records_c
     assert "Elm Row" not in redacted
 
 
-def test_an_empty_set_gives_an_empty_dict() -> None:
+def test_redact_digests_a_grounded_ref_in_a_plan_s_own_cause() -> None:
+    doc = json.loads(decided(["Elm Row", "Quay Street"]).document)
+    plan = next(i for i in doc["log"] if i["item"] == "plan")
+    plan["cause"] = {"code": "required", "refs": [grounded_ref(OUT, "Elm Row")]}
+    record = read_record(json.dumps(rehashed(doc)).encode("utf-8"))
+    redacted = json.loads(redact(record, b"k" * 32))
+    (cause_ref,) = next(i for i in redacted["log"] if i["item"] == "plan")["cause"]["refs"]
+    assert cause_ref.startswith('q:lamps/out["hmac-sha256:')
+    assert "Elm Row" not in json.dumps(redacted)
+
+
+def forged(r: ReadView) -> object:
+    """A cause naming a candidate the set never held."""
+    return Unsure(Cause(CauseCode.abstained, [grounded_ref(OUT, "Nowhere Lane")]))
+
+
+def on_board(r: ReadView) -> object:
+    """A cause naming a candidate the turn asked about."""
+    return Unsure(Cause(CauseCode.abstained, [grounded_ref(OUT, "Quay Street")]))
+
+
+def test_a_returned_cause_names_a_grounded_ref_only_when_the_turn_wrote_its_entry() -> None:
+    kept = entries(decided(["Quay Street"], load(design(doubt_rule=on_board))))["d:doubt"]
+    assert kept["marker"]["cause"]["refs"] == [grounded_ref(OUT, "Quay Street")]
+    refused = entries(decided(["Quay Street"], load(design(doubt_rule=forged))))["d:doubt"]
+    assert refused["marker"]["cause"] == {"code": "invalid-return", "refs": ["doubt"]}
+
+
+def test_the_set_s_marker_comes_back_unchanged_from_both_picks() -> None:
+    record = decided(["raise"])
+    for picks in PICKS:
+        assert isinstance(picks, Unavailable)
+        assert picks.cause.code.value == "need-unavailable"
+    assert entries(record)["d:lit"]["marker"] == entries(record)[OUT]["marker"]
+
+
+def test_an_empty_set_gives_an_empty_dict_from_both_picks() -> None:
     record = decided([])
-    assert PICKS == [{}]
+    assert PICKS == [{}, {}]
     assert entries(record)["d:lit"]["value"] == []
 
 
-@pytest.mark.parametrize("helper", [pick_each_with_margin, pick_each_with_thresholds])
-def test_a_read_that_is_not_per_candidate_raises(helper: Any) -> None:
-    def misuse(r: ReadView) -> object:
-        if helper is pick_each_with_margin:
-            return helper(r, "q:lamps/urgent", 0.8, 0.2)
-        return helper(r, "q:lamps/urgent", {"yes": 0.8}, 0.2)
-
-    globals()["misuse"] = misuse
-    misuse.__qualname__ = "misuse"
-    source = Source(
-        {
-            OUT: Question("noul", Text("Is a lamp out on {s}?", [slot("s", candidate=SET)])),
-            "q:lamps/urgent": Question("noul", Text("Is it urgent?")),
-        },
-        needs=["t:state.text"],
-        grounded=SET,
-    )
-    rules = dict(DESIGN.rules)
-    rules["lit"] = Rule("d:lit", t.list_(t.string), misuse, version="1", reads=["q:lamps/urgent"])
-    loaded = load(
-        Design(
-            name="lamps",
-            state=DESIGN.state,
-            sources={"lamps": source},
-            rules=rules,
-            policy=DESIGN.policy,
-        )
-    )
-
-    async def both(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
-        return CallResult({ref: {"yes": 0.9, "no": 0.1} for s in batch for ref in s.questions})
-
-    state = {"text": "Lamps out", "streets": ["Quay Street"]}
-    record = decide_sync(loaded, state, {"default": both}).record
-    lit_entry = entries(record)["d:lit"]
-    assert lit_entry["marker"]["cause"]["code"] == "raised"
+def lacking(r: ReadView) -> object:
+    return pick_each_with_thresholds(r, OUT, {"maybe": 0.5}, 0.0)
 
 
-def test_thresholds_refuse_a_label_an_answered_candidate_lacks() -> None:
-    def lacking(r: ReadView) -> object:
-        return pick_each_with_thresholds(r, OUT, {"maybe": 0.5}, 0.0)
+def bad_bar(r: ReadView) -> object:
+    return pick_each_with_margin(r, OUT, 1.5, 0.0)
 
-    globals()["lacking"] = lacking
-    lacking.__qualname__ = "lacking"
-    rules = dict(DESIGN.rules)
-    rules["lit"] = Rule("d:lit", t.list_(t.string), lacking, version="1", reads=[OUT])
-    fields = {f: getattr(DESIGN, f) for f in ("name", "state", "sources", "policy", "context")}
-    loaded = load(Design(rules=rules, **fields))
-    state = {"text": "Lamps out", "streets": ["Quay Street"]}
-    record = decide_sync(loaded, state, {"default": answer}).record
-    assert entries(record)["d:lit"]["marker"]["cause"]["code"] == "raised"
+
+def bad_margin(r: ReadView) -> object:
+    return pick_each_with_thresholds(r, OUT, {"yes": 0.5}, -0.1)
+
+
+def not_per_candidate(r: ReadView) -> object:
+    return pick_each_with_margin(r, SET, 0.8, 0.2)
+
+
+@pytest.mark.parametrize(
+    ("rule", "names"),
+    [
+        (lacking, ["Back Lane", "Quay Street", "Elm Row"]),
+        (bad_bar, ["Quay Street"]),
+        (bad_margin, ["Quay Street"]),
+        (bad_bar, []),
+        (not_per_candidate, ["Quay Street"]),
+    ],
+    ids=["a label every answer lacks", "bar", "margin", "bar over an empty set", "a list read"],
+)
+def test_a_misuse_raises_and_the_rule_s_entry_says_so(
+    rule: Callable[[ReadView], object], names: list[str]
+) -> None:
+    # The lacking label raises with a marker first among the candidates, before any pick.
+    reads = (OUT, SET) if rule is not_per_candidate else (OUT,)
+    loaded = load(design(lit_rule=rule, lit_reads=reads))
+    marker = entries(decided(names, loaded))["d:lit"]["marker"]
+    assert marker["cause"] == {"code": "raised", "refs": ["lit"]}

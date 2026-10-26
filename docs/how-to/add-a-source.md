@@ -674,8 +674,9 @@ applies to it: the rule gets the list, and `[]` when the model found none. For a
 does give a `p_null`, a rule can call `extract` first and then read the answer whole for its
 confidence.
 
+To ask a later source only when an estimate holds a value, without sending the estimate to
+the model, see [Gate a source on an earlier estimate](gate-a-source.md).
 
-To ask a later source only when an estimate holds a value, without sending the estimate to the model, see [Gate a source on an earlier estimate](gate-a-source.md).
 ## Run it
 
 The driver wraps the model to count its calls, so the run shows that replay makes none; wrap a
@@ -751,23 +752,21 @@ key you were given. The set reaches the binding only in the wordings, unless the
 declares it a need. An empty set asks nothing for the question.
 
 A rule reads the declared ref and gets a `dict` from each candidate, in the set's order, to its
-`Answer` or marker, or one marker when the set held a marker:
+`Answer` or marker, or one marker when the set held a marker. `pick_each_with_margin` picks
+each candidate's label as `pick_with_margin` picks one, a tie or a narrow lead giving `Unsure`
+naming that candidate, and keeps each candidate's marker:
 
 ```python
 def out_streets(r: ReadView) -> object:
     """The streets the model is sure have a lamp out, in the set's order."""
-    answers = r.read("q:lamps/out")
-    if isinstance(answers, MARKERS):
-        return answers
-    return [
-        street
-        for street, answer in answers.items()
-        if not isinstance(answer, MARKERS) and answer.probabilities["yes"] >= 0.8
-    ]
+    picks = pick_each_with_margin(r, "q:lamps/out", 0.8, 0.2)
+    if not isinstance(picks, dict):
+        return picks  # the set's own marker
+    return [street for street, pick in picks.items() if pick == "yes"]
 ```
 
-Declare `reads=["q:lamps/out"]`; reading it also reads the set. A choice helper such as
-`pick_with_margin` reads one ref's answer, and no rule can read a grounded ref, so a helper
-cannot be applied to one candidate's answer: work on the `Answer` objects in the `dict`, and
-abstain on a tie yourself if the rule needs to. Load refuses an extraction asked per candidate,
+Declare `reads=["q:lamps/out"]`; reading it also reads the set. No rule reads a grounded ref,
+so the one-ref picks such as `pick_with_margin` take no single candidate's answer:
+`pick_each_with_margin` and `pick_each_with_thresholds` pick every candidate at once, and a
+rule may pass one candidate's `Unsure` on as its own value. Load refuses an extraction asked per candidate,
 a per-candidate `choice` over a candidate-valued label set, and a need on `q:lamps/out`.
