@@ -802,7 +802,7 @@ def test_a_format_1_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
 
 
 def test_an_extraction_reads_points_cross_value_null_and_confidence() -> None:
-    fills, on_grid = filled(x.loaded(), ["q:amount"], None)
+    fills, on_grid, _ = filled(x.loaded(), ["q:amount"], None)
     points = [cast("dict[str, Any]", p.record) for p in fills["q:amount"]]
     assert "q:amount" in on_grid
     crossed = [(p["value"], p["p_null"], p["confidence"]) for p in points[:-1]]
@@ -824,7 +824,7 @@ def test_an_extraction_reads_points_cross_value_null_and_confidence() -> None:
 
 
 def test_an_extraction_read_off_the_grid_is_filled_from_values() -> None:
-    fills, on_grid = filled(x.loaded(), ["q:dates"], {"q:dates": [["2024-02-29"], []]})
+    fills, on_grid, _ = filled(x.loaded(), ["q:dates"], {"q:dates": [["2024-02-29"], []]})
     assert "q:dates" not in on_grid
     points = [cast("dict[str, Any]", p.record) for p in fills["q:dates"]][:-1]
     assert [(p["value"], p["p_null"], p["confidence"]) for p in points] == [
@@ -897,7 +897,7 @@ def gridded(entry: dict[str, list[str]]) -> LoadedDesign:
 
 def test_an_extraction_grid_entry_naming_confidence_gives_its_leaves() -> None:
     loaded = gridded({"null": [], "confidence": ["amount/null"], "value": ["amount/big"]})
-    fills, on_grid = filled(loaded, ["q:amount"], None)
+    fills, on_grid, _ = filled(loaded, ["q:amount"], None)
     assert "q:amount" in on_grid
     points = [cast("dict[str, Any]", p.record) for p in fills["q:amount"]][:-3]
     assert {p["confidence"] for p in points} == {0.0, 0.5, 1.0, None}
@@ -906,7 +906,7 @@ def test_an_extraction_grid_entry_naming_confidence_gives_its_leaves() -> None:
 
 def test_an_extraction_grid_entry_with_no_value_leaf_takes_its_values_from_values() -> None:
     loaded = gridded({"null": ["amount/null"], "confidence": [], "value": []})
-    fills, on_grid = filled(loaded, ["q:amount"], {"q:amount": [5]})
+    fills, on_grid, _ = filled(loaded, ["q:amount"], {"q:amount": [5]})
     assert "q:amount" in on_grid
     points = [cast("dict[str, Any]", p.record) for p in fills["q:amount"]][:-3]
     assert {p["value"] for p in points} == {5.0}

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """The ``Unsure``-to-execute lint's abstention search over a plain question: a rule on the
 policy's lineage that turns a pick's or ``extract``'s ``Unsure`` into a value lets the policy
 execute on it, so the lint runs the turn with each question a lineage rule reads at its
@@ -8,10 +9,12 @@ from typing import Any
 
 import pytest
 
+from designs import roles
 from extraction import STATE_T
 from extraction import question as extraction_question
 from ommat import (
     Design,
+    Parameter,
     Plan,
     Policy,
     Question,
@@ -35,6 +38,7 @@ from ommat.helpers import (
     unsure_to_execute,
 )
 from ommat.helpers._points import is_abstention
+from ommat.helpers._unsure import _via
 
 A, B, SPARE = "q:a", "q:b", "q:spare"
 ZEROS = {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"yes": 0, "no": 0}}
@@ -126,13 +130,13 @@ def test_a_dropped_pick_over_a_plain_question_is_reported() -> None:
 )
 def test_an_abstention_the_rule_does_not_drop_is_not_reported(rule: Any) -> None:
     report = unsure_to_execute(load(design(rule=rule)), values=VALUES)
-    assert report == {"points": 7, "execute": []}
+    assert report == {"points": 7, "execute": [], "narrowed": []}
 
 
 def test_a_pick_off_the_lineage_is_not_counted() -> None:
     extra = {"spare": Rule("d:spare", t.list_(t.string), spare_pick, version="1", reads=[A])}
     report = unsure_to_execute(load(design(rule=unpicked, extra=extra)), values=VALUES)
-    assert report == {"points": 7, "execute": []}
+    assert report == {"points": 7, "execute": [], "narrowed": []}
 
 
 def test_a_pick_passed_on_and_dropped_through_determined_is_reported() -> None:
@@ -172,7 +176,7 @@ def test_with_no_finding_each_target_varies_each_other_ranging_read_one_at_a_tim
     reads = tuple(q for q in questions if q != SPARE)
     loaded = load(design(rule=rule, reads=reads, questions=questions))
     report = unsure_to_execute(loaded, values=VALUES)
-    assert report == {"points": 1 + runs, "execute": []}
+    assert report == {"points": 1 + runs, "execute": [], "narrowed": []}
 
 
 def opened(r: ReadView) -> object:
@@ -310,8 +314,8 @@ def sender_dropped(r: ReadView) -> object:
     return []
 
 
-def test_a_candidate_valued_question_abstains_over_the_labels_its_run_renders() -> None:
-    designed = Design(
+def sender_design() -> Design:
+    return Design(
         state=t.record(),
         sources={
             "find": Source({SENDERS: {"type": t.list_(t.string), "candidates": True}}),
@@ -332,6 +336,10 @@ def test_a_candidate_valued_question_abstains_over_the_labels_its_run_renders() 
         },
         policy=Policy(act, version="1", reads=["d:kept"]),
     )
+
+
+def test_a_candidate_valued_question_abstains_over_the_labels_its_run_renders() -> None:
+    designed = sender_design()
     # The label set ranges, so its second value, which alone makes the rule drop the
     # abstention, is tried.
     values = {**VALUES, SENDERS: [["ana@x.org"], ["bob@x.org"]]}
@@ -448,6 +456,99 @@ def test_an_abstention_answer_is_every_probability_0_or_a_null_value(
     assert is_abstention(value) is abstains
 
 
-def test_a_key_for_a_question_its_type_fills_is_refused() -> None:
+def test_an_off_grid_question_narrowed_by_values_tries_its_listed_labels_and_is_named() -> None:
+    report = unsure_to_execute(load(design(rule=passed_on)), values={**VALUES, A: ["yes"]})
+    # q:a's points fall to yes and the marker, so q:b's search makes one run fewer.
+    assert report == {"points": 1 + 3 + 2, "execute": [], "narrowed": [A]}
+
+
+def test_narrowing_two_questions_names_each_once_in_code_point_order() -> None:
+    values = {**VALUES, B: ["no"], A: ["yes", "no"]}
+    report = unsure_to_execute(load(design(rule=passed_on)), values=values)
+    # q:a keeps three points and q:b falls to two: 1 + (1 + 1) + (1 + 2).
+    assert report == {"points": 6, "execute": [], "narrowed": [A, B]}
+
+
+def test_a_narrowed_question_the_search_holds_is_named_and_changes_no_run() -> None:
+    report = unsure_to_execute(load(design(rule=passed_on)), values={**VALUES, SPARE: ["no"]})
+    assert report == {"points": 7, "execute": [], "narrowed": [SPARE]}
+
+
+def test_a_key_for_a_candidate_valued_question_is_refused() -> None:
+    values = {**VALUES, SENDERS: [["ana@x.org"]], "q:sender": ["none"]}
+    with pytest.raises(ValueError, match='"q:sender", which its grid points or its type fill'):
+        unsure_to_execute(load(sender_design()), values=values)
+
+
+def test_a_key_for_a_question_its_grid_fills_is_refused() -> None:
+    rule = Rule(
+        "d:kept",
+        t.list_(t.string),
+        dropped,
+        version="1",
+        reads=[A, B],
+        params=["p/bar"],
+        boundaries={A: roles(bar=["p/bar"])},
+    )
+    designed = Design(
+        state=t.record(),
+        sources={"ask": Source({q: Question("noul", Text("Is it so?")) for q in (A, B)})},
+        rules={"kept": rule},
+        policy=Policy(act, version="1", reads=["d:kept"]),
+        parameters={"p/bar": Parameter(t.number(0, 1), 0.8)},
+    )
     with pytest.raises(ValueError, match='"q:a", which its grid points or its type fill'):
-        unsure_to_execute(load(design()), values={**VALUES, A: [{"yes": 1, "no": 0}]})
+        unsure_to_execute(load(designed), values={**VALUES, A: ["yes"]})
+
+
+def test_a_finding_on_a_marker_the_policy_met_names_the_d_read_in_via() -> None:
+    designed = Design(
+        state=t.record(),
+        sources={"ask": Source({q: Question("noul", Text("Is it so?")) for q in (A, B)})},
+        rules={"kept": Rule("d:kept", t.list_(t.string), passed_on, version="1", reads=[A, B])},
+        policy=Policy(pass_through_policy, version="1", reads=["d:kept"]),
+    )
+    report = unsure_to_execute(load(designed), values=VALUES)
+    assert [(i["read"], i.get("via")) for i in report["execute"]] == [
+        ("d:kept", None),
+        (A, "d:kept"),
+        (B, "d:kept"),
+    ]
+    assert "via" not in report["execute"][0]  # a first-search item never holds one
+
+
+def test_via_names_the_first_reported_d_read_in_code_point_order() -> None:
+    rules = {
+        name: Rule(f"d:{name}", t.label("yes", "no"), mid, version="1", reads=[A])
+        for name in ("z", "y")  # declared out of code-point order
+    }
+    designed = Design(
+        state=t.record(),
+        sources={"ask": Source({A: Question("noul", Text("Is it so?"))})},
+        rules=rules,
+        policy=Policy(pass_through_policy, version="1", reads=["d:z", "d:y"]),
+    )
+    report = unsure_to_execute(load(designed))
+    *first, found = report["execute"]
+    assert {i["read"] for i in first} == {"d:y", "d:z"}  # the first search reports both
+    assert (found["read"], found["via"]) == (A, "d:y")
+
+
+def test_via_ignores_a_marker_on_a_read_the_first_search_did_not_report() -> None:
+    marker = {"kind": "Unsure", "cause": {"code": "abstained", "refs": [A]}}
+    log = [{"item": "entry", "ref": "d:kept", "marker": marker}]
+    assert _via(log, A, set()) is None
+    assert _via(log, A, {"d:kept"}) == "d:kept"
+    assert _via(log, B, {"d:kept"}) is None  # a marker naming another question
+
+
+def test_a_finding_on_a_dropped_marker_has_no_via() -> None:
+    designed = Design(
+        state=t.record(),
+        sources={"ask": Source({A: Question("noul", Text("Is it so?"))})},
+        rules={"kept": Rule("d:kept", t.list_(t.string), dropped_a, version="1", reads=[A])},
+        policy=Policy(pass_through_policy, version="1", reads=["d:kept"]),
+    )
+    found = unsure_to_execute(load(designed), values=VALUES)["execute"][1]
+    assert found["read"] == A
+    assert "via" not in found

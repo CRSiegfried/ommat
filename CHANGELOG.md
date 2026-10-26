@@ -14,6 +14,10 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Changed
 
+- `dead_questions` and `unsure_to_execute` take a `values` key for a label question with no grid entry: its list is the labels to try, each at 1, in place of every label, so a question of many labels no rule bounds costs only the labels a caller names. Each report gains `narrowed`, those questions in code-point order. A key for such a question was a `ValueError`; a key for a question the grid fills still is.
+
+- An `unsure_to_execute` abstention finding whose run left a policy read the first search reported holding an `Unsure` that names the subject holds `via`, that `d:` read, so a caller can see which policy read met the abstention.
+
 - Design format 7: the document holds `targets`, each question's `target` and `latent_targets` and each rule's `target`. A design built in Python has a new design hash; a stored document of formats 1 to 6 loads to its own hash, and load refuses one holding a target member.
 
 ## [0.4.0] - 2026-10-23

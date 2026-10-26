@@ -24,7 +24,9 @@ pick or ``extract`` over the question, and its ``plan`` item is ``execute``. A `
 shows changing within one assignment raises ``ValueError``, as the dead-question lint's does. A
 subject's runs vary one ranging read at a time from their first points and stop at its first
 finding, so they grow with the sum of those reads' points, times the sum over the grounded
-entries where both range, not their product.
+entries where both range, not their product. A finding whose run left a policy read the first
+search reported holding an ``Unsure`` that names the subject names that read in ``via``: a
+policy refusing the marker there would not have executed in the run.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -59,14 +61,16 @@ _EACH = frozenset({"pick_each_with_margin", "pick_each_with_thresholds"})
 def unsure_to_execute(
     loaded: LoadedDesign, *, values: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """The report ``{"points": N, "execute": [{"read", "point"}]}``, by ``read`` in code-point
-    order, then by point in grid order; a ``ValueError`` before any call for a read nothing
-    fills or a slip in ``values``. ``values`` maps one of the policy's declared reads, ``d:``
-    or ``t:``, to a list of its values; a read declared under another is keyed by its field
-    path. When a rule on the policy's lineage reads a question, a key may also name a read
-    the abstention search fills and its grid and types cannot, such as a ``t:state`` field, a
-    candidate set or an extraction question, and a ``read`` may be a ``q:`` or grounded
-    ref."""
+    """The report ``{"points": N, "execute": [{"read", "point"}], "narrowed": [ref]}``, by
+    ``read`` in code-point order, then by point in grid order; a ``ValueError`` before any call
+    for a read nothing fills or a slip in ``values``. ``values`` maps one of the policy's
+    declared reads, ``d:`` or ``t:``, to a list of its values; a read declared under another is
+    keyed by its field path. When a rule on the policy's lineage reads a question, a key may
+    also name a read the abstention search fills and its grid and types cannot, such as a
+    ``t:state`` field, a candidate set or an extraction question, or a label question with no
+    grid entry, whose list is the labels to try and which ``narrowed`` names; a ``read`` may
+    then be a ``q:`` or grounded ref, and its item holds ``via``, a policy read the first
+    search reported, when the run left that read an ``Unsure`` naming the subject."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     policy = cast(Policy, loaded._design.policy)  # load refuses the policy table
@@ -75,10 +79,11 @@ def unsure_to_execute(
     lineage = _lineage(loaded, policy)
     subjects = _subjects(loaded, lineage)
     runs_fills: dict[str, list[Point]] = {}
+    narrowed: list[str] = []
     if subjects:
         sources = loaded._design.sources.values()
         provided = code_point_sorted({ref for src in sources for ref in src.provides} | {_STATE})
-        fills, runs_fills = fill_both(loaded, top, provided, values)
+        fills, runs_fills, narrowed = fill_both(loaded, top, provided, values)
     else:
         fills = fill(loaded, top, values)
     points = 0
@@ -99,10 +104,11 @@ def unsure_to_execute(
                 }
                 execute.append({"read": unsure, "point": shown})
     if subjects:
-        runs, found = _abstentions(loaded, policy, lineage, subjects, runs_fills)
+        flagged = {item["read"] for item in execute}
+        runs, found = _abstentions(loaded, policy, lineage, subjects, runs_fills, flagged)
         points += runs
         execute += found
-    return {"points": points, "execute": execute}
+    return {"points": points, "execute": execute, "narrowed": narrowed}
 
 
 def _lineage(loaded: LoadedDesign, policy: Policy) -> set[str]:
@@ -151,9 +157,11 @@ def _abstentions(
     lineage: set[str],
     subjects: Sequence[str],
     fills: Mapping[str, list[Point]],
+    flagged: set[str],
 ) -> tuple[int, list[dict[str, Any]]]:
     """The abstention search: the runs it made, and each run reported, by subject in
-    code-point order and then in run order."""
+    code-point order and then in run order. ``flagged`` holds the ``d:`` reads the first
+    search reported."""
     grounded = loaded._grounded
     ranging = _ranging(loaded, policy, lineage)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
@@ -207,6 +215,9 @@ def _abstentions(
                 shown = {ref: fresh(given[ref].record) for ref in code_point_sorted(given)}
                 shown.update(done[1])
                 found[subject] = {"read": subject, "point": shown}
+                via = _via(done[3], subject, flagged)
+                if via is not None:
+                    found[subject]["via"] = via
                 return True
         return False
 
@@ -261,6 +272,21 @@ def _rests(log: Sequence[Mapping[str, Any]], subject: str, rules: set[str]) -> b
         for ref in rules
         for item in written.get(ref, {}).get("derivation", [])
     )
+
+
+def _via(log: Sequence[Mapping[str, Any]], subject: str, flagged: set[str]) -> str | None:
+    """The first ``d:`` read, in code-point order, the first search reported and the run
+    wrote as an ``Unsure`` naming ``subject``: a policy refusing that marker would not have
+    executed in the run."""
+    met = [
+        item["ref"]
+        for item in log
+        if item["item"] == "entry"
+        and item["ref"] in flagged
+        and item.get("marker", {}).get("kind") == "Unsure"
+        and subject in item["marker"]["cause"]["refs"]
+    ]
+    return code_point_sorted(met)[0] if met else None
 
 
 def _board(point: Mapping[str, Point], unsure: str, marker: Unsure) -> dict[str, object]:

@@ -122,7 +122,7 @@ def test_a_decided_candidate_is_not_reported() -> None:
         ]
         assert item["read"] not in decided
     passing = unsure_to_execute(load(design(rule=passed_on)), values=VALUES)
-    assert passing == {"points": 7, "execute": []}
+    assert passing == {"points": 7, "execute": [], "narrowed": []}
 
 
 def test_a_pick_through_a_chain_of_rules_is_reported() -> None:
@@ -136,7 +136,7 @@ def test_a_pick_through_a_chain_of_rules_is_reported() -> None:
 
 def test_a_rule_reading_the_answers_without_a_pick_is_not_reported() -> None:
     report = unsure_to_execute(load(design(rule=unpicked)), values=VALUES)
-    assert report == {"points": 7, "execute": []}
+    assert report == {"points": 7, "execute": [], "narrowed": []}
 
 
 def test_a_pick_off_the_policy_s_lineage_runs_no_turn() -> None:
@@ -223,7 +223,7 @@ def test_a_thresholds_pick_is_reported_as_a_margin_pick_is() -> None:
 @pytest.mark.parametrize("rule", [caught, by_determined], ids=["a caught raise", "determined"])
 def test_a_rule_that_returned_no_pick_over_the_question_is_not_reported(rule: Any) -> None:
     report = unsure_to_execute(load(design(rule=rule)), values=VALUES)
-    assert report == {"points": 7, "execute": []}
+    assert report == {"points": 7, "execute": [], "narrowed": []}
 
 
 def test_a_pick_over_another_question_reports_only_that_question_s_entries() -> None:
@@ -312,4 +312,32 @@ def test_with_no_finding_each_entry_varies_the_others_one_at_a_time(
     # first point, then one per other point of each other entry, 1 + 2 (E - 1) runs.
     loaded = load(design(rule=passed_on))
     report = unsure_to_execute(loaded, values={SET: [folders], "d:kept": [["a"]]})
-    assert report == {"points": 1 + runs, "execute": []}
+    assert report == {"points": 1 + runs, "execute": [], "narrowed": []}
+
+
+def execute_anyway(r: ReadView) -> Plan:
+    r.read("d:kept")
+    return Plan("execute")
+
+
+def test_a_grounded_subject_s_finding_on_a_marker_the_policy_met_names_the_d_read_in_via() -> None:
+    report = unsure_to_execute(load(design(rule=passed_on, policy=execute_anyway)), values=VALUES)
+    assert [(i["read"], i.get("via")) for i in report["execute"]] == [
+        ("d:kept", None),
+        (grounded_ref(OUT, "a"), "d:kept"),
+        (grounded_ref(OUT, "b"), "d:kept"),
+    ]
+
+
+def test_a_per_candidate_question_narrowed_on_its_declared_ref_narrows_every_entry() -> None:
+    def lint(listed: list[str]) -> dict[str, Any]:
+        return unsure_to_execute(load(design(rule=passed_on)), values={**VALUES, OUT: listed})
+
+    # Both entries fall to yes and the marker, so each subject's search makes one run fewer.
+    assert lint(["yes"]) == {"points": 1 + 2 + 2, "execute": [], "narrowed": [OUT]}
+    assert lint(["yes", "no"])["points"] == 1 + 3 + 3  # every label: the count is unchanged
+
+
+def test_a_key_for_a_grounded_entry_is_refused() -> None:
+    with pytest.raises(ValueError, match="a read the lint does not fill"):
+        unsure_to_execute(load(design()), values={**VALUES, grounded_ref(OUT, "a"): ["yes"]})

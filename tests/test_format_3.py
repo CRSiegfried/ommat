@@ -406,7 +406,7 @@ def test_check_9_reads_the_label_names_alone() -> None:
 
 def test_the_lint_points_take_the_label_names() -> None:
     loaded = load(described())
-    fills, _ = filled(loaded, ["q:tone"], None)
+    fills, _, _ = filled(loaded, ["q:tone"], None)
     records: list[object] = [p.record for p in fills["q:tone"]]
     labels = {
         tuple(cast("dict[str, Any]", r)["labels"])

@@ -29,7 +29,7 @@ from ommat import types as t
 from ommat._read_view import ComponentKind, ReadView, Role
 from ommat.helpers import mass, pick_with_margin, pick_with_thresholds
 from ommat.helpers._numbers import exact
-from ommat.helpers._points import axis, fill
+from ommat.helpers._points import axis, fill, filled
 
 F = Fraction
 
@@ -540,7 +540,7 @@ class _NoRepr:
     [
         ({"t:x": ["a"], "t:other": ["a"]}, "a read the lint does not fill"),
         ({"t:x": ["a"], "t:f": [True]}, "its grid points or its type fill"),
-        ({"t:x": ["a"], "q:go": [{"yes": 1, "no": 0}]}, "its grid points or its type fill"),
+        ({"t:x": ["a"], "q:go": [{"yes": 1, "no": 0}]}, "is not one of its labels"),
         ({"t:x": ["a"], "t:n": [1]}, "its grid points or its type fill"),
         ({"t:x": [1]}, "does not conform"),
         ({"t:x": ["a", "a"]}, "one value twice"),
@@ -578,3 +578,39 @@ def test_an_unbounded_integer_axis_left_with_no_boundary_takes_the_domains_bound
     assert axis([F(7, 2)], None, None, integer=True) == [2, 3, 4, 5]  # each side of it
     assert numbers(t.integer(), Parameter(t.number(), 2.5)) == [1, 2, 3, 4]
     assert numbers(t.integer(0, 10), Parameter(t.number(), 2.5)) == [0, 2, 3, 10]
+
+
+# ---------------------------------------------------------------------------------------------
+# Narrowing an off-grid label question
+
+
+def test_an_off_grid_label_question_takes_the_labels_values_lists_in_declared_order() -> None:
+    loaded = design({"q:pick": Question("choice", Text("Which?"), labels=("a", "b", "c"))})
+    fills, on_grid, narrowed = filled(loaded, ["q:pick"], {"q:pick": ["c", "a"]})
+    assert [p.live for p in fills["q:pick"][:-1]] == [
+        {"a": 1.0, "b": 0.0, "c": 0.0},
+        {"a": 0.0, "b": 0.0, "c": 1.0},
+    ]
+    assert type(fills["q:pick"][-1].live).__name__ == "Unavailable"
+    assert (on_grid, narrowed) == (frozenset(), ["q:pick"])
+    assert filled(loaded, ["q:pick"], None)[2] == []
+
+
+@pytest.mark.parametrize(
+    ("listed", "says"),
+    [
+        (["d"], "is not one of its labels"),
+        ([1], "is not one of its labels"),
+        (["a", "a"], "one value twice"),
+        ([], "is empty"),
+    ],
+)
+def test_a_narrowing_slip_is_a_value_error(listed: list[object], says: str) -> None:
+    loaded = design({"q:pick": Question("choice", Text("Which?"), labels=("a", "b", "c"))})
+    with pytest.raises(ValueError, match=says):
+        fill(loaded, ["q:pick"], {"q:pick": listed})
+
+
+def test_a_question_on_the_grid_takes_no_narrowing() -> None:
+    with pytest.raises(ValueError, match='"q:go", which its grid points or its type fill'):
+        fill(noul(bar=0.5), ["q:go"], {"q:go": ["yes"]})

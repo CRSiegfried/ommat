@@ -54,19 +54,21 @@ class _Ran:
 def dead_questions(
     loaded: LoadedDesign, *, values: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """The report ``{"points": N, "questions": {ref: {"status", "witness"}}}``, keyed by
-    every ``q:`` ref a source provides; a ``ValueError`` before any run for a read nothing
-    fills or a slip in ``values``, and during the runs for a ``d:`` set that differs within one
-    assignment. ``values`` maps a read the lint fills, ``t:state`` or a
+    """The report ``{"points": N, "questions": {ref: {"status", "witness"}}, "narrowed":
+    [ref]}``, keyed by every ``q:`` ref a source provides; a ``ValueError`` before any run for
+    a read nothing fills or a slip in ``values``, and during the runs for a ``d:`` set that
+    differs within one assignment. ``values`` maps a read the lint fills, ``t:state`` or a
     field path under it, or a ``t:`` or ``q:`` ref a source provides, to a list of its values;
-    a ``d:`` ref is never a key, since rules compute those values."""
+    a ``d:`` ref is never a key, since rules compute those values. For a label question with
+    no grid entry its list is the labels to try, and ``narrowed`` names each such question in
+    code-point order."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     sources = loaded._design.sources.values()
     provided = {ref for s in sources for ref in s.provides} | {_STATE}
     grounded = provided & loaded._grounded.keys()
     reads = code_point_sorted(provided - grounded)
-    fills, on_grid = filled(loaded, code_point_sorted(provided), values)
+    fills, on_grid, narrowed = filled(loaded, code_point_sorted(provided), values)
     keys = {s.oracle for s in sources if s.oracle is not None}
     lists = [fills[r] for r in reads]
     ran: list[_Ran] = []
@@ -93,7 +95,7 @@ def dead_questions(
             else:
                 status = "no-change-found" if ref in on_grid else "not-on-grid"
         questions[ref] = {"status": status, "witness": witness}
-    return {"points": len(ran), "questions": questions}
+    return {"points": len(ran), "questions": questions, "narrowed": narrowed}
 
 
 class _At(dict[str, Point]):

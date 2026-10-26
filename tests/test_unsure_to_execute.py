@@ -132,6 +132,7 @@ def test_each_execute_on_unsure_is_reported_with_its_read_and_point_in_order() -
             {"read": "d:ok", "point": {"d:level": 1.0, "d:ok": ok, "t:count": 3}},
             {"read": "d:ok", "point": {"d:level": 1.0, "d:ok": ok, "t:count": 10}},
         ],
+        "narrowed": [],
     }
 
 
@@ -153,7 +154,7 @@ def test_no_t_read_is_set_and_with_no_d_read_nothing_is_called() -> None:
         called.append(r.read("t:count"))
         return Plan("execute")
 
-    assert lint(counting, ("t:count",)) == {"points": 0, "execute": []}
+    assert lint(counting, ("t:count",)) == {"points": 0, "execute": [], "narrowed": []}
     assert called == []
 
 
@@ -174,6 +175,7 @@ def test_a_d_field_path_read_sets_its_base_ref_and_every_read_under_it_shows_the
         "execute": [
             {"read": "d:info", "point": {"d:info.a": unsure("t:go"), "d:info.b": unsure("t:go")}}
         ],
+        "narrowed": [],
     }
     a, b = seen[0]
     assert type(a).__name__ == "Unsure"
@@ -232,7 +234,7 @@ def a_subclass(r: Any) -> Plan:
 def test_a_recorded_stop_a_raise_and_a_return_not_exactly_a_plan_are_not_reported(
     policy: Any,
 ) -> None:
-    assert lint(policy) == {"points": 1, "execute": []}
+    assert lint(policy) == {"points": 1, "execute": [], "narrowed": []}
 
 
 def test_the_plan_rules_and_the_guard_are_not_applied() -> None:
@@ -357,4 +359,4 @@ def returning_a_coroutine(r: Any) -> object:
 
 @pytest.mark.parametrize("policy", [async_policy, returning_a_coroutine])
 def test_an_async_policy_or_one_returning_a_coroutine_is_not_execute(policy: Any) -> None:
-    assert lint(policy) == {"points": 1, "execute": []}
+    assert lint(policy) == {"points": 1, "execute": [], "narrowed": []}

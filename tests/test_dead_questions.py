@@ -230,7 +230,7 @@ def test_the_state_is_the_points_t_state_live() -> None:
     )
     report = dead_questions(loaded, values={"t:state.blob": [b"\x01"]})
     assert seen == [b"\x01"]
-    assert report == {"points": 1, "questions": {}}
+    assert report == {"points": 1, "questions": {}, "narrowed": []}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -364,3 +364,25 @@ def test_a_one_label_question_on_the_grid_that_changes_nothing_is_no_change_foun
     )
     report = dead_questions(loaded)
     assert report["questions"]["q:only"] == {"status": "no-change-found", "witness": None}
+
+
+# ---------------------------------------------------------------------------------------------
+# Narrowing an off-grid question
+
+
+def test_an_off_grid_question_narrowed_by_values_tries_its_listed_labels_and_is_named() -> None:
+    whole = dead_questions(LOADED)
+    report = dead_questions(LOADED, values={"q:tone": ["cold"]})
+    assert report["narrowed"] == ["q:tone"]
+    assert whole["narrowed"] == []
+    # q:tone's points fall from warm, cold and the marker to cold and the marker.
+    assert (whole["points"], report["points"]) == (30, 20)
+    assert json.loads(json.dumps(report)) == report
+    witness = report["questions"]["q:go"]["witness"]
+    assert witness[0]["q:tone"] == answer("choice", ["warm", "cold"], warm=0.0, cold=1.0)
+    assert report["questions"]["q:tone"] == {"status": "not-on-grid", "witness": None}
+
+
+def test_a_question_on_the_grid_is_not_narrowed() -> None:
+    with pytest.raises(ValueError, match='"q:go", which its grid points or its type fill'):
+        dead_questions(LOADED, values={"q:go": ["yes"]})

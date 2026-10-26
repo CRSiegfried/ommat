@@ -6,11 +6,13 @@ every slip in ``values`` and every unfilled read before either lint runs a point
 filled from the first of: its grid points, from load's grid and the parameter block through
 ``_leaf_value``; its declared type's values; its list in ``values``. A record's type fill is
 the cross product of its fields' fills, each field filled by the same order under its field
-path. An extraction read's points cross its value points, from its grid's ``value`` axis or
-its list in ``values``, with its ``p_null`` and ``confidence`` points, then add the two null
-points. A ``q:`` read's points end with ``Unavailable`` ``refused``. A per-candidate question
-is filled once, on its declared ref, and each grounded entry takes those points with a marker
-of its own last.
+path. A label question with no grid entry, other than a candidate-valued one, is filled from
+its list in ``values`` when it has one, each label listed at 1 in declared order, and is then
+narrowed. An extraction read's points cross its value points, from its grid's ``value`` axis
+or its list in ``values``, with its ``p_null`` and ``confidence`` points, then add the two
+null points. A ``q:`` read's points end with ``Unavailable`` ``refused``. A per-candidate
+question is filled once, on its declared ref, and each grounded entry takes those points with
+a marker of its own last.
 
 Every point is computed exactly over each boundary's ``Fraction(repr(x))`` and rounded once
 to the nearest ``float``. A point is held in two forms: the record form a report shows and
@@ -38,7 +40,7 @@ from ommat._canonical import encode
 from ommat._design import LoadedDesign, Question
 from ommat._interpret import _marker_document
 from ommat._markers import Cause, CauseCode, Unavailable
-from ommat._refs import parse_ref
+from ommat._refs import code_point_sorted, parse_ref
 from ommat._typed import typed
 from ommat._types import (
     Interval,
@@ -184,21 +186,23 @@ def fill(loaded: LoadedDesign, reads: Sequence[str], values: object) -> dict[str
 
 def filled(
     loaded: LoadedDesign, reads: Sequence[str], values: object
-) -> tuple[dict[str, list[Point]], frozenset[str]]:
-    """``fill``'s points, and the ``q:`` reads their grid entry filled."""
+) -> tuple[dict[str, list[Point]], frozenset[str], list[str]]:
+    """``fill``'s points, the ``q:`` reads their grid entry filled, and the questions
+    ``values`` narrowed, in code-point order."""
     filler = _Filler(loaded, values)
-    return filler.run(reads), frozenset(filler.on_grid)
+    return filler.run(reads), frozenset(filler.on_grid), code_point_sorted(filler.narrowed)
 
 
 def fill_both(
     loaded: LoadedDesign, first: Sequence[str], second: Sequence[str], values: object
-) -> tuple[dict[str, list[Point]], dict[str, list[Point]]]:
-    """Two fills over one ``values``: each key must be a read either fills, and one
-    ``ValueError`` names every slip in either and every unfilled read, before any point runs."""
+) -> tuple[dict[str, list[Point]], dict[str, list[Point]], list[str]]:
+    """Two fills over one ``values``, and the questions it narrowed in either: each key must
+    be a read either fills, and one ``ValueError`` names every slip in either and every
+    unfilled read, before any point runs."""
     fillers = [_Filler(loaded, values), _Filler(loaded, values)]
     fills = (fillers[0].collect(first), fillers[1].collect(second))
     _finish(fillers)
-    return fills
+    return (*fills, code_point_sorted({r for f in fillers for r in f.narrowed}))
 
 
 def _finish(fillers: Sequence["_Filler"]) -> None:
@@ -229,6 +233,7 @@ class _Filler:
         self.unfilled: list[str] = []
         self.typed_paths: set[str] = set()  # paths the grid or a type filled
         self.on_grid: set[str] = set()  # q: reads their grid entry filled
+        self.narrowed: set[str] = set()  # label questions values filled
 
     def checked_values(self, values: object) -> dict[str, list[object]]:
         if values is None:
@@ -265,8 +270,10 @@ class _Filler:
             points = self.extraction(read, found)
             return None if points is None else [*points, _refused(read)]
         if isinstance(found, Question):
-            self.typed_paths.add(read)
-            return [*self.answers(read, found), _refused(read)]
+            answers = self.answers(read, found)
+            if read not in self.narrowed:
+                self.typed_paths.add(read)
+            return [*answers, _refused(read)]
         return self.path(read, found)
 
     def path(self, path: str, t: Type) -> list[Point] | None:
@@ -377,8 +384,28 @@ class _Filler:
             if points:
                 self.on_grid.add(ref)
                 return points
-        # Off the grid, or an entry yielding no answer point: each label at 1, in order.
-        return [_answer(q, labels, _at(labels, {label: _ONE})) for label in labels]
+        # Off the grid, or an entry yielding no answer point: each label at 1 in declared
+        # order, or only the labels values lists.
+        tried = self.narrowing(ref, labels) if ref in self.values else labels
+        return [_answer(q, labels, _at(labels, {label: _ONE})) for label in tried]
+
+    def narrowing(self, ref: str, labels: tuple[str, ...]) -> tuple[str, ...]:
+        """The labels ``values`` lists for an off-grid question, in declared order."""
+        self.consumed.add(ref)
+        self.narrowed.add(ref)
+        listed: set[str] = set()
+        for value in self.values[ref]:
+            if not is_scalar_string(value) or string_data(cast(str, value)) not in labels:
+                self.problems.append(f"a value for {quote(ref)} is not one of its labels")
+                continue
+            label = string_data(cast(str, value))
+            if label in listed:
+                self.problems.append(f"values for {quote(ref)} lists one value twice")
+                continue
+            listed.add(label)
+        if not self.values[ref]:
+            self.problems.append(f"values for {quote(ref)} is empty")
+        return tuple(label for label in labels if label in listed)
 
     def extraction(self, ref: str, q: Question) -> list[Point] | None:
         """An extraction read's answer points, before its marker: the cross of its value
