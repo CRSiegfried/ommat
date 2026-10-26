@@ -546,3 +546,61 @@ def test_a_turn_shows_targets_and_the_boundaries_its_design_declares(tmp_path: P
     assert shown["byQuestion"].count("data-row=") == 2
     assert "90.0%" in shown["byQuestion"]
     assert "d:urgent = &quot;yes&quot;" in shown["byQuestion"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_selection_ranks_its_links_first_and_its_stubs_name_why_the_rest_fold(
+    tmp_path: Path,
+) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const id = "tg:urgency", L = dstate.links;
+          const tl = { asks: L.asks.get(id) || [], bears: L.bears.get(id) || [],
+            est: L.est.get(id) || [] };
+          const up = new Set(["e:q:ask/urgent", "e:d:urgent"]), down = new Set(["plan"]);
+          const rank = Object.fromEntries(rankOf(dstate, "g:" + id, tl, up, down));
+          const turnish = { kind: "turn" };
+          return { rank,
+            target: stubText(dstate, "g:tg:cost",
+              ["e:q:ask/urgent", "e:d:urgent", "e:t:state"], false),
+            open: stubText(dstate, "g:tg:cost", ["e:t:state"], true),
+            ref: stubText(dstate, "e:d:urgent", ["p:urgent/bar"], false),
+            turn: stubText(turnish, "e:d:urgent", ["e:t:state", "plan"], false) }; })()""",
+    )
+    assert shown["rank"] == {"g:tg:urgency": 0, "e:q:ask/urgent": 1, "e:d:urgent": 3, "plan": 4}
+    # Under a target, a card with a target elsewhere and one declaring none are told apart,
+    # and neither is called unrelated; the state takes no target, so it counts as unlinked.
+    assert shown["target"] == "Show 3 with no link declared to tg:cost"
+    assert shown["open"] == "Hide 1 with no link declared to tg:cost"
+    assert shown["ref"] == "Show 1 with no declared link to it"
+    assert shown["turn"] == "Show 2 not on its lineage"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_labels_past_the_top_few_fold_into_other_unless_a_boundary_names_them(
+    tmp_path: Path,
+) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const labels = ["a", "b", "c", "d", "e", "f"];
+          const probs = { a: 0.05, b: 0.4, c: 0.3, d: 0.1, e: 0.1, f: 0.05 };
+          const none = () => false;
+          const bounds = { bar: [], thresholds: [["t", { a: 0.5 }]], margin: [], mass: [],
+            null: [], confidence: [], value: [], plain: [] };
+          const value = { kind: "choice", labels, probabilities: probs };
+          const html = valueOnly({ value }, bounds);
+          return { plain: [...foldedLabels(labels, probs, none)],
+            short: [...foldedLabels(["x", "y", "z", "w"], { x: 1 }, none)],
+            ticked: [...foldedLabels(labels, probs, (l) => l === "a")],
+            html, extra: (html.match(/ extra/g) || []).length }; })()""",
+    )
+    assert shown["plain"] == ["a", "e", "f"]  # b, c and d, the first of the tie, show
+    assert shown["short"] == []  # four labels fold nothing: "Other" would hide one
+    assert shown["ticked"] == ["e", "f"]  # a carries a threshold tick, so it always shows
+    assert shown["extra"] == 2
+    assert "+2 labels" in shown["html"]
+    assert 'class="bar other"' in shown["html"]

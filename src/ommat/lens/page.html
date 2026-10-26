@@ -118,6 +118,24 @@ tr[data-row] { cursor: pointer; }
 tr[data-row]:hover td { background: var(--accent-soft); }
 td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .jump { font: 500 12px var(--body); padding: 4px 8px; }
+/* Selection moves matches to the top of each column; Filter mode folds the rest into stubs. */
+.colhead { order: -1; }
+.card { content-visibility: auto; contain-intrinsic-size: auto 72px; }
+.card.hide { display: none; }
+.stub { order: 1000; font: 500 12px var(--body); color: var(--muted); background: none; border: 1px dashed var(--line); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
+.stub:hover { border-color: var(--accent); color: var(--ink); }
+/* Compact: the selected card in full, its direct links with their meta, the rest one line. */
+#cols.compact .card:not(.sel) .val, #cols.compact .card:not(.sel) .bar:not(.top) { display: none; }
+#cols.compact .card:not(.sel):not(.near) .meta { display: none; }
+/* Labels past the top few fold into one "Other" bar until the card is selected. */
+.bar.extra { display: none; }
+.card.sel .bar.extra { display: grid; }
+.card.sel .bar.other { display: none; }
+.bar.other .lab { font-style: italic; color: var(--muted); }
+.card .qx { display: none; }
+.card.sel .qx { display: inline; }
+.card.sel .qmore { display: none; }
+.qmore { font-style: italic; }
 </style>
 </head>
 <body>
@@ -149,6 +167,8 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
     <button type="button" role="tab" data-tab="turn" aria-selected="true">Turn</button>
     <button type="button" role="tab" data-tab="turns" aria-selected="false">Turns</button>
     <span class="spacer"></span>
+    <select id="viewMode" aria-label="When a card is selected"><option value="filter">Selection filters the rest</option><option value="dim">Selection dims the rest</option></select>
+    <select id="density" aria-label="Card density"><option value="auto">Density: auto</option><option value="full">Density: full</option><option value="compact">Density: compact</option></select>
     <select id="designPick" aria-label="Design shown" hidden></select>
     <select id="turnsBy" aria-label="Group turns by" hidden></select>
   </nav>
@@ -198,6 +218,9 @@ function parseRef(ref) {
 let state = null; // the Turn view's graph, from one record
 let dstate = null; // the Design view's graph, from one design document
 let tab = "turn", selected = null, designKey = null, turnsBy = "";
+let mode = "filter", density = "auto"; // what a selection does to the rest, and card density
+const openCols = new Set(); // the columns whose folded cards the reader opened
+const TOP_LABELS = 3; // labels shown before the rest fold into "Other"
 const known = new Map(); // every design the page holds: key (its hash, or "opened") -> {doc, name}
 const addKnown = (key, doc) => { if (!known.has(key) || key === "opened") known.set(key, { doc, name: `${text(obj(doc).name ?? "unnamed")} · ${key.startsWith("sha256:") ? key.slice(7, 15) + "…" : key}` }); };
 const keyOf = (doc) => { for (const [k, v] of known) if (v.doc === doc) return k; addKnown("opened", doc); return "opened"; };
@@ -448,6 +471,21 @@ function valueHtml(e, b, paired) {
   return held + (notes.length ? `<div class="meta">${notes.map((n) => `<span>${n}</span>`).join("")}</div>` : "");
 }
 
+// A long list of items as its first few, the rest folded behind "+n more" until the card is
+// selected; each item is already escaped HTML.
+function foldList(items, keep, sep = "") {
+  if (items.length <= keep + 1) return items.join(sep);
+  return items.slice(0, keep).join(sep) + items.slice(keep).map((x) => `<span class="qx">${sep}${x}</span>`).join("") + `<span class="qmore">${sep}+${items.length - keep} more</span>`;
+}
+
+// The labels to fold into "Other": none for a short list, else every label past the top few by
+// probability, except one a boundary ticks or a mass bound names, which always shows.
+function foldedLabels(labels, probs, bounded) {
+  if (labels.length <= TOP_LABELS + 1) return new Set();
+  const shown = new Set([...labels].sort((a, c) => (num(probs[c]) ? probs[c] : -1) - (num(probs[a]) ? probs[a] : -1)).slice(0, TOP_LABELS));
+  return new Set(labels.filter((l) => !shown.has(l) && !bounded(l)));
+}
+
 function valueOnly(e, b) {
   if (e.marker) {
     const m = obj(e.marker), c = obj(m.cause);
@@ -461,11 +499,14 @@ function valueOnly(e, b) {
     const labels = arr(v.labels).length ? arr(v.labels) : Object.keys(probs);
     const top = labels.reduce((a, b) => ((probs[b] ?? -1) > (probs[a] ?? -1) ? b : a), labels[0]);
     const ticks = (l) => (b ? [...b.bar.map(([, x]) => x), ...b.thresholds.map(([, x]) => (num(x) ? x : obj(x)[l]))].filter(num) : []);
-    return `<div class="bars">${labels.map((l) => {
-      const p = probs[l], w = typeof p === "number" ? Math.max(0, Math.min(100, p * 100)) : 0;
-      const marks = ticks(l).map((x) => `<span class="tick" style="left:calc(${Math.max(0, Math.min(100, x * 100))}% - 1px)" title="${esc(pct(x))}"></span>`).join("");
-      return `<div class="bar${l === top ? " top" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${w}%"></span>${marks}</span><span class="pct">${pct(p)}</span></div>`;
-    }).join("")}</div>`;
+    const folded = foldedLabels(labels, probs, (l) => ticks(l).length > 0 || (b ? b.mass.some((m) => m.labels.includes(l)) : false));
+    const barHtml = (l, p, extra, other) => {
+      const w = typeof p === "number" ? Math.max(0, Math.min(100, p * 100)) : 0;
+      const marks = other ? "" : ticks(l).map((x) => `<span class="tick" style="left:calc(${Math.max(0, Math.min(100, x * 100))}% - 1px)" title="${esc(pct(x))}"></span>`).join("");
+      return `<div class="bar${l === top && !other ? " top" : ""}${extra ? " extra" : ""}${other ? " other" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${w}%"></span>${marks}</span><span class="pct">${pct(p)}</span></div>`;
+    };
+    const rest = folded.size ? barHtml(`+${folded.size} label${folded.size === 1 ? "" : "s"}`, [...folded].reduce((s, l) => s + (num(probs[l]) ? probs[l] : 0), 0), false, true) : "";
+    return `<div class="bars">${labels.map((l) => barHtml(l, probs[l], folded.has(l), false)).join("")}${rest}</div>`;
   }
   if (v && typeof v === "object" && v.kind === "extraction") {
     const shown = v.value === null ? "none found" : v.value === undefined ? "–" : JSON.stringify(v.value);
@@ -505,7 +546,7 @@ function render() {
       const failed = obj(c.outcome).failed;
       html += `<div role="button" tabindex="0" aria-pressed="false" class="card call" data-node="c:${idx}"><span class="k">Call · ${esc(arr(c.sources).join(", "))}</span>
         <span class="meta">${failed ? `<span class="chip bad">failed ${esc(obj(failed).code ?? "")}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
-        <span class="meta">${Object.entries(obj(c.questions)).map(([r, q]) => `<span title="question identity ${esc(obj(q).identity ?? "none")}">${esc(r)}${str(obj(q).identity) ? " · " + esc(q.identity.slice(7, 15)) + "…" : ""}</span>`).join("")}</span></div>`;
+        <span class="meta">${foldList(Object.entries(obj(c.questions)).map(([r, q]) => `<span title="question identity ${esc(obj(q).identity ?? "none")}">${esc(r)}${str(obj(q).identity) ? " · " + esc(q.identity.slice(7, 15)) + "…" : ""}</span>`), 4)}</span></div>`;
     }
     for (const ref of r.entries) {
       const e = s.entries.get(ref);
@@ -559,7 +600,7 @@ function renderDesign() {
       if (n.kind === "tool") return card(node, head);
       const labels = Array.isArray(n.q.labels) ? n.q.labels.map((l) => (str(l) ? l : obj(l).name)) : n.q.labels && typeof n.q.labels === "object" ? ["(candidate-valued)"] : [];
       return card(node, `${head}${str(obj(n.q.wording).template) ? `<div class="val">${esc(n.q.wording.template)}</div>` : ""}
-        ${labels.length ? `<span class="meta">${labels.map(esc).join(" · ")}</span>` : ""}<span class="meta">${targetHtml(targetsOf(d, ref))}</span>`);
+        ${labels.length ? `<span class="meta"><span>${foldList(labels.map(esc), 6, " · ")}</span></span>` : ""}<span class="meta">${targetHtml(targetsOf(d, ref))}</span>`);
     })];
   const ruleCards = of("rule").map(([node, n]) => card(node, `<span class="ref">${esc(node.slice(2))}</span>
     <span class="meta"><span>rule ${esc(n.rid)}</span><span>${esc(n.r.form ?? "?")}</span>${n.r.outputs != null ? `<span>${esc(n.r.outputs)}</span>` : ""}</span>
@@ -579,9 +620,42 @@ const cardOf = (node) => [...$("cols").querySelectorAll("[data-node]")].find((el
 
 // A target's selection lights its declared links and all that follows them; any other card lights
 // what it came from and what it fed.
+// Each card's place under a selection: 0 the selection, then its direct links, then the rest of
+// its lineage, each kind together; a node absent from the map is not linked to it.
+function rankOf(g, node, tlinks, up, down) {
+  const rank = new Map();
+  if (!node) return rank;
+  const put = (n, r) => { if (!rank.has(n)) rank.set(n, r); };
+  put(node, 0);
+  if (tlinks) {
+    tlinks.asks.forEach((r) => put("e:" + r, 1));
+    tlinks.bears.forEach((x) => put("e:" + x.ref, 2));
+    tlinks.est.forEach((r) => put("e:" + r, 3));
+  } else {
+    (g.inputs.get(node) || []).forEach((i) => put(i.node, 1));
+    (g.outputs.get(node) || []).forEach((i) => put(i.node, 2));
+    up.forEach((n) => put(n, 3));
+  }
+  down.forEach((n) => put(n, 4));
+  return rank;
+}
+
+// What a stub says it folded: under a target, the cards declaring no target at all apart from
+// those declaring others, so a missing link never reads as "unrelated".
+function stubText(g, node, folded, open) {
+  const verb = open ? "Hide" : "Show";
+  if (g.kind === "design" && node.startsWith("g:")) {
+    const none = folded.filter((n) => { const t = targetsOf(g.design, n.slice(2)); return t && !t.target && !t.latent.length; }).length;
+    const other = folded.length - none;
+    return [other ? `${other} with no link declared to ${node.slice(2)}` : "", none ? `${none} declaring no target` : ""].filter(Boolean).map((x) => `${verb} ${x}`).join(" · ");
+  }
+  return `${verb} ${folded.length} ${g.kind === "design" ? "with no declared link to it" : "not on its lineage"}`;
+}
+
 function select(node) {
   const g = graph();
   if (!g || (g.kind === "design" && node && !g.nodes.has(node))) node = null;
+  if (node !== selected) openCols.clear();
   selected = node;
   let up = new Set(), down = new Set(), tlinks = null;
   if (node && g.kind === "design" && node.startsWith("g:")) {
@@ -593,14 +667,30 @@ function select(node) {
     up = reach(g.inputs, node);
     down = reach(g.outputs, node);
   }
-  for (const el of $("cols").querySelectorAll("[data-node]")) {
-    const n = el.dataset.node;
-    el.classList.toggle("sel", n === node);
-    el.setAttribute("aria-pressed", String(n === node));
-    el.classList.toggle("up", up.has(n));
-    el.classList.toggle("down", down.has(n));
-    el.classList.toggle("dim", !!node && n !== node && !up.has(n) && !down.has(n));
-  }
+  const rank = rankOf(g, node, tlinks, up, down);
+  let hidden = 0;
+  [...$("cols").querySelectorAll("section.col")].forEach((col, i) => {
+    for (const old of col.querySelectorAll(".stub")) old.remove();
+    const folded = [];
+    for (const el of col.querySelectorAll("[data-node]")) {
+      const n = el.dataset.node, r = rank.get(n);
+      el.classList.toggle("sel", n === node);
+      el.setAttribute("aria-pressed", String(n === node));
+      el.classList.toggle("up", up.has(n));
+      el.classList.toggle("down", down.has(n));
+      el.classList.toggle("near", r === 1 || r === 2 || (!!tlinks && r === 3));
+      el.classList.toggle("dim", !!node && r === undefined);
+      el.style.order = node ? String(r ?? 9) : "";
+      const fold = !!node && r === undefined && mode === "filter";
+      el.classList.toggle("hide", fold && !openCols.has(i));
+      if (fold) folded.push(n);
+    }
+    if (folded.length) {
+      hidden += openCols.has(i) ? 0 : folded.length;
+      col.insertAdjacentHTML("beforeend", `<button type="button" class="stub" data-open-col="${i}">${esc(stubText(g, node, folded, openCols.has(i)))}</button>`);
+    }
+  });
+  applyDensity();
   const go = (n, how) => `<li><button type="button" data-go="${esc(n)}">${esc(label(n))}</button>${how ? `<span class="how">${esc(how)}</span>` : ""}</li>`;
   const list = (items) => items && items.length ? `<ul>${items.map((i) => go(i.node, i.how + " · " + i.src)).join("")}</ul>` : `<p class="meta">None</p>`;
   const refs = (rs, how) => rs.length ? `<ul>${rs.map((r) => go("e:" + r, how)).join("")}</ul>` : `<p class="meta">None declared</p>`;
@@ -626,7 +716,14 @@ function select(node) {
       <h3>Fed into, directly</h3>${list(g.outputs.get(node))}
       <p class="meta">${up.size} upstream and ${down.size} downstream in all. "record" links are in the record itself; "design" links come from the design document, as declared.</p>`;
   }
-  $("lineage").innerHTML = `<h2>Lineage</h2>${node ? `<div class="ref">${esc(label(node))}</div>` : ""}${legend}${jump}${body}`;
+  const filtered = hidden ? `<p class="notice">Filtered: ${hidden} card${hidden === 1 ? "" : "s"} folded into the columns' stubs.</p>` : "";
+  $("lineage").innerHTML = `<h2>Lineage</h2>${node ? `<div class="ref">${esc(label(node))}</div>` : ""}${legend}${filtered}${jump}${body}`;
+}
+
+// Compact when asked, or by default once a column holds more than 40 cards.
+function applyDensity() {
+  const most = Math.max(0, ...[...$("cols").querySelectorAll("section.col")].map((c) => c.querySelectorAll("[data-node]").length));
+  $("cols").classList.toggle("compact", density === "compact" || (density === "auto" && most > 40));
 }
 
 // The same thing's node in the other view: a turn's grounded entry is its declared ref's card in
@@ -667,6 +764,7 @@ function chrome() {
   $("turnsView").hidden = tab !== "turns";
   $("turnsBy").hidden = tab !== "turns";
   $("designPick").hidden = !(tab === "design" && known.size > 1);
+  $("viewMode").hidden = $("density").hidden = tab === "turns";
 }
 
 function setTab(next, node = null) {
@@ -773,6 +871,13 @@ document.addEventListener("click", (ev) => {
   if (jump) {
     if (jump.dataset.jump === "design") { const node = designNode(selected); designKey = keyOf(state.design); setTab("design", node); }
     else setTab("turn", turnNode(selected));
+    return;
+  }
+  const stub = ev.target.closest("[data-open-col]");
+  if (stub) {
+    const i = +stub.dataset.openCol;
+    if (openCols.has(i)) openCols.delete(i); else openCols.add(i);
+    select(selected);
     return;
   }
   const row = ev.target.closest("[data-row]");
@@ -955,6 +1060,8 @@ $("pasteGo").addEventListener("click", async () => {
 const DATA = JSON.parse($("lens-data").textContent);
 $("designPick").addEventListener("change", () => { designKey = $("designPick").value; setTab("design"); });
 $("turnsBy").addEventListener("change", () => { turnsBy = $("turnsBy").value; renderTurns(); });
+$("viewMode").addEventListener("change", () => { mode = $("viewMode").value; select(selected); });
+$("density").addEventListener("change", () => { density = $("density").value; applyDensity(); });
 if (DATA.records.length) deckFrom(DATA.records, new Map(Object.entries(DATA.designs)), DATA.skipped, DATA.read);
 else if (Object.keys(DATA.designs).length) { for (const [k, doc] of Object.entries(DATA.designs)) addKnown(k, doc); setTab("design"); }
 else clearView(`<span>No record yet. Open a record file, or a folder of records and their designs, with the buttons above.</span>`);
