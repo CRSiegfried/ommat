@@ -432,3 +432,8 @@ def test_a_one_label_answer_at_0_ties_its_runner_up_of_0_and_abstains() -> None:
 def test_an_answer_of_all_zeros_abstains_and_has_no_mass() -> None:
     assert pick_with_margin(view(), "q:zeros", 0, 0) == abstained("q:zeros")
     assert mass(view(), "q:zeros", ["yes", "no"]) == 0.0
+
+
+def test_the_most_probable_qualifier_wins_when_it_is_not_the_first_label() -> None:
+    # a and d both clear their bars; d is the later label and the more probable.
+    assert pick_with_thresholds(view(), "q:quarters", {"a": 0.0, "d": 0.1}, 0.0) == "d"

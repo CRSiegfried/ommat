@@ -182,6 +182,36 @@ def filled(
     return filler.run(reads), frozenset(filler.on_grid)
 
 
+def fill_both(
+    loaded: LoadedDesign, first: Sequence[str], second: Sequence[str], values: object
+) -> tuple[dict[str, list[Point]], dict[str, list[Point]]]:
+    """Two fills over one ``values``: each key must be a read either fills, and one
+    ``ValueError`` names every slip in either and every unfilled read, before any point runs."""
+    fillers = [_Filler(loaded, values), _Filler(loaded, values)]
+    fills = (fillers[0].collect(first), fillers[1].collect(second))
+    _finish(fillers)
+    return fills
+
+
+def _finish(fillers: Sequence["_Filler"]) -> None:
+    """Raise one ``ValueError`` naming every slip the fillers found: a key none consumed, an
+    unfilled read, and each problem a fill met, each once."""
+    problems = list(dict.fromkeys(p for f in fillers for p in f.problems))
+    for key in fillers[0].values:
+        if any(key in f.consumed for f in fillers):
+            continue
+        if any(key in f.typed_paths for f in fillers):
+            problems.append(f"values names {quote(key)}, which its grid points or its type fill")
+        else:
+            problems.append(f"values names {quote(key)}, a read the lint does not fill")
+    unfilled = sorted({r for f in fillers for r in f.unfilled})
+    if unfilled:
+        names = ", ".join(quote(r) for r in unfilled)
+        problems.append(f"unfilled: {names}; give each a list in values")
+    if problems:
+        raise ValueError("; ".join(problems))
+
+
 class _Filler:
     def __init__(self, loaded: LoadedDesign, values: object) -> None:
         self.loaded = loaded
@@ -209,25 +239,16 @@ class _Filler:
         return out
 
     def run(self, reads: Sequence[str]) -> dict[str, list[Point]]:
+        fills = self.collect(reads)
+        _finish([self])
+        return fills
+
+    def collect(self, reads: Sequence[str]) -> dict[str, list[Point]]:
         fills: dict[str, list[Point]] = {}
         for read in reads:
             points = self.read(read)
             if points is not None:
                 fills[read] = points
-        for key in self.values:
-            if key in self.consumed:
-                continue
-            if key in self.typed_paths:
-                self.problems.append(
-                    f"values names {quote(key)}, which its grid points or its type fill"
-                )
-            else:
-                self.problems.append(f"values names {quote(key)}, a read the lint does not fill")
-        if self.unfilled:
-            names = ", ".join(quote(r) for r in sorted(self.unfilled))
-            self.problems.append(f"unfilled: {names}; give each a list in values")
-        if self.problems:
-            raise ValueError("; ".join(self.problems))
         return fills
 
     def read(self, read: str) -> list[Point] | None:
@@ -532,6 +553,14 @@ def _extracted(q: Question, value: object, p_null: float | None, confidence: flo
         cast(Any, q.value_type), q.is_list, fresh(value), None, p_null, confidence, None
     )
     return Point(extraction_document(answer), binding_form(answer))
+
+
+def abstention(loaded: LoadedDesign, ref: str) -> Point:
+    """A probability question's answer with every label at 0, on which every pick abstains,
+    a tie at the top whatever its bar, thresholds or margin."""
+    q = question(loaded, ref)
+    labels = labels_of(loaded, ref)
+    return _answer(q, labels, dict.fromkeys(labels, 0.0))
 
 
 def entry_points(points: Sequence[Point], ref: str) -> list[Point]:

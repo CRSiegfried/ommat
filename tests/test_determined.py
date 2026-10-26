@@ -76,6 +76,7 @@ def test_the_first_marker_of_the_winning_kind_in_argument_order_wins() -> None:
     board = {**BOARD, "d:later": later}
     r = ReadView(Role(ComponentKind.rule, "route"), tuple(board), (), board, {})
     assert determined(r, "d:later", "d:unsure") is later
+    assert logged(r) == [("determined", ("d:later", "d:unsure"), ("d:later",))]
 
 
 @pytest.mark.parametrize(

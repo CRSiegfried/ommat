@@ -6,6 +6,7 @@ The spec covers what record format 6 and design format 6 hold and the engine doe
 
 - loading a design, and the load checks that refuse an invalid one;
 - decide: the turn's entry with the codec, the broken entry, interpret over rounds of sources and function rules, the three markers and their causes, and compile with a function policy, the plan rules and the guard;
+- source requirements: a source asked only when an estimate holds one of its values, the estimate never sent;
 - the ledger and the observer, the record with its canonical JSON encoding, order objects and hashes, the ordered encoding a model reads, and reading a stored record back;
 - the context block a design declares, rendered into the record, and the record views: the escalation view, the handoff view, the transcript view and the redacted view;
 - the conversation renderers, which render a handoff as text and a transcript as Chat Completions or Pydantic AI messages;
@@ -166,6 +167,23 @@ Decide and replay refuse an async observer with `EntryRefusal`: an `async def` f
 
 A cancellation of a running turn appends the `cause` item `cancelled`, closes the record, and propagates the `CancelledError` with the record as its `record`. To read `exc.record`, catch the `CancelledError` inside the task that awaits decide; a `CancelledError` that asyncio raises afresh carries no record. A cancellation requested from the observer takes effect at decide's next await. If the turn has none left, decide finishes, asyncio marks the finished task cancelled and raises a fresh `CancelledError`, and the decision is lost.
 
+## Source requirements
+
+A source may declare `requirement=SourceRequirement(ref, values)`: the source is asked only when `ref`, a `d:` ref with no field path, holds one of `values`. It is a `when` written as data, and it reads one estimate a rule wrote. Values are compared by their canonical bytes, so `1` and `true` differ and a list matches only a list in the same order.
+
+The ref is an edge in the dependency graph, so the source waits for the rule that writes it, as it would for a need; it is never sent to the binding unless the source also declares it a need. A source may declare both a requirement and a function `when`; both must hold, and the requirement is tested first, after the needs. What the source's refs get follows what the ref holds, ranked with the needs' markers:
+
+| The ref holds | The source's refs |
+|---|---|
+| one of `values` | the source is asked |
+| another value | `Unasked` with `when-false` naming the ref |
+| `Unsure` or `Unasked` | `Unasked` with `need-undetermined` naming it among the undetermined needs |
+| `Unavailable` | `Unavailable` with `need-unavailable` naming it among the unavailable needs |
+
+A requirement cannot fail, so `when-failed` comes only from a function `when`, which reads only its source's needs and the state. A need, unlike a requirement, is sent to the binding: under the idia binding's `state=`, a source whose need sits beside the state is `unsupported`. The design hash covers a requirement as data, with no `version`.
+
+Load refuses a requirement whose ref is not a `d:` ref, `t:state` and a `q:` answer included, so a condition over an answer goes through a rule; a ref with a field path, so a record's field is projected by a rule of its own; a ref with no provider; a value the ref's type cannot hold, or a value given twice; and a cycle through it. A label-typed ref lets load refuse a misspelt value, which a plain `string` would let through to make the source `Unasked` on every turn.
+
 ## The context block
 
 A design may declare `context=Context(entries, plan=True, steps=True, record=True)`, what a turn hands its next reader, such as an LLM carrying on the conversation. With none, nothing is handed off. Each `ContextEntry(ref, text)` flags `ref`, which is `t:state` or a `d:` ref, with or without a field path, and words it with `text`, a `Text` whose slots name board refs or parameters, one of them `ref` as spelled. There is no reserved `{value}` slot and no size bound. The switches each default on: `plan` gives the plan's kind, `reply` and `reason` and the verdict's kind; `steps` its steps' tools and arguments, never their requirements; `record` the design's name and hash and the record hash.
@@ -244,6 +262,8 @@ The helper version, which each record's `design` item carries as `helpers`, is 3
 
 `dead_questions` reports each question `live`, `no-change-found`, `not-on-grid` or `not-grounded`. A per-candidate question has one grid entry, shared by its grounded entries, and one report, under its declared ref. At each assignment of the other reads its set's value is fixed, by the point for a `t:` set and by the run for a `d:` set, which the lint learns by first running the assignment with every grounded entry at its first point, and that value grounds the entries; a later run whose `d:` set differs raises `ValueError` naming the set, since a set that moves with the entries cannot be fixed. Each grounded entry is filled as its question is, and the entries cross after the other reads, in code-point order, so they vary fastest. An empty set, or one holding a marker, grounds nothing. The question is `live` when any of its grounded entries has two points whose runs differ, and `not-grounded` when it is not `live` and no assignment grounds an entry of it. A report's point holds each grounded entry under its grounded ref.
 
+
+`unsure_to_execute` also covers a per-candidate pick. A rule may turn one candidate's `Unsure` into a value, such as a list leaving that candidate out, so the policy executes on a read the first search never sets. For each per-candidate question a rule on the policy's lineage reads, a rule whose ref the policy reads or one such a rule reads, the lint runs whole turns as `dead_questions` does, each grounded entry in turn answered with every label at 0, on which every pick abstains, and the other entries over their points. A run is reported when it wrote that answer, a rule on the lineage returned a `pick_each_with_margin` or `pick_each_with_thresholds` over the question, and its plan is `execute`; the report item's `read` is the entry's grounded ref and its `point` the run's exogenous values and grounded entries, after the `d:` items. A `values` key may then name a read either search fills, and `points` counts the runs too.
 ## Replay
 
 `design-mismatch` gives the recorded and replayed design hashes. A function component's identity includes its module and qualified name, so the usual cause is a component whose module was `__main__`, a design defined in the script that ran it. To find the member that differs, keep the design document beside each record and diff it against `loaded.document` with any JSON diff; a design document is canonical JSON, so the output is stable. A design that must live in a script keeps its document and is loaded elsewhere with `load(document, functions={...})`, keyed by each function component's key, a rule's name, `<source>.when` or `policy`, which keeps its hash.

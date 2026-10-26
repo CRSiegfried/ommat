@@ -21,7 +21,9 @@ Two ways that look right do not work:
   `d:intent` there is an undeclared read, and the source's refs become `Unavailable`.
 
 A source requirement is the way: it names a `d:` ref and the values that let the source be
-asked. The ref orders the source after its rule, as a need would, but nothing sends it.
+asked. The ref orders the source after its rule, as a need would, but nothing sends it. The
+spec's [source requirements](../spec/README.md#source-requirements) state the rules; this
+guide shows them at work.
 
 ## Project the value the gate tests
 

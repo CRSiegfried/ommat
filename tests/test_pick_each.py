@@ -380,3 +380,18 @@ def test_a_read_that_is_not_per_candidate_or_an_entry_that_is_not_an_answer_rais
         pick_each_with_margin(r, OUT, 0.8, 0.2)
     with pytest.raises(TypeError, match="is not a per-candidate question's declared ref"):
         pick_each_with_margin(r, SET, 0.8, 0.2)
+
+
+def test_thresholds_pick_the_most_probable_qualifier_when_it_is_not_the_first_label() -> None:
+    r = board_view({"Late": choice(0.1, 0.6, 0.3)})
+    picks = cast("dict[str, object]", pick_each_with_thresholds(r, OUT, {"a": 0.0, "b": 0.1}, 0.0))
+    assert picks == {"Late": "b"}
+
+
+@pytest.mark.parametrize("pick", BOTH, ids=["margin", "thresholds"])
+def test_an_empty_set_gives_a_new_empty_dict(pick: Callable[[ReadView], object]) -> None:
+    r = board_view({})
+    read = r.read(OUT)
+    got = pick(r)
+    assert got == {}
+    assert got is not read

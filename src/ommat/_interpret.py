@@ -1018,9 +1018,11 @@ class _Turn:
         bases = {need: self.board[base(need)] for need in needs}
         unavailable = [need for need in needs if isinstance(bases[need], Unavailable)]
         if unavailable:
+            # spec: Source requirements
             return Unavailable(Cause(_C.need_unavailable, code_point_sorted(unavailable)))
         undetermined = [need for need in needs if isinstance(bases[need], Undetermined)]
         if undetermined:
+            # spec: Source requirements
             return Unasked(Cause(_C.need_undetermined, code_point_sorted(undetermined)))
         return None
 
@@ -1035,6 +1037,7 @@ class _Turn:
         # the encoding takes; the values are load's own bytes, never the caller's objects.
         if encode(self.board[requirement.ref]) in self.loaded._requirement_bytes[sid]:
             return None
+        # spec: Source requirements
         return Unasked(Cause(_C.when_false, [requirement.ref]))
 
     def when_marker(self, sid: str, texts: dict[str, _WhenText]) -> Undetermined | None:

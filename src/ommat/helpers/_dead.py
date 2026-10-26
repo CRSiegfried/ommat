@@ -155,10 +155,10 @@ def _block(
 
 def _run(
     loaded: LoadedDesign, point: dict[str, Point], keys: set[str]
-) -> tuple[_Run, dict[str, Any], dict[str, Any]]:
+) -> tuple[_Run, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """One turn at ``point``: its ``plan`` and ``verdict`` items' canonical bytes, each
-    candidate-valued question's value or marker as the run's record wrote its entry, and each
-    grounding ``d:`` set's value or marker as the record wrote it."""
+    candidate-valued question's value or marker as the run's record wrote its entry, each
+    grounding ``d:`` set's value or marker as the record wrote it, and the record's log."""
 
     async def binding(batch: tuple[SourceCall, ...], *, seconds: float) -> object:
         values: dict[str, object] = {ref: fresh(point[ref].live) for c in batch for ref in c.refs}
@@ -184,7 +184,7 @@ def _run(
     }
     entries = {r: fresh(v) for r, v in written.items() if r in loaded._label_sets}
     sets = {r: written.get(r) for r in loaded._grounded.values() if r.startswith("d:")}
-    return (encode(plan, _ITEM_DEPTH), encode(verdict, _ITEM_DEPTH)), entries, sets
+    return (encode(plan, _ITEM_DEPTH), encode(verdict, _ITEM_DEPTH)), entries, sets, log
 
 
 def _candidates(value: object) -> list[str]:

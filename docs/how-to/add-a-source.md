@@ -768,5 +768,6 @@ def out_streets(r: ReadView) -> object:
 Declare `reads=["q:lamps/out"]`; reading it also reads the set. No rule reads a grounded ref,
 so the one-ref picks such as `pick_with_margin` take no single candidate's answer:
 `pick_each_with_margin` and `pick_each_with_thresholds` pick every candidate at once, and a
-rule may pass one candidate's `Unsure` on as its own value. Load refuses an extraction asked per candidate,
-a per-candidate `choice` over a candidate-valued label set, and a need on `q:lamps/out`.
+rule may pass one candidate's `Unsure` on as its own value.
+Load refuses an extraction asked per candidate, a per-candidate `choice` over a
+candidate-valued label set, and a need on `q:lamps/out`.
