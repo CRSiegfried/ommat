@@ -271,3 +271,112 @@ def test_a_misuse_raises_and_the_rule_s_entry_says_so(
     loaded = load(design(lit_rule=rule, lit_reads=reads))
     marker = entries(decided(names, loaded))["d:lit"]["marker"]
     assert marker["cause"] == {"code": "raised", "refs": ["lit"]}
+
+
+# ---------------------------------------------------------------------------------------------
+# The helpers over a read view, each candidate's entry set by hand
+
+from ommat import Answer  # noqa: E402
+from ommat._read_view import ComponentKind, Role  # noqa: E402
+
+GONE = Unavailable(Cause(CauseCode.raised, ["lamps"]))
+
+
+def board_view(entries: dict[str, object], *, marker: object | None = None) -> ReadView:
+    board: dict[str, object] = {"t:state": {}, SET: list(entries)}
+    for street, entry in entries.items():
+        board[grounded_ref(OUT, street)] = entry
+    if marker is not None:
+        board[OUT] = marker
+    return ReadView(Role(ComponentKind.rule, "lit"), (OUT, SET), (), board, {}, grounded={OUT: SET})
+
+
+def noul(yes: float) -> Answer:
+    return Answer("noul", ["yes", "no"], {"yes": yes, "no": round(1 - yes, 2)})
+
+
+def choice(a: float, b: float, c: float) -> Answer:
+    return Answer("choice", ["a", "b", "c"], {"a": a, "b": b, "c": c})
+
+
+def test_the_bar_alone_and_the_margin_alone_each_reject_a_candidate() -> None:
+    # 0.79 leads by 0.58 but misses a bar of 0.8; 0.85 clears any bar but leads by only 0.75.
+    yes_no = board_view({"Low": noul(0.79), "Clear": noul(0.95)})
+    abc = board_view({"Close": choice(0.85, 0.1, 0.05), "Sure": choice(0.97, 0.02, 0.01)})
+    by_bar = cast("dict[str, object]", pick_each_with_margin(yes_no, OUT, 0.8, 0.0))
+    assert isinstance(by_bar["Low"], Unsure)
+    assert by_bar["Clear"] == "yes"
+    by_margin = cast("dict[str, object]", pick_each_with_margin(abc, OUT, 0.0, 0.8))
+    assert isinstance(by_margin["Close"], Unsure)
+    assert by_margin["Sure"] == "a"
+    by_bar = cast("dict[str, object]", pick_each_with_thresholds(yes_no, OUT, {"yes": 0.8}, 0.0))
+    assert isinstance(by_bar["Low"], Unsure)
+    assert by_bar["Clear"] == "yes"
+    by_margin = cast("dict[str, object]", pick_each_with_thresholds(abc, OUT, {"a": 0.0}, 0.8))
+    assert isinstance(by_margin["Close"], Unsure)
+    assert by_margin["Sure"] == "a"
+
+
+BOTH: list[Callable[[ReadView], object]] = [
+    lambda r: pick_each_with_margin(r, OUT, 0.8, 0.2),
+    lambda r: pick_each_with_thresholds(r, OUT, {"yes": 0.8, "no": 0.8}, 0.2),
+]
+
+
+@pytest.mark.parametrize("pick", BOTH, ids=["margin", "thresholds"])
+def test_a_new_dict_in_the_set_s_order_each_marker_the_entry_itself(
+    pick: Callable[[ReadView], object],
+) -> None:
+    entries: dict[str, object] = {"Zed": noul(0.9), "Gone": GONE, "Abel": noul(0.1)}
+    r = board_view(entries)
+    read = r.read(OUT)
+    picks = cast("dict[str, object]", pick(r))
+    assert list(picks) == ["Zed", "Gone", "Abel"]
+    assert picks["Gone"] is GONE
+    assert picks == {"Zed": "yes", "Gone": GONE, "Abel": "no"}
+    assert picks is not read
+    assert r.read(OUT) == read
+
+
+@pytest.mark.parametrize(
+    ("pick", "name"),
+    list(zip(BOTH, ["pick_each_with_margin", "pick_each_with_thresholds"], strict=True)),
+    ids=["margin", "thresholds"],
+)
+def test_the_set_s_marker_comes_back_itself_and_the_call_rests_on_the_ref(
+    pick: Callable[[ReadView], object], name: str
+) -> None:
+    need = Unavailable(Cause(CauseCode.need_unavailable, [SET]))
+    r = board_view({}, marker=need)
+    assert pick(r) is need
+    assert [(i.helper, i.refs, i.rested_on) for i in r.helper_log()] == [(name, (OUT,), (OUT,))]
+
+
+BAD_ARGUMENTS: list[tuple[Callable[[ReadView], object], str]] = [
+    (lambda r: pick_each_with_margin(r, OUT, 1.5, 0.2), "bar is not a finite number"),
+    (lambda r: pick_each_with_margin(r, OUT, 0.8, -0.1), "margin is not a finite number"),
+    (lambda r: pick_each_with_margin(r, OUT, True, 0.2), "bar is not exactly an int or a float"),
+    (lambda r: pick_each_with_thresholds(r, OUT, [0.5], 0.2), "thresholds is not exactly a dict"),  # type: ignore[arg-type]
+    (lambda r: pick_each_with_thresholds(r, OUT, {1: 0.5}, 0.2), "a key that is not exactly a str"),  # type: ignore[dict-item]
+    (lambda r: pick_each_with_thresholds(r, OUT, {"yes": 2}, 0.2), "thresholds is not a finite"),
+    (lambda r: pick_each_with_thresholds(r, OUT, {"yes": 0.5}, 1.5), "margin is not a finite"),
+]
+
+
+@pytest.mark.parametrize("over_a_marker", [False, True], ids=["over answers", "over a marker"])
+@pytest.mark.parametrize(("pick", "message"), BAD_ARGUMENTS)
+def test_each_bad_argument_raises_even_over_a_marker(
+    pick: Callable[[ReadView], object], message: str, over_a_marker: bool
+) -> None:
+    marker = Unsure(Cause(CauseCode.need_undetermined, [SET])) if over_a_marker else None
+    r = board_view({"Quay Street": noul(0.9)}, marker=marker)
+    with pytest.raises((TypeError, ValueError), match=message):
+        pick(r)
+
+
+def test_a_read_that_is_not_per_candidate_or_an_entry_that_is_not_an_answer_raises() -> None:
+    r = board_view({"Quay Street": noul(0.9), "Odd": 3, "Elm Row": noul(0.1)})
+    with pytest.raises(TypeError, match=r"Odd.*which holds no answer"):
+        pick_each_with_margin(r, OUT, 0.8, 0.2)
+    with pytest.raises(TypeError, match="is not a per-candidate question's declared ref"):
+        pick_each_with_margin(r, SET, 0.8, 0.2)
