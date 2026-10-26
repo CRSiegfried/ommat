@@ -18,12 +18,13 @@ graph, the lint also runs the turn as the dead-question lint does, with that que
 of its grounded entries in turn, at its abstention point: every label at 0, or a null
 extraction value. The reads the lineage reads, needs, is gated on, is grounded over or is
 labelled by range over their points, and every other read holds its first. A target's first run
-is reported, under the question's ref or the entry's grounded ref, when it wrote the target as
-its abstention answer, an entry of a lineage rule lists a returned pick or ``extract`` over the
-question, and its ``plan`` item is ``execute``. A ``d:`` set that changes within one assignment
-raises ``ValueError``, as the dead-question lint's does. A target's runs vary one ranging read
-at a time from their first points and stop at its first finding, so they grow with the sum of
-those reads' points, not their product.
+that rests on its abstention is reported, under the question's ref or the entry's grounded ref,
+when it wrote the target as its abstention answer, an entry of a lineage rule lists a returned
+pick or ``extract`` over the question, and its ``plan`` item is ``execute``. A ``d:`` set a run
+shows changing within one assignment raises ``ValueError``, as the dead-question lint's does. A
+target's runs vary one ranging read at a time from their first points and stop at its first
+finding, so they grow with the sum of those reads' points, times the sum over the grounded
+entries where both range, not their product.
 """
 
 from collections.abc import Iterator, Mapping, Sequence

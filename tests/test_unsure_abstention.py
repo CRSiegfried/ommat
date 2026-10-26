@@ -374,7 +374,7 @@ def mixed(set_values: list[object]) -> tuple[Design, dict[str, Any]]:
     return designed, {**VALUES, "t:set": set_values}
 
 
-def test_a_plain_target_crosses_the_grounded_entries_and_each_entry_the_plain_question() -> None:
+def test_a_design_with_plain_and_grounded_targets_reports_each_once() -> None:
     designed, values = mixed([["x", "y"]])
     report = unsure_to_execute(load(designed), values=values)
     # Each target's first run, every other read and entry at its first point, finds it.

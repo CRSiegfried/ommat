@@ -241,7 +241,7 @@ def test_a_pick_off_the_lineage_is_not_counted_for_a_rule_on_it() -> None:
 
 
 def test_a_question_no_lineage_rule_reads_holds_its_first_point() -> None:
-    # Without the hold, q:other's three points per candidate would cross every run: 7 to 55.
+    # Without the hold, q:other's entries would range too: 3 runs to 9.
     report = unsure_to_execute(load(two(kept)), values=VALUES)
     assert report["points"] == 1 + 1 + 1
     assert len(report["execute"]) == 2
