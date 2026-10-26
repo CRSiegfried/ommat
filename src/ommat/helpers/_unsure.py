@@ -17,7 +17,9 @@ rule on the policy's lineage reads, the lint also runs the turn as the dead-ques
 each grounded entry in turn at the abstention point, every label at 0, on which every pick
 abstains, and every other entry over its points. A run is reported, under the entry's grounded
 ref, when it wrote the entry as that answer, an entry of a rule on the lineage lists a
-returned per-candidate pick over the question, and its ``plan`` item is ``execute``.
+returned per-candidate pick over the question, and its ``plan`` item is ``execute``. A
+per-candidate question no lineage rule reads holds its first point, and a ``d:`` set that
+changes within one assignment raises ``ValueError``, as the dead-question lint's does.
 """
 
 import itertools
@@ -58,8 +60,9 @@ def unsure_to_execute(
     fills or a slip in ``values``. ``values`` maps one of the policy's declared reads, ``d:``
     or ``t:``, to a list of its values; a read declared under another is keyed by its field
     path, and a ``q:`` ref is never a key. When a rule on the policy's lineage reads a
-    per-candidate question, a key may also name a read the dead-question lint fills, which
-    the per-candidate search then needs, and a ``read`` may be a grounded ref."""
+    per-candidate question, a key may also name a read the per-candidate search needs and
+    its grid and types cannot fill, such as the candidate set, and a ``read`` may be a
+    grounded ref."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     policy = cast(Policy, loaded._design.policy)  # load refuses the policy table
@@ -147,8 +150,12 @@ def _per_candidate(
         if any(grounded[ref] not in sets for ref in firsts):  # a d: set: run the probe
             runs += 1
             sets.update(_run(loaded, _At(point, firsts), keys)[2])
+        # A question no lineage rule picks over holds its first point: only the picked
+        # questions' other entries can change what a pick returns.
         entries = {
-            grounded_ref(ref, c): entry_points(fills[ref], grounded_ref(ref, c))
+            grounded_ref(ref, c): entry_points(fills[ref], grounded_ref(ref, c))[
+                slice(None) if ref in picked else slice(1)
+            ]
             for ref in firsts
             for c in _candidates(sets.get(grounded[ref]))
         }
@@ -188,9 +195,9 @@ def _rests(
     if encode(entry["value"]) != encode(stopped.record):
         return False
     return any(
-        call["helper"] in _PICKS and call["refs"] == [question_ref] == call["rested_on"]
+        item["helper"] in _PICKS and item["refs"] == [question_ref] == item["rested_on"]
         for ref in lineage
-        for call in written.get(ref, {}).get("derivation", [])
+        for item in written.get(ref, {}).get("derivation", [])
     )
 
 

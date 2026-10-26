@@ -99,5 +99,5 @@ closed is not taken for a missing answer:
 
 - A requirement on a `q:` answer or on `t:state`: route it through a rule.
 - A requirement on a field path, such as `d:triage.intent`: project the field, as above.
-- A value the ref's type cannot hold, a value given twice, or a ref with no provider.
+- No value, a value the ref's type cannot hold, a value given twice, or a ref with no provider.
 - A cycle, such as the gated source's answer feeding the rule it is gated on.
