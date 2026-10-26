@@ -75,22 +75,22 @@ kind = Question(
 )
 ```
 
-Targets name, for a reader, the property a question asks about or a rule estimates, and the ones a question bears on; they gate nothing and leave the question's identity alone:
+From format 7, targets name, for a reader, the property a question asks about or a rule estimates, and the ones a question bears on; they gate nothing and leave the question's identity alone:
 
 ```python
-from ommat import Target
+from ommat import Question, Target, Text
 
 targets = {
-    "tg:distress": Target("How upset the traveller is"),
-    "tg:urgency": Target("The traveller needs action within 24 hours", values="yes or no"),
+    "tg:danger": Target("Whether the report describes a danger to people", values="yes or no"),
+    "tg:priority": Target("How soon a crew should go out"),
 }
-upset = Question(
+danger = Question(
     "noul",
-    Text("Is the traveller upset?"),
-    target="tg:distress",  # each id is a key of targets
-    latent_targets=[{"target": "tg:urgency", "role": "reflective"}],  # or formative, unknown
+    Text("Does the report describe a danger to people?"),
+    target="tg:danger",  # each id is a key of the design's targets
+    latent_targets=[{"target": "tg:priority", "role": "formative"}],  # or reflective, unknown
 )
-# Design(..., targets=targets); Rule(..., target="tg:urgency")
+# Design(..., targets=targets), and a rule names what it estimates: Rule(..., target="tg:priority")
 ```
 
 ## Handing off to the next model

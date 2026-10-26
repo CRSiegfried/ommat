@@ -16,6 +16,7 @@ from ommat import (
     InvalidDesign,
     Question,
     Rule,
+    Table,
     Target,
     TargetRole,
     Text,
@@ -49,7 +50,8 @@ def targeted(
     )
 
 
-def failures(design: Design) -> list[tuple[int, tuple[str, ...], str]]:
+def failures(design: Design | dict[str, Any]) -> list[tuple[int, tuple[str, ...], str]]:
+    """Each failure load raises on a design or a document: its check, names and message."""
     with pytest.raises(InvalidDesign) as raised:
         load(design)
     return [(f.check, f.names, f.message) for f in raised.value.failures]
@@ -100,11 +102,13 @@ def test_a_target_listed_under_two_roles_loads() -> None:
         {"target": "tg:distress", "role": "reflective"},
         {"target": "tg:distress", "role": "formative"},
     )
-    load(targeted(latent=latent))
+    asked = json.loads(load(targeted(latent=latent)).document)["sources"]["ask"]["provides"]
+    assert len(asked["q:ask/urgent"]["latent_targets"]) == 2
 
 
 def test_a_design_with_targets_and_no_link_loads() -> None:
-    load(targeted(target=None, latent=(), rule_target=None))
+    doc = json.loads(load(targeted(target=None, latent=(), rule_target=None)).document)
+    assert set(doc["targets"]) == set(TARGETS)
 
 
 @pytest.mark.parametrize(
@@ -250,3 +254,76 @@ def test_check_11_holds_a_format_7_documents_target_members(
         load(doc)
     assert [f.check for f in raised.value.failures] == [11]
     assert says in str(raised.value)
+
+
+def document(**edits: Any) -> dict[str, Any]:
+    """The targeted design's document, its question's and rule's target members set as given."""
+    doc: dict[str, Any] = json.loads(load(targeted()).document)
+    asked = doc["sources"]["ask"]["provides"]["q:ask/urgent"]
+    for member in ("target", "latent_targets"):
+        if member in edits:
+            asked[member] = edits[member]
+    if "rule_target" in edits:
+        doc["rules"]["urgent"]["target"] = edits["rule_target"]
+    if "targets" in edits:
+        doc["targets"] = edits["targets"]
+    return doc
+
+
+@pytest.mark.parametrize(
+    ("edits", "check", "says"),
+    [
+        ({"target": "tg:missing"}, 3, 'names the target "tg:missing", which is not declared'),
+        ({"rule_target": "tg:missing"}, 3, 'names the target "tg:missing", which is not declared'),
+        (
+            {"latent_targets": [{"role": "reflective", "target": "tg:urgency"}]},
+            1,
+            'lists its own target "tg:urgency" as latent',
+        ),
+        (
+            {"latent_targets": [{"role": "causal", "target": "tg:distress"}]},
+            10,
+            "hold a role that is not reflective, formative or unknown",
+        ),
+        ({"target": 7}, 10, "'s target is not a string"),
+        (
+            {
+                "targets": {
+                    "tg:distress": {"statement": 1, "values": None},
+                    **{"tg:urgency": {"statement": "s", "values": None}},
+                }
+            },
+            10,
+            'target "tg:distress"\'s statement is not a string',
+        ),
+    ],
+)
+def test_a_documents_target_slips_are_refused_as_a_designs_are(
+    edits: dict[str, Any], check: int, says: str
+) -> None:
+    found = failures(document(**edits))
+    assert any(c == check and says in m for c, _, m in found), found
+
+
+def test_a_tables_target_is_held_to_its_form_and_the_table_refused() -> None:
+    table = Table("d:urgent", 'label{"no", "yes"}', "U", [], [], target="tg:urgency")
+    assert table.target == "tg:urgency"
+    design = dataclasses.replace(targeted(rule_target=None), rules={"urgent": table})
+    assert {c for c, _, _ in failures(design)} == {12}
+    bad = dataclasses.replace(table, target=3)  # type: ignore[arg-type]
+    found = failures(dataclasses.replace(design, rules={"urgent": bad}))
+    assert any(c == 10 and 'rule "urgent"\'s target is not a string' in m for c, _, m in found)
+
+
+def test_a_role_names_its_member_and_any_other_string_stays_a_string() -> None:
+    latent = ({"target": "tg:distress", "role": "reflective"}, {"target": "x", "role": "causal"})
+    held = Question("noul", Text("Upset?"), latent_targets=latent).latent_targets
+    assert held[0]["role"] is TargetRole.reflective
+    assert type(held[1]["role"]) is str
+    assert [str(r) for r in TargetRole] == ["reflective", "formative", "unknown"]
+
+
+def test_a_design_and_a_target_default_as_declared() -> None:
+    assert dict(dataclasses.replace(DESIGN).targets) == {}
+    assert Target("s").values is None
+    assert Table("d:x", "string", "U", [], []).target is None

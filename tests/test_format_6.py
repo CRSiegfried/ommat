@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from format_6_design import DESIGN
 from ommat import FindingKind, InvalidDesign, load, read_record, replay_sync
 
 FORMAT_6 = Path(__file__).parent / "format_6"
@@ -70,8 +71,6 @@ def test_a_stored_format_6_record_replays_under_its_design_with_no_finding() -> 
 
 
 def test_a_format_6_record_under_the_current_design_differs_only_by_its_design() -> None:
-    from format_6_design import DESIGN
-
     rerun, findings = replay_sync(
         read_record((FORMAT_6 / "record.json").read_bytes()), load(DESIGN)
     )
