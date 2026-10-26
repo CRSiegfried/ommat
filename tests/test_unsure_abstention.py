@@ -114,12 +114,11 @@ def design(
 
 def test_a_dropped_pick_over_a_plain_question_is_reported() -> None:
     report = unsure_to_execute(load(design()), values=VALUES)
-    assert [item["read"] for item in report["execute"]] == [A] * 3 + [B] * 3
+    assert [item["read"] for item in report["execute"]] == [A, B]  # one finding per target
     for item in report["execute"]:
         assert item["point"][item["read"]] == ZEROS
-    # One policy call with d:kept Unsure, then for each target the other question's three
-    # points, q:spare held at its first.
-    assert report["points"] == 1 + 3 + 3
+    # One policy call with d:kept Unsure, then each target's first run, which finds it.
+    assert report["points"] == 1 + 1 + 1
 
 
 @pytest.mark.parametrize(
@@ -144,26 +143,36 @@ def test_a_pick_passed_on_and_dropped_through_determined_is_reported() -> None:
     assert {item["read"] for item in report["execute"]} == {A}
 
 
-def picks_ab(r: ReadView) -> object:
-    return [q for q in (A, B) if pick_with_margin(r, q, 0.8, 0.2) == "yes"]
+def passes_ab(r: ReadView) -> object:
+    for q in (A, B):
+        pick = pick_with_margin(r, q, 0.8, 0.2)
+        if isinstance(pick, Undetermined):
+            return pick
+    return []
 
 
-def picks_abc(r: ReadView) -> object:
-    return [q for q in (A, B, "q:c") if pick_with_margin(r, q, 0.8, 0.2) == "yes"]
+def passes_abc(r: ReadView) -> object:
+    for q in (A, B, "q:c"):
+        pick = pick_with_margin(r, q, 0.8, 0.2)
+        if isinstance(pick, Undetermined):
+            return pick
+    return []
 
 
 @pytest.mark.parametrize(
     ("rule", "questions", "runs"),
-    [(picks_ab, (A, B, SPARE), 3 + 3), (picks_abc, (A, B, "q:c", SPARE), 9 + 9 + 9)],
+    [(passes_ab, (A, B, SPARE), 2 * (1 + 2)), (passes_abc, (A, B, "q:c", SPARE), 3 * (1 + 2 + 2))],
     ids=["two targets", "three targets"],
 )
-def test_each_target_runs_the_cross_of_the_other_ranging_reads(
+def test_with_no_finding_each_target_varies_each_other_ranging_read_one_at_a_time(
     rule: Any, questions: tuple[str, ...], runs: int
 ) -> None:
-    # Each target at its abstention point, each other target over three points, q:spare held.
+    # Each target at its abstention point: one run with every other read at its first point,
+    # then one per other point of each other target, never their cross product; q:spare held.
     reads = tuple(q for q in questions if q != SPARE)
     loaded = load(design(rule=rule, reads=reads, questions=questions))
-    assert unsure_to_execute(loaded, values=VALUES)["points"] == 1 + runs
+    report = unsure_to_execute(loaded, values=VALUES)
+    assert report == {"points": 1 + runs, "execute": []}
 
 
 def opened(r: ReadView) -> object:
@@ -292,7 +301,13 @@ SENDERS = "t:senders"
 
 
 def sender_dropped(r: ReadView) -> object:
-    return ["a"] if pick_with_margin(r, "q:sender", 0.8, 0.2) == "none" else []
+    """Drops the abstention only when bob is among the labels, which only the set's second
+    value renders; else passes it on."""
+    pick = pick_with_margin(r, "q:sender", 0.8, 0.2)
+    answer: Any = r.read("q:sender")
+    if isinstance(pick, Undetermined) and "bob@x.org" not in getattr(answer, "labels", ()):
+        return pick
+    return []
 
 
 def test_a_candidate_valued_question_abstains_over_the_labels_its_run_renders() -> None:
@@ -317,14 +332,15 @@ def test_a_candidate_valued_question_abstains_over_the_labels_its_run_renders() 
         },
         policy=Policy(act, version="1", reads=["d:kept"]),
     )
-    # The label set ranges, so each of its values renders the question's labels in turn.
+    # The label set ranges, so its second value, which alone makes the rule drop the
+    # abstention, is tried.
     values = {**VALUES, SENDERS: [["ana@x.org"], ["bob@x.org"]]}
     report = unsure_to_execute(load(designed), values=values)
-    assert [item["read"] for item in report["execute"]] == ["q:sender", "q:sender"]
-    labels = [item["point"]["q:sender"]["labels"] for item in report["execute"]]
-    assert labels == [["none", "ana@x.org"], ["none", "bob@x.org"]]
-    for item in report["execute"]:
-        assert set(item["point"]["q:sender"]["probabilities"].values()) == {0}
+    (item,) = report["execute"]
+    assert item["read"] == "q:sender"
+    written = item["point"]["q:sender"]
+    assert written["labels"] == ["none", "bob@x.org"]
+    assert set(written["probabilities"].values()) == {0}
 
 
 def both_kinds(r: ReadView) -> object:
@@ -361,17 +377,17 @@ def mixed(set_values: list[object]) -> tuple[Design, dict[str, Any]]:
 def test_a_plain_target_crosses_the_grounded_entries_and_each_entry_the_plain_question() -> None:
     designed, values = mixed([["x", "y"]])
     report = unsure_to_execute(load(designed), values=values)
-    # q:a at its point, the two entries over 3 points each: 9; each entry at its point, the
-    # other entry and q:a over 3 points each: 9 apiece.
-    assert report["points"] == 1 + 9 + 9 + 9
+    # Each target's first run, every other read and entry at its first point, finds it.
+    assert report["points"] == 1 + 1 + 1 + 1
     assert {item["read"] for item in report["execute"]} == {A, 'q:each["x"]', 'q:each["y"]'}
 
 
 def test_a_grounded_set_ranges_over_its_values() -> None:
     designed, values = mixed([[], ["x"]])
     report = unsure_to_execute(load(designed), values=values)
-    # q:a at its point: no entry, then one entry over 3; the entry at its point: q:a over 3.
-    assert report["points"] == 1 + (1 + 3) + 3
+    # q:a's first run, the empty set, finds it; the entry exists only at the set's second
+    # value, so the set must range for it to be a target at all.
+    assert report["points"] == 1 + 1 + 1
     assert {item["read"] for item in report["execute"]} == {A, 'q:each["x"]'}
 
 

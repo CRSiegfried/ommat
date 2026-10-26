@@ -107,12 +107,11 @@ VALUES: dict[str, Any] = {SET: [["a", "b"]], "d:kept": [["a"]]}
 def test_an_execute_on_a_candidate_s_abstention_dropped_by_a_pick_is_reported() -> None:
     report = unsure_to_execute(load(design()), values=VALUES)
     reads = [item["read"] for item in report["execute"]]
-    assert reads == [grounded_ref(OUT, "a")] * 3 + [grounded_ref(OUT, "b")] * 3
+    assert reads == [grounded_ref(OUT, "a"), grounded_ref(OUT, "b")]  # one per target
     for item in report["execute"]:
         assert item["point"][item["read"]] == ABSTAINED
-    # One policy call with d:kept Unsure, then three runs per candidate: the other's yes, no
-    # and marker.
-    assert report["points"] == 7
+    # One policy call with d:kept Unsure, then each candidate's first run, which finds it.
+    assert report["points"] == 1 + 1 + 1
 
 
 def test_a_decided_candidate_is_not_reported() -> None:
@@ -218,7 +217,7 @@ def two(rule: Any, reads: tuple[str, ...] = (OUT,), extra: dict[str, Rule] | Non
 
 def test_a_thresholds_pick_is_reported_as_a_margin_pick_is() -> None:
     report = unsure_to_execute(load(design(rule=kept_by_thresholds)), values=VALUES)
-    assert len(report["execute"]) == 6
+    assert len(report["execute"]) == 2
 
 
 @pytest.mark.parametrize("rule", [caught, by_determined], ids=["a caught raise", "determined"])
@@ -244,8 +243,8 @@ def test_a_pick_off_the_lineage_is_not_counted_for_a_rule_on_it() -> None:
 def test_a_question_no_lineage_rule_reads_holds_its_first_point() -> None:
     # Without the hold, q:other's three points per candidate would cross every run: 7 to 55.
     report = unsure_to_execute(load(two(kept)), values=VALUES)
-    assert report["points"] == 7
-    assert len(report["execute"]) == 6
+    assert report["points"] == 1 + 1 + 1
+    assert len(report["execute"]) == 2
 
 
 def fixed_folders(r: ReadView) -> object:
@@ -266,8 +265,8 @@ def test_a_d_set_is_learned_by_a_probe_run_that_counts() -> None:
         policy=Policy(act, version="1", reads=["d:kept"]),
     )
     report = unsure_to_execute(load(designed), values={"d:kept": [["a"]]})
-    assert report["points"] == 1 + 1 + 6  # the policy call, the probe, the runs
-    assert len(report["execute"]) == 6
+    assert report["points"] == 1 + 1 + 2  # the policy call, the probe, a run per candidate
+    assert len(report["execute"]) == 2
 
 
 def kept_b(r: ReadView) -> object:
@@ -305,10 +304,12 @@ def test_a_set_that_moves_with_the_entries_raises() -> None:
         unsure_to_execute(load(chained), values=values)
 
 
-@pytest.mark.parametrize(("folders", "runs"), [(["a", "b"], 6), (["a", "b", "c"], 27)])
-def test_the_runs_are_each_entry_times_the_others_cross_product(
+@pytest.mark.parametrize(("folders", "runs"), [(["a", "b"], 2 * 3), (["a", "b", "c"], 3 * 5)])
+def test_with_no_finding_each_entry_varies_the_others_one_at_a_time(
     folders: list[str], runs: int
 ) -> None:
-    # Each of E entries in turn at the abstention point, the other E - 1 over three points.
-    report = unsure_to_execute(load(design()), values={SET: [folders], "d:kept": [["a"]]})
-    assert report["points"] == 1 + runs
+    # Each of E entries in turn at the abstention point: one run with the others at their
+    # first point, then one per other point of each other entry, 1 + 2 (E - 1) runs.
+    loaded = load(design(rule=passed_on))
+    report = unsure_to_execute(loaded, values={SET: [folders], "d:kept": [["a"]]})
+    assert report == {"points": 1 + runs, "execute": []}

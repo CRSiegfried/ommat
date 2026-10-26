@@ -17,17 +17,16 @@ rule on the policy's lineage reads, every rule and source its reads rest on in t
 graph, the lint also runs the turn as the dead-question lint does, with that question, or each
 of its grounded entries in turn, at its abstention point: every label at 0, or a null
 extraction value. The reads the lineage reads, needs, is gated on, is grounded over or is
-labelled by range over their points, and every other read holds its first. A run is reported,
-under the question's ref or the entry's grounded ref, when it wrote the target as its
-abstention answer, an entry of a lineage rule lists a returned pick or ``extract`` over the
+labelled by range over their points, and every other read holds its first. A target's first run
+is reported, under the question's ref or the entry's grounded ref, when it wrote the target as
+its abstention answer, an entry of a lineage rule lists a returned pick or ``extract`` over the
 question, and its ``plan`` item is ``execute``. A ``d:`` set that changes within one assignment
-raises ``ValueError``, as the dead-question lint's does. A target's runs are the cross of the
-ranging reads' points other than its own, so they grow with those reads as the dead-question
-lint's cross product does.
+raises ``ValueError``, as the dead-question lint's does. A target's runs vary one ranging read
+at a time from their first points and stop at its first finding, so they grow with the sum of
+those reads' points, not their product.
 """
 
-import itertools
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, cast
 
 from ommat._canonical import encode
@@ -163,7 +162,7 @@ def _abstentions(
     reads = code_point_sorted(set(fills) - grounded.keys())
     held = {r: fills[r] if base(r) in ranging else fills[r][:1] for r in reads}
     firsts = {ref: fills[ref][0] for ref in grounded if ref in fills}
-    found: dict[str, list[dict[str, Any]]] = {}
+    found: dict[str, dict[str, Any]] = {}
     runs = 0
 
     def assignment(point: dict[str, Point]) -> dict[str, list[Point]]:
@@ -188,10 +187,12 @@ def _abstentions(
 
     self_sets: dict[str, object] = {}
 
-    def cross(point: dict[str, Point], entries: dict[str, list[Point]], target: str) -> None:
+    def cross(point: dict[str, Point], entries: dict[str, list[Point]], target: str) -> bool:
+        """Whether a run over these entries, varied one at a time, rests on the target's
+        abstention; the first such run is the target's finding."""
         nonlocal runs
         names = code_point_sorted(entries)
-        for chosen in itertools.product(*(entries[n] for n in names)):
+        for chosen in _one_at_a_time([entries[n] for n in names]):
             given = {**point, **dict(zip(names, chosen, strict=True))}
             runs += 1
             done = _run(loaded, given, keys)
@@ -204,25 +205,40 @@ def _abstentions(
             if _rests(done[3], target, rules):
                 shown = {ref: fresh(given[ref].record) for ref in code_point_sorted(given)}
                 shown.update(done[1])
-                found.setdefault(target, []).append({"read": target, "point": shown})
+                found[target] = {"read": target, "point": shown}
+                return True
+        return False
 
     plain = [q for q in targets if q not in grounded]
     each = [q for q in targets if q in grounded]
     for target in plain:
         lists = [[abstention(loaded, r)] if r == target else held[r] for r in reads]
-        for combo in grid_order(lists):
+        for combo in _one_at_a_time(lists):
             self_sets.clear()
             point = dict(zip(reads, combo, strict=True))
-            cross(point, assignment(point), target)
+            if cross(point, assignment(point), target):
+                break
     if each:
-        for combo in grid_order([held[r] for r in reads]):
+        for combo in _one_at_a_time([held[r] for r in reads]):
             self_sets.clear()
             point = dict(zip(reads, combo, strict=True))
             entries = assignment(point)
             for target in code_point_sorted(e for e in entries if declared_ref(e) in each):
+                if target in found:
+                    continue
                 stopped = {**entries, target: [abstention(loaded, declared_ref(target))]}
                 cross(point, stopped, target)
-    return runs, [item for target in code_point_sorted(found) for item in found[target]]
+    return runs, [found[target] for target in code_point_sorted(found)]
+
+
+def _one_at_a_time(lists: Sequence[list[Point]]) -> Iterator[tuple[Point, ...]]:
+    """Every read at its first point, then each read in turn over its other points with the
+    rest at their first: one run per point beyond the first, not their cross product."""
+    first = tuple(points[0] for points in lists)
+    yield first
+    for i, points in enumerate(lists):
+        for point in points[1:]:
+            yield (*first[:i], point, *first[i + 1 :])
 
 
 def _rests(log: Sequence[Mapping[str, Any]], target: str, rules: set[str]) -> bool:
