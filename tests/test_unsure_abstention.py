@@ -29,6 +29,7 @@ from ommat.helpers import (
     agree,
     determined,
     extract,
+    pick_each_with_margin,
     pick_with_margin,
     pick_with_thresholds,
     unsure_to_execute,
@@ -169,7 +170,7 @@ def opened(r: ReadView) -> object:
 
 
 def test_a_question_gating_the_target_s_source_ranges() -> None:
-    # q:door, which no lineage rule reads, decides through d:open whether q:a's source is
+    # q:door, read only by the gate rule d:open, decides through it whether q:a's source is
     # asked; at q:door's first point it is not, so holding q:door would hide the finding.
     designed = Design(
         state=t.record(),
@@ -271,7 +272,6 @@ def test_a_state_field_gating_the_target_s_source_through_a_when_ranges() -> Non
         sources={
             "ask": Source(
                 {A: Question("noul", Text("Is it so?"))},
-                needs=["t:state.flag"],
                 when=When(flag_set, version="1"),
             )
         },
@@ -282,3 +282,155 @@ def test_a_state_field_gating_the_target_s_source_through_a_when_ranges() -> Non
     (item,) = report["execute"]
     assert item["read"] == A
     assert item["point"]["t:state"] == {"flag": True}
+
+
+# ---------------------------------------------------------------------------------------------
+# A candidate-valued target, a design with both kinds of target, and what else ranges
+
+SENDERS = "t:senders"
+
+
+def sender_dropped(r: ReadView) -> object:
+    return ["a"] if pick_with_margin(r, "q:sender", 0.8, 0.2) == "none" else []
+
+
+def test_a_candidate_valued_question_abstains_over_the_labels_its_run_renders() -> None:
+    designed = Design(
+        state=t.record(),
+        sources={
+            "find": Source({SENDERS: {"type": t.list_(t.string), "candidates": True}}),
+            "ask": Source(
+                {
+                    "q:sender": Question(
+                        "choice",
+                        Text("Who sent it?"),
+                        {"fixed": ["none"], "candidates": SENDERS},
+                    )
+                }
+            ),
+        },
+        rules={
+            "kept": Rule(
+                "d:kept", t.list_(t.string), sender_dropped, version="1", reads=["q:sender"]
+            )
+        },
+        policy=Policy(act, version="1", reads=["d:kept"]),
+    )
+    report = unsure_to_execute(load(designed), values={**VALUES, SENDERS: [["ana@x.org"]]})
+    (item,) = report["execute"]
+    assert item["read"] == "q:sender"
+    written = item["point"]["q:sender"]
+    assert written["labels"] == ["none", "ana@x.org"]
+    assert set(written["probabilities"].values()) == {0}
+
+
+def both_kinds(r: ReadView) -> object:
+    plain = pick_with_margin(r, A, 0.8, 0.2)
+    each = pick_each_with_margin(r, "q:each", 0.8, 0.2)
+    kept = [c for c, pick in each.items() if pick == "yes"] if isinstance(each, dict) else []
+    return kept + (["a"] if plain == "yes" else [])
+
+
+def mixed(set_values: list[object]) -> tuple[Design, dict[str, Any]]:
+    designed = Design(
+        state=t.record(),
+        sources={
+            "look": Source({"t:set": {"type": t.list_(t.string), "candidates": True}}),
+            "ask": Source({A: Question("noul", Text("Is it so?"))}),
+            "each": Source(
+                {
+                    "q:each": Question(
+                        "noul",
+                        Text("Is '{c}' so?", [{"name": "c", "origin": {"candidate": "t:set"}}]),
+                    )
+                },
+                grounded="t:set",
+            ),
+        },
+        rules={
+            "kept": Rule("d:kept", t.list_(t.string), both_kinds, version="1", reads=[A, "q:each"])
+        },
+        policy=Policy(act, version="1", reads=["d:kept"]),
+    )
+    return designed, {**VALUES, "t:set": set_values}
+
+
+def test_a_plain_target_crosses_the_grounded_entries_and_each_entry_the_plain_question() -> None:
+    designed, values = mixed([["x", "y"]])
+    report = unsure_to_execute(load(designed), values=values)
+    # q:a at its point, the two entries over 3 points each: 9; each entry at its point, the
+    # other entry and q:a over 3 points each: 9 apiece.
+    assert report["points"] == 1 + 9 + 9 + 9
+    assert {item["read"] for item in report["execute"]} == {A, 'q:each["x"]', 'q:each["y"]'}
+
+
+def test_a_grounded_set_ranges_over_its_values() -> None:
+    designed, values = mixed([[], ["x"]])
+    report = unsure_to_execute(load(designed), values=values)
+    # q:a at its point: no entry, then one entry over 3; the entry at its point: q:a over 3.
+    assert report["points"] == 1 + (1 + 3) + 3
+    assert {item["read"] for item in report["execute"]} == {A, 'q:each["x"]'}
+
+
+def gated_policy(r: ReadView) -> Plan:
+    """Executes only when the tool says go; the first search sets d:kept to Unsure."""
+    if r.read("t:go") is True and isinstance(r.read("d:kept"), list):
+        return Plan("execute")
+    return Plan("escalate", reason="no")
+
+
+def test_a_policy_read_ranges_and_its_findings_follow_the_first_search_s() -> None:
+    designed = Design(
+        state=t.record(),
+        sources={
+            "tool": Source({"t:go": t.boolean}),
+            "ask": Source({A: Question("noul", Text("Is it so?"))}),
+        },
+        rules={"kept": Rule("d:kept", t.list_(t.string), dropped_a, version="1", reads=[A])},
+        policy=Policy(gated_policy, version="1", reads=["d:kept", "t:go"]),
+    )
+    report = unsure_to_execute(load(designed), values=VALUES)
+    (item,) = report["execute"]
+    # t:go ranges, true and false; only true executes on q:a's abstention.
+    assert item["read"] == A
+    assert item["point"]["t:go"] is True
+    assert report["points"] == 2 + 2
+
+
+def pass_through_policy(r: ReadView) -> Plan:
+    return Plan("execute")
+
+
+def test_the_first_search_s_items_come_before_the_abstention_search_s() -> None:
+    designed = Design(
+        state=t.record(),
+        sources={"ask": Source({A: Question("noul", Text("Is it so?"))})},
+        rules={"kept": Rule("d:kept", t.list_(t.string), dropped_a, version="1", reads=[A])},
+        policy=Policy(pass_through_policy, version="1", reads=["d:kept"]),
+    )
+    report = unsure_to_execute(load(designed), values=VALUES)
+    assert [item["read"] for item in report["execute"]] == ["d:kept", A]
+
+
+@pytest.mark.parametrize(
+    ("value", "abstains"),
+    [
+        ({"kind": "noul", "labels": ["yes", "no"], "probabilities": {"yes": 0, "no": 0}}, True),
+        ({"kind": "noul", "labels": ["yes", "no"], "probabilities": {"yes": 0, "no": 1}}, False),
+        ({"kind": "extraction", "value": None, "p_null": 1}, True),
+        ({"kind": "extraction", "value": 12, "p_null": 0}, False),
+        ({"kind": "Unsure", "cause": {"code": "abstained", "refs": []}}, False),
+        ([0, 0], False),
+    ],
+)
+def test_an_abstention_answer_is_every_probability_0_or_a_null_value(
+    value: object, abstains: bool
+) -> None:
+    from ommat.helpers._points import is_abstention
+
+    assert is_abstention(value) is abstains
+
+
+def test_a_key_for_a_question_its_type_fills_is_refused() -> None:
+    with pytest.raises(ValueError, match='"q:a", which its grid points or its type fill'):
+        unsure_to_execute(load(design()), values={**VALUES, A: [{"yes": 1, "no": 0}]})

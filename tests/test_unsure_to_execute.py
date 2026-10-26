@@ -271,7 +271,11 @@ def test_each_call_gets_a_fresh_board() -> None:
     [
         (("d:ok", "t:name"), None, 'unfilled: "t:name"'),
         (("t:name",), None, 'unfilled: "t:name"'),  # though no d: read is set
-        (("d:ok", "t:name"), {"t:name": ["a"], "q:go": [1]}, '"q:go", a read the lint does not'),
+        (
+            ("d:ok", "t:name"),
+            {"t:name": ["a"], "q:nothing": [1]},
+            '"q:nothing", a read the lint does not',
+        ),
         (("d:ok", "t:name"), {"t:name": ["a"], "d:ok": [True]}, '"d:ok", which its grid points'),
         (("d:ok", "t:name"), {"t:name": [1]}, 'a value for "t:name" does not conform'),
         (("d:ok", "t:name"), {"t:name": ["a", "a"]}, 'values for "t:name" lists one value twice'),

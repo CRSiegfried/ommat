@@ -141,8 +141,6 @@ def _ranging(loaded: LoadedDesign, policy: Policy, lineage: set[str]) -> set[str
             continue
         source = loaded._design.sources[node]
         used |= {base(r) for r in loaded._needs[node]}
-        if source.requirement is not None:
-            used.add(base(source.requirement.ref))
         if source.grounded is not None:
             used.add(source.grounded)
         if source.when is not None:
