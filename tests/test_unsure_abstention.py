@@ -114,10 +114,10 @@ def design(
 
 def test_a_dropped_pick_over_a_plain_question_is_reported() -> None:
     report = unsure_to_execute(load(design()), values=VALUES)
-    assert [item["read"] for item in report["execute"]] == [A, B]  # one finding per target
+    assert [item["read"] for item in report["execute"]] == [A, B]  # one finding per subject
     for item in report["execute"]:
         assert item["point"][item["read"]] == ZEROS
-    # One policy call with d:kept Unsure, then each target's first run, which finds it.
+    # One policy call with d:kept Unsure, then each subject's first run, which finds it.
     assert report["points"] == 1 + 1 + 1
 
 
@@ -162,13 +162,13 @@ def passes_abc(r: ReadView) -> object:
 @pytest.mark.parametrize(
     ("rule", "questions", "runs"),
     [(passes_ab, (A, B, SPARE), 2 * (1 + 2)), (passes_abc, (A, B, "q:c", SPARE), 3 * (1 + 2 + 2))],
-    ids=["two targets", "three targets"],
+    ids=["two subjects", "three subjects"],
 )
 def test_with_no_finding_each_target_varies_each_other_ranging_read_one_at_a_time(
     rule: Any, questions: tuple[str, ...], runs: int
 ) -> None:
-    # Each target at its abstention point: one run with every other read at its first point,
-    # then one per other point of each other target, never their cross product; q:spare held.
+    # Each subject at its abstention point: one run with every other read at its first point,
+    # then one per other point of each other subject, never their cross product; q:spare held.
     reads = tuple(q for q in questions if q != SPARE)
     loaded = load(design(rule=rule, reads=reads, questions=questions))
     report = unsure_to_execute(loaded, values=VALUES)
@@ -295,7 +295,7 @@ def test_a_state_field_gating_the_target_s_source_through_a_when_ranges() -> Non
 
 
 # ---------------------------------------------------------------------------------------------
-# A candidate-valued target, a design with both kinds of target, and what else ranges
+# A candidate-valued subject, a design with both kinds of subject, and what else ranges
 
 SENDERS = "t:senders"
 
@@ -377,7 +377,7 @@ def mixed(set_values: list[object]) -> tuple[Design, dict[str, Any]]:
 def test_a_design_with_plain_and_grounded_targets_reports_each_once() -> None:
     designed, values = mixed([["x", "y"]])
     report = unsure_to_execute(load(designed), values=values)
-    # Each target's first run, every other read and entry at its first point, finds it.
+    # Each subject's first run, every other read and entry at its first point, finds it.
     assert report["points"] == 1 + 1 + 1 + 1
     assert {item["read"] for item in report["execute"]} == {A, 'q:each["x"]', 'q:each["y"]'}
 
@@ -386,7 +386,7 @@ def test_a_grounded_set_ranges_over_its_values() -> None:
     designed, values = mixed([[], ["x"]])
     report = unsure_to_execute(load(designed), values=values)
     # q:a's first run, the empty set, finds it; the entry exists only at the set's second
-    # value, so the set must range for it to be a target at all.
+    # value, so the set must range for it to be a subject at all.
     assert report["points"] == 1 + 1 + 1
     assert {item["read"] for item in report["execute"]} == {A, 'q:each["x"]'}
 

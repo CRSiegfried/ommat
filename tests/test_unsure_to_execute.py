@@ -3,7 +3,7 @@
 base ref set to ``Unsure`` in turn while the other reads range over their points, the
 policy called alone on a fresh board, what counts as ``execute``, the ``ValueError``s before
 any call, and a report of plain data. The rules read no question, so the abstention search,
-tested in ``test_unsure_abstention.py``, finds no target. The points are tested in
+tested in ``test_unsure_abstention.py``, finds no subject. The points are tested in
 ``test_lint_points.py``."""
 
 import contextlib

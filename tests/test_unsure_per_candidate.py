@@ -107,7 +107,7 @@ VALUES: dict[str, Any] = {SET: [["a", "b"]], "d:kept": [["a"]]}
 def test_an_execute_on_a_candidate_s_abstention_dropped_by_a_pick_is_reported() -> None:
     report = unsure_to_execute(load(design()), values=VALUES)
     reads = [item["read"] for item in report["execute"]]
-    assert reads == [grounded_ref(OUT, "a"), grounded_ref(OUT, "b")]  # one per target
+    assert reads == [grounded_ref(OUT, "a"), grounded_ref(OUT, "b")]  # one per subject
     for item in report["execute"]:
         assert item["point"][item["read"]] == ABSTAINED
     # One policy call with d:kept Unsure, then each candidate's first run, which finds it.

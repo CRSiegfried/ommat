@@ -17,12 +17,12 @@ rule on the policy's lineage reads, every rule and source its reads rest on in t
 graph, the lint also runs the turn as the dead-question lint does, with that question, or each
 of its grounded entries in turn, at its abstention point: every label at 0, or a null
 extraction value. The reads the lineage reads, needs, is gated on, is grounded over or is
-labelled by range over their points, and every other read holds its first. A target's first run
+labelled by range over their points, and every other read holds its first. A subject's first run
 that rests on its abstention is reported, under the question's ref or the entry's grounded ref,
-when it wrote the target as its abstention answer, an entry of a lineage rule lists a returned
+when it wrote the subject as its abstention answer, an entry of a lineage rule lists a returned
 pick or ``extract`` over the question, and its ``plan`` item is ``execute``. A ``d:`` set a run
 shows changing within one assignment raises ``ValueError``, as the dead-question lint's does. A
-target's runs vary one ranging read at a time from their first points and stop at its first
+subject's runs vary one ranging read at a time from their first points and stop at its first
 finding, so they grow with the sum of those reads' points, times the sum over the grounded
 entries where both range, not their product.
 """
@@ -73,9 +73,9 @@ def unsure_to_execute(
     declared = code_point_sorted(set(policy.reads))
     top = [r for r in declared if not any(r.startswith(o + ".") for o in declared)]
     lineage = _lineage(loaded, policy)
-    targets = _targets(loaded, lineage)
+    subjects = _subjects(loaded, lineage)
     runs_fills: dict[str, list[Point]] = {}
-    if targets:
+    if subjects:
         sources = loaded._design.sources.values()
         provided = code_point_sorted({ref for src in sources for ref in src.provides} | {_STATE})
         fills, runs_fills = fill_both(loaded, top, provided, values)
@@ -98,8 +98,8 @@ def unsure_to_execute(
                     for r in declared
                 }
                 execute.append({"read": unsure, "point": shown})
-    if targets:
-        runs, found = _abstentions(loaded, policy, lineage, targets, runs_fills)
+    if subjects:
+        runs, found = _abstentions(loaded, policy, lineage, subjects, runs_fills)
         points += runs
         execute += found
     return {"points": points, "execute": execute}
@@ -117,7 +117,7 @@ def _lineage(loaded: LoadedDesign, policy: Policy) -> set[str]:
     return seen
 
 
-def _targets(loaded: LoadedDesign, lineage: set[str]) -> list[str]:
+def _subjects(loaded: LoadedDesign, lineage: set[str]) -> list[str]:
     """The questions a lineage rule reads; load refuses a per-candidate extraction, so a
     per-candidate one is of a probability kind."""
     rules = loaded._design.rules
@@ -149,10 +149,10 @@ def _abstentions(
     loaded: LoadedDesign,
     policy: Policy,
     lineage: set[str],
-    targets: Sequence[str],
+    subjects: Sequence[str],
     fills: Mapping[str, list[Point]],
 ) -> tuple[int, list[dict[str, Any]]]:
-    """The abstention search: the runs it made, and each run reported, by target in
+    """The abstention search: the runs it made, and each run reported, by subject in
     code-point order and then in run order."""
     grounded = loaded._grounded
     ranging = _ranging(loaded, policy, lineage)
@@ -188,9 +188,9 @@ def _abstentions(
 
     self_sets: dict[str, object] = {}
 
-    def cross(point: dict[str, Point], entries: dict[str, list[Point]], target: str) -> bool:
-        """Whether a run over these entries, varied one at a time, rests on the target's
-        abstention; the first such run is the target's finding."""
+    def cross(point: dict[str, Point], entries: dict[str, list[Point]], subject: str) -> bool:
+        """Whether a run over these entries, varied one at a time, rests on the subject's
+        abstention; the first such run is the subject's finding."""
         nonlocal runs
         names = code_point_sorted(entries)
         for chosen in _one_at_a_time([entries[n] for n in names]):
@@ -203,33 +203,33 @@ def _abstentions(
                         f"the candidate set {set_ref!r} changes within one assignment of the "
                         "other reads, so the lint cannot fix its grounded entries"
                     )
-            if _rests(done[3], target, rules):
+            if _rests(done[3], subject, rules):
                 shown = {ref: fresh(given[ref].record) for ref in code_point_sorted(given)}
                 shown.update(done[1])
-                found[target] = {"read": target, "point": shown}
+                found[subject] = {"read": subject, "point": shown}
                 return True
         return False
 
-    plain = [q for q in targets if q not in grounded]
-    each = [q for q in targets if q in grounded]
-    for target in plain:
-        lists = [[abstention(loaded, r)] if r == target else held[r] for r in reads]
+    plain = [q for q in subjects if q not in grounded]
+    each = [q for q in subjects if q in grounded]
+    for subject in plain:
+        lists = [[abstention(loaded, r)] if r == subject else held[r] for r in reads]
         for combo in _one_at_a_time(lists):
             self_sets.clear()
             point = dict(zip(reads, combo, strict=True))
-            if cross(point, assignment(point), target):
+            if cross(point, assignment(point), subject):
                 break
     if each:
         for combo in _one_at_a_time([held[r] for r in reads]):
             self_sets.clear()
             point = dict(zip(reads, combo, strict=True))
             entries = assignment(point)
-            for target in code_point_sorted(e for e in entries if declared_ref(e) in each):
-                if target in found:
+            for subject in code_point_sorted(e for e in entries if declared_ref(e) in each):
+                if subject in found:
                     continue
-                stopped = {**entries, target: [abstention(loaded, declared_ref(target))]}
-                cross(point, stopped, target)
-    return runs, [found[target] for target in code_point_sorted(found)]
+                stopped = {**entries, subject: [abstention(loaded, declared_ref(subject))]}
+                cross(point, stopped, subject)
+    return runs, [found[subject] for subject in code_point_sorted(found)]
 
 
 def _one_at_a_time(lists: Sequence[list[Point]]) -> Iterator[tuple[Point, ...]]:
@@ -242,16 +242,16 @@ def _one_at_a_time(lists: Sequence[list[Point]]) -> Iterator[tuple[Point, ...]]:
             yield (*first[:i], point, *first[i + 1 :])
 
 
-def _rests(log: Sequence[Mapping[str, Any]], target: str, rules: set[str]) -> bool:
-    """Whether a run's ``execute`` plan rests on the abstention at ``target``: it was written
+def _rests(log: Sequence[Mapping[str, Any]], subject: str, rules: set[str]) -> bool:
+    """Whether a run's ``execute`` plan rests on the abstention at ``subject``: it was written
     as an abstention answer, and a lineage rule returned a pick or ``extract`` over its
     question, the one-ref helpers for a plain question and the per-candidate picks for a
     grounded entry."""
-    question_ref = declared_ref(target)
-    helpers = _ONE if target == question_ref else _EACH
+    question_ref = declared_ref(subject)
+    helpers = _ONE if subject == question_ref else _EACH
     written = {i["ref"]: i for i in log if i["item"] == "entry"}
     plan = next(i for i in log if i["item"] == "plan")
-    entry = written.get(target)
+    entry = written.get(subject)
     if plan["kind"] != "execute" or entry is None or "value" not in entry:
         return False
     if not is_abstention(entry["value"]):
