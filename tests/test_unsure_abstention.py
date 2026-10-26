@@ -34,6 +34,7 @@ from ommat.helpers import (
     pick_with_thresholds,
     unsure_to_execute,
 )
+from ommat.helpers._points import is_abstention
 
 A, B, SPARE = "q:a", "q:b", "q:spare"
 ZEROS = {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"yes": 0, "no": 0}}
@@ -316,12 +317,14 @@ def test_a_candidate_valued_question_abstains_over_the_labels_its_run_renders() 
         },
         policy=Policy(act, version="1", reads=["d:kept"]),
     )
-    report = unsure_to_execute(load(designed), values={**VALUES, SENDERS: [["ana@x.org"]]})
-    (item,) = report["execute"]
-    assert item["read"] == "q:sender"
-    written = item["point"]["q:sender"]
-    assert written["labels"] == ["none", "ana@x.org"]
-    assert set(written["probabilities"].values()) == {0}
+    # The label set ranges, so each of its values renders the question's labels in turn.
+    values = {**VALUES, SENDERS: [["ana@x.org"], ["bob@x.org"]]}
+    report = unsure_to_execute(load(designed), values=values)
+    assert [item["read"] for item in report["execute"]] == ["q:sender", "q:sender"]
+    labels = [item["point"]["q:sender"]["labels"] for item in report["execute"]]
+    assert labels == [["none", "ana@x.org"], ["none", "bob@x.org"]]
+    for item in report["execute"]:
+        assert set(item["point"]["q:sender"]["probabilities"].values()) == {0}
 
 
 def both_kinds(r: ReadView) -> object:
@@ -426,8 +429,6 @@ def test_the_first_search_s_items_come_before_the_abstention_search_s() -> None:
 def test_an_abstention_answer_is_every_probability_0_or_a_null_value(
     value: object, abstains: bool
 ) -> None:
-    from ommat.helpers._points import is_abstention
-
     assert is_abstention(value) is abstains
 
 

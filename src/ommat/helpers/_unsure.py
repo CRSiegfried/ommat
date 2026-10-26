@@ -14,23 +14,22 @@ The report is a warning: the lint raises nothing on a finding.
 An answer's abstention, a pick's or ``extract``'s ``Unsure``, is no read the policy makes: a
 rule may turn it into a value, such as a list leaving a candidate out. So for each question a
 rule on the policy's lineage reads, every rule and source its reads rest on in the dependency
-graph, the lint also runs the turn as the dead-question lint does, with that question, or
-each of its grounded entries in turn, at its abstention point: every label at 0, or a null
-extraction value. The reads the lineage reads, needs, is gated on or is grounded over range
-over their points, and every other read holds its first. A run is reported, under the
-question's ref or the entry's grounded ref, when it wrote the target as its abstention
-answer, an entry of a lineage rule lists a returned pick or ``extract`` over the question,
-and its ``plan`` item is ``execute``. A ``d:`` set that changes within one assignment
-raises ``ValueError``, as the dead-question lint's does. A target's runs are the cross of
-the ranging reads' points other than its own, so they grow with those reads as the
-dead-question lint's cross product does.
+graph, the lint also runs the turn as the dead-question lint does, with that question, or each
+of its grounded entries in turn, at its abstention point: every label at 0, or a null
+extraction value. The reads the lineage reads, needs, is gated on, is grounded over or is
+labelled by range over their points, and every other read holds its first. A run is reported,
+under the question's ref or the entry's grounded ref, when it wrote the target as its
+abstention answer, an entry of a lineage rule lists a returned pick or ``extract`` over the
+question, and its ``plan`` item is ``execute``. A ``d:`` set that changes within one assignment
+raises ``ValueError``, as the dead-question lint's does. A target's runs are the cross of the
+ranging reads' points other than its own, so they grow with those reads as the dead-question
+lint's cross product does.
 """
 
 import itertools
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from ommat._answer import AnswerKind
 from ommat._canonical import encode
 from ommat._component import base, call
 from ommat._design import LoadedDesign, Policy, Rule
@@ -50,7 +49,6 @@ from ommat.helpers._points import (
     fresh,
     grid_order,
     is_abstention,
-    question,
 )
 
 _POLICY = "policy"
@@ -120,15 +118,11 @@ def _lineage(loaded: LoadedDesign, policy: Policy) -> set[str]:
 
 
 def _targets(loaded: LoadedDesign, lineage: set[str]) -> list[str]:
-    """The questions a lineage rule reads, a per-candidate one of a probability kind only."""
+    """The questions a lineage rule reads; load refuses a per-candidate extraction, so a
+    per-candidate one is of a probability kind."""
     rules = loaded._design.rules
     read = {base(r) for rid in lineage if rid in rules for r in cast(Rule, rules[rid]).reads}
-    return code_point_sorted(
-        ref
-        for ref in read
-        if ref.startswith("q:")
-        and (ref not in loaded._grounded or question(loaded, ref).kind is not AnswerKind.extraction)
-    )
+    return code_point_sorted(ref for ref in read if ref.startswith("q:"))
 
 
 def _ranging(loaded: LoadedDesign, policy: Policy, lineage: set[str]) -> set[str]:
