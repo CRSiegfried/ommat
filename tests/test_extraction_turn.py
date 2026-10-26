@@ -653,8 +653,8 @@ def test_a_record_of_an_unknown_format_is_refused() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden extraction record
 
-GOLDEN_X_DESIGN = "sha256:0fa38eeaf8a8858bdc77e8097e506c8697944a782b3286f791dd96ce993b1fd2"
-GOLDEN_X_RECORD = "sha256:abfcae0851e72c2e8f49edcbf27b6136a0528f189b98212700b2a92fc1e7a0c9"
+GOLDEN_X_DESIGN = "sha256:830aaefc20b2e96ab8b37e975a56bbf27446c5b615046da49965ec8d7bb997f7"
+GOLDEN_X_RECORD = "sha256:3f1cb2a551a1b4d1c2edc540d1c578336fd9c8cb77d3c5301cab9bcace2c75bb"
 
 
 def test_the_golden_extraction_record() -> None:

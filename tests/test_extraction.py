@@ -261,7 +261,7 @@ def only(design: Any, check: int, says: str) -> None:
 def test_a_valid_extraction_design_loads_and_writes_the_questions_object() -> None:
     loaded = x.loaded()
     provides = decode(loaded.document)["sources"]["read"]["provides"]
-    assert decode(loaded.document)["format"] == 6
+    assert decode(loaded.document)["format"] == 7
     assert provides["q:amount"] == {
         "kind": "extraction",
         "wording": {
@@ -273,13 +273,15 @@ def test_a_valid_extraction_design_loads_and_writes_the_questions_object() -> No
         "is_list": False,
         "text": {"ref": "t:state.body"},
         "reference_date": {"ref": "t:state.today"},
+        "target": None,
+        "latent_targets": [],
     }
 
 
 def test_a_probability_kinds_question_object_gains_no_member() -> None:
     noul = x.with_question("q:spam", Question("noul", Text("Is it spam?")))
     provides = decode(load(noul).document)["sources"]["read"]["provides"]
-    assert set(provides["q:spam"]) == {"kind", "wording", "labels"}
+    assert set(provides["q:spam"]) == {"kind", "wording", "labels", "target", "latent_targets"}
 
 
 def test_the_text_and_reference_date_refs_are_needs_and_edges() -> None:

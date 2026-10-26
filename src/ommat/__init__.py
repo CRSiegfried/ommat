@@ -31,6 +31,8 @@ from ommat._design import (
     SourceRequirement,
     Structured,
     Table,
+    Target,
+    TargetRole,
     Text,
     When,
 )
@@ -97,6 +99,8 @@ __all__ = [
     "Step",
     "Structured",
     "Table",
+    "Target",
+    "TargetRole",
     "Text",
     "Unasked",
     "Unavailable",

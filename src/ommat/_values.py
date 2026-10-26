@@ -37,7 +37,7 @@ to it, each under that format's rules."""
 RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
 """The record formats this engine reads."""
 
-DESIGN_FORMAT = 6
+DESIGN_FORMAT = 7
 """The format number this engine writes into a design document, which changes only when a
 design rule changes. It reads every design format from 1 up to it."""
 
@@ -96,6 +96,10 @@ order; and the first record format whose entry, plan and verdict items hold thei
 GROUNDED_FORMAT = 6
 """The first record format whose ``settings`` item names each grounded declared ref's set,
 under ``grounded``, and whose log may hold a grounded ref."""
+
+TARGETS_FORMAT = 7
+"""The first design format whose document holds ``targets``, a question's ``target`` and
+``latent_targets``, and a rule's ``target``."""
 
 
 def string_data(value: str) -> str:

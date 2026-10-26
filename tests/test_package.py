@@ -48,6 +48,8 @@ PUBLIC = {
     "SourceRequirement",
     "When",
     "Table",
+    "Target",
+    "TargetRole",
     "Structured",
     "Text",
     "load",

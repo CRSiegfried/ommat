@@ -1301,8 +1301,10 @@ class _Turn:
                 path = cast(str, origin["param"])
                 origin = {"param": path, "value": decode(self.loaded._leaf_bytes[path])}
             slots.append({**slot, "origin": origin})
-        # The question's object is a holder of design members, held to no size bound.
-        return hash_value({**question, "wording": {**wording, "slots": slots}}, MAX_DOCUMENT_DEPTH)
+        # The question's object is a holder of design members, held to no size bound; its
+        # targets guide a reader and are not what was asked.
+        hashed = {k: v for k, v in question.items() if k not in ("target", "latent_targets")}
+        return hash_value({**hashed, "wording": {**wording, "slots": slots}}, MAX_DOCUMENT_DEPTH)
 
     async def ask(self, batches: list[_Batch]) -> list[_Returned]:
         """Run the live frontier's calls concurrently, one task per batch; a task that ended

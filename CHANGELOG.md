@@ -4,6 +4,14 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+
+- Targets: a design may declare `targets={id: Target(statement, values=None)}`, the properties of the state its questions and rules are about. A `Question` takes `target`, the target it asks about, and `latent_targets`, each `{"target": id, "role": TargetRole}` with the role `reflective`, `formative` or `unknown`; a `Rule` takes `target`, the target it estimates. They guide a reader and gate nothing: no turn reads one, and a question's identity leaves them out. Load refuses an undeclared target id, a question's own target as latent, a link repeated under one role and a member of another form. `Target` and `TargetRole` are public.
+
+### Changed
+
+- Design format 7: the document holds `targets`, each question's `target` and `latent_targets` and each rule's `target`. A design built in Python has a new design hash; a stored document of formats 1 to 6 loads to its own hash, and load refuses one holding a target member.
+
 ## [0.4.0] - 2026-10-23
 
 ### Added

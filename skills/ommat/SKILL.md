@@ -75,6 +75,24 @@ kind = Question(
 )
 ```
 
+Targets name, for a reader, the property a question asks about or a rule estimates, and the ones a question bears on; they gate nothing and leave the question's identity alone:
+
+```python
+from ommat import Target
+
+targets = {
+    "tg:distress": Target("How upset the traveller is"),
+    "tg:urgency": Target("The traveller needs action within 24 hours", values="yes or no"),
+}
+upset = Question(
+    "noul",
+    Text("Is the traveller upset?"),
+    target="tg:distress",  # each id is a key of targets
+    latent_targets=[{"target": "tg:urgency", "role": "reflective"}],  # or formative, unknown
+)
+# Design(..., targets=targets); Rule(..., target="tg:urgency")
+```
+
 ## Handing off to the next model
 
 A design's context block says what a turn hands the next model in a conversation, and `handoff(record)` reads it back; `transcript(record)` gives every call of the turn and its conclusion. `ommat.conversation`, outside the compatibility promise, renders both and words nothing:

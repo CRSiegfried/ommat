@@ -78,7 +78,7 @@ def src_hash(fn: Callable[..., Any]) -> str:
 def test_a_minimal_design_writes_every_member_with_its_default() -> None:
     loaded = load(minimal())
     assert decode(loaded.document) == {
-        "format": 6,
+        "format": 7,
         "name": None,
         "state": "record{}",
         "sources": {},
@@ -102,6 +102,7 @@ def test_a_minimal_design_writes_every_member_with_its_default() -> None:
         "groups": {},
         "classes": {},
         "context": None,
+        "targets": {},
     }
     assert loaded.design_hash == sha256_ref(loaded.document)
     assert dict(loaded._graph) == {}
@@ -129,11 +130,15 @@ def test_a_source_and_its_questions() -> None:
                     ],
                 },
                 "labels": None,
+                "target": None,
+                "latent_targets": [],
             },
             "q:intent/tone": {
                 "kind": "choice",
                 "wording": {"template": "Which tone?", "slots": []},
                 "labels": ["warm", "cold"],
+                "target": None,
+                "latent_targets": [],
             },
         },
         "needs": ["t:state", "t:state.sender"],
@@ -177,6 +182,7 @@ def test_function_rules_and_the_policy() -> None:
         "boundaries": None,
         "candidates": False,
         "grounded": None,
+        "target": None,
         "module": "designs",
         "qualname": "route",
         "version": "r2",

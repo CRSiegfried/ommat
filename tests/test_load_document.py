@@ -376,6 +376,7 @@ def refused_form_docs() -> list[tuple[dict[str, Any], str]]:
             "outputs": "boolean",
             "candidates": False,
             "grounded": None,
+            "target": None,
             "hit": "U",
             "order": None,
             "inputs": [{"any": "shape"}],
@@ -933,8 +934,9 @@ def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -
             minimal(), "find", designs.rule("find", outputs="list<string>", candidates=True)
         )
     )
+    designs.document_before_targets(rule_doc, fmt)
     del rule_doc["context"]
-    (failure,) = refused(written({**rule_doc, "format": fmt}))
+    (failure,) = refused(written(rule_doc))
     assert failure.message == f'rule "find" is a candidate set, which format {fmt} does not have'
 
 

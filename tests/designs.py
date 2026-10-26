@@ -248,12 +248,30 @@ def bounded(**changes: Any) -> Design:
     return dataclasses.replace(design, **fields)
 
 
-def document_before_key_order(doc: dict[str, Any], fmt: int = 5) -> dict[str, Any]:
-    """A current decoded design document made format ``fmt``, before format 6: the format
-    number set, each source's ``payload_order``, each parameter leaf's ``order`` and each
-    structured wording's ``order`` dropped, and every type string that spells a record's fields
-    out of code-point order re-spelled in it, as a document before format 6 holds them."""
+def document_before_targets(doc: dict[str, Any], fmt: int = 6) -> dict[str, Any]:
+    """A current decoded design document made format ``fmt``, before format 7: the format
+    number set, and ``targets``, each question's ``target`` and ``latent_targets`` and each
+    rule's ``target`` dropped."""
     doc["format"] = fmt
+    doc.pop("targets", None)
+    for source in cast("dict[str, dict[str, Any]]", doc["sources"]).values():
+        for provided in cast("dict[str, Any]", source["provides"]).values():
+            if isinstance(provided, dict):
+                cast("dict[str, Any]", provided).pop("target", None)
+                cast("dict[str, Any]", provided).pop("latent_targets", None)
+    for rule in cast("dict[str, Any]", doc["rules"]).values():
+        if isinstance(rule, dict):
+            cast("dict[str, Any]", rule).pop("target", None)
+    return doc
+
+
+def document_before_key_order(doc: dict[str, Any], fmt: int = 5) -> dict[str, Any]:
+    """A current decoded design document made format ``fmt``, before format 6: as
+    ``document_before_targets`` makes it, then each source's ``payload_order``, each parameter
+    leaf's ``order`` and each structured wording's ``order`` dropped, and every type string that
+    spells a record's fields out of code-point order re-spelled in it, as a document before
+    format 6 holds them."""
+    document_before_targets(doc, fmt)
     sources: dict[str, dict[str, Any]] = doc["sources"]
     for source in sources.values():
         source.pop("payload_order", None)

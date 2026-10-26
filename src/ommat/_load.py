@@ -55,6 +55,7 @@ from ommat._design import (
     SourceRequirement,
     Structured,
     Table,
+    Target,
     Text,
     When,
     document_value,
@@ -107,6 +108,7 @@ from ommat._values import (
     MISSING,
     NOUL_DESCRIPTION_FORMAT,
     STRUCTURED_WORDING_FORMAT,
+    TARGETS_FORMAT,
     domain_error,
     in_domain,
     member_named,
@@ -575,6 +577,9 @@ class _Loader:
                     f"group {_q(gname)} names q: refs grounded over different candidate sets, or "
                     "grounded and ungrounded ones",
                 )
+        for names, where, target in self.target_links():
+            if target not in self.d.targets:
+                self.fail(3, names, f"{where} names the target {_q(target)}, which is not declared")
         form_refused = {ref for ref, _ in self.form_providers}  # check 10 has failed them
         for key, parsed in self.class_keys:
             where = f"the classes block's key {_q(key)}"
@@ -590,6 +595,20 @@ class _Loader:
                     (key,),
                     f"{where} is not t:state, a source's t: ref, a d: ref or an extraction q: ref",
                 )
+
+    def target_links(self) -> Iterator[tuple[tuple[str, ...], str, str]]:
+        """Each target id a question or a rule names: the question's ref or the rule's id,
+        where it is named, and the id."""
+        for sid, source in self.sources():
+            for ref, question in _questions(source):
+                where = f"source {_q(sid)}'s question {_q(ref)}"
+                if question.target is not None:
+                    yield (ref,), where, question.target
+                for latent in question.latent_targets:
+                    yield (ref,), f"{where}'s latent_targets", latent["target"]
+        for rid, rule in self.rules():
+            if rule.target is not None:
+                yield (rid,), f"rule {_q(rid)}", rule.target
 
     def is_set(self, ref: str) -> bool:
         """Whether a ref's provider declares it a candidate set: a source's provision with
@@ -742,6 +761,18 @@ class _Loader:
         for sid, source in self.sources():
             if source.requirement is not None:
                 self.repeated_values(sid, source.requirement.ref, source.requirement.values)
+            for ref, question in _questions(source):
+                where = f"source {_q(sid)}'s question {_q(ref)}"
+                listed: set[tuple[str, str]] = set()
+                for latent in question.latent_targets:
+                    target, role = latent["target"], str(latent["role"])
+                    if target == question.target:
+                        self.fail(1, (ref,), f"{where} lists its own target {_q(target)} as latent")
+                    if (target, role) in listed:
+                        self.fail(
+                            1, (ref,), f"{where} lists the target {_q(target)} twice as {role}"
+                        )
+                    listed.add((target, role))
         for owner, key, where, entry in self.boundary_entries():
             if isinstance(entry, list):
                 self.repeats(owner, where, "leaf paths", cast("list[str]", entry), refs=False)
@@ -1419,7 +1450,7 @@ class _Loader:
             "name": d.name,
             "state": d.state,
             "sources": {sid: _source(s, self.format) for sid, s in d.sources.items()},
-            "rules": {rid: _rule(cast(Rule, r)) for rid, r in d.rules.items()},
+            "rules": {rid: _rule(cast(Rule, r), self.format) for rid, r in d.rules.items()},
             "policy": {
                 "form": "function",
                 "reads": _unordered(policy.reads),
@@ -1436,6 +1467,16 @@ class _Loader:
             "groups": {g: code_point_sorted(group.refs) for g, group in d.groups.items()},
             "classes": dict(d.classes),  # each tree plain data, from check 10's form test
             **({"context": _context(d.context)} if self.format >= CONTEXT_FORMAT else {}),
+            **(
+                {
+                    "targets": {
+                        tid: {"statement": target.statement, "values": target.values}
+                        for tid, target in d.targets.items()
+                    }
+                }
+                if self.format >= TARGETS_FORMAT
+                else {}
+            ),
         }
 
     # --- check 11's comparison -------------------------------------------------------------
@@ -1952,6 +1993,16 @@ def _source(source: Source, fmt: int) -> dict[str, Any]:
                     text=dict(cast("Mapping[str, str]", provided.text)),
                     reference_date=None if date is None else dict(date),
                 )
+            if fmt >= TARGETS_FORMAT:
+                provides[ref].update(
+                    target=provided.target,
+                    latent_targets=_unordered(
+                        [
+                            {"target": latent["target"], "role": str(latent["role"])}
+                            for latent in provided.latent_targets
+                        ]
+                    ),
+                )
         else:
             provides[ref] = dict(cast("Mapping[str, Any]", provided))
     w, r = source.when, source.requirement
@@ -1970,7 +2021,7 @@ def _source(source: Source, fmt: int) -> dict[str, Any]:
     }
 
 
-def _rule(rule: Rule) -> dict[str, Any]:
+def _rule(rule: Rule, fmt: int) -> dict[str, Any]:
     return {
         "form": "function",
         "provides": rule.provides,
@@ -1980,6 +2031,7 @@ def _rule(rule: Rule) -> dict[str, Any]:
         "boundaries": _boundaries(rule.boundaries),
         "candidates": rule.candidates,
         "grounded": rule.grounded,
+        **({"target": rule.target} if fmt >= TARGETS_FORMAT else {}),
         **_function(rule.function, rule.version),
     }
 
@@ -2181,6 +2233,8 @@ _DOCUMENT = frozenset(
     }
 )
 _CONTEXT = frozenset({"entries", "plan", "steps", "record"})
+_TARGET = frozenset({"statement", "values"})
+_LATENT = frozenset({"target", "role"})
 _FUNCTION = frozenset({"module", "qualname", "version", "source"})
 _SOURCE = frozenset(
     {
@@ -2330,7 +2384,11 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
     argument one origin as a declaration writes it. A table's ``inputs``
     and ``rows`` are tested only for the value domain, as their members are not yet decided."""
     members = _DOCUMENT | {"context"} if fmt >= CONTEXT_FORMAT else _DOCUMENT
+    if fmt >= TARGETS_FORMAT:
+        members |= {"targets"}
     yield from _missing_or_extra(doc, members, "the document", ())
+    for tid, target in _objects(doc.get("targets")):
+        yield from _missing_or_extra(target, _TARGET, f"target {_q(tid)}", (tid,))
     context = doc.get("context")
     if isinstance(context, dict):
         block = cast("dict[str, Any]", context)
@@ -2368,8 +2426,11 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
     )
     for r in _items(doc["requirements"]):
         yield from _missing_or_extra(r, frozenset({"ref", "value"}), "a plan-level requirement", ())
+    targeted: frozenset[str] = frozenset({"target"} if fmt >= TARGETS_FORMAT else ())
     for rid, rule in _objects(doc["rules"]):
-        yield from _function_failures(rule, f"rule {_q(rid)}", (rid,), _RULE, _TABLE, fmt)
+        yield from _function_failures(
+            rule, f"rule {_q(rid)}", (rid,), _RULE | targeted, _TABLE | targeted, fmt
+        )
         if fmt < CANDIDATE_FORMAT and rule.get("candidates") is True:
             yield (rid,), f"rule {_q(rid)} is a candidate set, which format {fmt} does not have"
     for sid, source in _objects(doc["sources"]):
@@ -2441,7 +2502,12 @@ def _source_failures(
             yield at, f"{shown} is an extraction question, which format {fmt} does not have"
         else:
             members = _EXTRACTION if extraction else _QUESTION
+            if fmt >= TARGETS_FORMAT:
+                members |= {"target", "latent_targets"}
             yield from _missing_or_extra(provided, members, shown, at)
+        if fmt >= TARGETS_FORMAT:
+            for latent in _items(provided.get("latent_targets")):
+                yield from _missing_or_extra(latent, _LATENT, f"{shown}'s latent target", at)
         if isinstance(provided.get("wording"), dict):
             yield from _text_failures(
                 provided["wording"], f"{shown}'s wording", at, held=fmt >= KEY_ORDER_FORMAT
@@ -2664,6 +2730,8 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
             is_list=value.get("is_list", False),
             text=value.get("text"),
             reference_date=value.get("reference_date"),
+            target=value.get("target"),
+            latent_targets=value.get("latent_targets", ()),
         )
 
     def source(sid: str, s: dict[str, Any]) -> Source:
@@ -2692,6 +2760,7 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
                 order=r["order"],
                 candidates=r["candidates"],
                 grounded=r["grounded"],
+                target=r.get("target"),
             )
         return Rule(
             r["provides"],
@@ -2703,6 +2772,7 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
             boundaries=r["boundaries"],
             candidates=r["candidates"],
             grounded=r["grounded"],
+            target=r.get("target"),
         )
 
     policy: Any = doc["policy"]
@@ -2748,6 +2818,7 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
         classes=doc["classes"],
         name=doc["name"],
         context=_context_of(doc.get("context")),
+        targets=block(doc.get("targets", {}), lambda _, v: Target(v["statement"], v["values"])),
     )
 
 

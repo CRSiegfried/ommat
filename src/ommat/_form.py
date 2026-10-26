@@ -35,6 +35,8 @@ from ommat._design import (
     SourceRequirement,
     Structured,
     Table,
+    Target,
+    TargetRole,
     Text,
     When,
     new_failure,
@@ -174,6 +176,18 @@ class _Form:
             g: Group(self.strings(v.refs, f"group {quote(g)}'s refs", (g,)))
             for g, v in self.members(d.groups, "groups", Group).items()
         }
+        targets = {
+            tid: Target(
+                cast(
+                    str,
+                    self.string(
+                        v.statement, f"target {quote(tid)}'s statement", (tid,), optional=False
+                    ),
+                ),
+                self.string(v.values, f"target {quote(tid)}'s values", (tid,)),
+            )
+            for tid, v in self.members(d.targets, "targets", Target).items()
+        }
         plans = self.members(d.plans, "plans", PlanDeclaration)
         for name, plan in plans.items():
             self.plan(name, plan)
@@ -199,6 +213,7 @@ class _Form:
             classes=self.classes(d.classes),
             name=self.string(d.name, "the design's name", ()),
             context=self.context(d.context),
+            targets=targets,
         )
 
     def context(self, c: object) -> Context | None:
@@ -426,7 +441,38 @@ class _Form:
             is_list=q.is_list,
             text=q.text,
             reference_date=q.reference_date,
+            target=self.string(q.target, f"{where}'s target", names),
+            latent_targets=self.latent_targets(q.latent_targets, where, names),
         )
+
+    def latent_targets(
+        self, value: object, where: str, names: tuple[str, ...]
+    ) -> tuple[Mapping[str, Any], ...]:
+        """A question's latent targets, each exactly a string ``target`` and a ``TargetRole``
+        ``role``; a member of another form is dropped."""
+        where = f"{where}'s latent_targets"
+        if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+            self.fail(names, f"{where} are not a list")
+            return ()
+        out: list[Mapping[str, Any]] = []
+        for member in cast("Sequence[object]", value):
+            if not isinstance(member, Mapping) or set(cast("Mapping[object, Any]", member)) != {
+                "target",
+                "role",
+            }:
+                self.fail(names, f"{where} hold a member that is not a target and a role")
+                continue
+            fields = cast("Mapping[str, Any]", member)
+            target = self.string(fields["target"], f"{where}' target", names, optional=False)
+            role = fields["role"]
+            if not issubclass(type(role), TargetRole):
+                self.fail(
+                    names, f"{where} hold a role that is not reflective, formative or unknown"
+                )
+                continue
+            if target is not None:
+                out.append(MappingProxyType({"target": target, "role": role}))
+        return tuple(out)
 
     def extraction(self, q: Question, where: str, names: tuple[str, ...]) -> bool:
         """An extraction question's members of their form: a value type, a boolean list flag,
@@ -590,6 +636,7 @@ class _Form:
             boundaries=self.boundaries(r.boundaries, where, names),
             candidates=self.boolean(r.candidates, False, f"{where}'s candidates", names),
             grounded=self.string(r.grounded, f"{where}'s grounding ref", names),
+            target=self.string(r.target, f"{where}'s target", names),
         )
 
     def policy(self, p: Policy) -> Policy:
@@ -647,6 +694,7 @@ class _Form:
             self.fail(names, f"{where}'s order is not null or a list in the value domain")
         self.boolean(r.candidates, False, f"{where}'s candidates", names)
         self.string(r.grounded, f"{where}'s grounding ref", names)
+        self.string(r.target, f"{where}'s target", names)
         self.data(r.inputs, r.rows, where, names)
 
     def data(self, inputs: object, rows: object, where: str, names: tuple[str, ...]) -> None:

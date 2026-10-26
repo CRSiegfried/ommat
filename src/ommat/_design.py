@@ -11,6 +11,7 @@ field changes no design. Values inside, a payload or a leaf's value among them, 
 given, so a caller who changes those before load changes the design load sees.
 """
 
+import enum
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import InitVar, dataclass, field
 from types import MappingProxyType
@@ -77,6 +78,48 @@ def _set(obj: object, **fields: object) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
+# Targets
+
+
+class TargetRole(enum.StrEnum):
+    """How a question's answer bears on one of its latent targets."""
+
+    reflective = "reflective"
+    """The answer alone is evidence for or against the target."""
+    formative = "formative"
+    """The answer supplies a part of the target."""
+    unknown = "unknown"
+    """Not yet judged."""
+
+
+@dataclass(frozen=True, slots=True)
+class Target:
+    """A property of the state a design's questions and rules are about, for a reader:
+    ``statement`` says what it is, ``values`` describes its value space, or ``None``."""
+
+    statement: str
+    values: str | None = None
+
+    def __post_init__(self) -> None:
+        _set(self, statement=_string(self.statement), values=_string(self.values))
+
+
+def _latent(value: object) -> Any:
+    """A latent target as a read-only mapping: its ``target`` as string data, its ``role`` a
+    ``TargetRole`` member when it names one."""
+    members = _mapping(value)
+    if type(members) is not MappingProxyType:
+        return cast(object, members)
+    snapshot = dict(cast("Mapping[str, Any]", members))
+    if "target" in snapshot:
+        snapshot["target"] = _string(snapshot["target"])
+    role: object = snapshot.get("role")
+    if isinstance(role, str) and string_data(role) in TargetRole.__members__:
+        snapshot["role"] = TargetRole(string_data(role))
+    return MappingProxyType(snapshot)
+
+
+# ---------------------------------------------------------------------------------------------
 # Text, questions and requirements
 
 
@@ -138,7 +181,10 @@ class Question:
     also declares ``value_type``, a ``ValueType`` member or its string, held as the member;
     ``is_list``, a boolean; ``text``, a board-ref origin ``{"ref": r}`` naming the string its
     spans index; and ``reference_date``, such an origin or ``None``. A probability kind's
-    question leaves those four at ``None``, ``False``, ``None`` and ``None``."""
+    question leaves those four at ``None``, ``False``, ``None`` and ``None``. ``target`` is the
+    target id it asks about, or ``None``; ``latent_targets`` lists the targets it bears on
+    without asking about them, each a mapping of ``target`` and ``role``, held as a read-only
+    copy whose role is a ``TargetRole`` member."""
 
     kind: AnswerKind | str
     """An ``AnswerKind`` member or its string, held as the member."""
@@ -148,6 +194,8 @@ class Question:
     is_list: bool = False
     text: Mapping[str, str] | None = None
     reference_date: Mapping[str, str] | None = None
+    target: str | None = None
+    latent_targets: Sequence[Mapping[str, Any]] = ()
 
     def __post_init__(self) -> None:
         kind: object = self.kind
@@ -173,7 +221,16 @@ class Question:
             value_type=value_type,
             text=_origin(self.text),
             reference_date=_origin(self.reference_date),
+            target=_string(self.target),
+            latent_targets=_latents(self.latent_targets),
         )
+
+
+def _latents(value: object) -> Any:
+    members = _sequence(value)
+    if type(members) is tuple:
+        return tuple(_latent(v) for v in cast("tuple[object, ...]", members))
+    return members
 
 
 def _labels(value: object) -> Any:
@@ -311,7 +368,8 @@ class Source:
 
 @dataclass(frozen=True, slots=True)
 class Rule:
-    """A function rule: it provides its own ``d:`` ref, its value of type ``outputs``."""
+    """A function rule: it provides its own ``d:`` ref, its value of type ``outputs``.
+    ``target`` is the target id it estimates, or ``None``."""
 
     provides: str
     outputs: str
@@ -322,6 +380,7 @@ class Rule:
     boundaries: Mapping[str, Any] | None = None
     candidates: bool = False
     grounded: str | None = None
+    target: str | None = None
     form: Literal["function"] = field(default="function", init=False)
 
     def __post_init__(self) -> None:
@@ -334,6 +393,7 @@ class Rule:
             params=_strings(self.params),
             boundaries=_mapping(self.boundaries),
             grounded=_string(self.grounded),
+            target=_string(self.target),
         )
 
 
@@ -349,10 +409,11 @@ class Table:
     order: Sequence[Any] | None = None
     candidates: bool = False
     grounded: str | None = None
+    target: str | None = None
     form: Literal["table"] = field(default="table", init=False)
 
     def __post_init__(self) -> None:
-        _set(self, provides=_string(self.provides))
+        _set(self, provides=_string(self.provides), target=_string(self.target))
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,8 +494,9 @@ class Design:
 
     ``sources``, ``rules``, ``plans``, ``types`` and ``groups`` map each declared name to its
     declaration; ``parameters`` maps each leaf's full path to a ``Parameter``; ``classes``
-    maps a ref to its class tree; ``tools`` lists the tool names; each defaults to empty.
-    ``context`` is the context block, ``None`` for none.
+    maps a ref to its class tree; ``targets`` maps each target id to a ``Target``; ``tools``
+    lists the tool names; each defaults to empty. ``context`` is the context block, ``None`` for
+    none.
     """
 
     state: str
@@ -451,6 +513,7 @@ class Design:
     classes: Mapping[str, Any] = field(default_factory=_empty)
     name: str | None = None
     context: Context | None = None
+    targets: Mapping[str, Target] = field(default_factory=_empty)
 
     def __post_init__(self) -> None:
         types = _mapping(self.types)
@@ -471,6 +534,7 @@ class Design:
             classes=_mapping(self.classes),
             tools=_strings(self.tools),
             name=_string(self.name),
+            targets=_mapping(self.targets),
         )
 
 

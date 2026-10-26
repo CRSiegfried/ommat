@@ -512,10 +512,10 @@ def check_param_functions() -> dict[str, Any]:
     return {"policy": inform, "param_keys": check_param}
 
 
-def test_a_format_6_document_writes_each_order_and_loads_back_to_its_own_hash() -> None:
+def test_a_document_from_format_6_writes_each_order_and_loads_back_to_its_own_hash() -> None:
     loaded = load(ordered_design())
     doc = decode(loaded.document)
-    assert doc["format"] == 6
+    assert doc["format"] == 7
     assert doc["sources"]["ask"]["payload_order"] == {"0": [1, 2, 0], "1": [1, 0]}
     assert doc["parameters"]["weights"]["order"] == {"0": [1, 0]}
     assert doc["sources"]["ask"]["provides"]["q:it"]["wording"]["order"] == {"0": [2, 1, 0]}
