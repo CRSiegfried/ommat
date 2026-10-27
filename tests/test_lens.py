@@ -902,15 +902,15 @@ def test_clicks_keep_a_picked_or_opened_design_and_the_jumps_and_stubs_work(
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
-def test_a_table_is_shown_as_not_traced_and_a_mass_on_its_bound_shows_its_digits(
+def test_a_table_shows_its_inputs_reads_and_a_mass_on_its_bound_shows_its_digits(
     tmp_path: Path,
 ) -> None:
     shown = _run(
         page([], [_targeted().document]),
         tmp_path,
         """(() => {
-          dstate = buildDesign({ policy: { form: "table", inputs: ["d:t"] },
-            rules: { t: { form: "table", provides: "d:t", inputs: ["q:a"] } },
+          dstate = buildDesign({ policy: { form: "table", inputs: [{ read: "d:t" }] },
+            rules: { t: { form: "table", provides: "d:t", inputs: [{ read: "q:a" }] } },
             sources: { s: { provides: { "q:a": {} } } } });
           renderDesign();
           const mass = { bar: [], thresholds: [], margin: [], null: [], confidence: [],
@@ -919,7 +919,8 @@ def test_a_table_is_shown_as_not_traced_and_a_mass_on_its_bound_shows_its_digits
             mass: valueHtml({ value: { kind: "choice", labels: ["a", "b", "c"],
               probabilities: { a: 0.3, b: 0.2, c: 0.5 } } }, mass, true) }; })()""",
     )
-    assert shown["cols"].count("not traced") == 2
+    assert "reads d:t" in shown["cols"]
+    assert "reads q:a" in shown["cols"]
     assert "reads nothing" not in shown["cols"]
     assert "mass a+b" in shown["mass"]
     assert "50.000%" in shown["mass"]

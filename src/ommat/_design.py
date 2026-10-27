@@ -398,15 +398,52 @@ class Rule:
         )
 
 
+@dataclass(frozen=True, slots=True, init=False)
+class Helper:
+    """A table input that calls a helper of the library over one read: ``name`` names the
+    helper, ``read`` its read, and ``params`` binds each other argument of its signature to a
+    leaf path."""
+
+    name: str
+    read: str
+    params: Mapping[str, str]
+
+    def __init__(self, name: str, read: str, /, **params: str) -> None:
+        _set(self, name=_string(name), read=_string(read), params=_mapping(params))
+
+
+@dataclass(frozen=True, slots=True)
+class Input:
+    """A table row's output that passes through the input reading ``ref``."""
+
+    ref: str
+
+    def __post_init__(self) -> None:
+        _set(self, ref=_string(self.ref))
+
+
+@dataclass(frozen=True, slots=True)
+class Param:
+    """A table row's output that passes through the leaf at ``path``."""
+
+    path: str
+
+    def __post_init__(self) -> None:
+        _set(self, path=_string(self.path))
+
+
 @dataclass(frozen=True, slots=True)
 class Table:
-    """A rule table; load refuses it at check 12."""
+    """A rule table: it provides its own ``d:`` ref, its value of type ``outputs``, from its
+    ``inputs`` and ``rows`` under the hit policy ``hit``; ``order`` ranks the output values
+    under ``P``. Each input is a ref or a ``Helper``; each row a list of its cells, then its
+    output entry, the cells alone under ``C#``."""
 
     provides: str
     outputs: str
     hit: str
-    inputs: Any
-    rows: Any
+    inputs: Sequence[Any]
+    rows: Sequence[Any]
     order: Sequence[Any] | None = None
     candidates: bool = False
     grounded: str | None = None
@@ -414,7 +451,17 @@ class Table:
     form: Literal["table"] = field(default="table", init=False)
 
     def __post_init__(self) -> None:
-        _set(self, provides=_string(self.provides), target=_string(self.target))
+        _set(
+            self,
+            provides=_string(self.provides),
+            outputs=_string(self.outputs),
+            hit=_string(self.hit),
+            inputs=_sequence(self.inputs),
+            rows=_sequence(self.rows),
+            order=_sequence(self.order),
+            grounded=_string(self.grounded),
+            target=_string(self.target),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,22 +487,36 @@ class Policy:
 
 @dataclass(frozen=True, slots=True)
 class PolicyTable:
-    """The policy table; load refuses it at check 12."""
+    """The policy table: its ``inputs``, ``d:`` and ``t:`` reads or helpers over one, and its
+    ``rows``, each a list of its cells, then the name of the plan declaration it gives. Its hit
+    policy is first."""
 
-    inputs: Any
-    rows: Any
+    inputs: Sequence[Any]
+    rows: Sequence[Any]
     form: Literal["table"] = field(default="table", init=False)
+
+    def __post_init__(self) -> None:
+        _set(self, inputs=_sequence(self.inputs), rows=_sequence(self.rows))
 
 
 @dataclass(frozen=True, slots=True)
 class PlanDeclaration:
-    """A plan declaration; load refuses it at check 12."""
+    """A plan a policy table's row names: its ``kind``, its ``steps``, each a ``Step``, and
+    its ``reason`` and ``reply`` as declared text."""
 
     kind: str
     steps: Sequence[Any] = ()
     reason: Text | None = None
     reply: Text | None = None
     grounded: str | None = None
+
+    def __post_init__(self) -> None:
+        _set(
+            self,
+            kind=_string(self.kind),
+            steps=_sequence(self.steps),
+            grounded=_string(self.grounded),
+        )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -636,9 +697,12 @@ class LoadedDesign:
     ``_grounded``, each per-candidate question's declared ref and its grounding set's ref;
     ``_requirement_bytes``, each source requirement's values as
     canonical bytes, by source id; ``_context_bytes``, the context block's document object or
-    null. The class trees, payloads, leaf values and plan-level
-    requirements are decoded afresh at each read, so nothing a caller
-    changes after load reaches a turn.
+    null; ``_reads`` and ``_params``, each rule's and the policy's declared reads and leaf
+    paths, a table's from its inputs, cells and outputs and the policy table's with its plans'
+    board refs and slot leaves; ``_tables``, each table's document object by rule id, the
+    policy table's under ``policy``; ``_plans``, each plan declaration's document object. The
+    class trees, payloads, leaf values and plan-level requirements are decoded afresh at each
+    read, so nothing a caller changes after load reaches a turn.
     """
 
     __slots__ = (
@@ -659,10 +723,14 @@ class LoadedDesign:
         "_leaf_bytes",
         "_leaf_types",
         "_needs",
+        "_params",
         "_payload_bytes",
+        "_plans",
         "_providers",
+        "_reads",
         "_requirement_bytes",
         "_requirements_bytes",
+        "_tables",
         "_types",
     )
 
@@ -688,6 +756,10 @@ class LoadedDesign:
     _requirements_bytes: bytes
     _document: bytes
     _hash: str
+    _reads: Mapping[str, tuple[str, ...]]
+    _params: Mapping[str, tuple[str, ...]]
+    _tables: Mapping[str, Mapping[str, Any]]
+    _plans: Mapping[str, Mapping[str, Any]]
 
     def __init__(self, token: object, **parts: object) -> None:
         if token is not _BUILT_BY_LOAD:

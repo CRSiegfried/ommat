@@ -41,7 +41,9 @@ from ommat._design import (
     When,
     new_failure,
 )
+from ommat._plan import Step
 from ommat._refs import code_point_sorted, parse_ref
+from ommat._table import NotationError, input_form, row_form
 from ommat._values import (
     MAX_DEPTH,
     MAX_INTEGER,
@@ -188,14 +190,15 @@ class _Form:
             )
             for tid, v in self.members(d.targets, "targets", Target).items()
         }
-        plans = self.members(d.plans, "plans", PlanDeclaration)
-        for name, plan in plans.items():
-            self.plan(name, plan)
+        plans = {
+            name: self.plan(name, plan)
+            for name, plan in self.members(d.plans, "plans", PlanDeclaration).items()
+        }
         policy: object = d.policy
         if isinstance(policy, Policy):
             policy = self.policy(policy)
         elif isinstance(policy, PolicyTable):
-            self.data(policy.inputs, policy.rows, "the policy table", ("policy",))
+            policy = self.policy_table(policy)
         else:
             self.fail(("policy",), "the policy is not a Policy or a PolicyTable")
         return Design(
@@ -618,8 +621,7 @@ class _Form:
     def rule(self, rid: str, r: object) -> Rule | Table | None:
         where, names = f"rule {quote(rid)}", (rid,)
         if isinstance(r, Table):
-            self.table(rid, r)
-            return r  # a refused form: check 10's member forms test it, check 12 names it
+            return self.table(rid, r)
         if not isinstance(r, Rule):
             self.fail(names, f"{where} is not a Rule or a Table")
             return None
@@ -677,46 +679,103 @@ class _Form:
                 out[key] = cleaned
         return out
 
-    # --- the refused forms' members (check 12) -----------------------------------------------
+    # --- tables and plan declarations (§table-notation) -----------------------------------
 
-    def table(self, rid: str, r: Table) -> None:
-        """A table's members of their declared form; its ``inputs`` and
-        ``rows`` only in the value domain, their members not yet decided."""
+    def table(self, rid: str, r: Table) -> Table | None:
+        """A rule table with its members in the tagged form; ``None`` when ``provides`` is not
+        a string. A member the form cannot read is left out, and fails."""
         where, names = f"rule {quote(rid)}", (rid,)
-        self.string(r.provides, f"{where}'s provides", names, optional=False)
-        self.string(r.outputs, f"{where}'s outputs", names, optional=False)
-        if not (isinstance(r.hit, str) and string_data(r.hit) in _HITS):
+        provides = self.string(r.provides, f"{where}'s provides", names, optional=False)
+        if provides is None:
+            return None
+        hit = r.hit
+        if not (isinstance(hit, str) and string_data(hit) in _HITS):
             self.fail(names, f"{where}'s hit is not one of U, A, P, F, C+, C<, C> or C#")
-        if r.order is not None and not (
-            not isinstance(r.order, str | bytes | bytearray)
-            and isinstance(r.order, Sequence)
-            and in_domain(list(r.order))
-        ):
-            self.fail(names, f"{where}'s order is not null or a list in the value domain")
-        self.boolean(r.candidates, False, f"{where}'s candidates", names)
-        self.string(r.grounded, f"{where}'s grounding ref", names)
-        self.string(r.target, f"{where}'s target", names)
-        self.data(r.inputs, r.rows, where, names)
+            hit = "F"
+        order: list[Any] | None = None
+        if r.order is not None:
+            if isinstance(r.order, str | bytes | bytearray) or not isinstance(r.order, Sequence):
+                self.fail(names, f"{where}'s order is not null or a list")
+            else:
+                order = list(cast("Sequence[object]", r.order))
+                if not in_domain(order):
+                    self.fail(names, f"{where}'s order holds a value outside the value domain")
+        inputs, rows = self.tagged(r.inputs, r.rows, hit, where, names, policy=False)
+        return Table(
+            provides=provides,
+            outputs=r.outputs,
+            hit=string_data(hit),
+            inputs=inputs,
+            rows=rows,
+            order=order,
+            candidates=self.boolean(r.candidates, False, f"{where}'s candidates", names),
+            grounded=self.string(r.grounded, f"{where}'s grounding ref", names),
+            target=self.string(r.target, f"{where}'s target", names),
+        )
 
-    def data(self, inputs: object, rows: object, where: str, names: tuple[str, ...]) -> None:
+    def policy_table(self, p: PolicyTable) -> PolicyTable:
+        inputs, rows = self.tagged(
+            p.inputs, p.rows, "F", "the policy table", ("policy",), policy=True
+        )
+        return PolicyTable(inputs, rows)
+
+    def tagged(
+        self,
+        inputs: object,
+        rows: object,
+        hit: str,
+        where: str,
+        names: tuple[str, ...],
+        *,
+        policy: bool,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """A table's inputs and rows in the tagged form, each that the form cannot read left
+        out, and failing."""
+        out_inputs: list[dict[str, Any]] = []
+        out_rows: list[dict[str, Any]] = []
         for member, value in (("inputs", inputs), ("rows", rows)):
-            if not in_domain(value):
-                self.fail(names, f"{where}'s {member} are outside the value domain")
+            if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+                self.fail(names, f"{where}'s {member} are not a list")
+                continue
+            for n, item in enumerate(cast("Sequence[object]", value), 1):
+                try:
+                    if member == "inputs":
+                        out_inputs.append(input_form(item))
+                    else:
+                        row = row_form(item, hit=hit, policy=policy)
+                        if not in_domain(row):
+                            raise NotationError("it holds a value outside the value domain")
+                        out_rows.append(row)
+                except NotationError as exc:
+                    shown = "input" if member == "inputs" else "row"
+                    self.fail(names, f"{where}'s {shown} {n}: {exc}")
+        return out_inputs, out_rows
 
-    def plan(self, name: str, p: PlanDeclaration) -> None:
-        """A plan declaration's members of their declared form; its steps
-        only a list in the value domain."""
+    def plan(self, name: str, p: PlanDeclaration) -> PlanDeclaration:
+        """A plan declaration with its members of their form: each step a ``Step``, or the
+        ``plan`` item's form of a step that holds a candidate origin, for check 12 to name; a
+        member of another form is left out, and fails."""
         where, names = f"plan declaration {quote(name)}", (name,)
-        self.string(p.kind, f"{where}'s kind", names, optional=False)
-        steps: object = p.steps
-        if isinstance(steps, str | bytes | bytearray) or not isinstance(steps, Sequence):
+        kind = self.string(p.kind, f"{where}'s kind", names, optional=False)
+        steps: list[Any] = []
+        if isinstance(p.steps, str | bytes | bytearray) or not isinstance(p.steps, Sequence):
             self.fail(names, f"{where}'s steps are not a list")
-        elif not in_domain(list(cast("Sequence[object]", steps))):
-            self.fail(names, f"{where}'s steps are outside the value domain")
+        else:
+            for step in cast("Sequence[object]", p.steps):
+                if type(step) is Step or _candidate_step(step):
+                    steps.append(step)
+                else:
+                    self.fail(names, f"{where} holds a step that is not a Step")
+        texts: dict[str, Text | None] = {}
         for member, text in (("reason", p.reason), ("reply", p.reply)):
-            if text is not None:
-                self.text(text, f"{where}'s {member}", names)
-        self.string(p.grounded, f"{where}'s grounding ref", names)
+            texts[member] = None if text is None else self.text(text, f"{where}'s {member}", names)
+        return PlanDeclaration(
+            "execute" if kind is None else kind,
+            steps,
+            texts["reason"],
+            texts["reply"],
+            self.string(p.grounded, f"{where}'s grounding ref", names),
+        )
 
     def paths(self, value: object, where: str, names: tuple[str, ...]) -> list[str] | None:
         """A list of strings, as load's own list, or ``None`` after a failure."""
@@ -773,6 +832,23 @@ class _Form:
             return None
         out["mass"] = sets
         return out
+
+
+def _candidate_step(step: object) -> bool:
+    """A step in the ``plan`` item's form holding a candidate origin, which a ``Step`` cannot
+    hold."""
+    if not isinstance(step, Mapping):
+        return False
+    members = cast("Mapping[str, Any]", step)
+    arguments = members.get("arguments")
+    return (
+        set(members) == {"tool", "arguments", "requirements"}
+        and isinstance(arguments, Mapping)
+        and any(
+            isinstance(o, Mapping) and set(cast("Mapping[str, Any]", o)) == {"candidate"}
+            for o in cast("Mapping[str, Any]", arguments).values()
+        )
+    )
 
 
 def _probability_members_unset(q: Question) -> bool:

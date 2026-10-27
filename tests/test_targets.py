@@ -329,11 +329,14 @@ def test_a_documents_target_slips_are_refused_as_a_designs_are(
     assert any(c == check and says in m for c, _, m in found), found
 
 
-def test_a_tables_target_is_held_to_its_form_and_the_table_refused() -> None:
+def test_a_tables_target_is_held_to_its_form() -> None:
     table = Table("d:urgent", 'label{"no", "yes"}', "U", [], [], target="tg:urgency")
     assert table.target == "tg:urgency"
     design = dataclasses.replace(targeted(rule_target=None), rules={"urgent": table})
-    assert {c for c, _, _ in failures(design)} == {12}
+    assert load(design).design_hash.startswith("sha256:")
+    unknown = dataclasses.replace(table, target="tg:nowhere")
+    found = failures(dataclasses.replace(design, rules={"urgent": unknown}))
+    assert {c for c, _, _ in found} == {3}
     bad = dataclasses.replace(table, target=3)  # type: ignore[arg-type]
     found = failures(dataclasses.replace(design, rules={"urgent": bad}))
     assert any(c == 10 and 'rule "urgent"\'s target is not a string' in m for c, _, m in found)

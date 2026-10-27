@@ -347,18 +347,24 @@ class _Filler:
 
     # --- grid points ---------------------------------------------------------------------
 
-    def bound(self, path: str) -> Fraction:
-        return exact(cast(float, self.loaded._leaf_value(path)))
+    def bound(self, boundary: str | int) -> Fraction:
+        """A boundary's value: a leaf's from the block, or an integer literal's own."""
+        if type(boundary) is int:
+            return Fraction(boundary)
+        return exact(cast(float, self.loaded._leaf_value(cast(str, boundary))))
 
     def numeric(self, path: str, t: Type) -> list[Point]:
-        """A numeric ``d:`` or ``t:`` read's axis; load's check 9 made its type numeric."""
+        """A numeric ``d:`` or ``t:`` read's axis, then null where a table's input admits it;
+        load's check 9 made its type numeric."""
+        if isinstance(t, Nullable):
+            return [*self.numeric(path, t.inner), Point(None, None)]
         integer = (isinstance(t, Scalar) and t.name == "integer") or (
             isinstance(t, Interval) and t.base == "integer"
         )
         lo = hi = None
         if isinstance(t, Interval):
             lo, hi = exact(t.lo), exact(t.hi)
-        bounds = [self.bound(p) for p in cast("Sequence[str]", self.loaded._grid[path])]
+        bounds = [self.bound(p) for p in cast("Sequence[str | int]", self.loaded._grid[path])]
         if not integer and lo is None:
             lo, hi = _end(min(bounds), -1), _end(max(bounds), 1)
         points: list[Point] = []

@@ -203,6 +203,8 @@ const esc = (s) => text(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;
 const pct = (p) => (typeof p === "number" ? (p * 100).toFixed(p * 100 >= 99.95 || p * 100 < 0.05 ? 0 : 1) + "%" : "–");
 const arr = (x) => (Array.isArray(x) ? x : []);
 const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
+// A component's declared reads: a function's reads, a table's inputs' reads.
+const readsOf = (c) => (obj(c).form === "table" ? arr(obj(c).inputs).map((i) => obj(i).read) : obj(c).reads);
 const str = (x) => typeof x === "string";
 
 // A ref's declared base: prefix and name, without a grounded bracket or a field path.
@@ -291,7 +293,7 @@ function build(record, design) {
     for (const d of arr(e.derivation)) link(node, obj(d).refs, "helper " + obj(d).helper, "record");
     link(node, obj(obj(e.marker).cause).refs, "named in its marker's cause", "record");
     const provider = Object.hasOwn(providers, base) ? providers[base] : undefined;
-    if (ref.startsWith("d:") && str(provider) && Object.hasOwn(rules, provider)) link(node, obj(rules[provider]).reads, "rule " + provider + " reads it", "design");
+    if (ref.startsWith("d:") && str(provider) && Object.hasOwn(rules, provider)) link(node, readsOf(rules[provider]), "rule " + provider + " reads it", "design");
   }
   for (const [idx, c] of calls) {
     link("c:" + idx, obj(obj(c.outcome).failed).refs, "named in its failure", "record");
@@ -310,7 +312,7 @@ function build(record, design) {
     }
     for (const c of arr(obj(plan.context).entries)) link("plan", [obj(c).ref], "a context entry", "record");
     for (const f of arr(obj(verdict).failures)) link("plan", [obj(f).ref, obj(obj(f).requirement).ref], "the guard refused on it", "record");
-    if (design) link("plan", obj(design.policy).reads, "the policy reads it", "design");
+    if (design) link("plan", readsOf(design.policy), "the policy reads it", "design");
     for (const c of arr(obj(design && design.context).entries)) {
       link("plan", [obj(c).ref], "a context entry", "design");
       link("plan", arr(obj(obj(c).text).slots).map((sl) => obj(obj(sl).origin).ref), "a context entry's wording", "design");
@@ -372,12 +374,12 @@ function buildDesign(doc) {
     const r = obj(r0);
     if (!str(r.provides)) continue;
     const node = "e:" + r.provides;
-    link(node, r.reads, "rule " + rid + " reads it");
+    link(node, readsOf(r), "rule " + rid + " reads it");
     linkParams(node, r.params, "rule " + rid + " reads it");
     linkParams(node, boundaryPaths(r.boundaries), "a declared boundary");
     if (str(r.grounded)) link(node, [r.grounded], "its candidate set");
   }
-  link("plan", policy.reads, "the policy reads it");
+  link("plan", readsOf(policy), "the policy reads it");
   linkParams("plan", policy.params, "the policy reads it");
   linkParams("plan", boundaryPaths(policy.boundaries), "a declared boundary");
   arr(design.requirements).forEach((q, i) => { link("req:" + i, [obj(q).ref], "it names this ref"); add("plan", "req:" + i, "guards every execute plan"); });
@@ -640,10 +642,10 @@ function renderDesign() {
     })];
   const ruleCards = of("rule").map(([node, n]) => card(node, `<span class="ref">${esc(node.slice(2))}</span>
     <span class="meta"><span>rule ${esc(n.rid)}</span><span>${esc(n.r.form ?? "?")}</span>${n.r.outputs != null ? `<span>${esc(n.r.outputs)}</span>` : ""}</span>
-    <span class="meta">${n.r.form === "table" ? `<span class="none" title="This engine refuses tables at load (check 12).">a table: not traced</span>` : `reads ${arr(n.r.reads).map(esc).join(", ") || "nothing"}`}</span>
+    <span class="meta">reads ${arr(readsOf(n.r)).map(esc).join(", ") || "nothing"}</span>
     <span class="meta">${targetHtml(targetsOf(d, node.slice(2)))}${n.r.boundaries ? `<span>boundaries declared</span>` : `<span class="none">no boundaries declared</span>`}</span>`));
   const policy = obj(d.policy);
-  const decide = [card("plan", `<span class="ref">policy · ${esc(policy.form ?? "?")}</span><span class="meta">${policy.form === "table" ? `<span class="none">a table: not traced</span>` : `reads ${arr(policy.reads).map(esc).join(", ") || "nothing"}`}</span>
+  const decide = [card("plan", `<span class="ref">policy · ${esc(policy.form ?? "?")}</span><span class="meta">reads ${arr(readsOf(policy)).map(esc).join(", ") || "nothing"}</span>
       ${policy.boundaries ? `<span class="meta">boundaries declared</span>` : ""}<span class="meta">plans: ${Object.keys(obj(d.plans)).map(esc).join(", ") || "none declared"}</span>`),
     ...of("req").map(([node, n]) => card(node, `<span class="ref">requires ${esc(n.q.ref)}</span><span class="meta">= ${esc(JSON.stringify(n.q.value ?? null))} · every execute plan</span>`))];
   const paramCards = of("param").map(([node, n]) => card(node, `<span class="ref">${esc(n.path)}</span><span class="meta">${esc(n.p.type ?? "")}</span><div class="val">${esc(JSON.stringify(n.p.value ?? null))}</div>`));

@@ -19,6 +19,7 @@ import inspect
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from graphlib import CycleError, TopologicalSorter
 from types import MappingProxyType
 from typing import Any, cast
@@ -64,12 +65,25 @@ from ommat._design import (
     new_failure,
 )
 from ommat._form import X_ROLES, check_form
+from ommat._markers import PlanKind
+from ommat._plan import Binding, Origin, Step, step_document
 from ommat._refs import (
     _ParsedRef,
     code_point_sorted,
     is_declared_name,
+    is_field_path,
     is_segment,
     parse_ref,
+)
+from ommat._table import (
+    ANY,
+    COMPARISONS,
+    HELPERS,
+    Axis,
+    overlap,
+    plan_conditions,
+    python_input,
+    python_row,
 )
 from ommat._types import (
     AnswerType,
@@ -158,6 +172,14 @@ _EXTRACTION_TREE = {
 _EXTRACTION_SET = ("value", "guess", "span")
 """The members a class name declared at an extraction ``q:`` ref sets."""
 _UNITS = MappingOf(_UNIT)
+_SIGNATURES: dict[str, dict[str, Type]] = {
+    "pick_with_margin": {"bar": _UNIT, "margin": _UNIT},
+    "pick_with_thresholds": {"thresholds": _UNITS, "margin": _UNIT},
+    "mass": {"labels": ListOf(_STRING)},
+    "extract": {"null_bar": _UNIT},
+}
+"""Each table helper's arguments after its read, with the type a binding's leaf conforms
+to."""
 _TYPE_SIZE = 2**20
 """The most code points a type spells with its definitions resolved, and the types of the
 refs the class trees cover, summed."""
@@ -242,6 +264,7 @@ class _Loader:
         self.leaves: frozenset[str] = frozenset(self.d.parameters) | frozenset(checked.leaves)
         self.refused_sources: set[str] = set()
         self.refused_rules: set[str] = set()
+        self.refused_plans: set[str] = set()
         self.grounded: set[str] = set()
         self.providers: dict[str, list[str | None]] = {}
         self.uses: list[_Use] = []
@@ -281,12 +304,44 @@ class _Loader:
                 yield sid, source
 
     def rules(self) -> Iterator[tuple[str, Rule]]:
+        """Each function rule check 12 lets through."""
+        for rid, rule in self.d.rules.items():
+            if rid not in self.refused_rules and isinstance(rule, Rule):
+                yield rid, rule
+
+    def tables(self) -> Iterator[tuple[str, Table]]:
+        """Each rule table check 12 lets through."""
+        for rid, rule in self.d.rules.items():
+            if rid not in self.refused_rules and isinstance(rule, Table):
+                yield rid, rule
+
+    def components(self) -> Iterator[tuple[str, Rule | Table]]:
+        """Each rule, function or table, check 12 lets through."""
         for rid, rule in self.d.rules.items():
             if rid not in self.refused_rules:
-                yield rid, cast(Rule, rule)
+                yield rid, rule
 
     def policy(self) -> Policy | None:
         return self.d.policy if isinstance(self.d.policy, Policy) else None
+
+    def policy_table(self) -> PolicyTable | None:
+        return self.d.policy if isinstance(self.d.policy, PolicyTable) else None
+
+    def plans(self) -> Iterator[tuple[str, PlanDeclaration]]:
+        """Each plan declaration check 12 lets through."""
+        for name, plan in self.d.plans.items():
+            if name not in self.refused_plans:
+                yield name, plan
+
+    def named_plans(self) -> list[str]:
+        """The declared plans the policy table's rows name, in first-named order."""
+        table = self.policy_table()
+        if table is None:
+            return []
+        names = [cast(str, row["plan"]) for row in table.rows]
+        return [
+            n for n in dict.fromkeys(names) if n in self.d.plans and n not in self.refused_plans
+        ]
 
     # --- the run ---------------------------------------------------------------------------
 
@@ -296,6 +351,7 @@ class _Loader:
         self.check_2()
         self.check_3()
         self.check_4()
+        self.check_6()
         self.check_1()
         self.check_10()
         self.check_8()
@@ -357,17 +413,26 @@ class _Loader:
                     refuse(sources, (sid, ref), f"{what}'s {_q(ref)}", _RECORD_SET)
         for rid, rule in self.d.rules.items():
             what = f"rule {_q(rid)}"
-            if isinstance(rule, Table):
-                refuse(rules, (rid,), what, "decision table")
-            elif rule.candidates and self.of_records(rule.outputs):
+            if rule.candidates and self.of_records(rule.outputs):
                 refuse(rules, (rid,), what, _RECORD_SET)
             if rule.grounded is not None:
-                refuse(rules, (rid,), what, "grounded rule")
+                form = "grounded table" if isinstance(rule, Table) else "grounded rule"
+                refuse(rules, (rid,), what, form)
                 self.grounded.add(rid)
-        if isinstance(self.d.policy, PolicyTable):
-            refuse(set(), ("policy",), "the policy", "policy table")
-        for name in self.d.plans:
-            refuse(set(), (name,), f"plan declaration {_q(name)}", "plan declaration")
+        for name, plan in self.d.plans.items():
+            what = f"plan declaration {_q(name)}"
+            if plan.grounded is not None:
+                refuse(self.refused_plans, (name,), what, "grounded plan declaration")
+            candidate = any(not isinstance(step, Step) for step in plan.steps) or any(
+                "candidate" in slot["origin"]
+                for text in (plan.reason, plan.reply)
+                if text is not None
+                for slot in text.slots
+            )
+            if candidate:
+                refuse(
+                    self.refused_plans, (name,), what, "plan declaration with a candidate origin"
+                )
 
     def of_records(self, text: object) -> bool:
         """Whether a candidate set's type text is a list of a record type, its definitions
@@ -467,10 +532,45 @@ class _Loader:
         for rid, rule in self.rules():
             for ref in rule.reads:
                 self.use(rid, f"rule {_q(rid)}", "read", ref)
+        for rid, table in self.tables():
+            for n, i in enumerate(table.inputs, 1):
+                role = "read" if i["helper"] is None else "helper"
+                self.use(rid, f"rule {_q(rid)}'s input {n}", role, i["read"])
+            self.table_refs(rid, f"rule {_q(rid)}", table.inputs, table.rows)
         policy = self.policy()
         if policy is not None:
             for ref in policy.reads:
                 self.use("policy", "the policy", "policy", ref)
+        policy_table = self.policy_table()
+        if policy_table is not None:
+            for n, i in enumerate(policy_table.inputs, 1):
+                self.use("policy", f"the policy table's input {n}", "policy", i["read"])
+            self.table_refs("policy", "the policy table", policy_table.inputs, policy_table.rows)
+        for name, plan in self.plans():
+            where = f"plan declaration {_q(name)}"
+            for n, step in enumerate(plan.steps, 1):
+                for arg, origin in cast(Step, step).arguments.items():
+                    if isinstance(origin, Origin) and origin.ref is not None:
+                        shown = f"{where}'s step {n} argument {_q(arg)}"
+                        self.use(name, shown, "origin", origin.ref)
+                for requirement in cast(Step, step).requirements:
+                    shown = f"{where}'s step {n} requirement"
+                    parsed = self.ref(requirement.ref, shown, name)
+                    if parsed is not None and parsed.fields:
+                        self.fail(
+                            7,
+                            (name, requirement.ref),
+                            f"{shown} names {_q(requirement.ref)}, which has a field path",
+                        )
+                    elif parsed is not None:
+                        self.uses.append(_Use(name, shown, "requirement", requirement.ref, parsed))
+            for member, text in (("reason", plan.reason), ("reply", plan.reply)):
+                if text is None:
+                    continue
+                for slot in text.slots:
+                    tag, value = next(iter(slot["origin"].items()))
+                    if tag == "ref":
+                        self.use(name, f"{where}'s {member}", "plan-slot", value)
         for owner, where, boundaries, _ in self.boundary_fields():
             for key in boundaries:
                 # Check 3 finds each key's provider and check 7 its form; check 4 gives a
@@ -517,6 +617,19 @@ class _Loader:
                     self.use(entry.ref, f"{where}'s text", "context-slot", value)
                 elif tag == "candidate":
                     self.context_candidates.append((entry.ref, where))
+
+    def table_refs(
+        self, owner: str, where: str, inputs: Sequence[Any], rows: Sequence[Any]
+    ) -> None:
+        """Check 7 over the refs a table's cells and pass-throughs name; check 9 holds each to
+        an input of the table."""
+        for k, row in enumerate(rows, 1):
+            named = list(_cell_refs(row["cells"]))
+            output = row.get("output")
+            if isinstance(output, dict) and "ref" in output:
+                named.append(cast("dict[str, str]", output)["ref"])
+            for ref in named:
+                self.ref(ref, f"{where}'s row {k}", owner)
 
     def context_entries(self) -> tuple[ContextEntry, ...]:
         """The context block's entries check 10's form test kept, none with no block."""
@@ -606,7 +719,7 @@ class _Loader:
                     yield (ref,), where, question.target
                 for latent in question.latent_targets:
                     yield (ref,), f"{where}'s latent_targets", latent["target"]
-        for rid, rule in self.rules():
+        for rid, rule in self.components():
             if rule.target is not None:
                 yield (rid,), f"rule {_q(rid)}", rule.target
 
@@ -663,7 +776,7 @@ class _Loader:
                     f"source {_q(sid)} provides q: and t: refs; "
                     "a source provides refs of one level",
                 )
-        for rid, rule in self.rules():
+        for rid, rule in self.components():
             parsed = _declared(rule.provides)
             if parsed is not None and rule.provides != f"d:{rid}":
                 message = (
@@ -683,6 +796,8 @@ class _Loader:
             "source-requirement": ("d",),
             "flagged": ("d", "t"),
             "context-slot": ("d", "t"),
+            "origin": ("d", "t"),
+            "plan-slot": ("d", "t"),
         }
         for flagged, where in self.context_candidates:
             self.fail(
@@ -720,6 +835,62 @@ class _Loader:
                 )
             elif u.parsed.candidate is not None:
                 self.fail(4, names, f"{u.where} names {_q(u.ref)}, a grounded ref")
+        self.check_4_helpers()
+
+    def helper_inputs(self) -> Iterator[tuple[str, str, int, dict[str, Any]]]:
+        """Each helper input of a table: its owner, where it is, its position and its input."""
+        for rid, table in self.tables():
+            for n, i in enumerate(table.inputs, 1):
+                if i["helper"] is not None:
+                    yield rid, f"rule {_q(rid)}'s input {n}", n, i
+        policy_table = self.policy_table()
+        if policy_table is not None:
+            for n, i in enumerate(policy_table.inputs, 1):
+                if i["helper"] is not None:
+                    yield "policy", f"the policy table's input {n}", n, i
+
+    def check_4_helpers(self) -> None:
+        """A helper input's read conforms to its signature's ``ref``: a pick helper's or
+        ``mass``'s a question of a probability kind, ``extract``'s an extraction question, and
+        ``size``'s a ``t:`` or ``d:`` read, its list type check 9's."""
+        for owner, where, _, i in self.helper_inputs():
+            helper, read = i["helper"], i["read"]
+            if helper not in HELPERS:
+                continue  # check 6's
+            parsed = _parsed(read)
+            if parsed is None:
+                continue  # check 7's
+            names = (owner, read)
+            if helper == "size":
+                if parsed.level == "q":
+                    self.fail(4, names, f"{where}: size reads {_q(read)}, which is no list")
+                continue
+            if parsed.level != "q" or parsed.fields:
+                self.fail(4, names, f"{where}: {helper} reads {_q(read)}, which is not a question")
+                continue
+            base = f"q:{parsed.name}"
+            if base not in self.providers:
+                continue  # check 3's
+            extraction = self.extraction_ref(base)
+            if helper == "extract" and not extraction:
+                self.fail(
+                    4,
+                    names,
+                    f"{where}: extract reads {_q(read)}, which is not an extraction question",
+                )
+            elif helper != "extract" and extraction:
+                self.fail(4, names, f"{where}: {helper} reads {_q(read)}, an extraction question")
+
+    def check_6(self) -> None:
+        for owner, where, _, i in self.helper_inputs():
+            helper = i["helper"]
+            if helper not in HELPERS:
+                self.fail(
+                    6,
+                    (owner,),
+                    f"{where} calls {_q(helper)}, which is not a helper a table may call: "
+                    "pick_with_margin, pick_with_thresholds, size, mass or extract",
+                )
 
     # --- check 1 ---------------------------------------------------------------------------
 
@@ -728,7 +899,8 @@ class _Loader:
         kinds: dict[str, list[str]] = {}
         blocks: list[tuple[str, list[str]]] = [
             ("source", [s for s, _ in self.sources()]),
-            ("rule", [r for r, _ in self.rules()]),
+            ("rule", [r for r, _ in self.components()]),
+            ("plan declaration", [n for n, _ in self.plans()]),
             ("parameter", list(self.leaves)),
             ("tool", list(d.tools)),
             ("type definition", list(d.types)),
@@ -758,6 +930,21 @@ class _Loader:
             self.fail(1, (node, path), f"parameter {_q(node)} is a node of {_q(path)}")
         for owner, where, what, members, refs in self.unordered():
             self.repeats(owner, where, what, members, refs=refs)
+        for owner, where, rows in self.table_rows():
+            for k, row in enumerate(rows, 1):
+                for cell in row["cells"]:
+                    if isinstance(cell, dict) and "one_of" in cell:
+                        seen: set[bytes] = set()
+                        for value in cast("list[object]", cast("dict[str, Any]", cell)["one_of"]):
+                            key = encode(value)
+                            if key in seen:
+                                shown = key.decode("utf-8")
+                                self.fail(
+                                    1,
+                                    (owner,),
+                                    f"{where}'s row {k} lists {shown} twice in a one_of cell",
+                                )
+                            seen.add(key)
         for sid, source in self.sources():
             if source.requirement is not None:
                 self.repeated_values(sid, source.requirement.ref, source.requirement.values)
@@ -812,6 +999,22 @@ class _Loader:
         if policy is not None:
             yield "policy", "the policy", "reads", policy.reads, True
             yield "policy", "the policy", "params", policy.params, False
+
+    def table_rows(self) -> Iterator[tuple[str, str, Sequence[Any]]]:
+        """Each table's owner, where it is and its rows."""
+        for rid, table in self.tables():
+            yield rid, f"rule {_q(rid)}", table.rows
+        policy_table = self.policy_table()
+        if policy_table is not None:
+            yield "policy", "the policy table", policy_table.rows
+
+    def table_inputs(self) -> Iterator[tuple[str, str, Sequence[Any]]]:
+        """Each table's owner, where it is and its inputs."""
+        for rid, table in self.tables():
+            yield rid, f"rule {_q(rid)}", table.inputs
+        policy_table = self.policy_table()
+        if policy_table is not None:
+            yield "policy", "the policy table", policy_table.inputs
 
     def boundary_fields(self) -> Iterator[tuple[str, str, Mapping[str, Any], Sequence[str]]]:
         """Each declared ``boundaries`` field of a rule check 12 lets through and of the
@@ -1004,6 +1207,39 @@ class _Loader:
             if t is not None and rule.candidates:
                 self.candidate_type(t, f"rule {_q(rid)}", (rid,))
             self.version(rule.version, f"rule {_q(rid)}", rid)
+        for rid, table in self.tables():
+            provides = table.provides if _declared(table.provides) is not None else None
+            t = self.declared(table.outputs, True, f"rule {_q(rid)}'s outputs", (rid,), provides)
+            if t is not None and provides is not None:
+                self.types[table.provides] = t
+            if t is not None and table.candidates:
+                self.candidate_type(t, f"rule {_q(rid)}", (rid,))
+            if not in_domain(table.inputs) or not in_domain(table.rows):
+                self.fail(
+                    10, (rid,), f"rule {_q(rid)}'s inputs or rows are outside the value domain"
+                )
+        for name, plan in self.plans():
+            for n, step in enumerate(plan.steps, 1):
+                for arg, origin in cast(Step, step).arguments.items():
+                    if (
+                        isinstance(origin, Origin)
+                        and origin.ref is None
+                        and not in_domain(origin.literal)
+                    ):
+                        self.fail(
+                            10,
+                            (name,),
+                            f"plan declaration {_q(name)}'s step {n} argument {_q(arg)} is a "
+                            "literal outside the value domain",
+                        )
+                for r in cast(Step, step).requirements:
+                    if not in_domain(r.value):
+                        self.fail(
+                            10,
+                            (name, r.ref),
+                            f"plan declaration {_q(name)}'s step {n} requirement holds a value "
+                            "outside the value domain",
+                        )
         policy = self.policy()
         if policy is not None:
             self.version(policy.version, "the policy", "policy")
@@ -1095,6 +1331,14 @@ class _Loader:
                 if tag == "param":
                     shown = f"the context entry for {_q(entry.ref)}"
                     named_params.append((entry.ref, shown, value))
+        named_params += self.table_params()
+        for name, plan in self.plans():
+            for member, text in (("reason", plan.reason), ("reply", plan.reply)):
+                for slot in () if text is None else text.slots:
+                    tag, value = next(iter(slot["origin"].items()))
+                    if tag == "param":
+                        shown = f"plan declaration {_q(name)}'s {member}"
+                        named_params.append((name, shown, value))
         for owner, where, path in named_params:
             if path not in declared:
                 self.fail(8, (owner, path), f"{where} names {_q(path)}, which is not a leaf")
@@ -1107,10 +1351,53 @@ class _Loader:
             if not value_conforms(self.leaf_value(path), t, {}, form="live"):
                 self.fail(8, (path,), f"parameter {_q(path)}'s value does not conform to its type")
 
+    def table_params(self) -> list[tuple[str, str, str]]:
+        """Each leaf path a table names: its helpers' bindings, its cells' operands and its
+        outputs' pass-throughs, with its owner and where."""
+        out: list[tuple[str, str, str]] = []
+        for owner, where, inputs in self.table_inputs():
+            for n, i in enumerate(inputs, 1):
+                out += [(owner, f"{where}'s input {n}", path) for path in i["params"].values()]
+        for owner, where, rows in self.table_rows():
+            for k, row in enumerate(rows, 1):
+                shown = f"{where}'s row {k}"
+                out += [(owner, shown, path) for path in _cell_params(row["cells"])]
+                output = row.get("output")
+                if isinstance(output, dict) and "param" in output:
+                    out.append((owner, shown, cast("dict[str, str]", output)["param"]))
+        return out
+
     def check_8_types(self) -> None:
         """Check 8's test of a named leaf's type: a leaf a ``boundaries`` field names has a
-        type that conforms to ``number`` or ``mapping<string, number>``. It runs
-        once checks 1 to 4, 10 and 12 pass, so every declared leaf has its type."""
+        type that conforms to ``number`` or ``mapping<string, number>``; a helper binding's
+        leaf conforms to its argument's type in the helper's signature, and a leaf a cell
+        compares against is numeric. It runs once checks 1 to 4, 10 and 12 pass, so every
+        declared leaf has its type."""
+        for owner, where, inputs in self.table_inputs():
+            for n, i in enumerate(inputs, 1):
+                signature = _SIGNATURES.get(cast(str, i["helper"]), {})
+                for arg, path in cast("dict[str, str]", i["params"]).items():
+                    t, wanted = self.leaf_types.get(path), signature.get(arg)
+                    if t is None or wanted is None or conforms(t, wanted, {}):
+                        continue
+                    self.fail(
+                        8,
+                        (owner, path),
+                        f"{where}'s input {n} binds {arg} to {_q(path)}, whose type is "
+                        f"{render(self.leaf_written[path])}, which does not conform to "
+                        f"{render(wanted)}",
+                    )
+        for owner, where, rows in self.table_rows():
+            for k, row in enumerate(rows, 1):
+                for path in _cell_params(row["cells"]):
+                    t = self.leaf_types.get(path)
+                    if t is not None and not conforms(t, _NUMBER, {}):
+                        self.fail(
+                            8,
+                            (owner, path),
+                            f"{where}'s row {k} compares against {_q(path)}, whose type is "
+                            f"{render(self.leaf_written[path])}, which is not numeric",
+                        )
         for owner, _, where, entry in self.boundary_entries():
             for path in _entry_paths(entry):
                 t = self.leaf_types.get(path)
@@ -1180,6 +1467,519 @@ class _Loader:
                         f"{u.where} on {_q(u.ref)} can never hold for {shown}: {reason}",
                     )
         self.check_9_boundaries()
+        self.check_9_tables()
+
+    # --- check 9 over tables and plan declarations (§decision-tables) ----------------------
+
+    def input_type(self, owner: str, where: str, i: Mapping[str, Any]) -> Type | None:
+        """A table input's type: a bare read's, ``answer`` for a ``q:`` one; a helper's
+        return; ``None`` when an earlier check refused what it rests on."""
+        read, helper = cast(str, i["read"]), i["helper"]
+        parsed = _parsed(read)
+        if parsed is None:
+            return None
+        base = f"{parsed.level}:{parsed.name}"
+        if helper is None:
+            if parsed.level == "q":
+                return AnswerType() if not parsed.fields else None
+            t = self.read_type(_Use(owner, where, "read", read, parsed))
+            return None if isinstance(t, TypeFailure) else t
+        if helper == "size":
+            return Scalar("integer")
+        if helper == "mass":
+            return _UNIT
+        if helper not in HELPERS or base not in self.providers or parsed.level != "q":
+            return None
+        question = self.question(base)
+        if helper == "extract":
+            if question.kind is not AnswerKind.extraction:
+                return None
+            item = _NUMBER if question.value_type is ValueType.number else _STRING
+            return ListOf(item) if question.is_list else item
+        if question.kind is AnswerKind.extraction:
+            return None
+        if question.kind is AnswerKind.noul:
+            return Label(tuple(sorted(_NOUL_LABELS)))
+        if isinstance(question.labels, Mapping):
+            return _STRING  # a candidate-valued set's labels are named per turn
+        return Label(tuple(sorted(label_parts(_fixed(question.labels))[0])))
+
+    def check_9_tables(self) -> None:
+        for rid, table in self.tables():
+            self.check_9_table(rid, f"rule {_q(rid)}", table.inputs, table.rows, table)
+        policy_table = self.policy_table()
+        if policy_table is not None:
+            self.check_9_table(
+                "policy", "the policy table", policy_table.inputs, policy_table.rows, None
+            )
+            self.check_9_policy_table(policy_table)
+        for name, plan in self.plans():
+            self.check_9_plan(name, plan)
+        self.check_9_covered()
+
+    def check_9_table(
+        self,
+        owner: str,
+        where: str,
+        inputs: Sequence[dict[str, Any]],
+        rows: Sequence[dict[str, Any]],
+        table: Table | None,
+    ) -> None:
+        names = (owner,)
+        reads = [cast(str, i["read"]) for i in inputs]
+        types = [self.input_type(owner, where, i) for i in inputs]
+        counts = Counter(reads)
+        for n, i in enumerate(inputs, 1):
+            self.check_9_helper(owner, f"{where}'s input {n}", i)
+
+        def named(ref: str, shown: str) -> int | None:
+            if counts[ref] == 1:
+                return reads.index(ref)
+            if counts[ref] == 0:
+                self.fail(9, (owner, ref), f"{shown} names {_q(ref)}, which no input of it reads")
+            else:
+                self.fail(9, (owner, ref), f"{shown} names {_q(ref)}, which two inputs of it read")
+            return None
+
+        outputs = None
+        if table is not None and _declared(table.provides) is not None:
+            outputs = self.types.get(table.provides)
+        hit = "F" if table is None else table.hit
+        for k, row in enumerate(rows, 1):
+            shown = f"{where}'s row {k}"
+            cells = row["cells"]
+            if len(cells) != len(inputs):
+                self.fail(9, names, f"{shown} has {len(cells)} cells for its {len(inputs)} inputs")
+                continue
+            for n, cell in enumerate(cells):
+                self.check_9_cell(owner, f"{shown}'s cell {n + 1}", cell, n, reads, types, named)
+            if table is not None:
+                self.check_9_output(owner, shown, row["output"], hit, outputs, reads, types, named)
+        if table is None:
+            return
+        self.check_9_hit(owner, where, table, outputs)
+        if hit in ("U", "A") and not self.failed(frozenset({8, 9})):
+            self.check_9_overlap(owner, where, table, types)
+
+    def check_9_helper(self, owner: str, where: str, i: Mapping[str, Any]) -> None:
+        """A helper's ``params`` name each argument of its signature after the read, and no
+        other; a ``mass`` input's ``labels`` leaf holds labels of its read, each once."""
+        helper = i["helper"]
+        if helper is None:
+            if i["params"]:
+                self.fail(
+                    9, (owner,), f"{where} reads {_q(i['read'])} and binds params, with no helper"
+                )
+            return
+        if helper not in HELPERS:
+            return  # check 6's
+        wanted, given = set(HELPERS[helper]), set(i["params"])
+        if given != wanted:
+            shown = ", ".join(HELPERS[helper]) or "no argument"
+            self.fail(
+                9,
+                (owner,),
+                f"{where} binds {', '.join(sorted(given)) or 'nothing'}; {helper} takes {shown} "
+                "after its read",
+            )
+            return
+        if helper != "mass":
+            return
+        path = i["params"]["labels"]
+        parsed = _parsed(i["read"])
+        if (
+            path not in self.leaf_types
+            or parsed is None
+            or f"q:{parsed.name}" not in self.providers
+        ):
+            return
+        value = self.leaf_value(path)
+        if type(value) is not list:
+            return  # check 8's
+        question = self.question(f"q:{parsed.name}")
+        labels = (
+            _NOUL_LABELS
+            if question.kind is AnswerKind.noul
+            else label_parts(_fixed(question.labels))[0]
+        )
+        members = cast("list[object]", value)
+        for label in members:
+            if label not in labels:
+                self.fail(
+                    9,
+                    (owner, path),
+                    f"{where}'s labels {_q(path)} holds {_q(str(label))}, which is not a label "
+                    f"of {_q(i['read'])}",
+                )
+        if len(set(map(str, members))) != len(members):
+            self.fail(9, (owner, path), f"{where}'s labels {_q(path)} lists a label twice")
+
+    def check_9_cell(
+        self,
+        owner: str,
+        where: str,
+        cell: Any,
+        n: int,
+        reads: Sequence[str],
+        types: Sequence[Type | None],
+        named: Callable[[str, str], int | None],
+    ) -> None:
+        names = (owner,)
+        if cell == ANY:
+            return
+        ((tag, member),) = cast("dict[str, Any]", cell).items()
+        if tag == "marker":
+            return
+        t = types[n]
+        if t is None:
+            return
+        if isinstance(t, AnswerType):
+            self.fail(
+                9,
+                names,
+                f"{where} tests the answer at {_q(reads[n])}; only - and marker cells apply to a "
+                "q: input",
+            )
+            return
+        inner = resolve(t, self.defs)
+        if isinstance(inner, Nullable):
+            inner = resolve(inner.inner, self.defs)
+        if tag in ("is", "one_of"):
+            for value in [member] if tag == "is" else cast("list[object]", member):
+                problem = _value_cell(value, inner)
+                if problem is not None:
+                    self.fail(
+                        9, names, f"{where}: {problem} over {_q(reads[n])}, of type {render(t)}"
+                    )
+            return
+        if tag == "in":
+            j = named(cast(str, member), where)
+            if j is None or types[j] is None:
+                return
+            listed = resolve(cast(Type, types[j]), self.defs)
+            if isinstance(listed, Nullable):
+                listed = resolve(listed.inner, self.defs)
+            if not isinstance(listed, ListOf):
+                self.fail(9, names, f"{where}: {_q(member)} is not a list")
+                return
+            item = resolve(listed.item, self.defs)
+            numeric = _is_numeric(inner) and _is_numeric(item)
+            textual = _is_textual(inner) and _is_textual(item)
+            if not (numeric or textual):
+                self.fail(
+                    9,
+                    names,
+                    f"{where}: {_q(reads[n])} and the members of {_q(member)} are not both "
+                    "numeric, nor both strings or labels",
+                )
+            return
+        if not _is_numeric(inner):
+            self.fail(
+                9,
+                names,
+                f"{where} compares {_q(reads[n])}, of type {render(t)}, which is not numeric",
+            )
+            return
+        integer = _numeric_base(inner) == "integer"
+        operands = cast("list[dict[str, Any]]", member if tag == "between" else [member])
+        bounds: list[object] = []
+        for operand in operands:
+            if "literal" in operand:
+                if not integer:
+                    self.fail(
+                        9,
+                        names,
+                        f"{where} holds an integer literal over {_q(reads[n])}, which is not "
+                        "integer",
+                    )
+                bounds.append(operand["literal"])
+            elif "param" in operand:
+                path = cast(str, operand["param"])
+                bounds.append(self.leaf_value(path) if path in self.leaf_types else None)
+            else:
+                j = named(cast(str, operand["ref"]), where)
+                if j is not None and types[j] is not None:
+                    other = resolve(cast(Type, types[j]), self.defs)
+                    if isinstance(other, Nullable):
+                        other = resolve(other.inner, self.defs)
+                    if not _is_numeric(other):
+                        self.fail(
+                            9,
+                            names,
+                            f"{where} compares against {_q(operand['ref'])}, which is not numeric",
+                        )
+        if tag == "between" and all(_number_value(b) for b in bounds):
+            lo, hi = cast("list[float]", bounds)
+            if lo > hi:
+                self.fail(9, names, f"{where}'s interval has its lower bound above its upper")
+
+    def check_9_output(
+        self,
+        owner: str,
+        where: str,
+        output: Any,
+        hit: str,
+        outputs: Type | None,
+        reads: Sequence[str],
+        types: Sequence[Type | None],
+        named: Callable[[str, str], int | None],
+    ) -> None:
+        names = (owner,)
+        if hit == "C#":
+            return  # the form gives a count's rows no output
+        ((tag, member),) = cast("dict[str, Any]", output).items()
+        if tag == "marker":
+            if hit == "P" or hit.startswith("C"):
+                self.fail(
+                    9,
+                    names,
+                    f"{where}'s output is Unsure, which a {hit} table cannot rank or aggregate",
+                )
+            return
+        if hit == "P" and tag != "literal":
+            self.fail(9, names, f"{where}'s output is a pass-through, which a P table cannot rank")
+            return
+        if outputs is None:
+            return
+        if tag == "literal":
+            form = "document" if self.parsed is not None else "live"
+            if not value_conforms(member, outputs, self.defs, form=form):
+                self.fail(
+                    9,
+                    names,
+                    f"{where}'s output {encode(member).decode('utf-8')} is not a value of "
+                    f"{render(outputs)}",
+                )
+            elif hit.startswith("C") and not _number_value(member):
+                self.fail(9, names, f"{where}'s output is not a number")
+            return
+        if tag == "param":
+            t = self.leaf_types.get(cast(str, member))
+            if t is not None and not conforms(t, outputs, self.defs):
+                self.fail(
+                    9,
+                    names,
+                    f"{where} passes {_q(member)} through, whose type does not conform to "
+                    f"{render(outputs)}",
+                )
+            return
+        j = named(cast(str, member), where)
+        if j is None or types[j] is None:
+            return
+        t = cast(Type, types[j])
+        if isinstance(t, AnswerType):
+            self.fail(
+                9,
+                names,
+                f"{where} passes the answer at {_q(member)} through; a q: input cannot be passed "
+                "through",
+            )
+        elif not conforms(t, outputs, self.defs):
+            self.fail(
+                9,
+                names,
+                f"{where} passes {_q(member)} through, of type {render(t)}, which does not "
+                f"conform to {render(outputs)}",
+            )
+
+    def check_9_hit(self, owner: str, where: str, table: Table, outputs: Type | None) -> None:
+        names = (owner,)
+        hit = table.hit
+        if hit != "P":
+            if table.order is not None:
+                self.fail(9, names, f"{where} declares an order, which only a P table has")
+        else:
+            order = list(table.order or ())
+            if table.order is None:
+                self.fail(9, names, f"{where} is a P table with no order")
+            keys = [encode(v) for v in order if in_domain(v)]
+            if len(set(keys)) != len(keys):
+                self.fail(9, names, f"{where}'s order lists a value twice")
+            form = "document" if self.parsed is not None else "live"
+            for v in order:
+                if (
+                    outputs is not None
+                    and in_domain(v)
+                    and not value_conforms(v, outputs, self.defs, form=form)
+                ):
+                    self.fail(
+                        9,
+                        names,
+                        f"{where}'s order lists {encode(v).decode('utf-8')}, which is not a "
+                        f"value of {render(outputs)}",
+                    )
+            for k, row in enumerate(table.rows, 1):
+                output = cast(object, row["output"])
+                literal = (
+                    cast("dict[str, Any]", output).get("literal")
+                    if isinstance(output, dict)
+                    else None
+                )
+                if literal is not None and in_domain(literal) and encode(literal) not in keys:
+                    self.fail(9, names, f"{where}'s row {k} gives a value its order does not list")
+        if outputs is None:
+            return
+        if hit == "C#" and resolve(outputs, self.defs) != Scalar("integer"):
+            self.fail(
+                9,
+                names,
+                f"{where} counts its rows, but its outputs {render(outputs)} is not integer",
+            )
+        elif hit in ("C+", "C<", "C>") and not conforms(outputs, _NUMBER, self.defs):
+            self.fail(
+                9,
+                names,
+                f"{where} aggregates its rows, but its outputs {render(outputs)} does not "
+                "conform to number",
+            )
+
+    def check_9_overlap(
+        self, owner: str, where: str, table: Table, types: Sequence[Type | None]
+    ) -> None:
+        reads = [cast(str, i["read"]) for i in table.inputs]
+        axes = [self.axis(t) for t in types]
+        leaves = {p: self.leaf_value(p) for p in self.leaf_types}
+        rows = list(table.rows)
+        for a in range(len(rows)):
+            for b in range(a + 1, len(rows)):
+                if len(rows[a]["cells"]) != len(reads) or len(rows[b]["cells"]) != len(reads):
+                    continue
+                if not overlap(rows[a], rows[b], reads, axes, leaves):
+                    continue
+                if table.hit == "U":
+                    self.fail(
+                        9,
+                        (owner,),
+                        f"{where}'s rows {a + 1} and {b + 1} overlap, which a U table refuses",
+                    )
+                elif encode(rows[a]["output"]) != encode(rows[b]["output"]):
+                    self.fail(
+                        9,
+                        (owner,),
+                        f"{where}'s rows {a + 1} and {b + 1} overlap and give different outputs",
+                    )
+
+    def axis(self, t: Type | None) -> Axis:
+        if t is None or isinstance(t, AnswerType):
+            return Axis()
+        inner = resolve(t, self.defs)
+        if isinstance(inner, Nullable):
+            inner = resolve(inner.inner, self.defs)
+        if isinstance(inner, Interval):
+            return Axis(inner.base == "integer", _exact(inner.lo), _exact(inner.hi))
+        return Axis(isinstance(inner, Scalar) and inner.name == "integer")
+
+    def check_9_policy_table(self, table: PolicyTable) -> None:
+        names = ("policy",)
+        for k, row in enumerate(table.rows, 1):
+            plan = cast(str, row["plan"])
+            if plan not in self.d.plans:
+                self.fail(
+                    9,
+                    ("policy", plan),
+                    f"the policy table's row {k} names {_q(plan)}, which is not a declared plan",
+                )
+        if not table.rows:
+            self.fail(9, names, "the policy table has no row")
+            return
+        last = table.rows[-1]
+        if any(cell != ANY for cell in last["cells"]):
+            self.fail(9, names, "the policy table's last row holds a cell that is not -")
+        plan = self.d.plans.get(cast(str, last["plan"]))
+        if plan is not None and _board_refs(plan):
+            self.fail(
+                9,
+                names,
+                f"the policy table's last row names {_q(last['plan'])}, whose plan reads the board",
+            )
+
+    def check_9_plan(self, name: str, plan: PlanDeclaration) -> None:
+        where, names = f"plan declaration {_q(name)}", (name,)
+        try:
+            kind = PlanKind(plan.kind)
+        except ValueError:
+            self.fail(
+                9,
+                names,
+                f"{where}'s kind {_q(plan.kind)} is not execute, clarify, inform or escalate",
+            )
+            return
+        if kind is PlanKind.broken:
+            self.fail(9, names, f"{where}'s kind is broken, which only the engine writes")
+        if kind is not PlanKind.execute and plan.steps:
+            self.fail(9, names, f"{where} is {kind.value}, which holds no steps")
+        if kind in (PlanKind.clarify, PlanKind.inform) and plan.reply is None:
+            self.fail(9, names, f"{where} is {kind.value}, which declares a reply")
+        if kind in (PlanKind.execute, PlanKind.escalate) and plan.reply is not None:
+            self.fail(9, names, f"{where} is {kind.value}, which declares no reply")
+        if kind is PlanKind.escalate and plan.reason is None:
+            self.fail(9, names, f"{where} is escalate, which declares a reason")
+        for member, text in (("reason", plan.reason), ("reply", plan.reply)):
+            if text is not None:
+                self.text(text, f"{where}'s {member}", names)
+        for n, step in enumerate(cast("Sequence[Step]", plan.steps), 1):
+            shown = f"{where}'s step {n}"
+            if step.tool not in self.d.tools:
+                self.fail(
+                    9, names, f"{shown} names the tool {_q(step.tool)}, which is not declared"
+                )
+            for arg, origin in step.arguments.items():
+                if arg == "idempotency_key":
+                    self.fail(9, names, f"{shown} has an argument named idempotency_key")
+                if isinstance(origin, Binding) and not (
+                    1 <= origin.step < n and (origin.path is None or is_field_path(origin.path))
+                ):
+                    self.fail(
+                        9,
+                        names,
+                        f"{shown}'s argument {_q(arg)} binds no earlier step by a path in the "
+                        "grammar",
+                    )
+            for r in step.requirements:
+                parsed = _parsed(r.ref)
+                if parsed is None or parsed.fields or r.ref not in self.types:
+                    continue
+                reason = hold_failure(r.value, self.types[r.ref], self.defs)
+                if reason is not None:
+                    self.fail(
+                        9,
+                        (name, r.ref),
+                        f"{shown}'s requirement on {_q(r.ref)} can never hold: {reason}",
+                    )
+
+    def table_compares(self) -> set[tuple[str, str]]:
+        """Each read a table compares against a leaf, with the leaf: a comparison cell's read,
+        and a helper binding's read."""
+        out: set[tuple[str, str]] = set()
+        for _, _, inputs, rows in self.all_tables():
+            for i in inputs:
+                out |= {(cast(str, i["read"]), p) for p in i["params"].values()}
+            for row in rows:
+                for n, cell in enumerate(row["cells"]):
+                    if n < len(inputs):
+                        out |= {(cast(str, inputs[n]["read"]), p) for p in _cell_params([cell])}
+        return out
+
+    def all_tables(self) -> Iterator[tuple[str, str, Sequence[Any], Sequence[Any]]]:
+        for rid, table in self.tables():
+            yield rid, f"rule {_q(rid)}", table.inputs, table.rows
+        policy_table = self.policy_table()
+        if policy_table is not None:
+            yield "policy", "the policy table", policy_table.inputs, policy_table.rows
+
+    def check_9_covered(self) -> None:
+        """No ``boundaries`` field pairs a read with a leaf a table already compares that read
+        against."""
+        covered = self.table_compares()
+        for owner, key, where, entry in self.boundary_entries():
+            for path in _entry_paths(entry):
+                if (key, path) in covered:
+                    self.fail(
+                        9,
+                        (owner, key, path),
+                        f"{where} names {_q(path)}, which a table already compares {_q(key)} "
+                        "against",
+                    )
 
     def check_9_context(self) -> None:
         """Each context entry's text: its template and slots, a slot naming the flagged ref
@@ -1406,6 +2206,7 @@ class _Loader:
                 "grounding",
                 "text",
                 "read",
+                "helper",
                 "source-requirement",
             ) and (u.base != _STATE):
                 preds[u.owner].add(providers[u.base])
@@ -1433,7 +2234,6 @@ class _Loader:
     def document(self) -> dict[str, Any]:
         d = self.d
         policy = d.policy
-        assert isinstance(policy, Policy)  # check 12 refuses the policy table
         parameters: dict[str, Any] = {}
         for path, leaf in d.parameters.items():
             t = self.leaf_types.get(path)
@@ -1450,20 +2250,28 @@ class _Loader:
             "name": d.name,
             "state": d.state,
             "sources": {sid: _source(s, self.format) for sid, s in d.sources.items()},
-            "rules": {rid: _rule(cast(Rule, r), self.format) for rid, r in d.rules.items()},
-            "policy": {
-                "form": "function",
-                "reads": _unordered(policy.reads),
-                "params": _unordered(policy.params),
-                "boundaries": _boundaries(policy.boundaries),
-                **_function(policy.function, policy.version),
-            },
+            "rules": {rid: _rule(r, self.format) for rid, r in d.rules.items()},
+            "policy": (
+                {
+                    "form": "function",
+                    "reads": _unordered(policy.reads),
+                    "params": _unordered(policy.params),
+                    "boundaries": _boundaries(policy.boundaries),
+                    **_function(policy.function, policy.version),
+                }
+                if isinstance(policy, Policy)
+                else {
+                    "form": "table",
+                    "inputs": [_input(i) for i in policy.inputs],
+                    "rows": [_row(r) for r in policy.rows],
+                }
+            ),
             "requirements": [{"ref": r.ref, "value": r.value} for r in d.requirements],
             "default_deny": d.default_deny,
             "tools": {name: {} for name in d.tools},
             "parameters": parameters,
             "types": dict(d.types),
-            "plans": {},  # check 12 refuses every plan declaration
+            "plans": {name: _plan(plan) for name, plan in d.plans.items()},
             "groups": {g: code_point_sorted(group.refs) for g, group in d.groups.items()},
             "classes": dict(d.classes),  # each tree plain data, from check 10's form test
             **({"context": _context(d.context)} if self.format >= CONTEXT_FORMAT else {}),
@@ -1599,8 +2407,8 @@ class _Loader:
                 # The key a field function takes: the id, a dot, the field.
                 callables[f"{sid}.when"] = source.when.function
         policy = self.policy()
-        assert policy is not None
-        callables["policy"] = policy.function
+        if policy is not None:
+            callables["policy"] = policy.function
         return LoadedDesign(
             _BUILT_BY_LOAD,
             design=self.d,
@@ -1657,11 +2465,133 @@ class _Loader:
             hash=sha256_ref(document),
             # Load's own copy of the block, from the document; none before format 5.
             context_bytes=encode(decoded.get("context"), MAX_DOCUMENT_DEPTH - 1),
+            reads=MappingProxyType(self.component_reads()),
+            params=MappingProxyType(self.component_params()),
+            tables=MappingProxyType(
+                {
+                    **{rid: decoded["rules"][rid] for rid, _ in self.tables()},
+                    **({"policy": decoded["policy"]} if self.policy_table() is not None else {}),
+                }
+            ),
+            plans=MappingProxyType(dict(decoded["plans"])),
         )
+
+    def component_reads(self) -> dict[str, tuple[str, ...]]:
+        """Each rule's and the policy's declared reads: a table's its inputs' reads, each once
+        in input order, the policy table's then each named plan's board refs."""
+        out: dict[str, tuple[str, ...]] = {rid: tuple(r.reads) for rid, r in self.rules()}
+        for rid, table in self.tables():
+            out[rid] = tuple(dict.fromkeys(i["read"] for i in table.inputs))
+        policy, policy_table = self.policy(), self.policy_table()
+        if policy is not None:
+            out["policy"] = tuple(policy.reads)
+        elif policy_table is not None:
+            refs = [i["read"] for i in policy_table.inputs]
+            for name in self.named_plans():
+                refs += [ref for ref, _ in plan_conditions(self.d.plans[name])]
+            out["policy"] = tuple(dict.fromkeys(refs))
+        return out
+
+    def component_params(self) -> dict[str, tuple[str, ...]]:
+        """Each rule's and the policy's leaf paths, a table's those it names, the policy
+        table's with its named plans' slot leaves."""
+        out: dict[str, tuple[str, ...]] = {rid: tuple(r.params) for rid, r in self.rules()}
+        named: dict[str, list[str]] = {}
+        for owner, _, path in self.table_params():
+            named.setdefault(owner, []).append(path)
+        for rid, _ in self.tables():
+            out[rid] = tuple(dict.fromkeys(named.get(rid, [])))
+        policy = self.policy()
+        if policy is not None:
+            out["policy"] = tuple(policy.params)
+        elif self.policy_table() is not None:
+            paths = named.get("policy", [])
+            for name in self.named_plans():
+                plan = self.d.plans[name]
+                for text in (plan.reason, plan.reply):
+                    for slot in () if text is None else text.slots:
+                        tag, value = next(iter(slot["origin"].items()))
+                        if tag == "param":
+                            paths.append(cast(str, value))
+            out["policy"] = tuple(dict.fromkeys(paths))
+        return out
 
 
 # ---------------------------------------------------------------------------------------------
 # Helpers
+
+
+def _value_cell(value: object, t: Type) -> str | None:
+    """Why a value cell's value is not one the input's type enumerates, or ``None``."""
+    if isinstance(t, Label):
+        return (
+            None
+            if isinstance(value, str) and value in t.values
+            else f"{encode(value).decode('utf-8')} is not a label of the input"
+        )
+    if isinstance(t, Scalar) and t.name == "boolean":
+        return None if type(value) is bool else f"{encode(value).decode('utf-8')} is not a boolean"
+    if _numeric_base(t) == "integer":
+        if type(value) is not int:
+            return f"{encode(value).decode('utf-8')} is not an integer"
+        if isinstance(t, Interval) and not t.lo <= value <= t.hi:
+            return f"{value} is outside the input's interval"
+        return None
+    return "a value cell stands only over a label, boolean or integer input"
+
+
+def _numeric_base(t: Type) -> str | None:
+    if isinstance(t, Scalar) and t.name in ("number", "integer"):
+        return t.name
+    if isinstance(t, Interval):
+        return t.base
+    return None
+
+
+def _is_numeric(t: Type) -> bool:
+    return _numeric_base(t) is not None
+
+
+def _is_textual(t: Type) -> bool:
+    return isinstance(t, Label) or (isinstance(t, Scalar) and t.name == "string")
+
+
+def _number_value(value: object) -> bool:
+    return type(value) is int or type(value) is float
+
+
+def _exact(x: int | float) -> Fraction:
+    return Fraction(x) if type(x) is int else Fraction(repr(x))
+
+
+def _board_refs(plan: PlanDeclaration) -> list[str]:
+    """A plan declaration's board-ref origins and slots, in rule 2's naming order."""
+    return [ref for ref, _ in plan_conditions(plan)]
+
+
+def _cell_refs(cells: Sequence[Any]) -> Iterator[str]:
+    """Each ref a row's cells name: an ``in`` cell's list and a two-input comparison's other
+    input."""
+    for cell in cells:
+        if cell == ANY:
+            continue
+        ((tag, member),) = cast("dict[str, Any]", cell).items()
+        if tag == "in":
+            yield cast(str, member)
+        elif tag in COMPARISONS and "ref" in member:
+            yield cast("dict[str, str]", member)["ref"]
+
+
+def _cell_params(cells: Sequence[Any]) -> Iterator[str]:
+    """Each leaf path a row's cells compare against."""
+    for cell in cells:
+        if cell == ANY:
+            continue
+        ((tag, member),) = cast("dict[str, Any]", cell).items()
+        operands = member if tag == "between" else [member] if tag in COMPARISONS else []
+        for operand in cast("list[dict[str, Any]]", operands):
+            if "param" in operand:
+                yield cast(str, operand["param"])
 
 
 def _parsed(ref: str) -> _ParsedRef | None:
@@ -1807,10 +2737,17 @@ def _grid(document: Mapping[str, Any]) -> Mapping[str, Any]:
     ascending order of canonical bytes; the mass sets are in ascending order of their sorted labels'
     canonical bytes, and a set's labels are held in that order too, so a lint takes "the set's first
     label in declared order" from the question. A read whose boundaries name no leaf over
-    every component has no entry. Read-only at every depth. A loaded design has no table, so
-    the fields are all."""
-    fields = [r.get("boundaries") for r in cast("dict[str, Any]", document["rules"]).values()]
-    fields.append(cast("dict[str, Any]", document["policy"]).get("boundaries"))
+    every component has no entry. Read-only at every depth. A table gives its fields as
+    ``_table_boundaries`` derives them."""
+    rules = list(cast("dict[str, Any]", document["rules"]).values())
+    policy = cast("dict[str, Any]", document["policy"])
+    fields = [r.get("boundaries") for r in rules]
+    fields.append(policy.get("boundaries"))
+    leaves = cast("dict[str, Any]", document["parameters"])
+    for table in [r for r in rules if r["form"] == "table"] + (
+        [policy] if policy["form"] == "table" else []
+    ):
+        fields.append(_table_boundaries(table, leaves))
     entries: dict[str, Any] = {}
     for field in fields:
         for key, entry in cast("dict[str, Any]", field or {}).items():
@@ -1859,6 +2796,59 @@ def _grid(document: Mapping[str, Any]) -> Mapping[str, Any]:
             }
         )
     return MappingProxyType(grid)
+
+
+def _table_boundaries(table: Mapping[str, Any], leaves: Mapping[str, Any]) -> dict[str, Any]:
+    """A table's boundaries, as a ``boundaries`` field writes them (§answer-grid): a pick
+    helper's bindings under its read's roles, ``extract``'s ``null_bar`` under ``null``; a
+    parameter comparison over a bare ``d:`` or ``t:`` read under that read, an integer literal
+    as its value; over a ``mass`` input under ``mass`` with the set its ``labels`` leaf holds;
+    over an ``extract`` input under ``value``. A cell over a ``size`` input or another input
+    adds nothing."""
+    inputs = cast("list[dict[str, Any]]", table["inputs"])
+    out: dict[str, Any] = {}
+
+    def roles(read: str, extraction: bool) -> dict[str, Any]:
+        names = X_ROLES if extraction else ("bar", "thresholds", "margin", "mass")
+        empty: dict[str, list[Any]] = {r: [] for r in names}
+        return cast("dict[str, Any]", out.setdefault(read, empty))
+
+    for i in inputs:
+        helper, read, params = i["helper"], cast(str, i["read"]), i["params"]
+        if helper in ("pick_with_margin", "pick_with_thresholds"):
+            entry = roles(read, False)
+            for role in ("bar", "thresholds", "margin"):
+                if role in params:
+                    entry[role].append(params[role])
+        elif helper == "extract":
+            roles(read, True)["null"].append(params["null_bar"])
+    for row in cast("list[dict[str, Any]]", table["rows"]):
+        for n, cell in enumerate(cast("list[Any]", row["cells"])):
+            if cell == ANY or n >= len(inputs):
+                continue
+            ((tag, member),) = cast("dict[str, Any]", cell).items()
+            if tag == "between":
+                operands = cast("list[dict[str, Any]]", member)
+            elif tag in COMPARISONS and "ref" not in member:
+                operands = [cast("dict[str, Any]", member)]
+            else:
+                continue
+            bounds = [o.get("param", o.get("literal")) for o in operands]
+            i = inputs[n]
+            helper, read = i["helper"], cast(str, i["read"])
+            if helper is None and not read.startswith("q:"):
+                out.setdefault(read, []).extend(bounds)
+            elif helper == "mass":
+                labels = leaves[i["params"]["labels"]]["value"]
+                mass = roles(read, False)["mass"]
+                found = next((m for m in mass if m["labels"] == labels), None)
+                if found is None:
+                    mass.append({"labels": list(labels), "bounds": list(bounds)})
+                else:
+                    found["bounds"].extend(bounds)
+            elif helper == "extract":
+                roles(read, True)["value"].extend(bounds)
+    return out
 
 
 def _ascending(members: Mapping[bytes, str]) -> tuple[str, ...]:
@@ -2021,7 +3011,20 @@ def _source(source: Source, fmt: int) -> dict[str, Any]:
     }
 
 
-def _rule(rule: Rule, fmt: int) -> dict[str, Any]:
+def _rule(rule: Rule | Table, fmt: int) -> dict[str, Any]:
+    if isinstance(rule, Table):
+        return {
+            "form": "table",
+            "provides": rule.provides,
+            "outputs": rule.outputs,
+            "hit": rule.hit,
+            "order": None if rule.order is None else list(rule.order),
+            "inputs": [_input(i) for i in rule.inputs],
+            "rows": [_row(r) for r in rule.rows],
+            "candidates": rule.candidates,
+            "grounded": rule.grounded,
+            **({"target": rule.target} if fmt >= TARGETS_FORMAT else {}),
+        }
     return {
         "form": "function",
         "provides": rule.provides,
@@ -2033,6 +3036,32 @@ def _rule(rule: Rule, fmt: int) -> dict[str, Any]:
         "grounded": rule.grounded,
         **({"target": rule.target} if fmt >= TARGETS_FORMAT else {}),
         **_function(rule.function, rule.version),
+    }
+
+
+def _input(i: Mapping[str, Any]) -> dict[str, Any]:
+    return {"read": i["read"], "helper": i["helper"], "params": dict(i["params"])}
+
+
+def _row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """A row in the document, a ``one_of`` cell's values in canonical order."""
+    cells: list[Any] = []
+    for c in cast("list[Any]", row["cells"]):
+        tagged = _object(c)
+        if tagged is not None and "one_of" in tagged:
+            cells.append({"one_of": _unordered(cast("list[Any]", tagged["one_of"]))})
+        else:
+            cells.append(c)
+    return {**row, "cells": cells}
+
+
+def _plan(plan: PlanDeclaration) -> dict[str, Any]:
+    return {
+        "kind": plan.kind,
+        "steps": [s if isinstance(s, Mapping) else step_document(s) for s in plan.steps],
+        "reason": None if plan.reason is None else _text(plan.reason),
+        "reply": None if plan.reply is None else _text(plan.reply),
+        "grounded": plan.grounded,
     }
 
 
@@ -2755,8 +3784,8 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
                 r["provides"],
                 r["outputs"],
                 r["hit"],
-                r["inputs"],
-                r["rows"],
+                _listed(r["inputs"], python_input),
+                _rows(r["rows"], policy=False),
                 order=r["order"],
                 candidates=r["candidates"],
                 grounded=r["grounded"],
@@ -2779,7 +3808,7 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
     if isinstance(policy, dict):
         p = cast("dict[str, Any]", policy)
         if p["form"] == "table":
-            policy = PolicyTable(p["inputs"], p["rows"])
+            policy = PolicyTable(_listed(p["inputs"], python_input), _rows(p["rows"], policy=True))
         else:
             policy = Policy(
                 resolved["policy"],
@@ -2811,7 +3840,11 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
         plans=block(
             doc["plans"],
             lambda _, v: PlanDeclaration(
-                v["kind"], v["steps"], _text_of(v["reason"]), _text_of(v["reply"]), v["grounded"]
+                v["kind"],
+                _listed(v["steps"], _step_of),
+                _text_of(v["reason"]),
+                _text_of(v["reply"]),
+                v["grounded"],
             ),
         ),
         groups=_each(doc["groups"], Group),
@@ -2820,6 +3853,56 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
         context=_context_of(doc.get("context")),
         targets=block(doc.get("targets", {}), lambda _, v: Target(v["statement"], v["values"])),
     )
+
+
+def _rows(value: object, *, policy: bool) -> Any:
+    """A document's rows as a design written in Python holds them."""
+    return _listed(
+        value, lambda r: r if (o := _object(r)) is None else python_row(o, policy=policy)
+    )
+
+
+def _listed(value: object, build: Callable[[Any], Any]) -> Any:
+    if not isinstance(value, list):
+        return value
+    return [build(v) for v in cast("list[Any]", value)]
+
+
+def _step_of(value: object) -> Any:
+    """A document step as a ``Step``; one holding a candidate origin, or of another form,
+    kept whole, for check 12 or check 10."""
+    step = _object(value)
+    if step is None or set(step) != {"tool", "arguments", "requirements"}:
+        return value
+    arguments, requirements = _object(step["arguments"]), step["requirements"]
+    if arguments is None or not isinstance(requirements, list):
+        return value
+    origins: dict[str, Origin | Binding] = {}
+    for name, o in arguments.items():
+        origin = _object(o)
+        if origin is None:
+            return value
+        try:
+            if set(origin) == {"step", "path"}:
+                origins[name] = Binding(origin["step"], origin["path"])
+            elif set(origin) == {"ref"}:
+                origins[name] = Origin(ref=origin["ref"])
+            elif set(origin) == {"literal"}:
+                origins[name] = Origin(literal=origin["literal"])
+            else:
+                return value
+        except TypeError:  # a member of another form: check 10's
+            return value
+    built: list[Requirement] = []
+    for r in cast("list[Any]", requirements):
+        member = _object(r)
+        if member is None or set(member) != {"ref", "value"}:
+            return value
+        built.append(Requirement(member["ref"], member["value"]))
+    try:
+        return Step(step["tool"], origins, built)
+    except TypeError:  # a member of another form: check 10's
+        return value
 
 
 def _context_of(value: object) -> Any:

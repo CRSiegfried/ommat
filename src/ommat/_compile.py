@@ -11,24 +11,27 @@ returned is built from the copy the ledger stores, in exact ``dict``, ``list`` a
 each value's live type kept, so a ``1.0`` stays a ``float`` where the record's bytes read back
 as ``1``.
 
-This engine has a function policy only: a policy table and plan declarations are
-refused at load, so every ``plan`` item holds ``derivation`` and none holds ``rows`` or
-``slots``. Compile writes no board entry. It renders the design's context block over the board
-interpret left, before it calls the policy, into every ``plan`` item it appends.
+A policy table is evaluated, not called: its inputs read and its helpers called on a read
+view over its reads, its rows tested, and the winning row's plan declaration built, its
+declared text rendered from its slots; its ``plan`` item holds ``rows``, and ``slots`` when
+it rendered one, where a function policy's holds ``derivation``. Compile writes no board
+entry. It renders the design's context block over the board interpret left, before it calls
+the policy, into every ``plan`` item it appends.
 """
 
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ommat._component import at, call, exception_record, names_read
-from ommat._design import LoadedDesign, Policy, Requirement
+from ommat._design import LoadedDesign, PlanDeclaration, Policy, Requirement
 from ommat._guard import Verdict, guard, verdict_item
 from ommat._interpret import _marker_document, _render
 from ommat._ledger import Ledger
 from ommat._markers import Cause, CauseCode, PlanKind, Undetermined
-from ommat._plan import Binding, Origin, Plan, Step, engine_plan
+from ommat._plan import Binding, Origin, Plan, Step, declared_plan, engine_plan, step_document
 from ommat._read_view import ComponentKind, ReadView, RequireStopped, Role, UndeclaredRead, walk
 from ommat._refs import is_field_path, parse_ref
+from ommat._table import Condition, evaluate, plan_conditions, read_inputs
 from ommat._types import hold_failure
 from ommat._values import domain_error, string_data
 
@@ -42,8 +45,19 @@ def compile_turn(
 ) -> tuple[Plan, Verdict]:
     """Run compile over the live board interpret left, every ref on it, and
     return the plan and the verdict, both appended."""
-    policy = cast(Policy, loaded._design.policy)  # load refuses the policy table
     context = context_member(loaded, board)  # before the policy runs
+    if _POLICY in loaded._tables:
+        plan, rows, raised = table_plan(loaded, board)
+        item = plan_item(plan, None, context, rows=rows)
+        index = ledger.append(item)
+        if raised is not None:
+            ledger.write_unhashed("exceptions", exception_record(raised), index)
+        if plan.cause is None:
+            plan = _plan_of(item)  # the ledger's stored copy
+        verdict = guard(plan, board, loaded._requirements(), loaded._design.default_deny)
+        ledger.append(verdict_item(verdict))
+        return plan, verdict
+    policy = cast(Policy, loaded._design.policy)
     leaves = {path: loaded._leaf_value(path) for path in policy.params}
     view = ReadView(Role(ComponentKind.policy, _POLICY), policy.reads, policy.params, board, leaves)
     called = call(loaded._callables[_POLICY], view)
@@ -62,7 +76,7 @@ def compile_turn(
     elif called.awaitable:  # tested before any other test of the return
         plan = engine_plan(PlanKind.broken, Cause(_C.invalid_return, [_POLICY]))
     else:
-        refs = _Rules(loaded, board, policy).first_break(called.returned)
+        refs = _Rules(loaded, board).first_break(called.returned)
         if refs is None:
             plan = cast(Plan, called.returned)
         else:
@@ -85,18 +99,21 @@ def compile_turn(
 
 
 class _Rules:
-    def __init__(self, loaded: LoadedDesign, board: Mapping[str, object], policy: Policy) -> None:
+    def __init__(self, loaded: LoadedDesign, board: Mapping[str, object]) -> None:
         self.loaded = loaded
         self.board = board
         self.tools = frozenset(loaded._design.tools)
-        self.reads = frozenset(string_data(r) for r in policy.reads)
+        self.reads = frozenset(string_data(r) for r in loaded._reads[_POLICY])
 
-    def first_break(self, returned: object) -> list[str] | None:
-        """The cause's refs for what the policy returned, or ``None`` for a valid plan."""
+    def first_break(self, returned: object, *, declared: bool = False) -> list[str] | None:
+        """The cause's refs for what the policy returned, or ``None`` for a valid plan. A
+        ``declared`` plan, the policy table's, is the engine's own build of a declaration, so
+        its ``slots`` are not a policy's slip."""
         if type(returned) is not Plan:  # a subclass may override what compile reads
             return [_POLICY]
         plan = returned
-        if plan.cause is not None or plan.slots or any(_has_set(s) for s in plan.steps):
+        engine_only = plan.cause is not None or any(_has_set(s) for s in plan.steps)
+        if engine_only or (plan.slots and not declared):
             return [_POLICY]  # what only the engine writes
         if plan.kind is not PlanKind.execute and plan.steps:
             return ["rule:1"]
@@ -209,32 +226,6 @@ def _rule_7(step: Step, n: int) -> bool:
 # The plan item and the plan built from it
 
 
-def _plain(value: Any) -> Any:
-    """A domain value's copy in exact ``dict``, ``list`` and ``str``, as the ledger stores it,
-    a ``-0.0`` as ``0.0``, as the record writes it."""
-    t = type(cast(object, value))
-    if t is dict:
-        return {string_data(k): _plain(v) for k, v in cast("dict[str, Any]", value).items()}
-    if t is list or t is tuple:
-        return [_plain(v) for v in cast("list[Any]", value)]
-    if issubclass(t, str):
-        return string_data(value)
-    if t is float and value == 0:
-        return 0.0
-    return value
-
-
-def _origin(origin: Origin | Binding) -> dict[str, Any]:
-    if type(origin) is Binding:
-        return {"step": origin.step, "path": origin.path}
-    origin = cast(Origin, origin)
-    if origin.ref is not None:
-        return {"ref": origin.ref}
-    # No literal here carries a set: only a grounded plan's expansion writes one, and load
-    # refuses grounded plans; a policy's is refused before rule 1.
-    return {"literal": _plain(origin.literal)}
-
-
 def context_member(
     loaded: LoadedDesign, board: Mapping[str, object] | None
 ) -> dict[str, Any] | None:
@@ -280,24 +271,20 @@ def _entry(
 
 
 def plan_item(
-    plan: Plan, derivation: list[dict[str, Any]] | None, context: dict[str, Any] | None
+    plan: Plan,
+    derivation: list[dict[str, Any]] | None,
+    context: dict[str, Any] | None,
+    *,
+    rows: list[int] | None = None,
 ) -> dict[str, Any]:
-    """The ``plan`` item, with ``derivation`` when a function policy wrote the plan and none
-    at a broken entry, where no policy ran, and ``context`` as ``context_member`` gives it."""
+    """The ``plan`` item, with ``derivation`` when a function policy wrote the plan, ``rows``
+    and any ``slots`` when the policy table did, neither at a broken entry, where no policy
+    ran, and ``context`` as ``context_member`` gives it."""
     cause = plan.cause
     item: dict[str, Any] = {
         "item": "plan",
         "kind": plan.kind.value,
-        "steps": [
-            {
-                "tool": step.tool,
-                "arguments": {name: _origin(o) for name, o in step.arguments.items()},
-                "requirements": [
-                    {"ref": r.ref, "value": _plain(r.value)} for r in step.requirements
-                ],
-            }
-            for step in plan.steps
-        ],
+        "steps": [step_document(step) for step in plan.steps],
         "reason": plan.reason,
         "reply": plan.reply,
         "cause": None if cause is None else {"code": cause.code.value, "refs": list(cause.refs)},
@@ -305,6 +292,10 @@ def plan_item(
     }
     if derivation is not None:
         item["derivation"] = derivation
+    if plan.slots:
+        item["slots"] = {k: [dict(s) for s in v] for k, v in plan.slots.items()}
+    if rows is not None:
+        item["rows"] = rows
     return item
 
 
@@ -326,4 +317,85 @@ def _plan_of(item: dict[str, Any]) -> Plan:
         )
         for s in item["steps"]
     ]
+    slots = cast("dict[str, Any]", item.get("slots", {}))
+    if slots:
+        return declared_plan(item["kind"], steps, item["reason"], item["reply"], slots)
     return Plan(item["kind"], steps, reason=item["reason"], reply=item["reply"])
+
+
+# ---------------------------------------------------------------------------------------------
+# The policy table
+
+
+def table_plan(
+    loaded: LoadedDesign, board: Mapping[str, object]
+) -> tuple[Plan, list[int], Exception | None]:
+    """The policy table's plan over ``board``, held to the plan rules: ``table_choice``'s,
+    or ``broken`` naming the first rule it breaks."""
+    plan, rows, raised = table_choice(loaded, board)
+    if plan.cause is None:
+        refs = _Rules(loaded, board).first_break(plan, declared=True)
+        if refs is not None:
+            return engine_plan(PlanKind.broken, Cause(_C.invalid_return, refs)), rows, None
+    return plan, rows, raised
+
+
+def table_choice(
+    loaded: LoadedDesign, board: Mapping[str, object]
+) -> tuple[Plan, list[int], Exception | None]:
+    """The policy table's evaluation over ``board``: the plan its winning row's declaration
+    gives, built and rendered, or rule 2's ``escalate``; the matched rows; and the exception
+    a helper or a comparison raised, the plan then ``broken``. No plan rule is applied."""
+    table = loaded._tables[_POLICY]
+    reads, params = loaded._reads[_POLICY], loaded._params[_POLICY]
+    leaves = {path: loaded._leaf_value(path) for path in params}
+    view = ReadView(Role(ComponentKind.policy, _POLICY), reads, params, board, leaves)
+    inputs = cast("list[dict[str, Any]]", table["inputs"])
+    rows = cast("list[dict[str, Any]]", table["rows"])
+    declarations = loaded._design.plans
+    try:
+        values = read_inputs(inputs, view, leaves)
+        conditions = {
+            k: [
+                Condition(ref, view.read(ref), at)
+                for ref, at in plan_conditions(declarations[row["plan"]])
+            ]
+            for k, row in enumerate(rows)
+        }
+        outcome = evaluate(rows, "F", None, [i["read"] for i in inputs], values, leaves, conditions)
+    except Exception as exc:  # a helper's raise, or an incomparable comparison
+        return engine_plan(PlanKind.broken, Cause(_C.raised, [_POLICY])), [], exc
+    finally:
+        view.close()
+    if outcome.plan is None:
+        refs = list(cast(Undetermined, outcome.value).cause.refs)
+        return engine_plan(PlanKind.escalate, Cause(_C.required, refs)), outcome.rows, None
+    return _declared(loaded, board, declarations[outcome.plan]), outcome.rows, None
+
+
+def _declared(
+    loaded: LoadedDesign, board: Mapping[str, object], declaration: PlanDeclaration
+) -> Plan:
+    """A plan declaration as the plan it gives: its steps as declared, and its ``reason`` and
+    ``reply`` rendered from their slots, each slot's origin in ``slots``."""
+    texts: dict[str, str | None] = {}
+    slots: dict[str, list[dict[str, Any]]] = {}
+    for member, text in (("reason", declaration.reason), ("reply", declaration.reply)):
+        if text is None:
+            texts[member] = None
+            continue
+        values: dict[str, object] = {}
+        for slot in text.slots:
+            tag, origin = next(iter(slot["origin"].items()))
+            if tag == "param":
+                values[slot["name"]] = loaded._leaf_value(origin)
+            else:
+                parsed = parse_ref(origin)
+                values[slot["name"]] = walk(
+                    board[f"{parsed.level}:{parsed.name}"], parsed.fields, origin
+                )
+        texts[member] = _render(text.template, values)
+        if text.slots:
+            slots[member] = [{"name": s["name"], "origin": dict(s["origin"])} for s in text.slots]
+    steps = cast("list[Step]", list(declaration.steps))
+    return declared_plan(declaration.kind, steps, texts["reason"], texts["reply"], slots)

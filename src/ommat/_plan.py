@@ -233,8 +233,9 @@ _NO_SLOTS: Mapping[str, Any] = MappingProxyType({})
 @dataclass(frozen=True, slots=True, init=False)
 class Plan:
     """The turn's plan: its kind, its steps in order, the policy's
-    ``reason`` and ``reply``, the engine's ``cause``, and ``slots``, ``{}`` in this engine, which
-    refuses plan declarations. The public constructor takes neither ``cause`` nor ``slots``."""
+    ``reason`` and ``reply``, the engine's ``cause``, and ``slots``, ``{}`` unless a plan
+    declaration's text wrote them. The public constructor takes neither ``cause`` nor
+    ``slots``."""
 
     kind: PlanKind
     steps: tuple[Step, ...]
@@ -275,3 +276,52 @@ def engine_plan(kind: PlanKind, cause: Cause) -> Plan:
     plan = Plan(kind)
     object.__setattr__(plan, "cause", cause)
     return plan
+
+
+def declared_plan(
+    kind: PlanKind | str,
+    steps: list[Step],
+    reason: str | None,
+    reply: str | None,
+    slots: Mapping[str, Any],
+) -> Plan:
+    """A plan the policy table's winning row gives: its declaration's kind and steps, its
+    ``reason`` and ``reply`` rendered, and the ``slots`` they were rendered from."""
+    plan = Plan(kind, steps, reason=reason, reply=reply)
+    object.__setattr__(plan, "slots", MappingProxyType(dict(slots)))
+    return plan
+
+
+def plain(value: Any) -> Any:
+    """A domain value's copy in exact ``dict``, ``list`` and ``str``, as the ledger stores it,
+    a ``-0.0`` as ``0.0``, as the record writes it."""
+    t = type(cast(object, value))
+    if t is dict:
+        return {string_data(k): plain(v) for k, v in cast("dict[str, Any]", value).items()}
+    if t is list or t is tuple:
+        return [plain(v) for v in cast("list[Any]", value)]
+    if issubclass(t, str):
+        return string_data(value)
+    if t is float and value == 0:
+        return 0.0
+    return value
+
+
+def origin_document(origin: Origin | Binding) -> dict[str, Any]:
+    if type(origin) is Binding:
+        return {"step": origin.step, "path": origin.path}
+    origin = cast(Origin, origin)
+    if origin.ref is not None:
+        return {"ref": origin.ref}
+    # No literal here carries a set: only a grounded plan's expansion writes one, and load
+    # refuses grounded plans; a policy's is refused before rule 1.
+    return {"literal": plain(origin.literal)}
+
+
+def step_document(step: Step) -> dict[str, Any]:
+    """A step as the ``plan`` item and a plan declaration write it."""
+    return {
+        "tool": step.tool,
+        "arguments": {name: origin_document(o) for name, o in step.arguments.items()},
+        "requirements": [{"ref": r.ref, "value": plain(r.value)} for r in step.requirements],
+    }

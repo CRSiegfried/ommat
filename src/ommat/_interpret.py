@@ -56,7 +56,7 @@ from ommat._component import (
     names_read,
     now,
 )
-from ommat._design import LoadedDesign, Question, Rule, Source
+from ommat._design import LoadedDesign, Question, Rule, Source, Table
 from ommat._ledger import Ledger
 from ommat._markers import Cause, CauseCode, Failed, Unasked, Unavailable, Undetermined, Unsure
 from ommat._provenance import (
@@ -78,6 +78,7 @@ from ommat._read_view import (
 )
 from ommat._refs import code_point_sorted, declared_ref, grounded_ref
 from ommat._sorter import TurnSorter
+from ommat._table import evaluate, read_inputs
 from ommat._typed import is_a, typed
 from ommat._types import Type, b64url_encode
 from ommat._values import (
@@ -784,7 +785,7 @@ class _Turn:
         self.ledger = ledger
         self.loaded = loaded
         self.sources: Mapping[str, Source] = loaded._design.sources
-        self.rules = cast("Mapping[str, Rule]", loaded._design.rules)  # load refuses tables
+        self.rules: Mapping[str, Rule | Table] = loaded._design.rules
         self.bindings = bindings
         self.round_bound = round_bound
         self.timeout = timeout
@@ -842,6 +843,9 @@ class _Turn:
         the first undeclared read, the first ``require`` stop, a raise, an invalid return,
         the returned value."""
         r = self.rules[rid]
+        if isinstance(r, Table):
+            self.fire_table(rid, r, n)
+            return
         leaves = {path: self.loaded._leaf_value(path) for path in r.params}
         view = ReadView(
             Role(ComponentKind.rule, rid),
@@ -881,6 +885,49 @@ class _Turn:
             self.ledger.write_unhashed("exceptions", exception_record(called.text), index)
         if unnamed is not None:
             self.ledger.write_unhashed("reads", unnamed, index)
+
+    def fire_table(self, rid: str, r: Table, n: int) -> None:
+        """Evaluate a rule table: its inputs read and its helpers called in input order, on a
+        read view over its reads and leaves, then its rows; write its entry with ``rows``. A
+        helper that raises, or a comparison of incomparable values, is ``Unavailable`` with
+        ``raised``, no row tested."""
+        table = self.loaded._tables[rid]
+        reads, params = self.loaded._reads[rid], self.loaded._params[rid]
+        leaves = {path: self.loaded._leaf_value(path) for path in params}
+        view = ReadView(
+            Role(ComponentKind.rule, rid),
+            reads,
+            params,
+            self.board,
+            leaves,
+            grounded=self.loaded._grounded,
+        )
+        inputs = cast("list[dict[str, Any]]", table["inputs"])
+        rows: list[int] = []
+        raised: Exception | None = None
+        written: Written
+        try:
+            values = read_inputs(inputs, view, leaves)
+            outcome = evaluate(
+                table["rows"], r.hit, table["order"], [i["read"] for i in inputs], values, leaves
+            )
+        except Exception as exc:  # a helper's raise, or an incomparable comparison
+            raised = exc
+            written = Unavailable(Cause(_C.raised, [rid]))
+        else:
+            rows = outcome.rows
+            if isinstance(outcome.value, Undetermined):  # the engine's own marker
+                written = outcome.value
+            else:
+                value = typed(outcome.value, self.loaded._types[r.provides])
+                if value is not None and r.candidates and not _distinct(value[0]):
+                    value = None  # a candidate set's members are distinct, never merged
+                written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value
+        finally:
+            view.close()
+        index = self.write(r.provides, n, None, written, rows=rows)
+        if raised is not None:
+            self.ledger.write_unhashed("exceptions", exception_record(raised), index)
 
     # -- the source phase --------------------------------------------------------------------
 
@@ -1397,6 +1444,8 @@ class _Turn:
         call: int | None,
         written: Written,
         derivation: list[dict[str, list[str] | str]] | None = None,
+        *,
+        rows: list[int] | None = None,
     ) -> int:
         item: dict[str, object] = {"item": "entry", "ref": ref, "round": n, "call": call}
         if isinstance(written, Undetermined):  # the engine's own marker
@@ -1406,6 +1455,8 @@ class _Turn:
             item["value"], live = written
         if derivation is not None:
             item["derivation"] = derivation
+        if rows is not None:
+            item["rows"] = rows
         index = self.ledger.append(item)
         self.board[ref] = live
         return index

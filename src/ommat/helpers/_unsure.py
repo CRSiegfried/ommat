@@ -33,8 +33,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, cast
 
 from ommat._canonical import encode
+from ommat._compile import table_choice
 from ommat._component import base, call
-from ommat._design import LoadedDesign, Policy, Rule
+from ommat._design import LoadedDesign
 from ommat._interpret import _marker_document
 from ommat._markers import Cause, CauseCode, PlanKind, Unsure
 from ommat._plan import Plan
@@ -73,10 +74,9 @@ def unsure_to_execute(
     search reported, when the run left that read an ``Unsure`` naming the subject."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
-    policy = cast(Policy, loaded._design.policy)  # load refuses the policy table
-    declared = code_point_sorted(set(policy.reads))
+    declared = code_point_sorted(set(loaded._reads[_POLICY]))
     top = [r for r in declared if not any(r.startswith(o + ".") for o in declared)]
-    lineage = _lineage(loaded, policy)
+    lineage = _lineage(loaded)
     subjects = _subjects(loaded, lineage)
     runs_fills: dict[str, list[Point]] = {}
     narrowed: list[str] = []
@@ -89,15 +89,14 @@ def unsure_to_execute(
     points = 0
     execute: list[dict[str, Any]] = []
     for unsure in code_point_sorted({base(r) for r in declared if r.startswith("d:")}):
-        # load refuses a rule table, so a rule writes every d: ref
-        writer = cast(Rule, loaded._design.rules[loaded._providers[unsure]])
-        marker = Unsure(Cause(CauseCode.abstained, code_point_sorted(set(writer.reads))))
+        writer = loaded._reads[loaded._providers[unsure]]
+        marker = Unsure(Cause(CauseCode.abstained, code_point_sorted(set(writer))))
         shown_marker = _marker_document(marker)  # the record's marker form, interpret's
         others = [r for r in top if base(r) != unsure]
         for combo in grid_order([fills[r] for r in others]):
             point = dict(zip(others, combo, strict=True))
             points += 1
-            if _executes(loaded, policy, _board(point, unsure, marker)):
+            if _executes(loaded, _board(point, unsure, marker)):
                 shown = {
                     r: fresh(shown_marker) if base(r) == unsure else _record(r, top, point)
                     for r in declared
@@ -105,16 +104,16 @@ def unsure_to_execute(
                 execute.append({"read": unsure, "point": shown})
     if subjects:
         flagged = {item["read"] for item in execute}
-        runs, found = _abstentions(loaded, policy, lineage, subjects, runs_fills, flagged)
+        runs, found = _abstentions(loaded, lineage, subjects, runs_fills, flagged)
         points += runs
         execute += found
     return {"points": points, "execute": execute, "narrowed": narrowed}
 
 
-def _lineage(loaded: LoadedDesign, policy: Policy) -> set[str]:
+def _lineage(loaded: LoadedDesign) -> set[str]:
     """Every rule and source the policy's reads rest on in the dependency graph."""
     seen: set[str] = set()
-    todo = [loaded._providers[base(r)] for r in policy.reads if base(r) != _STATE]
+    todo = [loaded._providers[base(r)] for r in loaded._reads[_POLICY] if base(r) != _STATE]
     while todo:
         node = todo.pop()
         if node not in seen:
@@ -127,17 +126,17 @@ def _subjects(loaded: LoadedDesign, lineage: set[str]) -> list[str]:
     """The questions a lineage rule reads; load refuses a per-candidate extraction, so a
     per-candidate one is of a probability kind."""
     rules = loaded._design.rules
-    read = {base(r) for rid in lineage if rid in rules for r in cast(Rule, rules[rid]).reads}
+    read = {base(r) for rid in lineage if rid in rules for r in loaded._reads[rid]}
     return code_point_sorted(ref for ref in read if ref.startswith("q:"))
 
 
-def _ranging(loaded: LoadedDesign, policy: Policy, lineage: set[str]) -> set[str]:
+def _ranging(loaded: LoadedDesign, lineage: set[str]) -> set[str]:
     """The base refs the policy or a lineage component reads, needs, is gated on or is
     grounded over; every other exogenous read can change no finding."""
-    used = {base(r) for r in policy.reads}
+    used = {base(r) for r in loaded._reads[_POLICY]}
     for node in lineage:
         if node in loaded._design.rules:
-            used |= {base(r) for r in cast(Rule, loaded._design.rules[node]).reads}
+            used |= {base(r) for r in loaded._reads[node]}
             continue
         source = loaded._design.sources[node]
         used |= {base(r) for r in loaded._needs[node]}
@@ -153,7 +152,6 @@ def _ranging(loaded: LoadedDesign, policy: Policy, lineage: set[str]) -> set[str
 
 def _abstentions(
     loaded: LoadedDesign,
-    policy: Policy,
     lineage: set[str],
     subjects: Sequence[str],
     fills: Mapping[str, list[Point]],
@@ -163,10 +161,17 @@ def _abstentions(
     code-point order and then in run order. ``flagged`` holds the ``d:`` reads the first
     search reported."""
     grounded = loaded._grounded
-    ranging = _ranging(loaded, policy, lineage)
+    ranging = _ranging(loaded, lineage)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
-    rules = {
-        cast(Rule, loaded._design.rules[n]).provides for n in lineage if n in loaded._design.rules
+    rules = {loaded._design.rules[n].provides for n in lineage if n in loaded._design.rules}
+    # Each question a lineage table picks or extracts from: its entry holds rows, not a
+    # derivation, so the input stands for the returned helper.
+    picked = {
+        cast(str, i["read"])
+        for n in lineage
+        if n in loaded._tables
+        for i in cast("list[dict[str, Any]]", loaded._tables[n]["inputs"])
+        if i["helper"] in _ONE
     }
     reads = code_point_sorted(set(fills) - grounded.keys())
     held = {r: fills[r] if base(r) in ranging else fills[r][:1] for r in reads}
@@ -211,7 +216,7 @@ def _abstentions(
                         f"the candidate set {set_ref!r} changes within one assignment of the "
                         "other reads, so the lint cannot fix its grounded entries"
                     )
-            if _rests(done[3], subject, rules):
+            if _rests(done[3], subject, rules, picked):
                 shown = {ref: fresh(given[ref].record) for ref in code_point_sorted(given)}
                 shown.update(done[1])
                 found[subject] = {"read": subject, "point": shown}
@@ -253,11 +258,13 @@ def _one_at_a_time(lists: Sequence[list[Point]]) -> Iterator[tuple[Point, ...]]:
             yield (*first[:i], point, *first[i + 1 :])
 
 
-def _rests(log: Sequence[Mapping[str, Any]], subject: str, rules: set[str]) -> bool:
+def _rests(
+    log: Sequence[Mapping[str, Any]], subject: str, rules: set[str], picked: set[str]
+) -> bool:
     """Whether a run's ``execute`` plan rests on the abstention at ``subject``: it was written
     as an abstention answer, and a lineage rule returned a pick or ``extract`` over its
     question, the one-ref helpers for a plain question and the per-candidate picks for a
-    grounded entry."""
+    grounded entry, or a lineage table has a pick or ``extract`` input over it."""
     question_ref = declared_ref(subject)
     helpers = _ONE if subject == question_ref else _EACH
     written = {i["ref"]: i for i in log if i["item"] == "entry"}
@@ -267,6 +274,8 @@ def _rests(log: Sequence[Mapping[str, Any]], subject: str, rules: set[str]) -> b
         return False
     if not is_abstention(entry["value"]):
         return False
+    if subject == question_ref and question_ref in picked:
+        return True
     return any(
         item["helper"] in helpers and item["refs"] == [question_ref] == item["rested_on"]
         for ref in rules
@@ -304,11 +313,14 @@ def _board(point: Mapping[str, Point], unsure: str, marker: Unsure) -> dict[str,
     return board
 
 
-def _executes(loaded: LoadedDesign, policy: Policy, board: dict[str, object]) -> bool:
+def _executes(loaded: LoadedDesign, board: dict[str, object]) -> bool:
     """Whether the policy alone returns an ``execute`` plan over ``board``, its stop record
-    read as compile reads it."""
-    leaves = {path: loaded._leaf_value(path) for path in policy.params}
-    view = ReadView(Role(ComponentKind.policy, _POLICY), policy.reads, policy.params, board, leaves)
+    read as compile reads it; over a policy table, compile's evaluation gives the plan."""
+    if _POLICY in loaded._tables:
+        return table_choice(loaded, board)[0].kind is PlanKind.execute
+    reads, params = loaded._reads[_POLICY], loaded._params[_POLICY]
+    leaves = {path: loaded._leaf_value(path) for path in params}
+    view = ReadView(Role(ComponentKind.policy, _POLICY), reads, params, board, leaves)
     called = call(loaded._callables[_POLICY], view)
     if called.stop is not None or called.error is not None:
         return False
