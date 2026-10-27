@@ -288,7 +288,14 @@ def declared_plan(
     """A plan the policy table's winning row gives: its declaration's kind and steps, its
     ``reason`` and ``reply`` rendered, and the ``slots`` they were rendered from."""
     plan = Plan(kind, steps, reason=reason, reply=reply)
-    object.__setattr__(plan, "slots", MappingProxyType(dict(slots)))
+    frozen = {
+        member: tuple(
+            MappingProxyType({"name": s["name"], "origin": MappingProxyType(dict(s["origin"]))})
+            for s in listed
+        )
+        for member, listed in slots.items()
+    }
+    object.__setattr__(plan, "slots", MappingProxyType(frozen))
     return plan
 
 

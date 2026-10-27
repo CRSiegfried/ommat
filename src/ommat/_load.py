@@ -172,6 +172,8 @@ _EXTRACTION_TREE = {
 _EXTRACTION_SET = ("value", "guess", "span")
 """The members a class name declared at an extraction ``q:`` ref sets."""
 _UNITS = MappingOf(_UNIT)
+_COUNT = Interval("integer", 0, 2**53 - 1)
+"""What ``size`` returns: an integer, at least 0, within the value domain."""
 _SIGNATURES: dict[str, dict[str, Type]] = {
     "pick_with_margin": {"bar": _UNIT, "margin": _UNIT},
     "pick_with_thresholds": {"thresholds": _UNITS, "margin": _UNIT},
@@ -1485,7 +1487,7 @@ class _Loader:
             t = self.read_type(_Use(owner, where, "read", read, parsed))
             return None if isinstance(t, TypeFailure) else t
         if helper == "size":
-            return Scalar("integer")
+            return _COUNT
         if helper == "mass":
             return _UNIT
         if helper not in HELPERS or base not in self.providers or parsed.level != "q":
@@ -1558,7 +1560,8 @@ class _Loader:
         if table is None:
             return
         self.check_9_hit(owner, where, table, outputs)
-        if hit in ("U", "A") and not self.failed(frozenset({8, 9})):
+        own = any(f.check in (6, 8, 9) and owner in f.names for f in self.failures)
+        if hit in ("U", "A") and not own:
             self.check_9_overlap(owner, where, table, types)
 
     def check_9_helper(self, owner: str, where: str, i: Mapping[str, Any]) -> None:
@@ -1583,32 +1586,48 @@ class _Loader:
                 "after its read",
             )
             return
-        if helper != "mass":
-            return
-        path = i["params"]["labels"]
         parsed = _parsed(i["read"])
-        if (
-            path not in self.leaf_types
-            or parsed is None
-            or f"q:{parsed.name}" not in self.providers
-        ):
+        if parsed is None:
+            return  # check 7's
+        if helper == "size":
+            t = self.input_type(owner, where, {**i, "helper": None})
+            if t is not None and not isinstance(resolve(t, self.defs), ListOf):
+                self.fail(
+                    9,
+                    (owner, i["read"]),
+                    f"{where}: size reads {_q(i['read'])}, of type {render(t)}, "
+                    "which is not a list",
+                )
             return
-        value = self.leaf_value(path)
-        if type(value) is not list:
+        if helper not in ("mass", "pick_with_thresholds"):
+            return
+        arg = "labels" if helper == "mass" else "thresholds"
+        path = i["params"][arg]
+        if path not in self.leaf_types or f"q:{parsed.name}" not in self.providers:
+            return
+        held: object = self.leaf_value(path)
+        wanted_type: type = list if helper == "mass" else dict
+        if type(held) is not wanted_type:
             return  # check 8's
         question = self.question(f"q:{parsed.name}")
+        if question.kind is AnswerKind.extraction:
+            return  # check 4's
         labels = (
             _NOUL_LABELS
             if question.kind is AnswerKind.noul
             else label_parts(_fixed(question.labels))[0]
         )
-        members = cast("list[object]", value)
+        members: list[object] = (
+            list(cast("dict[str, object]", held))
+            if type(held) is dict
+            else cast("list[object]", held)
+        )
         for label in members:
             if label not in labels:
                 self.fail(
                     9,
                     (owner, path),
-                    f"{where}'s labels {_q(path)} holds {_q(str(label))}, which is not a label "
+                    f"{where}'s {arg} {_q(path)} holds {_q(str(label))}, which is not a label "
                     f"of {_q(i['read'])}",
                 )
         if len(set(map(str, members))) != len(members):
@@ -1808,14 +1827,11 @@ class _Loader:
                         f"{where}'s order lists {encode(v).decode('utf-8')}, which is not a "
                         f"value of {render(outputs)}",
                     )
-            for k, row in enumerate(table.rows, 1):
+            for k, row in enumerate(table.rows if table.order is not None else (), 1):
                 output = cast(object, row["output"])
-                literal = (
-                    cast("dict[str, Any]", output).get("literal")
-                    if isinstance(output, dict)
-                    else None
-                )
-                if literal is not None and in_domain(literal) and encode(literal) not in keys:
+                tagged = cast("dict[str, Any]", output) if isinstance(output, dict) else {}
+                literal = tagged.get("literal")
+                if "literal" in tagged and in_domain(literal) and encode(literal) not in keys:
                     self.fail(9, names, f"{where}'s row {k} gives a value its order does not list")
         if outputs is None:
             return
@@ -2467,13 +2483,19 @@ class _Loader:
             context_bytes=encode(decoded.get("context"), MAX_DOCUMENT_DEPTH - 1),
             reads=MappingProxyType(self.component_reads()),
             params=MappingProxyType(self.component_params()),
-            tables=MappingProxyType(
+            table_bytes=MappingProxyType(
                 {
-                    **{rid: decoded["rules"][rid] for rid, _ in self.tables()},
-                    **({"policy": decoded["policy"]} if self.policy_table() is not None else {}),
+                    **{rid: encode(decoded["rules"][rid]) for rid, _ in self.tables()},
+                    **(
+                        {"policy": encode(decoded["policy"])}
+                        if self.policy_table() is not None
+                        else {}
+                    ),
                 }
             ),
-            plans=MappingProxyType(dict(decoded["plans"])),
+            plan_bytes=MappingProxyType(
+                {name: encode(plan) for name, plan in decoded["plans"].items()}
+            ),
         )
 
     def component_reads(self) -> dict[str, tuple[str, ...]]:
@@ -2802,9 +2824,9 @@ def _table_boundaries(table: Mapping[str, Any], leaves: Mapping[str, Any]) -> di
     """A table's boundaries, as a ``boundaries`` field writes them (§answer-grid): a pick
     helper's bindings under its read's roles, ``extract``'s ``null_bar`` under ``null``; a
     parameter comparison over a bare ``d:`` or ``t:`` read under that read, an integer literal
-    as its value; over a ``mass`` input under ``mass`` with the set its ``labels`` leaf holds;
-    over an ``extract`` input under ``value``. A cell over a ``size`` input or another input
-    adds nothing."""
+    in a comparison or a value cell as its value; over a ``mass`` input under ``mass`` with
+    the set its ``labels`` leaf holds; over an ``extract`` input under ``value``. A cell over
+    a ``size`` input or another input adds nothing."""
     inputs = cast("list[dict[str, Any]]", table["inputs"])
     out: dict[str, Any] = {}
 
@@ -2827,6 +2849,15 @@ def _table_boundaries(table: Mapping[str, Any], leaves: Mapping[str, Any]) -> di
             if cell == ANY or n >= len(inputs):
                 continue
             ((tag, member),) = cast("dict[str, Any]", cell).items()
+            i = inputs[n]
+            helper, read = i["helper"], cast(str, i["read"])
+            if tag in ("is", "one_of"):
+                # An integer value cell is a literal boundary of a bare numeric read.
+                values = [member] if tag == "is" else cast("list[object]", member)
+                ints = [v for v in values if type(v) is int]
+                if ints and helper is None and not read.startswith("q:"):
+                    out.setdefault(read, []).extend(ints)
+                continue
             if tag == "between":
                 operands = cast("list[dict[str, Any]]", member)
             elif tag in COMPARISONS and "ref" not in member:
@@ -2834,8 +2865,6 @@ def _table_boundaries(table: Mapping[str, Any], leaves: Mapping[str, Any]) -> di
             else:
                 continue
             bounds = [o.get("param", o.get("literal")) for o in operands]
-            i = inputs[n]
-            helper, read = i["helper"], cast(str, i["read"])
             if helper is None and not read.startswith("q:"):
                 out.setdefault(read, []).extend(bounds)
             elif helper == "mass":
@@ -3410,8 +3439,8 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
     """Every object's missing or extra member, in one traversal order: the document's members,
     then each block's in code-point order of its name, each declaration's in code-point order
     of its own. A step is the ``plan`` item's, each
-    argument one origin as a declaration writes it. A table's ``inputs``
-    and ``rows`` are tested only for the value domain, as their members are not yet decided."""
+    argument one origin as a declaration writes it. A table's inputs and rows are objects of
+    §table-notation's members; their values' forms are check 10's."""
     members = _DOCUMENT | {"context"} if fmt >= CONTEXT_FORMAT else _DOCUMENT
     if fmt >= TARGETS_FORMAT:
         members |= {"targets"}
@@ -3455,8 +3484,13 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
     )
     for r in _items(doc["requirements"]):
         yield from _missing_or_extra(r, frozenset({"ref", "value"}), "a plan-level requirement", ())
+    policy_doc = _object(doc["policy"])
+    if policy_doc is not None and policy_doc.get("form") == "table":
+        yield from _table_member_failures(policy_doc, "the policy table", ("policy",), _POLICY_ROW)
     targeted: frozenset[str] = frozenset({"target"} if fmt >= TARGETS_FORMAT else ())
     for rid, rule in _objects(doc["rules"]):
+        if rule.get("form") == "table":
+            yield from _table_member_failures(rule, f"rule {_q(rid)}", (rid,), _RULE_ROW)
         yield from _function_failures(
             rule, f"rule {_q(rid)}", (rid,), _RULE | targeted, _TABLE | targeted, fmt
         )
@@ -3466,6 +3500,21 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
         yield from _source_failures(sid, source, fmt)
     for name, tool in _objects(doc["tools"]):
         yield from _missing_or_extra(tool, frozenset(), f"tool {_q(name)}", (name,))
+
+
+_INPUT = frozenset({"read", "helper", "params"})
+_RULE_ROW = frozenset({"cells", "output"})
+_POLICY_ROW = frozenset({"cells", "plan"})
+
+
+def _table_member_failures(
+    table: dict[str, Any], where: str, names: tuple[str, ...], row: frozenset[str]
+) -> Iterator[tuple[tuple[str, ...], str]]:
+    """Each table input's and row's missing or extra member, by position from 1."""
+    for n, i in enumerate(_items(table.get("inputs")), 1):
+        yield from _missing_or_extra(i, _INPUT, f"{where}'s input {n}", names)
+    for k, r in enumerate(_items(table.get("rows")), 1):
+        yield from _missing_or_extra(r, row, f"{where}'s row {k}", names)
 
 
 def _function_failures(
@@ -3785,7 +3834,7 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
                 r["outputs"],
                 r["hit"],
                 _listed(r["inputs"], python_input),
-                _rows(r["rows"], policy=False),
+                _rows(r["rows"], policy=False, hit=r["hit"]),
                 order=r["order"],
                 candidates=r["candidates"],
                 grounded=r["grounded"],
@@ -3855,10 +3904,12 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
     )
 
 
-def _rows(value: object, *, policy: bool) -> Any:
-    """A document's rows as a design written in Python holds them."""
+def _rows(value: object, *, policy: bool, hit: object = None) -> Any:
+    """A document's rows as a design written in Python holds them, one not of the tagged form
+    as the ``NotationError`` check 10 reports."""
     return _listed(
-        value, lambda r: r if (o := _object(r)) is None else python_row(o, policy=policy)
+        value,
+        lambda r: r if (o := _object(r)) is None else python_row(o, policy=policy, hit=hit),
     )
 
 

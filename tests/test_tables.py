@@ -336,7 +336,8 @@ def test_check_6_a_helper_outside_the_tables_library(helper: str) -> None:
 
 
 def test_check_7_a_cell_or_pass_through_ref_out_of_the_grammar() -> None:
-    refused(tab("F", ["t:state.n"], [["in d:Bad", 1]]), 7, "not a ref")
+    refused(tab("F", ["t:state.n"], [[{"in": "d:Bad"}, 1]]), 7, "not a ref")
+    refused(tab("F", ["t:state.n"], [["in d:Bad", 1]]), 10, "names no ref")
     refused(tab("F", ["t:state.n"], [["-", Input("d:")]]), 7, "not a ref")
 
 
@@ -667,7 +668,7 @@ def test_each_collect_aggregator(hit: str, outputs: str, rows: list[Any], expect
 
 def test_min_and_max_with_no_match_follow_rule_1() -> None:
     entry = one(tab("C<", ["t:state.n"], [[">= 9", 1]]))
-    assert entry["marker"]["cause"]["code"] == "abstained"
+    assert entry["marker"]["cause"] == {"code": "abstained", "refs": ["t:state.n"]}
 
 
 def test_collect_propagates_an_unavailable_from_any_row() -> None:
@@ -890,7 +891,7 @@ def test_redact_digests_a_plans_rendered_text_and_keeps_its_slots() -> None:
     record = run(load(policy_design()), 0.1)
     view = json.loads(redact(record, b"k" * 32))
     plan = next(i for i in view["log"] if i["item"] == "plan")
-    assert plan["reply"] != "Nothing urgent for Ada; bar 0.6."
+    assert plan["reply"].startswith("hmac-sha256:")
     assert plan["slots"]["reply"][0] == {"name": "n", "origin": {"ref": "t:state.name"}}
     assert plan["rows"] == [2, 3]
 
@@ -1014,3 +1015,403 @@ def test_a_count_table_is_probed_over_the_values_given() -> None:
     assert "t:state.items" not in loaded._grid
     report = dead_questions(loaded, values={"t:state.items": [[], [1, 2]]})
     assert report["points"] > 0
+
+
+# ---------------------------------------------------------------------------------------------
+# Further cases
+
+
+def test_a_design_and_its_document_give_one_record_whatever_the_argument_order() -> None:
+    literal = Origin(literal={"z": 1, "a": [2, {"y": 3, "b": 4}]})
+    plans = {
+        **PLANS,
+        "page": PlanDeclaration(
+            "execute",
+            [
+                Step("notify", {"who": Origin(ref="t:state.name"), "extra": literal}),
+                Step("notify", {"z": Binding(1, "id"), "a": Origin(literal=1.0)}),
+            ],
+        ),
+    }
+    built = load(dataclasses.replace(policy_design(), plans=plans))
+    stored = load(built.document)
+    assert stored.design_hash == built.design_hash
+    a, b = run(built, 0.9), run(stored, 0.9)
+    assert a.record_hash == b.record_hash
+    assert replay_sync(a, stored)[1] == []
+    step = item(a, "plan")["steps"][0]
+    assert list(step["arguments"]) == ["extra", "who"]
+    assert step["arguments"]["extra"] == {"literal": {"a": [2, {"b": 4, "y": 3}], "z": 1}}
+
+
+def test_a_clarify_plan_renders_its_reason_and_reply_slots() -> None:
+    plans = {
+        **PLANS,
+        "tell": PlanDeclaration(
+            "clarify",
+            reason=Text("Checked {n}.", [{"name": "n", "origin": {"ref": "t:state.name"}}]),
+            reply=Text("Which {{one}} for {n}?", [{"name": "n", "origin": {"ref": "t:state.n"}}]),
+        ),
+    }
+    plan = item(run(load(dataclasses.replace(policy_design(), plans=plans)), 0.1), "plan")
+    assert plan["kind"] == "clarify"
+    assert plan["reason"] == "Checked Ada."
+    assert plan["reply"] == "Which {one} for 3?"
+    assert list(plan["slots"]) == ["reason", "reply"]
+
+
+def test_a_row_whose_plans_slot_holds_a_marker_is_skipped() -> None:
+    plans = {
+        **PLANS,
+        "tell": PlanDeclaration(
+            "inform", reply=Text("Said {s}.", [{"name": "s", "origin": {"ref": "d:s0"}}])
+        ),
+    }
+    for kind, cause in (("Unsure", None), ("Unavailable", {"code": "required", "refs": ["d:s0"]})):
+        design_ = dataclasses.replace(
+            policy_design(), rules={**policy_design().rules, **srcs(kind)}, plans=plans
+        )
+        plan = item(run(load(design_), 0.1), "plan")
+        assert plan["kind"] == "escalate"
+        assert plan["cause"] == cause
+        assert plan["rows"] == [3]
+
+
+CHOOSE = Source(
+    {
+        "q:desk": Question("choice", Text("Which desk?"), labels=("hotel", "flight", "other")),
+        "q:ref": Question(
+            "extraction",
+            Text("The booking reference"),
+            value_type="text",
+            text={"ref": "t:state.name"},
+        ),
+    },
+    needs=["t:state"],
+)
+
+
+def choose(*tables: tuple[str, Table], **changes: Any) -> Design:
+    leaves = {
+        **LEAVES,
+        "desk/bars": Parameter(t.mapping(t.number(0, 1)), {"hotel": 0.5, "flight": 0.5}),
+        "null": Parameter(t.number(0, 1), 0.5),
+    }
+    return design(*tables, sources={"s": CHOOSE}, parameters=leaves, **changes)
+
+
+def answering_choice(desk: dict[str, float], value: str | None) -> Callable[..., Any]:
+    async def binding(batch: Any, *, seconds: float) -> object:
+        extraction = {
+            "value": value,
+            "guess": value,
+            "p_null": 0.1,
+            "confidence": 0.9,
+            "span": None,
+        }
+        return CallResult({"q:desk": desk, "q:ref": extraction})
+
+    return binding
+
+
+def test_a_yes_no_condition_from_a_choice_and_an_extract_table() -> None:
+    hotel = Table(
+        "d:hotel",
+        t.label("no", "yes"),
+        "F",
+        [Helper("pick_with_thresholds", "q:desk", thresholds="desk/bars", margin="margin")],
+        [["hotel", "yes"], ["{flight, other}", "no"]],
+    )
+    booking = Table(
+        "d:booking",
+        "string",
+        "F",
+        [Helper("extract", "q:ref", null_bar="null")],
+        [["-", Input("q:ref")]],
+    )
+    loaded = load(choose(("hotel", hotel), ("booking", booking)))
+    record = decide_sync(
+        loaded,
+        BASE,
+        {"default": answering_choice({"hotel": 0.8, "flight": 0.1, "other": 0.1}, "AB12")},
+    ).record
+    assert item(record, "entry", "d:hotel")["value"] == "yes"
+    assert item(record, "entry", "d:booking")["value"] == "AB12"
+    record = decide_sync(
+        loaded,
+        BASE,
+        {"default": answering_choice({"hotel": 0.1, "flight": 0.8, "other": 0.1}, None)},
+    ).record
+    assert item(record, "entry", "d:hotel")["value"] == "no"
+    assert item(record, "entry", "d:booking")["marker"]["cause"]["refs"] == ["q:ref"]
+    grid = loaded._grid
+    assert grid["q:desk"]["thresholds"] == ("desk/bars",)
+    assert grid["q:ref"]["null"] == ("null",)
+
+
+def test_each_marker_cell_matches_its_own_kind() -> None:
+    table = tab("F", ["d:s0"], [["Unsure", 1], ["Unavailable", 2], ["Unasked", 3], ["-", 4]])
+    for kind, expected in (("Unsure", 1), ("Unavailable", 2), ("Unasked", 3), ("value", 4)):
+        assert value(table, rules=srcs(kind)) == expected
+
+
+def test_a_label_spelt_unsure_is_matched_in_tagged_form() -> None:
+    labels = t.label("Unsure", "x")
+    table = Table("d:tab", "integer", "F", ["t:state.w"], [[{"is": "Unsure"}, 1], [{"is": "x"}, 2]])
+    loaded = load(design(("tab", table), state=t.record(w=labels)))
+    for label, expected in (("Unsure", 1), ("x", 2)):
+        record = decide_sync(loaded, {"w": label}, {}).record
+        assert item(record, "entry", "d:tab")["value"] == expected
+
+
+def test_rule_2_ignores_a_row_after_the_winner_under_f() -> None:
+    assert value(tab("F", ["d:s0"], [["-", 2], [1, 1]]), rules=srcs("Unavailable")) == 2
+
+
+def test_collect_propagates_from_a_row_before_a_match_and_with_no_match() -> None:
+    rules = srcs("Unavailable")
+    before = tab("C+", ["d:s0", "t:state.n"], [[1, "-", 1], ["-", ">= 1", 2]])
+    assert value(before, rules=rules)["cause"] == {"code": "required", "refs": ["d:s0"]}
+    alone = tab("C#", ["d:s0"], [[1]])
+    assert value(alone, rules=rules)["cause"] == {"code": "required", "refs": ["d:s0"]}
+
+
+def test_a_collect_sum_is_exact_over_the_decimals() -> None:
+    leaves = {**LEAVES, "a": Parameter(t.number(), 0.1), "b": Parameter(t.number(), 0.2)}
+    table = tab("C+", ["t:state.n"], [["-", Param("a")], ["-", Param("b")]], outputs="number")
+    loaded = load(design(("tab", table), parameters=leaves))
+    record = decide_sync(loaded, BASE, {}).record
+    assert item(record, "entry", "d:tab")["value"] == 0.3
+
+
+def test_rule_2_names_inputs_then_origins_then_slots_and_the_first_input_of_a_cell() -> None:
+    plans = {
+        **PLANS,
+        "page": PlanDeclaration(
+            "execute",
+            [Step("notify", {"who": Origin(ref="d:s1")})],
+            reason=Text("Paging {s}.", [{"name": "s", "origin": {"ref": "d:s2"}}]),
+        ),
+    }
+    policy = PolicyTable(["d:s0"], [[{"one_of": [1, 2]}, "page"], ["-", "ask"]])
+    for kinds, named in (
+        (("Unavailable", "Unavailable", "Unavailable"), "d:s0"),
+        (("value", "Unavailable", "Unavailable"), "d:s1"),
+        (("value", "value", "Unavailable"), "d:s2"),
+    ):
+        design_ = dataclasses.replace(
+            policy_design(),
+            rules={**policy_design().rules, **srcs(*kinds)},
+            plans=plans,
+            policy=policy,
+        )
+        plan = item(run(load(design_), 0.9), "plan")
+        assert plan["cause"] == {"code": "required", "refs": [named]}
+    both = tab("F", ["d:s0", "d:s1"], [["-", ">= d:s0", 1], ["-", "-", 2]])
+    assert value(both, rules=srcs("Unavailable", "Unavailable"))["cause"]["refs"] == ["d:s0"]
+    one_side = tab("F", ["d:s0", "d:s1"], [[">= d:s1", "-", 1], ["-", "-", 2]])
+    assert value(one_side, rules=srcs("Unsure", "Unavailable"))["cause"]["refs"] == ["d:s1"]
+
+
+def test_a_comparison_against_a_marker_and_an_in_over_a_marker_do_not_match() -> None:
+    table = tab("F", ["t:state.n", "d:s0"], [[">= d:s0", "-", 1], ["-", "-", 2]])
+    assert value(table, rules=srcs("Unsure")) == 2
+    listed = Rule(
+        "d:s0",
+        t.list_(t.integer()),
+        lambda r: Unsure(Cause(CauseCode.abstained, ["t:state"])),
+        version="1",
+        reads=["t:state"],
+    )
+    table = tab("F", ["t:state.n", "d:s0"], [["in d:s0", "-", 1], ["-", "-", 2]])
+    assert value(table, rules={"s0": listed}) == 2
+
+
+def test_the_abstention_lint_finds_an_execute_on_a_policy_tables_catch_all() -> None:
+    plans = {"go": PlanDeclaration("execute", [Step("notify")]), "tell": PLANS["tell"]}
+    policy = PolicyTable(["d:urgent"], [["no", "tell"], ["-", "go"]])
+    design_ = dataclasses.replace(
+        policy_design(), plans=plans, policy=policy, state=t.record(name=t.string)
+    )
+    report = unsure_to_execute(load(design_), values={"t:state.name": ["Ada"]})
+    assert [i["read"] for i in report["execute"]] == ["d:urgent", "q:urgent"]
+
+
+def test_the_dead_question_lint_finds_a_question_a_policy_table_rests_on_live() -> None:
+    loaded = load(dataclasses.replace(policy_design(), state=t.record(name=t.string)))
+    dead = dead_questions(loaded, values={"t:state.name": ["Ada"]})
+    assert dead["questions"]["q:urgent"]["status"] == "live"
+
+
+def test_an_integer_value_cell_is_a_grid_boundary() -> None:
+    table = tab("F", ["t:state.n"], [[5, 1], [{"one_of": [7, 8]}, 2], ["-", 0]])
+    loaded = load(design(("tab", table)))
+    assert loaded._grid["t:state.n"] == (5, 7, 8)
+
+
+def test_a_mass_set_from_a_table_and_a_boundaries_field_share_one_entry() -> None:
+    leaves = {
+        **LEAVES,
+        "labels": Parameter(t.list_(t.string), ["yes"]),
+        "m2": Parameter(t.number(0, 1), 0.4),
+    }
+    share = Table(
+        "d:share",
+        "boolean",
+        "F",
+        [Helper("mass", "q:urgent", labels="labels")],
+        [[">= hi", True], ["-", False]],
+    )
+    boundary = {
+        "bar": [],
+        "thresholds": [],
+        "margin": [],
+        "mass": [{"labels": ["yes"], "bounds": ["m2"]}],
+    }
+    reader = Rule(
+        "d:r",
+        "boolean",
+        lambda r: True,
+        version="1",
+        reads=["q:urgent"],
+        boundaries={"q:urgent": boundary},
+    )
+    loaded = load(asked(("share", share), ("r", reader), parameters=leaves))
+    assert [dict(m) for m in loaded._grid["q:urgent"]["mass"]] == [
+        {"labels": ("yes",), "bounds": ("hi", "m2")}
+    ]
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        tab("U", ["t:state.word"], [["a", 1], ["{b, c}", 2]]),
+        tab("U", ["t:state.flag"], [[True, 1], [False, 2]]),
+        tab("U", ["t:state.n"], [["[0, 2]", 1], ["> 2", 2], ["< 0", 3]]),
+        tab(
+            "U", ["t:state.n", "t:state.items"], [["in t:state.items", "-", 1], ["Unsure", "-", 2]]
+        ),
+    ],
+)
+def test_more_rows_that_never_both_match(table: Table) -> None:
+    load(design(("tab", table)))
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        tab("U", ["t:state.word"], [["a", 1], ["{a, c}", 2]]),
+        tab("U", ["t:state.n"], [["[0, 2]", 1], [">= 2", 2]]),
+        tab("U", ["t:state.n", "t:state.items"], [["in t:state.items", "-", 1], ["> 1", "-", 2]]),
+        tab("U", ["t:state.maybe"], [["-", 1], ["-", 2]]),
+    ],
+)
+def test_more_rows_that_can_both_match(table: Table) -> None:
+    refused(table, 9, "overlap")
+
+
+@pytest.mark.parametrize(
+    ("table", "check", "says"),
+    [
+        (tab("F", [Helper("first", "t:state.items")], [["-", 1]]), 6, "not a helper a table"),
+        (tab("F", [Helper("unique", "t:state.items")], [["-", 1]]), 6, "not a helper a table"),
+        (tab("F", [Helper("size", "t:state.n")], [["-", 1]]), 9, "which is not a list"),
+        (tab("F", [Helper("size", "t:state.items")], [[-1, 1]]), 9, "outside the input's interval"),
+        (tab("P", ["t:state.n"], [["-", 1]], order=["x"]), 9, "is not a value of"),
+        (
+            Table("d:tab", "integer or null", "P", ["t:state.n"], [["-", None]], order=[1]),
+            9,
+            "does not list",
+        ),
+        (tab("F", ["t:state.n"], [["-", Input(3)]]), 10, "not a string"),  # type: ignore[arg-type]
+        (tab("F", [b"ab"], [["-", 1]]), 10, "not a ref or a Helper"),
+        (tab("F", ["t:state.n"], [b"\x01\x02"]), 10, "not a list"),
+    ],
+)
+def test_further_clauses(table: Table, check: int, says: str) -> None:
+    refused(table, check, says)
+
+
+def test_a_policy_input_outside_the_domain_and_a_step_requirement_ref_fail_check_10() -> None:
+    from ommat import Requirement
+
+    found = failures(
+        dataclasses.replace(policy_design(), policy=PolicyTable(["\ud800"], [["-", "ask"]]))
+    )
+    assert any(c == 10 and "value domain" in m for c, m in found)
+    bad = Requirement(3, "x")  # type: ignore[arg-type]
+    plans = {**PLANS, "page": PlanDeclaration("execute", [Step("notify", {}, [bad])])}
+    found = failures(dataclasses.replace(policy_design(), plans=plans))
+    assert any(c == 10 and "ref is not a string" in m for c, m in found)
+
+
+def test_more_plan_clauses_at_load() -> None:
+    from ommat import Requirement
+
+    plans = {
+        **PLANS,
+        "page": PlanDeclaration("execute", [Step("notify", {"who": Origin(ref="d:none")})]),
+    }
+    found = failures(dataclasses.replace(policy_design(), plans=plans))
+    assert any(c == 3 and "d:none" in m for c, m in found)
+    plans = {
+        **PLANS,
+        "page": PlanDeclaration(
+            "execute", [Step("notify", {}, [Requirement("d:urgent", "maybe")])]
+        ),
+    }
+    found = failures(dataclasses.replace(policy_design(), plans=plans))
+    assert any(c == 9 and "can never hold" in m for c, m in found)
+
+
+def test_a_mass_or_thresholds_leaf_names_labels_of_its_read_once() -> None:
+    leaves = {**LEAVES, "labels": Parameter(t.list_(t.string), ["yes", "yes"])}
+    found = failures(
+        asked(
+            ("tab", tab("F", [Helper("mass", "q:urgent", labels="labels")], [["-", 1]])),
+            parameters=leaves,
+        )
+    )
+    assert any(c == 9 and "lists a label twice" in m for c, m in found)
+    leaves = {**LEAVES, "th": Parameter(t.mapping(t.number(0, 1)), {"zzz": 0.5})}
+    picked = Helper("pick_with_thresholds", "q:urgent", thresholds="th", margin="margin")
+    found = failures(asked(("tab", tab("F", [picked], [["-", 1]])), parameters=leaves))
+    assert any(c == 9 and "not a label of" in m for c, m in found)
+
+
+def table_doc() -> dict[str, Any]:
+    return json.loads(load(design(("tab", tab("F", ["t:state.n"], [["-", 1]])))).document)
+
+
+def row_of(doc: dict[str, Any]) -> dict[str, Any]:
+    return doc["rules"]["tab"]["rows"][0]
+
+
+EDITS: dict[str, tuple[dict[str, Any], int]] = {
+    "an extra row member": ({"extra": 1}, 11),
+    "a bare integer cell": ({"cells": [5]}, 10),
+    "a bare label cell": ({"cells": ["yes"]}, 10),
+    "a null output outside C#": ({"output": None}, 10),
+    "an Unavailable output": ({"output": {"marker": "Unavailable"}}, 10),
+    "a ref output that is no string": ({"output": {"ref": 5}}, 10),
+}
+
+
+@pytest.mark.parametrize("edit", list(EDITS))
+def test_a_hand_edited_tables_members_fail_their_check(edit: str) -> None:
+    change, check = EDITS[edit]
+    doc = table_doc()
+    row_of(doc).update(change)
+    assert {c for c, _ in failures(doc)} == {check}
+
+
+def test_a_hand_edited_input_missing_a_member_fails_check_11() -> None:
+    doc = table_doc()
+    del doc["rules"]["tab"]["inputs"][0]["params"]
+    assert {c for c, _ in failures(doc)} == {11}
+
+
+def test_a_declared_plans_slots_are_read_only() -> None:
+    decision = decide_sync(load(policy_design()), BASE, {"default": answering(0.1)})
+    with pytest.raises(TypeError):
+        decision.plan.slots["reply"][0]["name"] = "x"  # type: ignore[index]

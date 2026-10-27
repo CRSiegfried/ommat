@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ommat._component import at, call, exception_record, names_read
-from ommat._design import LoadedDesign, PlanDeclaration, Policy, Requirement
+from ommat._design import LoadedDesign, Policy, Requirement
 from ommat._guard import Verdict, guard, verdict_item
 from ommat._interpret import _marker_document, _render
 from ommat._ledger import Ledger
@@ -46,7 +46,7 @@ def compile_turn(
     """Run compile over the live board interpret left, every ref on it, and
     return the plan and the verdict, both appended."""
     context = context_member(loaded, board)  # before the policy runs
-    if _POLICY in loaded._tables:
+    if _POLICY in loaded._table_bytes:
         plan, rows, raised = table_plan(loaded, board)
         item = plan_item(plan, None, context, rows=rows)
         index = ledger.append(item)
@@ -293,7 +293,10 @@ def plan_item(
     if derivation is not None:
         item["derivation"] = derivation
     if plan.slots:
-        item["slots"] = {k: [dict(s) for s in v] for k, v in plan.slots.items()}
+        item["slots"] = {
+            k: [{"name": s["name"], "origin": dict(s["origin"])} for s in v]
+            for k, v in plan.slots.items()
+        }
     if rows is not None:
         item["rows"] = rows
     return item
@@ -301,6 +304,15 @@ def plan_item(
 
 def _plan_of(item: dict[str, Any]) -> Plan:
     """The policy's plan rebuilt from its item, the copy the ledger stores."""
+    steps = _steps(item["steps"])
+    slots = cast("dict[str, Any]", item.get("slots", {}))
+    if slots:
+        return declared_plan(item["kind"], steps, item["reason"], item["reply"], slots)
+    return Plan(item["kind"], steps, reason=item["reason"], reply=item["reply"])
+
+
+def _steps(documents: list[dict[str, Any]]) -> list[Step]:
+    """Steps rebuilt from their document form, the ``plan`` item's or a declaration's."""
 
     def origin(o: dict[str, Any]) -> Origin | Binding:
         if "step" in o:
@@ -309,18 +321,14 @@ def _plan_of(item: dict[str, Any]) -> Plan:
             return Origin(ref=o["ref"])
         return Origin(literal=o["literal"])
 
-    steps = [
+    return [
         Step(
             s["tool"],
             {name: origin(o) for name, o in s["arguments"].items()},
             [Requirement(r["ref"], r["value"]) for r in s["requirements"]],
         )
-        for s in item["steps"]
+        for s in documents
     ]
-    slots = cast("dict[str, Any]", item.get("slots", {}))
-    if slots:
-        return declared_plan(item["kind"], steps, item["reason"], item["reply"], slots)
-    return Plan(item["kind"], steps, reason=item["reason"], reply=item["reply"])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -346,7 +354,7 @@ def table_choice(
     """The policy table's evaluation over ``board``: the plan its winning row's declaration
     gives, built and rendered, or rule 2's ``escalate``; the matched rows; and the exception
     a helper or a comparison raised, the plan then ``broken``. No plan rule is applied."""
-    table = loaded._tables[_POLICY]
+    table = loaded._table(_POLICY)
     reads, params = loaded._reads[_POLICY], loaded._params[_POLICY]
     leaves = {path: loaded._leaf_value(path) for path in params}
     view = ReadView(Role(ComponentKind.policy, _POLICY), reads, params, board, leaves)
@@ -363,39 +371,40 @@ def table_choice(
             for k, row in enumerate(rows)
         }
         outcome = evaluate(rows, "F", None, [i["read"] for i in inputs], values, leaves, conditions)
+        if outcome.plan is None:
+            refs = list(cast(Undetermined, outcome.value).cause.refs)
+            return engine_plan(PlanKind.escalate, Cause(_C.required, refs)), outcome.rows, None
+        return _declared(loaded, board, loaded._plan(outcome.plan)), outcome.rows, None
     except Exception as exc:  # a helper's raise, or an incomparable comparison
         return engine_plan(PlanKind.broken, Cause(_C.raised, [_POLICY])), [], exc
     finally:
         view.close()
-    if outcome.plan is None:
-        refs = list(cast(Undetermined, outcome.value).cause.refs)
-        return engine_plan(PlanKind.escalate, Cause(_C.required, refs)), outcome.rows, None
-    return _declared(loaded, board, declarations[outcome.plan]), outcome.rows, None
 
 
 def _declared(
-    loaded: LoadedDesign, board: Mapping[str, object], declaration: PlanDeclaration
+    loaded: LoadedDesign, board: Mapping[str, object], declaration: dict[str, Any]
 ) -> Plan:
-    """A plan declaration as the plan it gives: its steps as declared, and its ``reason`` and
-    ``reply`` rendered from their slots, each slot's origin in ``slots``."""
+    """A plan declaration's document object as the plan it gives: its steps as the document
+    holds them, in canonical order, and its ``reason`` and ``reply`` rendered from their slots,
+    each slot's origin in ``slots``."""
     texts: dict[str, str | None] = {}
     slots: dict[str, list[dict[str, Any]]] = {}
-    for member, text in (("reason", declaration.reason), ("reply", declaration.reply)):
+    for member in ("reason", "reply"):
+        text = cast("dict[str, Any] | None", declaration[member])
         if text is None:
             texts[member] = None
             continue
         values: dict[str, object] = {}
-        for slot in text.slots:
+        for slot in text["slots"]:
             tag, origin = next(iter(slot["origin"].items()))
             if tag == "param":
                 values[slot["name"]] = loaded._leaf_value(origin)
             else:
                 parsed = parse_ref(origin)
-                values[slot["name"]] = walk(
-                    board[f"{parsed.level}:{parsed.name}"], parsed.fields, origin
-                )
-        texts[member] = _render(text.template, values)
-        if text.slots:
-            slots[member] = [{"name": s["name"], "origin": dict(s["origin"])} for s in text.slots]
-    steps = cast("list[Step]", list(declaration.steps))
-    return declared_plan(declaration.kind, steps, texts["reason"], texts["reply"], slots)
+                base = board[f"{parsed.level}:{parsed.name}"]
+                values[slot["name"]] = walk(base, parsed.fields, origin)
+        texts[member] = _render(cast(str, text["template"]), values)
+        if text["slots"]:
+            slots[member] = text["slots"]
+    steps = _steps(declaration["steps"])
+    return declared_plan(declaration["kind"], steps, texts["reason"], texts["reply"], slots)

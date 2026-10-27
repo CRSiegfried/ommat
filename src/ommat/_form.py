@@ -740,7 +740,10 @@ class _Form:
             for n, item in enumerate(cast("Sequence[object]", value), 1):
                 try:
                     if member == "inputs":
-                        out_inputs.append(input_form(item))
+                        form = input_form(item)
+                        if not in_domain(form):
+                            raise NotationError("it holds a value outside the value domain")
+                        out_inputs.append(form)
                     else:
                         row = row_form(item, hit=hit, policy=policy)
                         if not in_domain(row):
@@ -762,10 +765,17 @@ class _Form:
             self.fail(names, f"{where}'s steps are not a list")
         else:
             for step in cast("Sequence[object]", p.steps):
-                if type(step) is Step or _candidate_step(step):
+                if _candidate_step(step):
                     steps.append(step)
-                else:
+                elif type(step) is not Step:
                     self.fail(names, f"{where} holds a step that is not a Step")
+                elif not all(
+                    isinstance(r, Requirement) and is_scalar_string(r.ref)
+                    for r in step.requirements
+                ):
+                    self.fail(names, f"{where} holds a step requirement whose ref is not a string")
+                else:
+                    steps.append(step)
         texts: dict[str, Text | None] = {}
         for member, text in (("reason", p.reason), ("reply", p.reply)):
             texts[member] = None if text is None else self.text(text, f"{where}'s {member}", names)

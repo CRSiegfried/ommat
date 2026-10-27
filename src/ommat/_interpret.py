@@ -891,7 +891,7 @@ class _Turn:
         read view over its reads and leaves, then its rows; write its entry with ``rows``. A
         helper that raises, or a comparison of incomparable values, is ``Unavailable`` with
         ``raised``, no row tested."""
-        table = self.loaded._tables[rid]
+        table = self.loaded._table(rid)
         reads, params = self.loaded._reads[rid], self.loaded._params[rid]
         leaves = {path: self.loaded._leaf_value(path) for path in params}
         view = ReadView(

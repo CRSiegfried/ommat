@@ -169,8 +169,8 @@ def _abstentions(
     picked = {
         cast(str, i["read"])
         for n in lineage
-        if n in loaded._tables
-        for i in cast("list[dict[str, Any]]", loaded._tables[n]["inputs"])
+        if n in loaded._table_bytes
+        for i in cast("list[dict[str, Any]]", loaded._table(n)["inputs"])
         if i["helper"] in _ONE
     }
     reads = code_point_sorted(set(fills) - grounded.keys())
@@ -316,7 +316,7 @@ def _board(point: Mapping[str, Point], unsure: str, marker: Unsure) -> dict[str,
 def _executes(loaded: LoadedDesign, board: dict[str, object]) -> bool:
     """Whether the policy alone returns an ``execute`` plan over ``board``, its stop record
     read as compile reads it; over a policy table, compile's evaluation gives the plan."""
-    if _POLICY in loaded._tables:
+    if _POLICY in loaded._table_bytes:  # compile's evaluation, which catches its own raise
         return table_choice(loaded, board)[0].kind is PlanKind.execute
     reads, params = loaded._reads[_POLICY], loaded._params[_POLICY]
     leaves = {path: loaded._leaf_value(path) for path in params}

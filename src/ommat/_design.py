@@ -699,8 +699,9 @@ class LoadedDesign:
     canonical bytes, by source id; ``_context_bytes``, the context block's document object or
     null; ``_reads`` and ``_params``, each rule's and the policy's declared reads and leaf
     paths, a table's from its inputs, cells and outputs and the policy table's with its plans'
-    board refs and slot leaves; ``_tables``, each table's document object by rule id, the
-    policy table's under ``policy``; ``_plans``, each plan declaration's document object. The
+    board refs and slot leaves; ``_table_bytes``, each table's document object by rule id, the
+    policy table's under ``policy``, and ``_plan_bytes``, each plan declaration's, read by
+    ``_table`` and ``_plan``. The
     class trees, payloads, leaf values and plan-level requirements are decoded afresh at each
     read, so nothing a caller changes after load reaches a turn.
     """
@@ -725,12 +726,12 @@ class LoadedDesign:
         "_needs",
         "_params",
         "_payload_bytes",
-        "_plans",
+        "_plan_bytes",
         "_providers",
         "_reads",
         "_requirement_bytes",
         "_requirements_bytes",
-        "_tables",
+        "_table_bytes",
         "_types",
     )
 
@@ -758,8 +759,8 @@ class LoadedDesign:
     _hash: str
     _reads: Mapping[str, tuple[str, ...]]
     _params: Mapping[str, tuple[str, ...]]
-    _tables: Mapping[str, Mapping[str, Any]]
-    _plans: Mapping[str, Mapping[str, Any]]
+    _table_bytes: Mapping[str, bytes]
+    _plan_bytes: Mapping[str, bytes]
 
     def __init__(self, token: object, **parts: object) -> None:
         if token is not _BUILT_BY_LOAD:
@@ -801,6 +802,14 @@ class LoadedDesign:
         """The plan-level requirements as decoded from the document, in declaration order."""
         decoded = cast("list[dict[str, Any]]", decode(self._requirements_bytes))
         return tuple(Requirement(r["ref"], r["value"]) for r in decoded)
+
+    def _table(self, key: str) -> dict[str, Any]:
+        """A table's document object, by rule id or ``policy``, decoded afresh."""
+        return cast("dict[str, Any]", decode(self._table_bytes[key]))
+
+    def _plan(self, name: str) -> dict[str, Any]:
+        """A plan declaration's document object, decoded afresh."""
+        return cast("dict[str, Any]", decode(self._plan_bytes[name]))
 
     def _leaf_value(self, path: str) -> Any:
         """A leaf's value as decoded from the document; a ``bytes`` value as ``bytes``."""

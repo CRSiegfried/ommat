@@ -16,6 +16,7 @@ the row holds, rested on an input holding ``Unavailable``: rule 2's test. A comp
 value that is not a number is ``Incomparable``, which load's typing makes unreachable.
 """
 
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -26,7 +27,8 @@ from ommat._design import Helper, Input, Param, PlanDeclaration
 from ommat._markers import Cause, CauseCode, Unasked, Unavailable, Undetermined, Unsure
 from ommat._plan import Origin, Step
 from ommat._read_view import ReadView
-from ommat._values import string_data
+from ommat._refs import is_declared_name, is_ref
+from ommat._values import in_domain, string_data
 
 ANY = "-"
 MARKERS: dict[str, type[Undetermined]] = {
@@ -62,6 +64,7 @@ REFUSED_HELPERS = frozenset(
 """Names of the library a table's input may not call: the per-candidate picks and
 ``determined`` (check 6), and the combinators, which a hit policy stands for."""
 _INTEGER = re.compile(r"-?(0|[1-9][0-9]*)")
+_IN = re.compile(r"in +([qtd]:\S*)")
 
 
 class NotationError(ValueError):
@@ -90,7 +93,11 @@ def _operand(text: str, *, ref: bool) -> dict[str, Any]:
     if _level_prefixed(text):
         if not ref:
             raise NotationError(f"an interval's operand {text!r} is a ref")
+        if not is_ref(text):
+            raise NotationError(f"the operand {text!r} is not a ref")
         return {"ref": text}
+    if not is_declared_name(text):
+        raise NotationError(f"the operand {text!r} is not an integer, a ref or a leaf path")
     return {"param": text}
 
 
@@ -111,12 +118,14 @@ def _notation(text: str) -> Any:
         return {"between": [_operand(lo, ref=False), _operand(hi, ref=False)]}
     if cell.startswith("{"):
         members = [m.strip() for m in cell[1:-1].split(",")] if cell.endswith("}") else []
-        if len(members) < 2 or not all(members):
+        if len(members) < 2 or not all(m and not set(m) & set("{}") for m in members):
             raise NotationError(f"the cell {text!r} is not a set of two or more labels")
         return {"one_of": members}
-    parts = cell.split(None, 1)
-    if len(parts) == 2 and parts[0] == "in" and _level_prefixed(parts[1].strip()):
-        return {"in": parts[1].strip()}
+    found = _IN.fullmatch(cell)
+    if found is not None:
+        if not is_ref(found.group(1)):
+            raise NotationError(f"the cell {text!r} names no ref")
+        return {"in": found.group(1)}
     return {"is": cell}
 
 
@@ -137,15 +146,16 @@ def cell_form(value: object) -> Any:
 def _tagged_cell(cell: Mapping[object, Any]) -> Any:
     if len(cell) != 1:
         raise NotationError("a tagged cell is not one tag and its value")
-    ((tag, value),) = cell.items()
+    ((key, value),) = cell.items()
+    tag = string_data(key) if isinstance(key, str) else None
     if tag not in CELL_TAGS:
-        raise NotationError(f"a tagged cell's tag {tag!r} is not a cell's")
+        raise NotationError("a tagged cell's tag is not a cell's")
     if tag == "is":
         if not _scalar(value):
             raise NotationError("an is cell's value is not a label, a boolean or an integer")
         return {"is": _plain(value)}
     if tag == "one_of":
-        if isinstance(value, str) or not isinstance(value, Sequence):
+        if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
             raise NotationError("a one_of cell's value is not a list")
         members = list(cast("Sequence[object]", value))
         if not members or not all(_scalar(m) for m in members):
@@ -160,7 +170,7 @@ def _tagged_cell(cell: Mapping[object, Any]) -> Any:
             raise NotationError("an in cell does not name a ref")
         return {"in": string_data(value)}
     if tag == "between":
-        if isinstance(value, str) or not isinstance(value, Sequence):
+        if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
             raise NotationError("a between cell is not two operands")
         bounds = list(cast("Sequence[object]", value))
         if len(bounds) != 2:
@@ -180,7 +190,8 @@ def _plain(value: object) -> Any:
 def _tagged_operand(value: object, *, ref: bool) -> dict[str, Any]:
     if not isinstance(value, Mapping) or len(cast("Mapping[object, Any]", value)) != 1:
         raise NotationError("an operand is not one tag and its value")
-    ((tag, member),) = cast("Mapping[object, Any]", value).items()
+    ((key, member),) = cast("Mapping[object, Any]", value).items()
+    tag = string_data(key) if isinstance(key, str) else None
     if tag == "literal" and type(member) is int:
         return {"literal": member}
     if tag == "param" and isinstance(member, str):
@@ -219,9 +230,15 @@ def output_form(value: object) -> dict[str, Any]:
     if value is Unsure:
         return {"marker": "Unsure"}
     if type(value) is Input:
-        return {"ref": value.ref}
+        ref = cast(object, value.ref)
+        if not isinstance(ref, str) or not in_domain(ref):
+            raise NotationError("an Input's ref is not a string")
+        return {"ref": ref}
     if type(value) is Param:
-        return {"param": value.path}
+        path = cast(object, value.path)
+        if not isinstance(path, str) or not in_domain(path):
+            raise NotationError("a Param's path is not a string")
+        return {"param": path}
     if isinstance(value, type | Undetermined):
         raise NotationError("an output entry is a marker other than the class Unsure")
     return {"literal": value}
@@ -230,7 +247,9 @@ def output_form(value: object) -> dict[str, Any]:
 def row_form(row: object, *, hit: object, policy: bool) -> dict[str, Any]:
     """A row in the tagged form: its cells, then its output entry or its plan's name, the
     cells alone under ``C#``."""
-    if isinstance(row, str) or not isinstance(row, Sequence):
+    if isinstance(row, NotationError):
+        raise row
+    if isinstance(row, str | bytes | bytearray) or not isinstance(row, Sequence):
         raise NotationError("a row is not a list")
     members = list(cast("Sequence[object]", row))
     if policy:
@@ -244,33 +263,39 @@ def row_form(row: object, *, hit: object, policy: bool) -> dict[str, Any]:
     return {"cells": [cell_form(c) for c in members[:-1]], "output": output_form(members[-1])}
 
 
-def python_row(row: Mapping[str, Any], *, policy: bool) -> list[Any]:
+def python_row(row: Mapping[str, Any], *, policy: bool, hit: object = None) -> Any:
     """A document row as a design written in Python holds it: its tagged cells, then its
-    output entry or its plan's name; a row of another form is kept whole, for check 10."""
+    output entry or its plan's name. A row not of the tagged form gives a ``NotationError``,
+    which check 10 reports: a cell that is neither ``"-"`` nor a tagged object, a plan's name
+    that is not a string, or an output that is not one tag, null only under ``C#``."""
     cells = row.get("cells")
-    if not isinstance(cells, list):
-        return [row]
+    if not isinstance(cells, list) or not all(
+        c == ANY or isinstance(c, dict) for c in cast("list[object]", cells)
+    ):
+        return NotationError("a row's cells are not a list of tagged cells")
     out = list(cast("list[Any]", cells))
     if policy:
-        out.append(row.get("plan"))
-        return out
+        plan = row.get("plan")
+        if not isinstance(plan, str):
+            return NotationError("a row's plan is not a name")
+        return [*out, plan]
     output = row.get("output")
+    if (output is None) != (hit == "C#"):
+        return NotationError("a row's output is null where the hit policy is not C#, or not")
     if output is None:
         return out
     if not isinstance(output, dict) or len(cast("dict[str, Any]", output)) != 1:
-        return [*out, output]
+        return NotationError("a row's output is not one tag and its value")
     ((tag, member),) = cast("dict[str, Any]", output).items()
     if tag == "literal":
-        out.append(member)
-    elif tag == "ref" and isinstance(member, str):
-        out.append(Input(member))
-    elif tag == "param" and isinstance(member, str):
-        out.append(Param(member))
-    elif tag == "marker" and member == "Unsure":
-        out.append(Unsure)
-    else:
-        out.append(output)
-    return out
+        return [*out, member]
+    if tag == "ref" and isinstance(member, str):
+        return [*out, Input(member)]
+    if tag == "param" and isinstance(member, str):
+        return [*out, Param(member)]
+    if tag == "marker" and member == "Unsure":
+        return [*out, Unsure]
+    return NotationError("a row's output is not a literal, a ref, a param or Unsure")
 
 
 def python_input(value: object) -> Any:
@@ -396,8 +421,13 @@ class _Table:
             return True, []
         ((tag, member),) = cast("dict[str, Any]", cell).items()
         unavailable = [i] if type(value) is Unavailable else []
-        if tag == "marker":
-            return type(value) is MARKERS[member], unavailable
+        if tag == "marker":  # no value could match it, so an outage changes nothing
+            return type(value) is MARKERS[member], []
+        other = member if tag == "in" else member.get("ref") if tag in COMPARISONS else None
+        if other is not None:
+            j = self.reads.index(other)
+            if type(self.values[j]) is Unavailable:
+                unavailable = sorted({*unavailable, j})
         if _marker(value) or value is None:
             return False, unavailable
         if tag == "is":
@@ -533,8 +563,7 @@ def evaluate(
             return Outcome(len(matched), None, positions)
         outs = [t.output(rows[k]["output"]) for k in matched]
         if hit == "C+":
-            total: object = sum(cast("list[float]", outs[1:]), cast(float, outs[0]))
-            return Outcome(total, None, positions)
+            return Outcome(_sum(cast("list[int | float]", outs)), None, positions)
         pick = min if hit == "C<" else max
         return Outcome(pick(cast("list[float]", outs)), None, positions)
     if not matched:
@@ -556,6 +585,19 @@ def evaluate(
     if policy:
         return Outcome(None, cast(str, rows[winner]["plan"]), positions)
     return Outcome(t.output(rows[winner]["output"]), None, positions)
+
+
+def _sum(outs: list[int | float]) -> int | float:
+    """The sum as ``collect`` takes it: an ``int`` when every output is one, else the exact
+    sum over their decimals rounded once; one no finite ``float`` holds is ``inf``, which no
+    type allows."""
+    if all(type(v) is int for v in outs):
+        return sum(cast("list[int]", outs))
+    total = sum((Fraction(repr(v)) for v in outs), Fraction(0))
+    try:
+        return float(total)
+    except OverflowError:
+        return math.inf
 
 
 def _rank(order: Sequence[Any], output: Mapping[str, Any]) -> int:
