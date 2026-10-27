@@ -39,6 +39,7 @@ from ommat import (
     Text,
     Unasked,
     Unavailable,
+    Undetermined,
     Unsure,
     decide_sync,
     load,
@@ -1502,10 +1503,9 @@ def test_the_abstention_search_through_each_table_helper() -> None:
         [Helper("pick_with_thresholds", "q:desk", thresholds="th", margin="margin")],
         [["hotel", True], ["-", False]],
     )
-    assert search(picked, parameters=leaves, sources={"s": ASK, "c": DESK}) == [
-        "d:share",
-        "q:desk",
-    ]
+    # d:share always matches a row, so the first search leaves it; the pick it rests on
+    # abstains through the turn.
+    assert search(picked, parameters=leaves, sources={"s": ASK, "c": DESK}) == ["q:desk"]
     massed = Table(
         "d:share",
         "boolean",
@@ -1513,7 +1513,7 @@ def test_the_abstention_search_through_each_table_helper() -> None:
         [Helper("mass", "q:urgent", labels="labels")],
         [[">= hi", True], ["-", False]],
     )
-    assert search(massed, parameters=leaves) == ["d:share"]
+    assert search(massed, parameters=leaves) == []
 
 
 def test_a_marker_row_under_u_stands_over_an_outage() -> None:
@@ -1648,3 +1648,101 @@ def test_pick_with_thresholds_over_a_noul_question_fails_check_9() -> None:
     picked = Helper("pick_with_thresholds", "q:urgent", thresholds="th", margin="margin")
     found = failures(asked(("tab", tab("F", [picked], [["-", 1]])), parameters=leaves))
     assert any(c == 9 and "takes pick_with_margin" in m for c, m in found), found
+
+
+# ---------------------------------------------------------------------------------------------
+# A cell listing marker kinds
+
+
+@pytest.mark.parametrize(
+    ("cell", "tagged"),
+    [
+        ("Undetermined", {"markers": ["Unsure", "Unavailable", "Unasked"]}),
+        ("Unsure or Unavailable", {"markers": ["Unsure", "Unavailable"]}),
+        ("Unasked or Unsure", {"markers": ["Unasked", "Unsure"]}),
+        (Undetermined, {"markers": ["Unsure", "Unavailable", "Unasked"]}),
+        ((Unsure, Unavailable), {"markers": ["Unsure", "Unavailable"]}),
+        ({"markers": ["Unavailable", "Unsure"]}, {"markers": ["Unavailable", "Unsure"]}),
+        ("Unsure or b", {"is": "Unsure or b"}),
+    ],
+)
+def test_a_cell_listing_marker_kinds_is_read(cell: Any, tagged: Any) -> None:
+    from ommat._table import cell_form
+
+    assert cell_form(cell) == tagged
+
+
+def test_a_markers_cell_matches_each_kind_it_lists_and_no_value() -> None:
+    table = tab("F", ["d:s0"], [["Unsure or Unavailable", 1], ["Unasked", 2], ["-", 3]])
+    for kind, expected in (("Unsure", 1), ("Unavailable", 1), ("Unasked", 2), ("value", 3)):
+        assert value(table, rules=srcs(kind)) == expected
+    either = tab("F", ["d:s0"], [["Undetermined", 1], ["-", 2]])
+    for kind, expected in (("Unsure", 1), ("Unavailable", 1), ("Unasked", 1), ("value", 2)):
+        assert value(either, rules=srcs(kind)) == expected
+
+
+def test_a_markers_cell_routes_an_outage_before_a_value_row() -> None:
+    # The outage row first keeps rule 2 from escalating a later value row's failure.
+    table = tab("F", ["d:s0"], [["Unsure or Unavailable", 0], [1, 1], ["-", 2]])
+    assert value(table, rules=srcs("Unavailable")) == 0
+
+
+def test_a_markers_cell_is_written_in_canonical_order_and_round_trips() -> None:
+    loaded = load(
+        design(("tab", tab("F", ["t:state.n"], [["Unsure or Unavailable", 1], ["-", 0]])))
+    )
+    cell = json.loads(loaded.document)["rules"]["tab"]["rows"][0]["cells"][0]
+    assert cell == {"markers": ["Unavailable", "Unsure"]}
+    assert load(loaded.document).design_hash == loaded.design_hash
+
+
+def test_a_markers_cell_of_one_kind_or_a_repeat_fails_load() -> None:
+    refused(tab("F", ["t:state.n"], [[{"markers": ["Unsure"]}, 1]]), 10, "fewer than two")
+    refused(tab("F", ["t:state.n"], [[{"markers": ["Unsure", "x"]}, 1]]), 10, "not a marker kind")
+    refused(
+        tab("F", ["t:state.n"], [[{"markers": ["Unsure", "Unsure"]}, 1]]), 1, "twice in a markers"
+    )
+
+
+def test_markers_cells_overlap_by_their_kinds() -> None:
+    load(
+        design(
+            (
+                "tab",
+                tab(
+                    "U",
+                    ["t:state.n"],
+                    [["Unsure or Unavailable", 1], ["Unasked", 2], [">= 0", 3], ["< 0", 4]],
+                ),
+            )
+        )
+    )
+    refused(tab("U", ["t:state.n"], [["Unsure or Unavailable", 1], ["Unsure", 2]]), 9, "overlap")
+
+
+def test_the_lint_skips_a_table_that_cannot_write_unsure() -> None:
+    def pol(r: Any) -> Any:
+        from ommat import Plan, Step
+
+        return Plan("execute", [Step("notify")])
+
+    gate = Table("d:gate", "boolean", "F", ["t:state.n"], [[">= 2", True], ["-", False]])
+    loaded = load(
+        design(("gate", gate), policy=Policy(pol, version="1", reads=["d:gate"]), tools=["notify"])
+    )
+    assert unsure_to_execute(loaded)["execute"] == []
+    abstains = Table("d:gate", "boolean", "F", ["t:state.n"], [[">= 2", True], ["-", Unsure]])
+    loaded = load(
+        design(
+            ("gate", abstains), policy=Policy(pol, version="1", reads=["d:gate"]), tools=["notify"]
+        )
+    )
+    assert [i["read"] for i in unsure_to_execute(loaded)["execute"]] == ["d:gate"]
+    passing = Table("d:gate", "integer", "F", ["t:state.n"], [["-", Input("t:state.n")]])
+    loaded = load(
+        design(
+            ("gate", passing), policy=Policy(pol, version="1", reads=["d:gate"]), tools=["notify"]
+        )
+    )
+    report = unsure_to_execute(loaded, values={"d:gate": [1]})
+    assert [i["read"] for i in report["execute"]] == ["d:gate"]

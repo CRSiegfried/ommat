@@ -38,7 +38,8 @@ MARKERS: dict[str, type[Undetermined]] = {
 }
 _KIND_NAMES = {v: k for k, v in MARKERS.items()}
 COMPARISONS = (">=", ">", "<=", "<")
-CELL_TAGS = frozenset({"is", "one_of", "marker", *COMPARISONS, "between", "in"})
+CELL_TAGS = frozenset({"is", "one_of", "marker", "markers", *COMPARISONS, "between", "in"})
+ANY_MARKER = "Undetermined"
 OPERAND_TAGS = frozenset({"literal", "param", "ref"})
 OUTPUT_TAGS = frozenset({"literal", "param", "ref", "marker"})
 HELPERS: dict[str, tuple[str, ...]] = {
@@ -109,6 +110,11 @@ def _notation(text: str) -> Any:
         return ANY
     if cell in MARKERS:
         return {"marker": cell}
+    if cell == ANY_MARKER:
+        return {"markers": list(MARKERS)}
+    kinds = [k.strip() for k in cell.split(" or ")]
+    if len(kinds) > 1 and all(k in MARKERS for k in kinds):
+        return _markers(kinds)
     for op in COMPARISONS:
         if cell.startswith(op):  # ">=" and "<=" are tried before ">" and "<"
             return {op: _operand(cell[len(op) :], ref=True)}
@@ -139,11 +145,17 @@ def cell_form(value: object) -> Any:
         return {"is": value}
     if isinstance(value, type) and value in _KIND_NAMES:
         return {"marker": _KIND_NAMES[cast("type[Undetermined]", value)]}
+    if value is Undetermined:
+        return {"markers": list(MARKERS)}
+    if type(value) is tuple:
+        members = cast("tuple[object, ...]", value)
+        if all(isinstance(v, type) and v in _KIND_NAMES for v in members):
+            return _markers([_KIND_NAMES[cast("type[Undetermined]", v)] for v in members])
     if isinstance(value, str):
         return _notation(string_data(value))
     if isinstance(value, Mapping):
         return _tagged_cell(cast("Mapping[object, Any]", value))
-    raise NotationError(f"a cell of type {type(value).__name__} is not a cell")
+    raise NotationError(f"a cell of type {type(cast(object, value)).__name__} is not a cell")
 
 
 def _tagged_cell(cell: Mapping[object, Any]) -> Any:
@@ -168,6 +180,13 @@ def _tagged_cell(cell: Mapping[object, Any]) -> Any:
         if not isinstance(value, str) or string_data(value) not in MARKERS:
             raise NotationError("a marker cell names no marker kind")
         return {"marker": string_data(value)}
+    if tag == "markers":
+        if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+            raise NotationError("a markers cell is not a list of marker kinds")
+        kinds = list(cast("Sequence[object]", value))
+        if not all(isinstance(k, str) and string_data(k) in MARKERS for k in kinds):
+            raise NotationError("a markers cell lists something that is not a marker kind")
+        return _markers([string_data(cast(str, k)) for k in kinds])
     if tag == "in":
         if not isinstance(value, str):
             raise NotationError("an in cell does not name a ref")
@@ -180,6 +199,13 @@ def _tagged_cell(cell: Mapping[object, Any]) -> Any:
             raise NotationError("a between cell is not two operands")
         return {"between": [_tagged_operand(b, ref=False) for b in bounds]}
     return {tag: _tagged_operand(value, ref=True)}
+
+
+def _markers(kinds: list[str]) -> dict[str, Any]:
+    """A cell listing two or three marker kinds; one kind is a marker cell's."""
+    if len(kinds) < 2:
+        raise NotationError("a markers cell lists fewer than two marker kinds")
+    return {"markers": kinds}
 
 
 def _scalar(value: object) -> bool:
@@ -426,6 +452,8 @@ class _Table:
         unavailable = [i] if type(value) is Unavailable else []
         if tag == "marker":  # no value could match it, so an outage changes nothing
             return type(value) is MARKERS[member], []
+        if tag == "markers":
+            return any(type(value) is MARKERS[k] for k in member), []
         other = member if tag == "in" else member.get("ref") if tag in COMPARISONS else None
         if other is not None:
             # A cell over two inputs fails on an outage only when every input it tests that is
@@ -723,6 +751,8 @@ def _cell_set(cell: Any, leaves: Mapping[str, Any]) -> _Set:
     ((tag, member),) = cast("dict[str, Any]", cell).items()
     if tag == "marker":
         return _Set(frozenset({member}), None)
+    if tag == "markers":
+        return _Set(frozenset(member), None)
     if tag == "is":
         return _Set(frozenset(), [member])
     if tag == "one_of":

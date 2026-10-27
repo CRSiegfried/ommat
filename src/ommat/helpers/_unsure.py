@@ -5,7 +5,8 @@ returns when one of its ``d:`` reads is ``Unsure``.
 It fills the policy's declared reads by the lint points: a read under another declared read's
 path is filled as a field of that read, and every other read is written at its path, on a
 board holding one entry per base ref. It sets each ``d:`` base ref in turn to ``Unsure``
-with cause ``abstained``, naming the declared reads of the rule that writes it, while the
+with cause ``abstained``, naming the declared reads of the rule that writes it, but for a
+table that cannot write ``Unsure``, while the
 other reads range over their points, and calls the policy alone through ``_component.call``
 on a fresh board per call: no plan rule and no guard. A call is ``execute`` only when no stop
 was recorded, nothing was raised, and the return is exactly a ``Plan`` of kind ``execute``.
@@ -89,6 +90,8 @@ def unsure_to_execute(
     points = 0
     execute: list[dict[str, Any]] = []
     for unsure in code_point_sorted({base(r) for r in declared if r.startswith("d:")}):
+        if _never_unsure(loaded, loaded._providers[unsure]):
+            continue
         writer = loaded._reads[loaded._providers[unsure]]
         marker = Unsure(Cause(CauseCode.abstained, code_point_sorted(set(writer))))
         shown_marker = _marker_document(marker)  # the record's marker form, interpret's
@@ -108,6 +111,23 @@ def unsure_to_execute(
         points += runs
         execute += found
     return {"points": points, "execute": execute, "narrowed": narrowed}
+
+
+def _never_unsure(loaded: LoadedDesign, rid: str) -> bool:
+    """Whether a table writes the ref and cannot write ``Unsure``: it has no ``Unsure``
+    output entry, and a row of ``-`` cells giving a value or a parameter always matches."""
+    if rid not in loaded._table_bytes:
+        return False
+    rows = cast("list[dict[str, Any]]", loaded._table(rid)["rows"])
+    outputs = [cast(object, row["output"]) for row in rows]
+    if any(isinstance(o, dict) and "marker" in o for o in outputs):
+        return False
+    return any(
+        all(cell == "-" for cell in row["cells"])
+        and isinstance(output, dict)
+        and ("literal" in output or "param" in output)
+        for row, output in zip(rows, outputs, strict=True)
+    )
 
 
 def _lineage(loaded: LoadedDesign) -> set[str]:

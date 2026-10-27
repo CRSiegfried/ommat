@@ -936,16 +936,24 @@ class _Loader:
         for owner, where, rows in self.table_rows():
             for k, row in enumerate(rows, 1):
                 for cell in row["cells"]:
-                    if isinstance(cell, dict) and "one_of" in cell:
+                    kind = next(
+                        (
+                            tag
+                            for tag in ("one_of", "markers")
+                            if isinstance(cell, dict) and tag in cell
+                        ),
+                        None,
+                    )
+                    if kind is not None:
                         seen: set[bytes] = set()
-                        for value in cast("list[object]", cast("dict[str, Any]", cell)["one_of"]):
+                        for value in cast("list[object]", cast("dict[str, Any]", cell)[kind]):
                             key = encode(value)
                             if key in seen:
                                 shown = key.decode("utf-8")
                                 self.fail(
                                     1,
                                     (owner,),
-                                    f"{where}'s row {k} lists {shown} twice in a one_of cell",
+                                    f"{where}'s row {k} lists {shown} twice in a {kind} cell",
                                 )
                             seen.add(key)
         for sid, source in self.sources():
@@ -1658,7 +1666,7 @@ class _Loader:
         if cell == ANY:
             return
         ((tag, member),) = cast("dict[str, Any]", cell).items()
-        if tag == "marker":
+        if tag in ("marker", "markers"):
             return
         t = types[n]
         if t is None:
@@ -3093,6 +3101,8 @@ def _row(row: Mapping[str, Any]) -> dict[str, Any]:
         tagged = _object(c)
         if tagged is not None and "one_of" in tagged:
             cells.append({"one_of": _unordered(cast("list[Any]", tagged["one_of"]))})
+        elif tagged is not None and "markers" in tagged:
+            cells.append({"markers": _unordered(cast("list[Any]", tagged["markers"]))})
         else:
             cells.append(c)
     return {**row, "cells": cells}
