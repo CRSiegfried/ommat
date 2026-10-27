@@ -7,7 +7,7 @@ A workflow's decision is rarely one question. Ask about this; the answer decides
 With ommat you write only the pieces, each declaring what it reads, and ommat works out the order:
 
 - **A source** asks a model closed questions, yes or no, which label, a score or a value read from a text, each answer with probabilities, or with a confidence where the model gives one. A `when` asks it only if earlier answers call for it.
-- **A rule** reads answers and settles an estimate, or returns a marker such as `Unsure`, never a `None` standing in for no answer.
+- **A rule** reads answers and settles an estimate, or returns a marker such as `Unsure`, never a `None` standing in for no answer. It is a function, or a decision table of rows over its inputs.
 - **The policy** reads the estimates it needs and writes the plan: execute tool steps, clarify, inform or escalate.
 - **ommat** builds the dependency graph from those declarations and runs it in rounds, and `load` checks the whole design before any turn: every read has a provider, nothing depends on itself, and the types agree. Get each piece right and `load` makes sure the pieces fit, whether you have a dozen questions or a few hundred.
 - **Each decision** is checked by a guard before any tool runs, and comes with a record that replays the turn with no model call.

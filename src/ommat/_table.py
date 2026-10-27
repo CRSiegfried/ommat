@@ -110,7 +110,7 @@ def _notation(text: str) -> Any:
     if cell in MARKERS:
         return {"marker": cell}
     for op in COMPARISONS:
-        if cell.startswith(op) and not (op in (">", "<") and cell[1:2] == "="):
+        if cell.startswith(op):  # ">=" and "<=" are tried before ">" and "<"
             return {op: _operand(cell[len(op) :], ref=True)}
     if cell.startswith("["):
         if not cell.endswith("]") or cell.count(",") != 1:

@@ -1535,7 +1535,10 @@ class _Loader:
         for n, i in enumerate(inputs, 1):
             self.check_9_helper(owner, f"{where}'s input {n}", i)
 
-        def named(ref: str, shown: str) -> int | None:
+        def named(ref: str, shown: str, own: int | None = None) -> int | None:
+            if counts[ref] == 1 and reads.index(ref) == own:
+                self.fail(9, (owner, ref), f"{shown} compares {_q(ref)} with itself")
+                return None
             if counts[ref] == 1:
                 return reads.index(ref)
             if counts[ref] == 0:
@@ -1613,6 +1616,13 @@ class _Loader:
         question = self.question(f"q:{parsed.name}")
         if question.kind is AnswerKind.extraction:
             return  # check 4's
+        if helper == "pick_with_thresholds" and question.kind is AnswerKind.noul:
+            self.fail(
+                9,
+                (owner, i["read"]),
+                f"{where}: a noul question takes pick_with_margin, not thresholds",
+            )
+            return
         labels = (
             _NOUL_LABELS
             if question.kind is AnswerKind.noul
@@ -1642,7 +1652,7 @@ class _Loader:
         n: int,
         reads: Sequence[str],
         types: Sequence[Type | None],
-        named: Callable[[str, str], int | None],
+        named: Callable[..., int | None],
     ) -> None:
         names = (owner,)
         if cell == ANY:
@@ -1673,7 +1683,7 @@ class _Loader:
                     )
             return
         if tag == "in":
-            j = named(cast(str, member), where)
+            j = named(cast(str, member), where, n)
             if j is None or types[j] is None:
                 return
             listed = resolve(cast(Type, types[j]), self.defs)
@@ -1717,7 +1727,7 @@ class _Loader:
                 path = cast(str, operand["param"])
                 bounds.append(self.leaf_value(path) if path in self.leaf_types else None)
             else:
-                j = named(cast(str, operand["ref"]), where)
+                j = named(cast(str, operand["ref"]), where, n)
                 if j is not None and types[j] is not None:
                     other = resolve(cast(Type, types[j]), self.defs)
                     if isinstance(other, Nullable):
@@ -1742,7 +1752,7 @@ class _Loader:
         outputs: Type | None,
         reads: Sequence[str],
         types: Sequence[Type | None],
-        named: Callable[[str, str], int | None],
+        named: Callable[..., int | None],
     ) -> None:
         names = (owner,)
         if hit == "C#":

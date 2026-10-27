@@ -735,7 +735,8 @@ PLANS = {
 
 def asked(*tables: tuple[str, Any], **changes: Any) -> Design:
     rules = dict(tables) if tables else {}
-    return design(*({"urgent": URGENT, **rules}).items(), sources={"s": ASK}, **changes)
+    fields: dict[str, Any] = {"sources": {"s": ASK}, **changes}
+    return design(*({"urgent": URGENT, **rules}).items(), **fields)
 
 
 def policy_design() -> Design:
@@ -1091,13 +1092,20 @@ CHOOSE = Source(
 )
 
 
+DESK = Source(
+    {"q:desk": Question("choice", Text("Which desk?"), labels=("hotel", "flight", "other"))},
+    needs=["t:state"],
+)
+
+
 def choose(*tables: tuple[str, Table], **changes: Any) -> Design:
     leaves = {
         **LEAVES,
         "desk/bars": Parameter(t.mapping(t.number(0, 1)), {"hotel": 0.5, "flight": 0.5}),
         "null": Parameter(t.number(0, 1), 0.5),
     }
-    return design(*tables, sources={"s": CHOOSE}, parameters=leaves, **changes)
+    fields: dict[str, Any] = {"sources": {"s": CHOOSE}, "parameters": leaves, **changes}
+    return design(*tables, **fields)
 
 
 def answering_choice(desk: dict[str, float], value: str | None) -> Callable[..., Any]:
@@ -1376,8 +1384,10 @@ def test_a_mass_or_thresholds_leaf_names_labels_of_its_read_once() -> None:
     )
     assert any(c == 9 and "lists a label twice" in m for c, m in found)
     leaves = {**LEAVES, "th": Parameter(t.mapping(t.number(0, 1)), {"zzz": 0.5})}
-    picked = Helper("pick_with_thresholds", "q:urgent", thresholds="th", margin="margin")
-    found = failures(asked(("tab", tab("F", [picked], [["-", 1]])), parameters=leaves))
+    picked = Helper("pick_with_thresholds", "q:desk", thresholds="th", margin="margin")
+    leaves["desk/bars"] = Parameter(t.mapping(t.number(0, 1)), {"hotel": 0.5})
+    leaves["null"] = Parameter(t.number(0, 1), 0.5)
+    found = failures(choose(("tab", tab("F", [picked], [["-", 1]])), parameters=leaves))
     assert any(c == 9 and "not a label of" in m for c, m in found)
 
 
@@ -1482,17 +1492,20 @@ def test_the_abstention_search_through_each_table_helper() -> None:
 
     leaves = {
         **LEAVES,
-        "th": Parameter(t.mapping(t.number(0, 1)), {"yes": 0.6}),
+        "th": Parameter(t.mapping(t.number(0, 1)), {"hotel": 0.6}),
         "labels": Parameter(t.list_(t.string), ["yes"]),
     }
     picked = Table(
         "d:share",
         "boolean",
         "F",
-        [Helper("pick_with_thresholds", "q:urgent", thresholds="th", margin="margin")],
-        [["yes", True], ["-", False]],
+        [Helper("pick_with_thresholds", "q:desk", thresholds="th", margin="margin")],
+        [["hotel", True], ["-", False]],
     )
-    assert search(picked, parameters=leaves) == ["d:share", "q:urgent"]
+    assert search(picked, parameters=leaves, sources={"s": ASK, "c": DESK}) == [
+        "d:share",
+        "q:desk",
+    ]
     massed = Table(
         "d:share",
         "boolean",
@@ -1526,3 +1539,112 @@ def test_hostile_and_deep_rows_fail_load_cleanly() -> None:
     doc = table_doc()
     doc["rules"]["tab"]["rows"][0] = ["-", 1]
     assert {c for c, _ in failures(doc)} == {10}
+
+
+def test_a_float_input_compares_and_an_interval_holds_both_ends() -> None:
+    assert value(tab("F", ["t:state.x"], [["> lo", 1], ["-", 2]])) == 1
+    assert value(tab("F", ["t:state.x"], [["[lo, hi]", 1], ["-", 2]]), {"x": 0.75}) == 1
+    assert value(tab("F", ["t:state.n"], [["[2, 5]", 1], ["-", 2]]), {"n": 5}) == 1
+
+
+def raising_list() -> Rule:
+    def fn(r: Any) -> Any:
+        raise RuntimeError("down")
+
+    return Rule("d:s0", t.list_(t.integer()), fn, version="1", reads=["t:state"])
+
+
+def test_an_in_over_an_unavailable_list_meets_rule_2() -> None:
+    table = tab("F", ["t:state.n", "d:s0"], [["in d:s0", "-", 1], ["-", "-", 2]])
+    assert value(table, rules={"s0": raising_list()})["cause"] == {
+        "code": "required",
+        "refs": ["d:s0"],
+    }
+
+
+def test_p_does_not_propagate_from_a_row_ranked_equal_to_the_winner() -> None:
+    table = tab("P", ["d:s0", "t:state.n"], [[1, "-", 1], ["-", "-", 1]], order=[1])
+    assert value(table, rules=srcs("Unavailable")) == 1
+
+
+def test_a_sum_past_every_float_is_invalid_return() -> None:
+    leaves = {**LEAVES, "huge": Parameter(t.number(), 1e308)}
+    table = tab("C+", ["t:state.n"], [["-", Param("huge")], ["-", Param("huge")]], outputs="number")
+    loaded = load(design(("tab", table), parameters=leaves))
+    record = decide_sync(loaded, BASE, {}).record
+    assert item(record, "entry", "d:tab")["marker"]["cause"] == {
+        "code": "invalid-return",
+        "refs": ["tab"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("cell", "inputs"),
+    [
+        ({"between": [{"ref": "t:state.m"}, {"literal": 9}]}, ["t:state.n", "t:state.m"]),
+        ({">=": {"literal": True}}, ["t:state.n", "t:state.m"]),
+        (">= 007", ["t:state.n", "t:state.m"]),
+    ],
+)
+def test_a_tagged_or_notation_operand_of_another_form_fails_check_10(
+    cell: Any, inputs: list[str]
+) -> None:
+    refused(tab("F", inputs, [[cell, "-", 1]]), 10, "row 1")
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        tab(
+            "U",
+            ["t:state.n", "t:state.m", "t:state.x"],
+            [["< t:state.m", "-", "-", 1], [">= t:state.x", "-", "-", 2]],
+        ),
+        tab("U", ["t:state.x"], [[">= p", 1], ["-", 2]]),
+    ],
+)
+def test_overlaps_against_different_refs_and_a_decimal_bound(table: Table) -> None:
+    leaves = {**LEAVES, "p": Parameter(t.number(0, 0.1), 0.1)}
+    state = t.record(n=t.integer(), m=t.integer(), x=t.number(0, 0.1))
+    found = failures(design(("tab", table), parameters=leaves, state=state))
+    assert any(c == 9 and "overlap" in m for c, m in found), found
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        tab("U", ["t:state.x"], [["> lo", 1], ["<= lo", 2]]),
+        tab("U", ["t:state.n"], [[3, 1], ["< 3", 2], ["> 3", 3]]),
+    ],
+)
+def test_rows_split_at_a_shared_bound_never_both_match(table: Table) -> None:
+    load(design(("tab", table)))
+
+
+def test_rule_2_orders_a_steps_origins_by_argument_name() -> None:
+    plans = {
+        **PLANS,
+        "page": PlanDeclaration(
+            "execute",
+            [Step("notify", {"zz": Origin(ref="d:s1"), "aa": Origin(ref="d:s2")})],
+        ),
+    }
+    policy = PolicyTable(["d:s0"], [["-", "page"], ["-", "ask"]])
+    design_ = dataclasses.replace(
+        policy_design(),
+        rules={**policy_design().rules, **srcs("value", "Unavailable", "Unavailable")},
+        plans=plans,
+        policy=policy,
+    )
+    assert item(run(load(design_), 0.9), "plan")["cause"]["refs"] == ["d:s2"]
+
+
+def test_a_cell_comparing_an_input_with_itself_fails_check_9() -> None:
+    refused(tab("F", ["t:state.n"], [[">= t:state.n", 1]]), 9, "with itself")
+
+
+def test_pick_with_thresholds_over_a_noul_question_fails_check_9() -> None:
+    leaves = {**LEAVES, "th": Parameter(t.mapping(t.number(0, 1)), {"yes": 0.6})}
+    picked = Helper("pick_with_thresholds", "q:urgent", thresholds="th", margin="margin")
+    found = failures(asked(("tab", tab("F", [picked], [["-", 1]])), parameters=leaves))
+    assert any(c == 9 and "takes pick_with_margin" in m for c, m in found), found
