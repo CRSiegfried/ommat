@@ -18,9 +18,10 @@ The spec covers what record format 6 and design format 7 hold and the engine doe
 - the candidate-valued label set: a `choice` whose labels are a fixed part and the members of a `list<string>` candidate set, rendered each time it is asked;
 - per-candidate questions: a source grounded over a `list<string>` candidate set asks a question once per candidate, beside its questions asked once;
 - the helpers: the choice helpers, `extract` and the per-candidate picks among them, `determined` and the combinators rules call, and the reference runner that runs a plan's steps;
-- the live frontier, the answer grid and the `boundaries` fields, and the design lints that read them.
+- the live frontier, the answer grid and the `boundaries` fields, and the design lints that read them;
+- decision tables: rule tables under every hit policy, data rules among them, and the policy table with its plan declarations and their declared text.
 
-Outside it, and refused by load in a design that declares one: decision tables, the policy table among them, and data rules; plan declarations; a candidate set of records; grounded rules and grounded sources of `t:` refs; a per-candidate extraction question and a per-candidate question whose labels are a candidate-valued set; and a need on a per-candidate question's declared ref. Also outside it: the run-time stopping certificate, multi-turn continuation, and every evaluation job but `use_answers`.
+Outside it, and refused by load in a design that declares one: a candidate set of records; grounded rules, tables and plan declarations, and a candidate origin in a plan declaration; grounded sources of `t:` refs; a per-candidate extraction question and a per-candidate question whose labels are a candidate-valued set; and a need on a per-candidate question's declared ref. Also outside it: the run-time stopping certificate, multi-turn continuation, and every evaluation job but `use_answers`.
 
 The sections below are written; the rest is not yet.
 
@@ -192,6 +193,30 @@ A design may declare `targets={id: Target(statement, values=None)}`, the propert
 A `Question` may name `target`, the one target it asks about, and `latent_targets`, the targets it is known to bear on without asking about them, each `{"target": id, "role": role}`, the role a `TargetRole`: `reflective`, the answer alone is evidence for or against the target; `formative`, the answer supplies a part of it; or `unknown`, not yet judged. One answer may bear on one target in several ways, so a target may stand under several roles. A `Rule` may name `target`, the target it estimates.
 
 Targets guide a reader and gate nothing: no turn or binding reads one. The design hash covers them, the latent targets as an unordered list, and a question's identity leaves out its `target` and `latent_targets`, so declaring targets keeps every question's identity. Load refuses a target id `targets` does not declare, naming the question's ref or the rule's id; a question's own `target` among its latent targets; one target listed twice under one role; and a role outside the three, a `target` or `statement` that is not a string, `values` that is neither a string nor null, and a latent target that is not exactly a target and a role. A missing link is not declared, not unrelated.
+
+## Decision tables
+
+A rule is a function or a `Table`; the policy is a `Policy` or a `PolicyTable`. A table has no `version`: the design hash covers it as data. Its entry holds `rows`, the positions from 1 of every row that matched, in table order, and no `derivation`.
+
+```python
+Table("d:urgent", 'label{"no", "yes"}', "F",
+      inputs=[Helper("pick_with_margin", "q:urgent", bar="urgent/bar", margin="urgent/margin")],
+      rows=[["-", Input("q:urgent")]])
+```
+
+**Inputs.** Each input is a ref, a read of a `q:`, `t:` or `d:` ref, a field path allowed, or `Helper(name, read, **params)`, which calls `pick_with_margin`, `pick_with_thresholds`, `size`, `mass` or `extract` over its read, each other argument bound to a leaf path: `bar`, `margin`, `thresholds`, `labels` (a `list<string>` leaf) or `null_bar`. A bare `q:` input holds an answer, so only `-` and marker cells apply to it. A data rule is a one-input table.
+
+**Rows and cells.** A row is a list: one cell per input, then the output entry; a `C#` row is its cells alone. A cell is written as a string in this notation, its form decided by how it begins: `-` matches anything, a marker or null included; `Unsure`, `Unavailable` or `Unasked` matches only that marker; `>= p`, `> p`, `<= p`, `< p` compare a numeric input against a leaf path, an integer literal over an `integer` input, or another input by the ref it reads; `[p, q]` is a closed interval of leaves or integer literals; `{a, b}` matches any listed label; `in d:x` is membership in a list-valued input; any other text is a label. A `bool` or an `int` is a value cell, and a marker class a marker cell. A cell may also be the document's tagged form, which load writes for every cell: `"-"`, `{"is": v}`, `{"one_of": [...]}`, `{"marker": k}`, `{">=": o}` and its kin, `{"between": [o, o]}` or `{"in": ref}`, each operand `{"param": p}`, `{"literal": n}` or `{"ref": r}`. A label the notation would read as a form, such as `-` or `Unsure`, is written `{"is": "-"}`. Null is matched by `-` alone.
+
+**Outputs.** An output entry is a value of the table's `outputs` type, the class `Unsure`, `Input(ref)`, a pass-through of an input, or `Param(path)`, a pass-through of a leaf. A row passing an input through matches only when that input holds a value. A value `outputs` does not allow, from a pass-through or an aggregate, is `Unavailable` with `invalid-return`.
+
+**Hit policies.** `U`, rows that never overlap; `A`, rows that overlap only with the same output; `F`, the first matching row; `P`, the highest-ranked output among the matching rows, by the table's `order`, which lists every output value, highest first; and `C+`, `C<`, `C>` and `C#`, the sum, minimum, maximum or count over the matching rows, the sum and count 0 when none matches. Load decides overlap from the cells and the leaves' values: two comparisons of one input against one other input that split the line never overlap, and any other cell over two inputs is taken to overlap where both inputs hold values.
+
+**Markers.** Every input is read first, in input order, and then every row is tested. When no row matches, the output is the inputs' marker of highest precedence, `Unavailable`, then `Unsure`, then `Unasked`, with `required` naming the first input holding it, or, when every input holds a value, `Unsure` with `abstained` naming the inputs once each in input order. Under `F` a row that failed only on inputs holding `Unavailable`, a pass-through's included, before the winning row, and under `P` such a row ranking above it, makes the output `Unavailable` with `required` naming that row's first such input; under `C` such a row anywhere does. A row that failed on `Unsure` or `Unasked` does not propagate. A helper that raises makes the output `Unavailable` with `raised`, with no row matched.
+
+**The policy table.** `PolicyTable(inputs, rows)` reads `d:` and `t:` refs only, under `F`; a row ends with the name of a `PlanDeclaration(kind, steps, reason, reply)`, its steps `Step`s and its `reason` and `reply` declared `Text`s whose slots name board refs or leaves. A row matches only when every board-ref origin and slot of its plan holds a value, and load adds them to the policy's reads. The last row is all `-` and names a plan with no board ref. Compile renders the winning plan's text, writes `rows` and, when a text has slots, `slots` on the `plan` item, and holds the plan to the plan rules; rule 2 gives an `escalate` plan with `required` naming the input, origin or slot, and a helper that raises gives `broken` with `raised`. A plan name is a declared name; a declared plan's kind is not `broken`, its `reply` and `reason` follow its kind, and its steps name declared tools.
+
+**The grid.** A table's parameter comparisons and helper bindings are its boundaries: a pick's bindings under its read, `extract`'s `null_bar` and comparisons over its input under its read's `null` and `value` roles, a comparison over a `mass` input under its read's `mass` with the set its `labels` leaf holds, and a comparison over a bare `d:` or `t:` read under that read, an integer literal by its value. A cell over a `size` input adds nothing, so the lints probe a count table only over the lists `values` gives. A function rule's `boundaries` field may not repeat a boundary a table already declares. The abstention search counts a lineage table's pick or `extract` input over a subject as resting on its abstention.
 
 ## The context block
 
