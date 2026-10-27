@@ -203,8 +203,32 @@ const esc = (s) => text(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;
 const pct = (p) => (typeof p === "number" ? (p * 100).toFixed(p * 100 >= 99.95 || p * 100 < 0.05 ? 0 : 1) + "%" : "–");
 const arr = (x) => (Array.isArray(x) ? x : []);
 const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
-// A component's declared reads: a function's reads, a table's inputs' reads.
-const readsOf = (c) => (obj(c).form === "table" ? arr(obj(c).inputs).map((i) => obj(i).read) : obj(c).reads);
+// A component's declared reads and leaves: a function's reads and params; a table's inputs'
+// reads and the leaves its bindings, cells and outputs name, and for the policy table its rows'
+// plans' board refs and slot leaves, as load adds them.
+const planOrigins = (c, plans, tag) => {
+  const out = [];
+  for (const row of arr(obj(c).rows)) {
+    const plan = obj(obj(plans)[obj(row).plan]);
+    for (const step of arr(plan.steps)) for (const o of Object.values(obj(obj(step).arguments))) if (tag === "ref" && str(obj(o).ref)) out.push(o.ref);
+    for (const text of [plan.reason, plan.reply]) for (const slot of arr(obj(text).slots)) if (str(obj(obj(slot).origin)[tag])) out.push(slot.origin[tag]);
+  }
+  return out;
+};
+const readsOf = (c, plans) => (obj(c).form === "table"
+  ? [...new Set([...arr(obj(c).inputs).map((i) => obj(i).read), ...planOrigins(c, plans, "ref")])]
+  : obj(c).reads);
+const paramsOf = (c, plans) => {
+  if (obj(c).form !== "table") return obj(c).params;
+  const out = arr(obj(c).inputs).flatMap((i) => Object.values(obj(obj(i).params)));
+  for (const row of arr(obj(c).rows)) {
+    for (const cell of arr(obj(row).cells)) for (const [tag, m] of Object.entries(obj(cell))) {
+      for (const o of tag === "between" ? arr(m) : [m]) if (str(obj(o).param)) out.push(o.param);
+    }
+    if (str(obj(obj(row).output).param)) out.push(row.output.param);
+  }
+  return [...new Set([...out, ...planOrigins(c, plans, "param")])];
+};
 const str = (x) => typeof x === "string";
 
 // A ref's declared base: prefix and name, without a grounded bracket or a field path.
@@ -312,7 +336,7 @@ function build(record, design) {
     }
     for (const c of arr(obj(plan.context).entries)) link("plan", [obj(c).ref], "a context entry", "record");
     for (const f of arr(obj(verdict).failures)) link("plan", [obj(f).ref, obj(obj(f).requirement).ref], "the guard refused on it", "record");
-    if (design) link("plan", readsOf(design.policy), "the policy reads it", "design");
+    if (design) link("plan", readsOf(design.policy, design.plans), "the policy reads it", "design");
     for (const c of arr(obj(design && design.context).entries)) {
       link("plan", [obj(c).ref], "a context entry", "design");
       link("plan", arr(obj(obj(c).text).slots).map((sl) => obj(obj(sl).origin).ref), "a context entry's wording", "design");
@@ -375,12 +399,12 @@ function buildDesign(doc) {
     if (!str(r.provides)) continue;
     const node = "e:" + r.provides;
     link(node, readsOf(r), "rule " + rid + " reads it");
-    linkParams(node, r.params, "rule " + rid + " reads it");
+    linkParams(node, paramsOf(r), "rule " + rid + " reads it");
     linkParams(node, boundaryPaths(r.boundaries), "a declared boundary");
     if (str(r.grounded)) link(node, [r.grounded], "its candidate set");
   }
-  link("plan", readsOf(policy), "the policy reads it");
-  linkParams("plan", policy.params, "the policy reads it");
+  link("plan", readsOf(policy, design.plans), "the policy reads it");
+  linkParams("plan", paramsOf(policy, design.plans), "the policy reads it");
   linkParams("plan", boundaryPaths(policy.boundaries), "a declared boundary");
   arr(design.requirements).forEach((q, i) => { link("req:" + i, [obj(q).ref], "it names this ref"); add("plan", "req:" + i, "guards every execute plan"); });
   for (const c of arr(obj(design.context).entries)) {
@@ -645,7 +669,7 @@ function renderDesign() {
     <span class="meta">reads ${arr(readsOf(n.r)).map(esc).join(", ") || "nothing"}</span>
     <span class="meta">${targetHtml(targetsOf(d, node.slice(2)))}${n.r.boundaries ? `<span>boundaries declared</span>` : `<span class="none">no boundaries declared</span>`}</span>`));
   const policy = obj(d.policy);
-  const decide = [card("plan", `<span class="ref">policy · ${esc(policy.form ?? "?")}</span><span class="meta">reads ${arr(readsOf(policy)).map(esc).join(", ") || "nothing"}</span>
+  const decide = [card("plan", `<span class="ref">policy · ${esc(policy.form ?? "?")}</span><span class="meta">reads ${arr(readsOf(policy, d.plans)).map(esc).join(", ") || "nothing"}</span>
       ${policy.boundaries ? `<span class="meta">boundaries declared</span>` : ""}<span class="meta">plans: ${Object.keys(obj(d.plans)).map(esc).join(", ") || "none declared"}</span>`),
     ...of("req").map(([node, n]) => card(node, `<span class="ref">requires ${esc(n.q.ref)}</span><span class="meta">= ${esc(JSON.stringify(n.q.value ?? null))} · every execute plan</span>`))];
   const paramCards = of("param").map(([node, n]) => card(node, `<span class="ref">${esc(n.path)}</span><span class="meta">${esc(n.p.type ?? "")}</span><div class="val">${esc(JSON.stringify(n.p.value ?? null))}</div>`));

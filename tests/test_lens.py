@@ -909,7 +909,10 @@ def test_a_table_shows_its_inputs_reads_and_a_mass_on_its_bound_shows_its_digits
         page([], [_targeted().document]),
         tmp_path,
         """(() => {
-          dstate = buildDesign({ policy: { form: "table", inputs: [{ read: "d:t" }] },
+          dstate = buildDesign({ policy: { form: "table", inputs: [{ read: "d:t" }],
+              rows: [{ cells: ["-"], plan: "p" }] },
+            plans: { p: { steps: [{ arguments: { a: { ref: "t:x" } } }], reason: null,
+              reply: { template: "{n}", slots: [{ name: "n", origin: { param: "lim" } }] } } },
             rules: { t: { form: "table", provides: "d:t", inputs: [{ read: "q:a" }] } },
             sources: { s: { provides: { "q:a": {} } } } });
           renderDesign();
@@ -919,7 +922,7 @@ def test_a_table_shows_its_inputs_reads_and_a_mass_on_its_bound_shows_its_digits
             mass: valueHtml({ value: { kind: "choice", labels: ["a", "b", "c"],
               probabilities: { a: 0.3, b: 0.2, c: 0.5 } } }, mass, true) }; })()""",
     )
-    assert "reads d:t" in shown["cols"]
+    assert "reads d:t, t:x" in shown["cols"]
     assert "reads q:a" in shown["cols"]
     assert "reads nothing" not in shown["cols"]
     assert "mass a+b" in shown["mass"]

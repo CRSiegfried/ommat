@@ -752,6 +752,9 @@ class _Form:
                 except NotationError as exc:
                     shown = "input" if member == "inputs" else "row"
                     self.fail(names, f"{where}'s {shown} {n}: {exc}")
+                except Exception:  # a container of the caller's that cannot be read
+                    shown = "input" if member == "inputs" else "row"
+                    self.fail(names, f"{where}'s {shown} {n} cannot be read")
         return out_inputs, out_rows
 
     def plan(self, name: str, p: PlanDeclaration) -> PlanDeclaration:

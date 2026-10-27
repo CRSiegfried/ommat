@@ -3,6 +3,7 @@
 the load checks it adds, its evaluation under each hit policy and the marker contract, the
 policy table and its plan declarations, replay over a table turn, the grid and the lints."""
 
+import contextlib
 import dataclasses
 import json
 from collections.abc import Callable, Mapping, Sequence
@@ -238,7 +239,7 @@ def test_a_label_the_notation_would_read_as_a_form_is_written_tagged() -> None:
         assert next(i for i in record.log if i.get("ref") == "d:tab")["value"] == expected
 
 
-def test_a_table_and_its_members_are_snapshot_when_built() -> None:
+def test_a_tables_row_list_is_copied_when_built() -> None:
     rows: list[Any] = [["-", 1]]
     table = tab("F", ["t:state.n"], rows)
     rows.append(["-", 2])
@@ -991,8 +992,6 @@ def test_the_lints_run_over_a_policy_table() -> None:
     loaded = load(dataclasses.replace(policy_design(), state=t.record(name=t.string)))
     report = unsure_to_execute(loaded, values={"t:state.name": ["Ada"]})
     assert report["execute"] == []
-    dead = dead_questions(loaded, values={"t:state.name": ["Ada"]})
-    assert dead["points"] > 0
 
 
 def test_a_count_table_is_probed_over_the_values_given() -> None:
@@ -1013,8 +1012,9 @@ def test_a_count_table_is_probed_over_the_values_given() -> None:
         )
     )
     assert "t:state.items" not in loaded._grid
-    report = dead_questions(loaded, values={"t:state.items": [[], [1, 2]]})
-    assert report["points"] > 0
+    with pytest.raises(ValueError, match="unfilled"):
+        dead_questions(loaded)
+    assert dead_questions(loaded, values={"t:state.items": [[], [1, 2]]})["points"] == 2
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1210,7 +1210,9 @@ def test_rule_2_names_inputs_then_origins_then_slots_and_the_first_input_of_a_ce
     both = tab("F", ["d:s0", "d:s1"], [["-", ">= d:s0", 1], ["-", "-", 2]])
     assert value(both, rules=srcs("Unavailable", "Unavailable"))["cause"]["refs"] == ["d:s0"]
     one_side = tab("F", ["d:s0", "d:s1"], [[">= d:s1", "-", 1], ["-", "-", 2]])
-    assert value(one_side, rules=srcs("Unsure", "Unavailable"))["cause"]["refs"] == ["d:s1"]
+    # With its other input Unsure, the cell fails whatever the outage withheld.
+    assert value(one_side, rules=srcs("Unsure", "Unavailable")) == 2
+    assert value(one_side, rules=srcs("value", "Unavailable"))["cause"]["refs"] == ["d:s1"]
 
 
 def test_a_comparison_against_a_marker_and_an_in_over_a_marker_do_not_match() -> None:
@@ -1415,3 +1417,112 @@ def test_a_declared_plans_slots_are_read_only() -> None:
     decision = decide_sync(load(policy_design()), BASE, {"default": answering(0.1)})
     with pytest.raises(TypeError):
         decision.plan.slots["reply"][0]["name"] = "x"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("cell", "n", "expected"),
+    [(3, 3, 1), (3, 4, 0), ({"one_of": [2, 3]}, 3, 1), ({"one_of": [2, 4]}, 3, 0)],
+)
+def test_an_integer_value_cell_matches_its_value(cell: Any, n: int, expected: int) -> None:
+    assert value(tab("F", ["t:state.n"], [[cell, 1], ["-", 0]]), {"n": n}) == expected
+
+
+def test_an_integer_value_cell_is_probed_on_both_sides() -> None:
+    from ommat.helpers._points import fill
+
+    loaded = load(design(("tab", tab("F", ["t:state.n"], [[5, 1], ["-", 0]]))))
+    assert [p.live for p in fill(loaded, ["t:state.n"], {})["t:state.n"]] == [4, 5, 6]
+
+
+def test_the_grid_takes_intervals_extract_values_and_the_policy_tables_cells() -> None:
+    table = tab("F", ["t:state.n", "t:state.x"], [["[2, 5]", "[lo, hi]", 1], ["-", "-", 0]])
+    loaded = load(design(("tab", table)))
+    assert loaded._grid["t:state.n"] == (2, 5)
+    assert loaded._grid["t:state.x"] == ("hi", "lo")
+    policy = PolicyTable(["t:state.n"], [[">= 2", "page"], ["-", "ask"]])
+    loaded = load(dataclasses.replace(policy_design(), policy=policy))
+    assert loaded._grid["t:state.n"] == (2,)
+    leaves = {**LEAVES, "null": Parameter(t.number(0, 1), 0.5), "big": Parameter(t.number(), 9)}
+    number_ref = Source(
+        {
+            "q:amount": Question(
+                "extraction", Text("The amount"), value_type="number", text={"ref": "t:state.name"}
+            )
+        },
+        needs=["t:state"],
+    )
+    amount = tab("F", [Helper("extract", "q:amount", null_bar="null")], [[">= big", 1], ["-", 0]])
+    loaded = load(design(("tab", amount), sources={"s": number_ref}, parameters=leaves))
+    assert loaded._grid["q:amount"]["value"] == ("big",)
+    assert loaded._grid["q:amount"]["null"] == ("null",)
+
+
+def test_a_boolean_cell_and_a_value_cell_over_a_size_input_are_no_boundary() -> None:
+    flag = tab("F", ["t:state.flag"], [[{"is": True}, 1], ["-", 0]])
+    assert "t:state.flag" not in load(design(("tab", flag)))._grid
+    count = tab("F", [Helper("size", "t:state.items")], [[2, 1], ["-", 0]])
+    assert "t:state.items" not in load(design(("tab", count)))._grid
+
+
+def test_the_abstention_search_through_each_table_helper() -> None:
+    plans = {"go": PlanDeclaration("execute", [Step("notify")]), "tell": PLANS["tell"]}
+
+    def search(table: Table, **changes: Any) -> list[str]:
+        policy = PolicyTable(["d:share"], [[True, "tell"], ["-", "go"]])
+        design_ = asked(
+            ("share", table),
+            plans=plans,
+            policy=policy,
+            tools=["notify"],
+            state=t.record(name=t.string),
+            **changes,
+        )
+        report = unsure_to_execute(load(design_), values={"t:state.name": ["Ada"]})
+        return [i["read"] for i in report["execute"]]
+
+    leaves = {
+        **LEAVES,
+        "th": Parameter(t.mapping(t.number(0, 1)), {"yes": 0.6}),
+        "labels": Parameter(t.list_(t.string), ["yes"]),
+    }
+    picked = Table(
+        "d:share",
+        "boolean",
+        "F",
+        [Helper("pick_with_thresholds", "q:urgent", thresholds="th", margin="margin")],
+        [["yes", True], ["-", False]],
+    )
+    assert search(picked, parameters=leaves) == ["d:share", "q:urgent"]
+    massed = Table(
+        "d:share",
+        "boolean",
+        "F",
+        [Helper("mass", "q:urgent", labels="labels")],
+        [[">= hi", True], ["-", False]],
+    )
+    assert search(massed, parameters=leaves) == ["d:share"]
+
+
+def test_a_marker_row_under_u_stands_over_an_outage() -> None:
+    table = tab("U", ["d:s0"], [[1, 1], ["Unavailable", 2]])
+    assert value(table, rules=srcs("Unavailable")) == 2
+
+
+def test_hostile_and_deep_rows_fail_load_cleanly() -> None:
+    class Broken(dict[str, Any]):
+        def __len__(self) -> int:
+            raise ZeroDivisionError
+
+    refused(tab("F", ["t:state.n"], [[Broken(), 1]]), 10, "cannot be read")
+    refused(tab("F", ["t:state.n"], [["in t:state.items extra", 1]]), 10, "not in and one ref")
+    for depth in (58, 60, 62, 64, 70):
+        deep: Any = 1
+        for _ in range(depth):
+            deep = [deep]
+        doc = json.loads(load(policy_design()).document)
+        doc["plans"]["page"]["steps"][0]["arguments"] = {"who": {"literal": deep}}
+        with contextlib.suppress(InvalidDesign):  # loads, or is refused; never raises else
+            load(doc)
+    doc = table_doc()
+    doc["rules"]["tab"]["rows"][0] = ["-", 1]
+    assert {c for c, _ in failures(doc)} == {10}

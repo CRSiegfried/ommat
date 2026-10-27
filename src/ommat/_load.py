@@ -80,6 +80,7 @@ from ommat._table import (
     COMPARISONS,
     HELPERS,
     Axis,
+    NotationError,
     overlap,
     plan_conditions,
     python_input,
@@ -2485,16 +2486,19 @@ class _Loader:
             params=MappingProxyType(self.component_params()),
             table_bytes=MappingProxyType(
                 {
-                    **{rid: encode(decoded["rules"][rid]) for rid, _ in self.tables()},
+                    **{
+                        rid: encode(decoded["rules"][rid], MAX_DOCUMENT_DEPTH)
+                        for rid, _ in self.tables()
+                    },
                     **(
-                        {"policy": encode(decoded["policy"])}
+                        {"policy": encode(decoded["policy"], MAX_DOCUMENT_DEPTH)}
                         if self.policy_table() is not None
                         else {}
                     ),
                 }
             ),
             plan_bytes=MappingProxyType(
-                {name: encode(plan) for name, plan in decoded["plans"].items()}
+                {name: encode(plan, MAX_DOCUMENT_DEPTH) for name, plan in decoded["plans"].items()}
             ),
         )
 
@@ -3909,7 +3913,11 @@ def _rows(value: object, *, policy: bool, hit: object = None) -> Any:
     as the ``NotationError`` check 10 reports."""
     return _listed(
         value,
-        lambda r: r if (o := _object(r)) is None else python_row(o, policy=policy, hit=hit),
+        lambda r: (
+            NotationError("a row is not an object of the tagged form")
+            if (o := _object(r)) is None
+            else python_row(o, policy=policy, hit=hit)
+        ),
     )
 
 

@@ -65,6 +65,7 @@ REFUSED_HELPERS = frozenset(
 ``determined`` (check 6), and the combinators, which a hit policy stands for."""
 _INTEGER = re.compile(r"-?(0|[1-9][0-9]*)")
 _IN = re.compile(r"in +([qtd]:\S*)")
+_IN_START = re.compile(r"in +[qtd]:")
 
 
 class NotationError(ValueError):
@@ -122,6 +123,8 @@ def _notation(text: str) -> Any:
             raise NotationError(f"the cell {text!r} is not a set of two or more labels")
         return {"one_of": members}
     found = _IN.fullmatch(cell)
+    if found is None and _IN_START.match(cell):
+        raise NotationError(f"the cell {text!r} is not in and one ref")
     if found is not None:
         if not is_ref(found.group(1)):
             raise NotationError(f"the cell {text!r} names no ref")
@@ -425,9 +428,12 @@ class _Table:
             return type(value) is MARKERS[member], []
         other = member if tag == "in" else member.get("ref") if tag in COMPARISONS else None
         if other is not None:
+            # A cell over two inputs fails on an outage only when every input it tests that is
+            # not Unavailable holds a value, so the withheld value alone could have changed it.
             j = self.reads.index(other)
-            if type(self.values[j]) is Unavailable:
-                unavailable = sorted({*unavailable, j})
+            pair = ((i, value), (j, self.values[j]))
+            held = all(type(v) is Unavailable or not (_marker(v) or v is None) for _, v in pair)
+            unavailable = sorted({k for k, v in pair if type(v) is Unavailable}) if held else []
         if _marker(value) or value is None:
             return False, unavailable
         if tag == "is":
