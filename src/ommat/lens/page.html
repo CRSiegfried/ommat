@@ -319,13 +319,19 @@ function build(record, design) {
   };
   for (const [ref, e] of entries) {
     const node = "e:" + ref;
-    const { base } = parseRef(ref);
+    const { base, candidate } = parseRef(ref);
+    // A grounded entry reads its own candidate's entry of a declared ref its cause names.
+    const own = (refs) => arr(refs).map((r) => {
+      if (candidate == null || !str(r) || parseRef(r).candidate != null) return r;
+      const g = parseRef(r).base + "[" + JSON.stringify(candidate) + "]";
+      return entries.has(g) ? g : r;
+    });
     if (calls.has(e.call)) add(node, "c:" + e.call, "asked in this call", "record");
     if (Object.hasOwn(grounded, base) && str(grounded[base])) link(node, [grounded[base]], "its candidate set", "record");
-    for (const d of arr(e.derivation)) link(node, obj(d).refs, "helper " + obj(d).helper, "record");
-    link(node, obj(obj(e.marker).cause).refs, "named in its marker's cause", "record");
+    for (const d of arr(e.derivation)) link(node, own(obj(d).refs), "helper " + obj(d).helper, "record");
+    link(node, own(obj(obj(e.marker).cause).refs), "named in its marker's cause", "record");
     const provider = Object.hasOwn(providers, base) ? providers[base] : undefined;
-    if (ref.startsWith("d:") && str(provider) && Object.hasOwn(rules, provider)) link(node, readsOf(rules[provider]), "rule " + provider + " reads it", "design");
+    if (ref.startsWith("d:") && str(provider) && Object.hasOwn(rules, provider)) link(node, own(readsOf(rules[provider])), "rule " + provider + " reads it", "design");
   }
   for (const [idx, c] of calls) {
     link("c:" + idx, obj(obj(c.outcome).failed).refs, "named in its failure", "record");

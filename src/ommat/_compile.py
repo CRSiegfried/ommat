@@ -25,7 +25,7 @@ from typing import Any, cast
 from ommat._component import at, call, exception_record, names_read
 from ommat._design import LoadedDesign, PlanDeclaration, Policy, Requirement
 from ommat._guard import Verdict, guard, verdict_item
-from ommat._interpret import _marker_document, _render
+from ommat._interpret import _marker_document, _render, slot_value
 from ommat._ledger import Ledger
 from ommat._markers import Cause, CauseCode, PlanKind, Undetermined
 from ommat._plan import (
@@ -301,7 +301,7 @@ def _entry(
         value = walk(board[f"{parsed.level}:{parsed.name}"], parsed.fields, origin)
         if isinstance(value, Undetermined):
             markers.append((origin, value))
-        values[slot["name"]] = value
+        values[slot["name"]] = slot_value(loaded, origin, value)
     if markers:
         flagged = [m for r, m in markers if r == ref]
         marker = flagged[0] if flagged else markers[0][1]
@@ -522,11 +522,8 @@ def _declared(
             else:
                 parsed = parse_ref(origin)
                 base = board[f"{parsed.level}:{parsed.name}"]
-                value: object = walk(base, parsed.fields, origin)
-                field = loaded._candidate_sets.get(origin)
-                if field is not None and type(value) is list:  # a set of records' candidates
-                    value = candidate_values(cast("list[object]", value), field)
-                values[slot["name"]] = value
+                value = walk(base, parsed.fields, origin)
+                values[slot["name"]] = slot_value(loaded, origin, value)
         texts[member] = _render(cast(str, text["template"]), values)
         if text["slots"]:
             slots[member] = text["slots"]

@@ -495,3 +495,22 @@ def test_the_ledger_refuses_sets_in_a_format_5_record() -> None:
     with pytest.raises(InvalidRecord) as info:
         read_record(rehashed(doc))
     assert "holds sets, which a format-5 record does not" in str(info.value)
+
+
+def test_a_slot_on_a_record_set_renders_its_candidate_values() -> None:
+    from ommat import Context, ContextEntry
+
+    ask = Source(
+        {"q:all/ok": Question("noul", Text("All {all} ok?", [slot("all", ref=SET)]))},
+        needs=[SET],
+    )
+    d = design(
+        sources={**design().sources, "all": ask},
+        context=Context([ContextEntry(SET, Text("E {x}", [slot("x", ref=SET)]))]),
+        classes={},
+    )
+    record = decided(loaded=load(d))
+    found = [s for b in ASKED for s in b if "q:all/ok" in s.questions]
+    assert found[0].questions["q:all/ok"].wording == "All Ana, Bo ok?"
+    plan = next(i for i in record.log if i["item"] == "plan")
+    assert plan["context"]["entries"][0]["text"] == "E Ana, Bo"

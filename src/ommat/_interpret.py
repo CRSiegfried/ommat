@@ -719,6 +719,19 @@ def _fresh(value: object) -> object:
     return value
 
 
+def slot_value(loaded: LoadedDesign, ref: str, value: object) -> object:
+    """A board-ref slot's value as declared text renders it: a candidate set of records as its
+    candidate values, so a record candidate renders as its candidate field; any other as read."""
+    field = loaded._candidate_sets.get(ref)
+    if field is None or type(value) is not list:
+        return value
+    members: list[object] = cast("list[object]", value)
+    try:
+        return candidate_values(members, field)
+    except (KeyError, TypeError):  # a member of another form: the set's own fault
+        return members
+
+
 def _render_wording(template: object, values: Mapping[str, object]) -> Any:
     """A wording rendered: a template string by ``_render``; a structured one into fresh
     containers, each string value rendered and each key and other value as written."""
@@ -1412,7 +1425,8 @@ class _Turn:
         for slot in q.wording.slots:
             tag, origin = next(iter(slot["origin"].items()))
             if tag == "ref":
-                values[slot["name"]] = needs[self.slot_key(origin, candidate)]
+                value = needs[self.slot_key(origin, candidate)]
+                values[slot["name"]] = slot_value(self.loaded, origin, value)
             elif tag == "param":
                 values[slot["name"]] = self.loaded._leaf_value(origin)
             elif candidate is not None:  # a candidate slot of a per-candidate entry

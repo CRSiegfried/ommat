@@ -965,3 +965,25 @@ def test_a_table_shows_its_inputs_reads_and_a_mass_on_its_bound_shows_its_digits
     assert "reads nothing" not in shown["cols"]
     assert "mass a+b" in shown["mass"]
     assert "50.000%" in shown["mass"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_grounded_entry_links_its_own_candidates_reads(tmp_path: Path) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const t = build({ log: [
+            { item: "design", hash: "h", format: 7, helpers: 3 },
+            { item: "settings", providers: { "q:x": "s", "d:f": "f", "d:s": "r" },
+              grounded: { "q:x": "d:s", "d:f": "d:s" }, sets: { "d:s": null } },
+            { item: "entry", ref: "d:s", round: 0, call: null, value: ["a", "b"] },
+            { item: "entry", ref: 'q:x["a"]', round: 1, call: null, value: {} },
+            { item: "entry", ref: 'q:x["b"]', round: 1, call: null, value: {} },
+            { item: "entry", ref: 'd:f["a"]', round: 1, call: null, value: "y",
+              derivation: [{ helper: "pick_with_margin", refs: ["q:x"], rested_on: ["q:x"] }] }]
+          }, null);
+          return (t.inputs.get('e:d:f["a"]') || []).map((x) => x.node); })()""",
+    )
+    assert 'e:q:x["a"]' in shown
+    assert 'e:q:x["b"]' not in shown
