@@ -28,7 +28,6 @@ from ommat import (
     InvalidRecord,
     LoadedDesign,
     Plan,
-    PlanDeclaration,
     Policy,
     Question,
     ReadView,
@@ -257,7 +256,6 @@ REFUSED: list[tuple[Design, str]] = [
         with_rule(over_t(), "r", rule("r", grounded="t:s", candidates=True)),
         "grounded candidate set",
     ),
-    (over_t(plans={"ask": PlanDeclaration("clarify", grounded="t:s")}), "plan declaration"),
     (
         over_t(
             ("g", Source({"t:y": {"type": t.list_(t.string), "candidates": True}}, grounded="t:s"))
@@ -1115,9 +1113,16 @@ def test_a_plan_or_verdict_holds_a_grounded_ref_only_in_a_cause(
     from ommat._ledger import _grounded_refs, _LedgerError  # pyright: ignore[reportPrivateUsage]
 
     with pytest.raises(_LedgerError, match="never holds"):
-        _grounded_refs(kind, {"item": kind, **item}, NAMED, {}, "item")
+        _grounded_refs(kind, {"item": kind, **item}, NAMED, {}, "item", 6)
     # The places the ledger admits take it.
     _grounded_refs("entry", {"item": "entry", "ref": GROUNDED_REF}, NAMED, {}, "item")
+
+
+def test_from_format_7_a_step_argument_holds_a_grounded_ref() -> None:
+    from ommat._ledger import _grounded_refs  # pyright: ignore[reportPrivateUsage]
+
+    kind, item = NEVER[0]
+    _grounded_refs(kind, {"item": kind, **item}, NAMED, {}, "item", 7)
 
 
 _MARKER = {"kind": "Unsure", "cause": {"code": "abstained", "refs": [GROUNDED_REF]}}

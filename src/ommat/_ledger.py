@@ -770,7 +770,9 @@ def _cause_refs(cause: Any, place: str) -> list[tuple[str, Any, bool]]:
     return [(f"{place}'s refs", r, True) for r in cast("dict[str, Any]", cause)["refs"]]
 
 
-def _ref_places(kind: str, item: dict[str, Any]) -> list[tuple[str, Any, bool]]:
+def _ref_places(
+    kind: str, item: dict[str, Any], fmt: int = SETS_FORMAT
+) -> list[tuple[str, Any, bool]]:
     """Each place of an item that redaction rewrites a grounded ref in: an entry's ref, a
     cause's refs, an origin's ref, a requirement's ref and a failure's ref, each with whether
     it may hold a grounded ref: an entry's ref and every cause's refs, wherever the cause
@@ -795,7 +797,8 @@ def _ref_places(kind: str, item: dict[str, Any]) -> list[tuple[str, Any, bool]]:
             for name, origin in cast("dict[str, Any]", step["arguments"]).items():
                 if type(origin) is dict and "ref" in origin:
                     ref: Any = cast("dict[str, Any]", origin)["ref"]
-                    places.append((f"step {n}'s argument {name!r}", ref, False))
+                    # A grounded plan's expanded origin, from format 7.
+                    places.append((f"step {n}'s argument {name!r}", ref, fmt >= SETS_FORMAT))
             for r in cast("list[dict[str, Any]]", step["requirements"]):
                 places.append((f"step {n}'s requirement", r["ref"], False))
     elif kind == "verdict":
@@ -819,11 +822,12 @@ def _grounded_refs(
     grounded: Mapping[str, str],
     classes: Mapping[str, Any],
     where: str,
+    fmt: int = SETS_FORMAT,
 ) -> None:
-    """Refuse a grounded ref outside the places a record admits one, whose declared ref is
-    not a key of the ``settings`` item's ``grounded``, or whose field path names a field its
-    declared ref's class tree does not hold."""
-    for place, ref, admitted in _ref_places(kind, item):
+    """Refuse a grounded ref outside the places a record admits one, a step argument's from
+    format 7, whose declared ref is not a key of the ``settings`` item's ``grounded``, or
+    whose field path names a field its declared ref's class tree does not hold."""
+    for place, ref, admitted in _ref_places(kind, item, fmt):
         if not _grounded(ref):
             continue
         if not admitted:
@@ -842,20 +846,6 @@ def _grounded_refs(
                     f"{where}: {place} {ref!r} names a field its class tree does not hold"
                 )
             tree = cast("dict[str, Any]", tree)[name]
-
-
-def _no_set(kind: str, item: dict[str, Any], where: str) -> None:
-    """No origin carrying ``set``, null included: nothing checks a candidate-value literal's
-    set in this engine. The item has passed its shape check."""
-    if kind != "plan":
-        return
-    for n, step in enumerate(cast("list[dict[str, Any]]", item["steps"]), 1):
-        for name, origin in cast("dict[str, Any]", step["arguments"]).items():
-            if type(origin) is dict and "set" in origin:
-                raise _LedgerError(
-                    f"{where}: step {n}'s argument {name!r} carries set, "
-                    "which a record holds nowhere"
-                )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1256,6 +1246,7 @@ class Ledger:
         self._providers: dict[str, bytes] = {}
         self._classes: dict[str, Any] = {}
         self._grounded: dict[str, str] = {}
+        self._sets: dict[str, str | None] = {}
         self._round = 0
         self._round_ended = False
         self._round_has_entry = False
@@ -1297,8 +1288,8 @@ class Ledger:
         shape(stored, where)
         if kind != "design":
             self._check_format(cast(str, kind), stored, where)
-        _grounded_refs(cast(str, kind), stored, self._grounded, self._classes, where)
-        _no_set(cast(str, kind), stored, where)
+        _grounded_refs(cast(str, kind), stored, self._grounded, self._classes, where, self._format)
+        self._check_origins(cast(str, kind), stored, where)
         commit = self._check_order(cast(str, kind), stored, index, where)
         if kind in _ORDERED and self._format >= KEY_ORDER_FORMAT:
             stored = _with_held_order(stored)
@@ -1461,14 +1452,51 @@ class Ledger:
         }
         classes = _copy(item["classes"])
         grounded = cast("dict[str, str]", _copy(item.get("grounded", {})))
+        sets = cast("dict[str, str | None]", _copy(item.get("sets", {})))
         bound = cast(int, item["settings"]["round_bound"])
         return self._set(
             _phase=_SETTLED,
             _providers=providers,
             _classes=classes,
             _grounded=grounded,
+            _sets=sets,
             _round_bound=bound,
         )
+
+    def _check_origins(self, kind: str, item: dict[str, Any], where: str) -> None:
+        """Refuse an origin holding ``candidate``, and one holding ``set`` before format 7 or
+        whose ``set`` names no key of the ``settings`` item's ``sets`` that an earlier entry
+        holds a value at, or whose literal does not fit that set's class tree. The item has
+        passed its shape check."""
+        if kind != "plan":
+            return
+        for n, step in enumerate(cast("list[dict[str, Any]]", item["steps"]), 1):
+            for name, origin in cast("dict[str, Any]", step["arguments"]).items():
+                if type(origin) is not dict:
+                    continue
+                at = f"{where}: step {n}'s argument {name!r}"
+                members = cast("dict[str, Any]", origin)
+                if "candidate" in members:
+                    raise _LedgerError(f"{at} is a candidate origin, which a record never holds")
+                if "set" not in members:
+                    continue
+                if self._format < SETS_FORMAT:
+                    raise _LedgerError(
+                        f"{at} carries set, which a format-{self._format} record does not"
+                    )
+                set_ref = members["set"]
+                if type(set_ref) is not str or set_ref not in self._sets:
+                    raise _LedgerError(f"{at} carries set {set_ref!r}, which is no key of sets")
+                if not any(
+                    i.get("item") == "entry" and i.get("ref") == set_ref and "value" in i
+                    for i in self._items
+                ):
+                    raise _LedgerError(
+                        f"{at} carries set {set_ref!r}, at which no earlier entry holds a value"
+                    )
+                found = _misfit(members.get("literal"), self._classes.get(set_ref), "its literal")
+                if found is not None:
+                    raise _LedgerError(f"{at}: {found}")
 
     def _require_round_ended(self, where: str) -> None:
         if self._round >= 1 and not self._round_ended:

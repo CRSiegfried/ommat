@@ -63,35 +63,48 @@ class Binding:
 
 @dataclass(frozen=True, slots=True, init=False)
 class Origin:
-    """A literal, ``Origin(literal=v)``, or a board ref, ``Origin(ref=r)``.
+    """A literal, ``Origin(literal=v)``, a board ref, ``Origin(ref=r)``, or, in a grounded plan
+    declaration only, the candidate value, ``Origin(candidate=r)`` naming its set.
 
-    ``literal`` is ``None`` for a board ref and ``ref`` ``None`` for a literal, so an origin is
-    a board ref exactly when ``ref`` is not ``None``. ``set`` is a candidate-value literal's set
-    ref, written only through ``candidate_literal``, which this engine never calls, and
-    otherwise ``None``.
+    ``literal`` is ``None`` for a board ref and a candidate origin, ``ref`` ``None`` for a
+    literal and a candidate origin, and ``candidate`` the candidate origin's set ref, else
+    ``None``: an origin is a candidate origin when ``candidate`` is not ``None``, else a board
+    ref when ``ref`` is not ``None``, else a literal. ``set`` is a candidate-value literal's set
+    ref, written only through ``candidate_literal``, and otherwise ``None``.
     """
 
     literal: Any
     ref: str | None
     set: str | None
+    candidate: str | None
 
-    def __init__(self, *, literal: Any = _ABSENT, ref: str | _Absent = _ABSENT) -> None:
-        if (literal is _ABSENT) == (ref is _ABSENT):
-            raise TypeError("an Origin takes exactly one of literal= and ref=")
-        if ref is _ABSENT:
-            object.__setattr__(self, "literal", literal)
-            object.__setattr__(self, "ref", None)
-        else:
-            if not issubclass(type(ref), str):  # pyright: ignore[reportUnnecessaryIsInstance]
-                raise TypeError(f"an origin's ref {described(ref)} is not a string")
-            object.__setattr__(self, "literal", None)
-            object.__setattr__(self, "ref", string_data(ref))
+    def __init__(
+        self,
+        *,
+        literal: Any = _ABSENT,
+        ref: str | _Absent = _ABSENT,
+        candidate: str | _Absent = _ABSENT,
+    ) -> None:
+        given = [x is not _ABSENT for x in (literal, ref, candidate)]
+        if sum(given) != 1:
+            raise TypeError("an Origin takes exactly one of literal=, ref= and candidate=")
+        object.__setattr__(self, "literal", None if literal is _ABSENT else literal)
+        object.__setattr__(self, "ref", _ref(ref, "an origin's ref"))
+        object.__setattr__(self, "candidate", _ref(candidate, "a candidate origin's set"))
         object.__setattr__(self, "set", None)
 
 
+def _ref(value: object, what: str) -> str | None:
+    if value is _ABSENT:
+        return None
+    if not issubclass(type(value), str):
+        raise TypeError(f"{what} {described(value)} is not a string")
+    return string_data(cast(str, value))
+
+
 def candidate_literal(value: object, set_ref: str) -> Origin:
-    """A grounded step's candidate-value literal, carrying its set's ref. Load refuses grounded
-    plans, so this engine's compile never builds one."""
+    """A grounded step's candidate-value literal, the whole member, carrying its set's ref;
+    compile writes it when it expands a grounded plan declaration."""
     origin = Origin(literal=value)
     object.__setattr__(origin, "set", string_data(set_ref))
     return origin
@@ -318,10 +331,12 @@ def origin_document(origin: Origin | Binding) -> dict[str, Any]:
     if type(origin) is Binding:
         return {"step": origin.step, "path": origin.path}
     origin = cast(Origin, origin)
+    if origin.candidate is not None:  # a grounded plan declaration's alone
+        return {"candidate": origin.candidate}
     if origin.ref is not None:
         return {"ref": origin.ref}
-    # No literal here carries a set: only a grounded plan's expansion writes one, and load
-    # refuses grounded plans; a policy's is refused before rule 1.
+    if origin.set is not None:  # a grounded plan's expansion writes it
+        return {"literal": plain(origin.literal), "set": origin.set}
     return {"literal": plain(origin.literal)}
 
 

@@ -29,7 +29,6 @@ from ommat import (
     InvalidDesign,
     LoadedDesign,
     Parameter,
-    PlanDeclaration,
     Policy,
     Question,
     Requirement,
@@ -1153,14 +1152,8 @@ def grounded(provides: str, **changes: Any) -> Table:
     return table(provides, grounded="t:set", **{"candidates": True, **changes})
 
 
-CANDIDATE_SLOT = Text("Which {c}?", [{"name": "c", "origin": {"candidate": "t:set"}}])
-
 REFUSED: list[tuple[Design, str]] = [
     (with_rule(minimal(), "tab", grounded("d:tab")), "grounded candidate set"),
-    (
-        minimal(plans={"ask": PlanDeclaration("clarify", reply=CANDIDATE_SLOT)}),
-        "plan declaration with a candidate origin",
-    ),
     (
         with_source(
             minimal(),
@@ -1172,10 +1165,6 @@ REFUSED: list[tuple[Design, str]] = [
     (
         with_rule(minimal(), "r", rule("r", grounded="t:set", candidates=True)),
         "grounded candidate set",
-    ),
-    (
-        minimal(plans={"ask": PlanDeclaration("clarify", grounded="t:set")}),
-        "grounded plan declaration",
     ),
 ]
 
@@ -1201,10 +1190,6 @@ def test_check_12_names_each_refused_form(design: Design, form: str) -> None:
             "tab",
             Table("d:tab", t.boolean, "U", {1, 2}, [], grounded="t:set", candidates=True),  # type: ignore[arg-type]
         ),
-        minimal(plans={"ask": PlanDeclaration(1, grounded="t:set")}),  # type: ignore[arg-type]
-        minimal(plans={"ask": PlanDeclaration("clarify", steps="send", grounded="t:set")}),  # type: ignore[arg-type]
-        minimal(plans={"ask": PlanDeclaration("clarify", steps=[{1, 2}], grounded="t:set")}),
-        minimal(plans={"ask": PlanDeclaration("clarify", reason="why", grounded="t:set")}),  # type: ignore[arg-type]
     ],
 )
 def test_check_10s_member_forms_test_a_refused_form(design: Design) -> None:

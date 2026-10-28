@@ -6,6 +6,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Added
 
+- Grounded plan declarations: an `execute` plan declaration may be grounded over a candidate set, its arguments taking `Origin(candidate=ref)`. Compile expands one copy of its steps per candidate, the candidate origin becoming `{"literal": member, "set": ref}`, an origin on a grounded declared ref the candidate's grounded ref, and a binding the same copy's step; the row naming it matches only when the set and every expanded origin hold a value, and rule 2 names the set first. The ledger admits the literal's `set` and a grounded step argument from record format 7, checking the set, and `redact` digests the literal under the set's tree.
+
 - Grounded sources of `t:` refs: a source grounded over a candidate set provides each `t:` ref once per candidate, under the grounded refs the engine forms and passes in `refs`; a binding reads each one's candidate with the new `ommat.bindings.candidate_of`. Each value is checked alone. A per-candidate question may hold a slot on a declared ref grounded over its own set, filled from that candidate's entry and given to the binding as a need under the grounded ref; a marker there leaves that candidate's question out.
 
 - Grounded rules and tables: a function rule or a table declared `grounded=ref` over a candidate set runs once per candidate, reading `candidate`, `candidate.f` and the current candidate's entry of a declared ref grounded over the same set, and writes one entry per candidate at `d:x["<candidate>"]`, each with its own `derivation` or `rows`. A set holding a marker gives the declared ref the set's need marker, and an empty set writes nothing. A reader of the declared ref, the policy included, gets a `dict` by candidate value. Load refuses a `candidate` read outside a grounded component, a field it does not name, a table reading a grounded ref of another set, a field path on a grounded ref outside its set, and a grounded candidate set.
@@ -22,7 +24,7 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Changed
 
-- `load` no longer refuses a decision table, a data rule, the policy table or a plan declaration; it still refuses a grounded plan declaration and a candidate origin in a plan declaration. `Table`, `PolicyTable` and `PlanDeclaration` copy their sequence fields when built.
+- `load` no longer refuses a decision table, a data rule, the policy table or a plan declaration. `Table`, `PolicyTable` and `PlanDeclaration` copy their sequence fields when built.
 
 - `dead_questions` and `unsure_to_execute` take a `values` key for a label question with no grid entry: its list is the labels to try, each at 1, in place of every label, so a question of many labels no rule bounds costs only the labels a caller names. Each report gains `narrowed`, those questions in code-point order. A key for such a question was a `ValueError`; a key for a question the grid fills still is.
 

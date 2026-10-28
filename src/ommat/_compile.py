@@ -23,14 +23,23 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from ommat._component import at, call, exception_record, names_read
-from ommat._design import LoadedDesign, Policy, Requirement
+from ommat._design import LoadedDesign, PlanDeclaration, Policy, Requirement
 from ommat._guard import Verdict, guard, verdict_item
 from ommat._interpret import _marker_document, _render
 from ommat._ledger import Ledger
 from ommat._markers import Cause, CauseCode, PlanKind, Undetermined
-from ommat._plan import Binding, Origin, Plan, Step, declared_plan, engine_plan, step_document
+from ommat._plan import (
+    Binding,
+    Origin,
+    Plan,
+    Step,
+    candidate_literal,
+    declared_plan,
+    engine_plan,
+    step_document,
+)
 from ommat._read_view import ComponentKind, ReadView, RequireStopped, Role, UndeclaredRead, walk
-from ommat._refs import is_field_path, parse_ref
+from ommat._refs import candidate_values, entry_ref, grounded_ref, is_field_path, parse_ref
 from ommat._table import Condition, evaluate, plan_conditions, read_inputs
 from ommat._types import hold_failure
 from ommat._values import domain_error, string_data
@@ -120,7 +129,11 @@ class _Rules:
         if type(returned) is not Plan:  # a subclass may override what compile reads
             return [_POLICY]
         plan = returned
-        engine_only = plan.cause is not None or any(_has_set(s) for s in plan.steps)
+        candidates = any(_has_candidate(s) for s in plan.steps)
+        engine_only = plan.cause is not None or candidates
+        # A grounded declaration's expansion writes a set literal; a policy writes none.
+        if not declared and any(_has_set(s) for s in plan.steps):
+            engine_only = True
         if engine_only or (plan.slots and not declared):
             return [_POLICY]  # what only the engine writes
         if plan.kind is not PlanKind.execute and plan.steps:
@@ -150,13 +163,23 @@ class _Rules:
         return step.tool in self.tools and all(name != _IDEMPOTENCY_KEY for name in names)
 
     def rule_4(self, step: Step, n: int) -> bool:
-        """Each board-ref origin a declared read of the policy that holds a value; the board
-        is read directly, so no stop or helper item is added to the policy's view."""
+        """Each board-ref origin a declared read of the policy that holds a value, an expanded
+        origin's declared ref a declared read and its own entry a value; the board is read
+        directly, so no stop or helper item is added to the policy's view."""
         for origin in step.arguments.values():
             if type(origin) is Origin and origin.ref is not None:
-                if origin.ref not in self.reads:
+                ref = origin.ref
+                try:
+                    p = parse_ref(ref)
+                except ValueError:  # not a ref under the grammar
                     return False
-                if issubclass(type(at(self.board, origin.ref)), Undetermined):
+                declared = f"{p.level}:{p.name}"
+                if (declared if p.candidate is not None else ref) not in self.reads:
+                    return False
+                # A grounded declared ref's own entry holds no value: it is a dict of entries.
+                if entry_ref(ref) not in self.board:
+                    return False
+                if issubclass(type(at(self.board, ref)), Undetermined):
                     return False
         return True
 
@@ -175,13 +198,17 @@ class _Rules:
             return False
         if p.level != "d" or p.fields or p.candidate is not None:
             return False
-        if ref not in self.loaded._providers:
+        if ref not in self.loaded._providers or ref in self.loaded._grounded:
             return False
         return hold_failure(requirement.value, self.loaded._types[ref], {}) is None
 
 
 def _has_set(step: Step) -> bool:
     return any(type(o) is Origin and o.set is not None for o in step.arguments.values())
+
+
+def _has_candidate(step: Step) -> bool:
+    return any(type(o) is Origin and o.candidate is not None for o in step.arguments.values())
 
 
 def _text(value: str | None) -> bool:
@@ -327,6 +354,8 @@ def _steps(documents: list[dict[str, Any]]) -> list[Step]:
             return Binding(o["step"], o["path"])
         if "ref" in o:
             return Origin(ref=o["ref"])
+        if "set" in o:
+            return candidate_literal(o["literal"], o["set"])
         return Origin(literal=o["literal"])
 
     return [
@@ -380,10 +409,7 @@ def table_choice(
     try:
         values = read_inputs(inputs, view, leaves)
         conditions = {
-            k: [
-                Condition(ref, view.read(ref), at)
-                for ref, at in plan_conditions(declarations[row["plan"]])
-            ]
+            k: _conditions(loaded, board, view, declarations[row["plan"]])
             for k, row in enumerate(rows)
         }
         outcome = evaluate(
@@ -404,6 +430,71 @@ def table_choice(
         return engine_plan(PlanKind.broken, Cause(_C.raised, [_POLICY])), [], exc
     finally:
         view.close()
+
+
+def _conditions(
+    loaded: LoadedDesign, board: Mapping[str, object], view: ReadView, plan: PlanDeclaration
+) -> list[Condition]:
+    """What a row naming ``plan`` needs held besides its cells, in rule 2's order: its
+    board-ref origins and slots; for a grounded plan, first its set's ref, then each expanded
+    step's origins by expansion position, an origin on a grounded declared ref as its
+    candidate's grounded ref, read from the board, then its slots."""
+    if plan.grounded is None:
+        return [Condition(ref, view.read(ref), at) for ref, at in plan_conditions(plan)]
+    set_ref = plan.grounded
+    value = board[set_ref]
+    out = [Condition(set_ref, value, (1, 0))]
+    if isinstance(value, Undetermined):
+        return out  # no expansion to walk
+    origins: list[str] = []
+    slots: list[str] = []
+    for ref, at_ in plan_conditions(plan):
+        (origins if at_[0] == 1 else slots).append(ref)
+    for candidate in candidate_values(value, loaded._candidate_sets[set_ref]):
+        for step in plan.steps:
+            arguments = cast(Step, step).arguments
+            for name in sorted(arguments):
+                origin = arguments[name]
+                if type(origin) is not Origin or origin.ref is None:
+                    continue
+                ref = _expanded(loaded, origin.ref, candidate)
+                held = at(board, ref) if ref != origin.ref else view.read(ref)
+                out.append(Condition(ref, held, (1, len(out))))
+    out += [Condition(ref, view.read(ref), (2, len(out) + i)) for i, ref in enumerate(slots)]
+    return out
+
+
+def _expanded(loaded: LoadedDesign, ref: str, candidate: str) -> str:
+    """An origin's ref in a candidate's copy: a grounded declared ref as that candidate's
+    grounded ref, any other as it is."""
+    return grounded_ref(ref, candidate) if ref in loaded._grounded else ref
+
+
+def _expansion(
+    loaded: LoadedDesign, board: Mapping[str, object], declaration: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """A grounded declaration's steps, one copy per candidate in the set's order: a candidate
+    origin as the candidate-value literal of the whole member, an origin on a grounded
+    declared ref as the candidate's grounded ref, a binding as the same copy's step."""
+    set_ref = cast(str, declaration["grounded"])
+    members = cast("list[object]", board[set_ref])
+    values = candidate_values(members, loaded._candidate_sets[set_ref])
+    steps = cast("list[dict[str, Any]]", declaration["steps"])
+    out: list[dict[str, Any]] = []
+    for copy, (member, value) in enumerate(zip(members, values, strict=True)):
+        for step in steps:
+            arguments: dict[str, Any] = {}
+            for name, o in cast("dict[str, dict[str, Any]]", step["arguments"]).items():
+                if "candidate" in o:
+                    arguments[name] = {"literal": member, "set": set_ref}
+                elif "ref" in o:
+                    arguments[name] = {"ref": _expanded(loaded, cast(str, o["ref"]), value)}
+                elif "step" in o:
+                    arguments[name] = {"step": copy * len(steps) + o["step"], "path": o["path"]}
+                else:
+                    arguments[name] = o
+            out.append({**step, "arguments": arguments})
+    return out
 
 
 def _declared(
@@ -427,9 +518,16 @@ def _declared(
             else:
                 parsed = parse_ref(origin)
                 base = board[f"{parsed.level}:{parsed.name}"]
-                values[slot["name"]] = walk(base, parsed.fields, origin)
+                value: object = walk(base, parsed.fields, origin)
+                field = loaded._candidate_sets.get(origin)
+                if field is not None and type(value) is list:  # a set of records' candidates
+                    value = candidate_values(cast("list[object]", value), field)
+                values[slot["name"]] = value
         texts[member] = _render(cast(str, text["template"]), values)
         if text["slots"]:
             slots[member] = text["slots"]
-    steps = _steps(declaration["steps"])
+    if declaration["grounded"] is not None:
+        steps = _steps(_expansion(loaded, board, declaration))
+    else:
+        steps = _steps(declaration["steps"])
     return declared_plan(declaration["kind"], steps, texts["reason"], texts["reply"], slots)

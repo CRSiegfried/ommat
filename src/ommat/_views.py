@@ -454,10 +454,19 @@ class _Walk:
 
     def step(self, step: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
         arguments: dict[str, Any] = {}
-        for name, origin in cast("dict[str, Any]", step["arguments"]).items():
-            if type(origin) is dict and "literal" in origin:  # its JSON form's default
+        for name, given in cast("dict[str, Any]", step["arguments"]).items():
+            if type(given) is not dict:  # the ledger holds each origin an object
+                arguments[name] = given
+                continue
+            origin = cast("dict[str, Any]", given)
+            if "set" in origin:  # a candidate-value literal: its set's tree
+                tree = classes.get(cast(str, origin["set"]), _CONTENT)
+                arguments[name] = {**origin, "literal": self.value(origin["literal"], tree)}
+            elif "literal" in origin:  # its JSON form's default
                 arguments[name] = {**origin, "literal": self.literal(origin["literal"])}
-            else:  # a board ref or a binding: open
+            elif "ref" in origin:  # open, but a grounded ref's candidate
+                arguments[name] = {**origin, "ref": self.ref(origin["ref"])}
+            else:  # a binding: open
                 arguments[name] = origin
         requirements = [self.requirement(r, classes) for r in step["requirements"]]
         return {**step, "arguments": arguments, "requirements": requirements}

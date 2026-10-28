@@ -277,6 +277,8 @@ class _Loader:
         # Each candidate read, which no ref spells: its owner, where it is, the read and its
         # role, a read or a boundary's key.
         self.candidate_reads: list[tuple[str, str, str, str]] = []
+        # Each plan declaration's text holding a candidate slot, which no text holds.
+        self.candidate_slots: list[tuple[str, str]] = []
         self.defs: dict[str, Type] = {}
         self.tainted: set[str] = set()
         # Each definition's size, and each provided ref's and the state's, once it passes.
@@ -422,20 +424,6 @@ class _Loader:
                 self.grounded.add(rid)
                 if rule.candidates:
                     refuse(rules, (rid,), what, "grounded candidate set")
-        for name, plan in self.d.plans.items():
-            what = f"plan declaration {_q(name)}"
-            if plan.grounded is not None:
-                refuse(self.refused_plans, (name,), what, "grounded plan declaration")
-            candidate = any(not isinstance(step, Step) for step in plan.steps) or any(
-                "candidate" in slot["origin"]
-                for text in (plan.reason, plan.reply)
-                if text is not None
-                for slot in text.slots
-            )
-            if candidate:
-                refuse(
-                    self.refused_plans, (name,), what, "plan declaration with a candidate origin"
-                )
 
     # --- gathering, and check 7 ------------------------------------------------------------
 
@@ -535,10 +523,14 @@ class _Loader:
             self.table_refs("policy", "the policy table", policy_table.inputs, policy_table.rows)
         for name, plan in self.plans():
             where = f"plan declaration {_q(name)}"
+            if plan.grounded is not None:
+                self.use(name, f"{where}'s grounding", "plan-grounding", plan.grounded)
             for n, step in enumerate(plan.steps, 1):
                 for arg, origin in cast(Step, step).arguments.items():
-                    if isinstance(origin, Origin) and origin.ref is not None:
-                        shown = f"{where}'s step {n} argument {_q(arg)}"
+                    shown = f"{where}'s step {n} argument {_q(arg)}"
+                    if isinstance(origin, Origin) and origin.candidate is not None:
+                        self.use(name, shown, "plan-candidate", origin.candidate)
+                    elif isinstance(origin, Origin) and origin.ref is not None:
                         self.use(name, shown, "origin", origin.ref)
                 for requirement in cast(Step, step).requirements:
                     shown = f"{where}'s step {n} requirement"
@@ -558,6 +550,8 @@ class _Loader:
                     tag, value = next(iter(slot["origin"].items()))
                     if tag == "ref":
                         self.use(name, f"{where}'s {member}", "plan-slot", value)
+                    elif tag == "candidate":
+                        self.candidate_slots.append((name, f"{where}'s {member}"))
         for owner, where, boundaries, _ in self.boundary_fields():
             for key in boundaries:
                 # Check 3 finds each key's provider and check 7 its form; check 4 gives a
@@ -650,11 +644,24 @@ class _Loader:
                         f"grounding set {_q(grounding)}",
                     )
                 continue
+            if u.role == "plan-candidate":
+                grounding = self.d.plans[u.owner].grounded
+                if grounding is not None and grounding != u.ref:
+                    self.fail(
+                        3,
+                        (u.owner, u.ref),
+                        f"{u.where} is a candidate origin naming {_q(u.ref)}, not its plan's "
+                        f"grounding set {_q(grounding)}",
+                    )
+                continue
             found = u.base in self.providers
             if not found:
                 names = (u.owner, u.ref) if u.owner else (u.ref,)
                 self.fail(3, names, f"{u.where} names {_q(u.ref)}, which has no provider")
-            elif u.role in ("label-set", "grounding") and u.parsed.level in ("t", "d"):
+            elif u.role in ("label-set", "grounding", "plan-grounding") and u.parsed.level in (
+                "t",
+                "d",
+            ):
                 if u.parsed.candidate is not None or u.parsed.fields or not self.is_set(u.ref):
                     self.fail(
                         3,
@@ -785,6 +792,7 @@ class _Loader:
                 self.fail(4, (rid, rule.provides), message)
         allowed = {
             "grounding": ("d", "t"),
+            "plan-grounding": ("d", "t"),
             "slot": ("d", "t"),
             "label-set": ("d", "t"),
             "text": ("d", "t"),
@@ -821,7 +829,7 @@ class _Loader:
                     f"source {_q(sid)} is grounded, but no question of it holds a candidate slot",
                 )
         for u in self.uses:
-            if u.role == "candidate":
+            if u.role in ("candidate", "plan-candidate"):
                 continue
             levels = allowed.get(u.role)
             names = (u.owner, u.ref) if u.owner else (u.ref,)
@@ -878,6 +886,27 @@ class _Loader:
                     f"{where} reads {_q(read)}, which only a grounded rule or table reads",
                 )
         per_candidate = _per_candidate_refs(self.d)
+        for u in self.uses:
+            if u.role == "plan-candidate" and self.d.plans[u.owner].grounded is None:
+                self.fail(
+                    4,
+                    (u.owner,),
+                    f"{u.where} is a candidate origin, which only a grounded plan declaration "
+                    "holds",
+                )
+            elif u.base in per_candidate and (
+                u.role == "context-slot"
+                or (u.role in ("origin", "plan-slot") and self.d.plans[u.owner].grounded is None)
+            ):
+                self.fail(
+                    4,
+                    (u.owner, u.ref) if u.owner else (u.ref,),
+                    f"{u.where} names {_q(u.ref)}, a grounded declared ref, which only a grounded "
+                    "plan's origin names",
+                )
+        for owner, where in self.candidate_slots:
+            if self.d.plans[owner].grounded is None:
+                self.fail(4, (owner,), f"{where} has a candidate slot, which no plan text holds")
         tables: list[tuple[str, str | None]] = [(r, t.grounded) for r, t in self.tables()]
         if self.policy_table() is not None:
             tables.append(("policy", None))
@@ -2101,7 +2130,11 @@ class _Loader:
         if any(cell != ANY for cell in last["cells"]):
             self.fail(9, names, "the policy table's last row holds a cell that is not -")
         plan = self.d.plans.get(cast(str, last["plan"]))
-        if plan is not None and _board_refs(plan):
+        if plan is not None and plan.grounded is not None:
+            self.fail(
+                9, names, f"the policy table's last row names {_q(last['plan'])}, a grounded plan"
+            )
+        elif plan is not None and _board_refs(plan):
             self.fail(
                 9,
                 names,
@@ -2121,6 +2154,8 @@ class _Loader:
             return
         if kind is PlanKind.broken:
             self.fail(9, names, f"{where}'s kind is broken, which only the engine writes")
+        if plan.grounded is not None:
+            self.check_9_grounded_plan(name, plan, kind)
         if kind is not PlanKind.execute and plan.steps:
             self.fail(9, names, f"{where} is {kind.value}, which holds no steps")
         if kind in (PlanKind.clarify, PlanKind.inform) and plan.reply is None:
@@ -2160,6 +2195,51 @@ class _Loader:
                         9,
                         (name, r.ref),
                         f"{shown}'s requirement on {_q(r.ref)} can never hold: {reason}",
+                    )
+
+    def check_9_grounded_plan(self, name: str, plan: PlanDeclaration, kind: PlanKind) -> None:
+        """A grounded plan declaration is ``execute``; its board-ref origin naming a grounded
+        declared ref names one grounded over its own set, with no field path; no slot names
+        the candidate value, a grounded entry or a grounded declared ref."""
+        where, names = f"plan declaration {_q(name)}", (name,)
+        if kind is not PlanKind.execute:
+            self.fail(9, names, f"{where} is grounded, so of kind execute, not {kind.value}")
+        per_candidate = _per_candidate_refs(self.d)
+        for n, step in enumerate(cast("Sequence[Step]", plan.steps), 1):
+            for arg, origin in step.arguments.items():
+                if not isinstance(origin, Origin) or origin.ref is None:
+                    continue
+                parsed = _parsed(origin.ref)
+                if parsed is None:
+                    continue
+                set_ref = per_candidate.get(f"{parsed.level}:{parsed.name}")
+                if set_ref is None:
+                    continue
+                shown = f"{where}'s step {n} argument {_q(arg)}"
+                if set_ref != plan.grounded:
+                    self.fail(
+                        9,
+                        (name, origin.ref),
+                        f"{shown} names {_q(origin.ref)}, grounded over {_q(set_ref)}, not its "
+                        "plan's set",
+                    )
+                elif parsed.fields:
+                    self.fail(
+                        9,
+                        (name, origin.ref),
+                        f"{shown} names {_q(origin.ref)}, a grounded declared ref by a field path",
+                    )
+        for member, text in (("reason", plan.reason), ("reply", plan.reply)):
+            for slot in () if text is None else text.slots:
+                tag, value = next(iter(slot["origin"].items()))
+                shown = f"{where}'s {member}"
+                if tag == "candidate":
+                    self.fail(9, names, f"{shown} has a candidate slot, which no plan text holds")
+                elif tag == "ref" and (_declared_base(cast(str, value)) or "") in per_candidate:
+                    self.fail(
+                        9,
+                        (name, cast(str, value)),
+                        f"{shown} has a slot on {_q(value)}, a grounded declared ref",
                     )
 
     def table_compares(self) -> set[tuple[str, str]]:
@@ -2720,7 +2800,10 @@ class _Loader:
         elif policy_table is not None:
             refs = [i["read"] for i in policy_table.inputs]
             for name in self.named_plans():
-                refs += [ref for ref, _ in plan_conditions(self.d.plans[name])]
+                plan = self.d.plans[name]
+                if plan.grounded is not None:  # the set, whose value the expansion walks
+                    refs.append(plan.grounded)
+                refs += [ref for ref, _ in plan_conditions(plan)]
             out["policy"] = tuple(dict.fromkeys(refs))
         return out
 
@@ -4172,8 +4255,7 @@ def _listed(value: object, build: Callable[[Any], Any]) -> Any:
 
 
 def _step_of(value: object) -> Any:
-    """A document step as a ``Step``; one holding a candidate origin, or of another form,
-    kept whole, for check 12 or check 10."""
+    """A document step as a ``Step``; one of another form kept whole, for check 10."""
     step = _object(value)
     if step is None or set(step) != {"tool", "arguments", "requirements"}:
         return value
@@ -4192,6 +4274,8 @@ def _step_of(value: object) -> Any:
                 origins[name] = Origin(ref=origin["ref"])
             elif set(origin) == {"literal"}:
                 origins[name] = Origin(literal=origin["literal"])
+            elif set(origin) == {"candidate"}:
+                origins[name] = Origin(candidate=origin["candidate"])
             else:
                 return value
         except TypeError:  # a member of another form: check 10's

@@ -767,9 +767,8 @@ class _Form:
         return out_inputs, out_rows
 
     def plan(self, name: str, p: PlanDeclaration) -> PlanDeclaration:
-        """A plan declaration with its members of their form: each step a ``Step``, or the
-        ``plan`` item's form of a step that holds a candidate origin, for check 12 to name; a
-        member of another form is left out, and fails."""
+        """A plan declaration with its members of their form, each step a ``Step``; a member of
+        another form is left out, and fails."""
         where, names = f"plan declaration {quote(name)}", (name,)
         kind = self.string(p.kind, f"{where}'s kind", names, optional=False)
         steps: list[Any] = []
@@ -777,9 +776,7 @@ class _Form:
             self.fail(names, f"{where}'s steps are not a list")
         else:
             for step in cast("Sequence[object]", p.steps):
-                if _candidate_step(step):
-                    steps.append(step)
-                elif type(step) is not Step:
+                if type(step) is not Step:
                     self.fail(names, f"{where} holds a step that is not a Step")
                 elif not all(
                     isinstance(r, Requirement) and is_scalar_string(r.ref)
@@ -854,23 +851,6 @@ class _Form:
             return None
         out["mass"] = sets
         return out
-
-
-def _candidate_step(step: object) -> bool:
-    """A step in the ``plan`` item's form holding a candidate origin, which a ``Step`` cannot
-    hold."""
-    if not isinstance(step, Mapping):
-        return False
-    members = cast("Mapping[str, Any]", step)
-    arguments = members.get("arguments")
-    return (
-        set(members) == {"tool", "arguments", "requirements"}
-        and isinstance(arguments, Mapping)
-        and any(
-            isinstance(o, Mapping) and set(cast("Mapping[str, Any]", o)) == {"candidate"}
-            for o in cast("Mapping[str, Any]", arguments).values()
-        )
-    )
 
 
 def _probability_members_unset(q: Question) -> bool:
