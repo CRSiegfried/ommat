@@ -224,7 +224,8 @@ const planOrigins = (c, plans, tag) => {
 const isCandidateRead = (r) => r === "candidate" || (str(r) && r.startsWith("candidate."));
 const readsOf = (c, plans) => (obj(c).form === "table"
   ? [...new Set([...arr(obj(c).inputs).map((i) => obj(i).read), ...planOrigins(c, plans, "ref")])]
-  : arr(obj(c).reads)).map((r) => (isCandidateRead(r) && str(obj(c).grounded) ? c.grounded : r));
+  : arr(obj(c).reads)).map((r) => (isCandidateRead(r) && str(obj(c).grounded) ? c.grounded : r))
+  .filter((r, i, all) => all.indexOf(r) === i);
 const paramsOf = (c, plans) => {
   if (obj(c).form !== "table") return obj(c).params;
   const out = arr(obj(c).inputs).flatMap((i) => Object.values(obj(obj(i).params)));

@@ -797,8 +797,9 @@ def _ref_places(
             for name, origin in cast("dict[str, Any]", step["arguments"]).items():
                 if type(origin) is dict and "ref" in origin:
                     ref: Any = cast("dict[str, Any]", origin)["ref"]
-                    # A grounded plan's expanded origin, from format 7.
-                    places.append((f"step {n}'s argument {name!r}", ref, fmt >= SETS_FORMAT))
+                    # A grounded plan's expanded origin, from format 7, with no field path.
+                    admitted = fmt >= SETS_FORMAT and not _has_fields(ref)
+                    places.append((f"step {n}'s argument {name!r}", ref, admitted))
             for r in cast("list[dict[str, Any]]", step["requirements"]):
                 places.append((f"step {n}'s requirement", r["ref"], False))
     elif kind == "verdict":
@@ -1066,6 +1067,7 @@ def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
     if fmt < GROUNDED_FORMAT:
         if "grounded" in item:
             raise _LedgerError(f"{where} holds grounded, which a format-{fmt} record does not")
+        _check_sets(item, fmt, where)  # which refuses sets before format 7
         return
     if "grounded" not in item:
         raise _LedgerError(f"{where} has no 'grounded' member")
@@ -1128,6 +1130,16 @@ def _check_sets(item: dict[str, Any], fmt: int, where: str) -> dict[str, Any] | 
                 "name or a field of its member record's tree"
             )
     return sets
+
+
+def _has_fields(ref: object) -> bool:
+    """Whether ``ref`` is a ref with a field path."""
+    if type(ref) is not str:
+        return False
+    try:
+        return bool(parse_ref(ref).fields)
+    except ValueError:
+        return False
 
 
 def _declared(ref: object) -> bool:

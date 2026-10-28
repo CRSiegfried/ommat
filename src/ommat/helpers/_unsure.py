@@ -142,6 +142,8 @@ class _FirstSearch:
                 entries = self.entries(point, None)
                 for target in code_point_sorted(entries):
                     declared = declared_ref(target)
+                    if not declared.startswith("d:"):
+                        continue  # only a rule writes Unsure
                     if _never_unsure(self.loaded, self.loaded._providers[declared]):
                         continue
                     rest = {e: p for e, p in entries.items() if e != target}
@@ -421,8 +423,12 @@ def _rests(
 
     if any(returned(ref, _ONE if plain else _EACH) for ref in rules):
         return True
-    if plain:
-        return False
+    if plain:  # a rule grounded over a set picks a plain question in each candidate's entry
+        return any(
+            returned(ref, _ONE)
+            for ref in written
+            if candidate_of(ref) is not None and declared_ref(ref) in rules
+        )
     candidate = cast(str, candidate_of(subject))
     return any(
         returned(grounded_ref(ref, candidate), _ONE)

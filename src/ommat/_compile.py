@@ -121,6 +121,7 @@ class _Rules:
         self.board = board
         self.tools = frozenset(loaded._design.tools)
         self.reads = frozenset(string_data(r) for r in loaded._reads[_POLICY])
+        self.declared = False  # whether the plan is a declaration compile built
 
     def first_break(self, returned: object, *, declared: bool = False) -> list[str] | None:
         """The cause's refs for what the policy returned, or ``None`` for a valid plan. A
@@ -129,6 +130,7 @@ class _Rules:
         if type(returned) is not Plan:  # a subclass may override what compile reads
             return [_POLICY]
         plan = returned
+        self.declared = declared
         candidates = any(_has_candidate(s) for s in plan.steps)
         engine_only = plan.cause is not None or candidates
         # A grounded declaration's expansion writes a set literal; a policy writes none.
@@ -173,8 +175,10 @@ class _Rules:
                     p = parse_ref(ref)
                 except ValueError:  # not a ref under the grammar
                     return False
-                declared = f"{p.level}:{p.name}"
-                if (declared if p.candidate is not None else ref) not in self.reads:
+                # Only a declared grounded plan's expansion names a grounded ref; a policy's
+                # grounded ref is in no read set.
+                expanded = p.candidate is not None and self.declared
+                if (f"{p.level}:{p.name}" if expanded else ref) not in self.reads:
                     return False
                 # A grounded declared ref's own entry holds no value: it is a dict of entries.
                 if entry_ref(ref) not in self.board:

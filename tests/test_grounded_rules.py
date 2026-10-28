@@ -467,3 +467,49 @@ def test_redact_digests_a_grounded_rules_candidate() -> None:
     written = [i["ref"] for i in view["log"] if i["item"] == "entry"]
     assert grounded_ref(FIT, digest("Ana", record)) in written
     assert grounded_ref(FIT, "Ana") not in written
+
+
+def test_check_4_refuses_a_requirement_naming_a_grounded_declared_ref() -> None:
+    from ommat import Requirement, SourceRequirement
+
+    found = failures(design(requirements=[Requirement(FIT, "x")]))
+    assert any(c == 4 and "which no requirement names" in m for c, m in found)
+    gated = Source(
+        {"q:other": Question("noul", Text("Other?"))},
+        requirement=SourceRequirement(FIT, ["x"]),
+    )
+    found = failures(design(sources={**design().sources, "other": gated}))
+    assert any(c == 4 and "which no requirement names" in m for c, m in found)
+
+
+@pytest.mark.parametrize(
+    "reads", [["candidate", "candidate", OUT], ["candidate.age", "candidate.age", OUT]]
+)
+def test_check_1_refuses_a_repeated_candidate_read(reads: list[str]) -> None:
+    rules = {
+        **design().rules,
+        "fit": Rule(FIT, t.string, fit, version="1", reads=reads, grounded=SET),
+    }
+    found = failures(design(rules=rules))
+    assert any(c == 1 and "twice" in m for c, m in found)
+
+
+def test_check_9_refuses_an_in_cell_over_records_testing_a_nullable_string() -> None:
+    person = t.record(name=t.string, nick=t.nullable(t.string))
+    rules = {
+        **design().rules,
+        "people": Rule(
+            SET, t.list_(person), people, version="1", reads=["t:state.people"], candidates="name"
+        ),
+        "fit": Rule(FIT, t.string, fit, version="1", reads=["candidate", OUT], grounded=SET),
+        "level": Table(
+            LEVEL,
+            t.boolean,
+            "F",
+            ["candidate.nick", SET],
+            [["in d:people", "-", True], ["-", "-", False]],
+            grounded=SET,
+        ),
+    }
+    found = failures(design(rules=rules, state=t.record(people=t.list_(person))))
+    assert any(c == 9 and "is not a string" in m for c, m in found)

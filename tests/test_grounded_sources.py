@@ -399,3 +399,13 @@ def test_a_record_holding_a_grounded_t_ref_reads_back() -> None:
     record = decided()
     doc = {"log": copy.deepcopy(record.log), "unhashed": copy.deepcopy(record.unhashed)}
     assert read_record(rehashed(doc)).record_hash == record.record_hash
+
+
+def test_check_12_refuses_an_extraction_reading_a_grounded_declared_ref() -> None:
+    import extraction as x
+
+    ex = Source({"q:ex/amt": x.question(text={"ref": CITY})})
+    with pytest.raises(InvalidDesign) as info:
+        load(design(sources={**design().sources, "ex": ex}))
+    assert [f.check for f in info.value.failures] == [12]
+    assert "need or slot ref on a grounded declared ref" in str(info.value)

@@ -416,3 +416,54 @@ def test_redact_digests_a_set_literal_under_its_sets_tree() -> None:
     assert who["literal"]["name"] == digest("Bo", record)
     to = plan["steps"][0]["arguments"]["to"]
     assert to["ref"] == grounded_ref(ADDR, digest("Bo", record))
+
+
+def test_a_function_policy_naming_a_grounded_entry_breaks_rule_4() -> None:
+    def policy(r: ReadView) -> Plan:
+        return Plan("execute", [Step("send", {"to": Origin(ref=grounded_ref(ADDR, "Bo"))})])
+
+    loaded = load(design(policy=Policy(policy, version="1", reads=["d:ready", ADDR]), plans={}))
+    plan = plan_item(decided(loaded=loaded))
+    assert plan["cause"] == {"code": "invalid-return", "refs": ["rule:4", "step:1"]}
+
+
+def test_the_ledger_refuses_a_field_path_on_a_grounded_step_argument() -> None:
+    def change(plan: dict[str, Any]) -> None:
+        plan["steps"][0]["arguments"]["to"]["ref"] += ".x"
+
+    refused(edited_plan(decided(), change), "which it never holds")
+
+
+def test_check_3_refuses_an_origin_on_a_ref_grounded_over_another_set() -> None:
+    def names(r: ReadView) -> object:
+        return ["x"]
+
+    rules = {
+        **design().rules,
+        "other": Rule("d:other", t.list_(t.string), names, version="1", candidates=True),
+        "addr2": Rule(
+            "d:addr2", t.string, plain_addr, version="1", reads=["candidate"], grounded="d:other"
+        ),
+    }
+    plans = {
+        "mail": PlanDeclaration(
+            "execute", [Step("send", {"to": Origin(ref="d:addr2")})], grounded=SET
+        ),
+        "wait": WAIT,
+    }
+    found = failures(design(rules=rules, plans=plans))
+    assert [c for c, m in found if "not its plan's set" in m] == [3]
+
+
+def test_a_field_path_on_a_grounded_plan_origin_fails_once() -> None:
+    record_addr = Rule(
+        ADDR, PERSON, addr, version="1", reads=["candidate", "candidate.age"], grounded=SET
+    )
+    plans = {
+        "mail": PlanDeclaration(
+            "execute", [Step("send", {"to": Origin(ref="d:addr.name")})], grounded=SET
+        ),
+        "wait": WAIT,
+    }
+    found = failures(design(rules={**design().rules, "addr": record_addr}, plans=plans))
+    assert len([m for _, m in found if "field path" in m]) == 1

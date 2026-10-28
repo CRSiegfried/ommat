@@ -410,7 +410,13 @@ class _Loader:
                         refuse(sources, (sid, ref), shown, _PER_CANDIDATE_EXTRACTION)
                     elif isinstance(question.labels, Mapping):
                         refuse(sources, (sid, ref), shown, _PER_CANDIDATE_LABEL_SET)
-            for need in _declared_needs(source):
+            texts = [
+                origin["ref"]
+                for _, question in _questions(source)
+                for _, origin in _extraction_origins(question)
+                if isinstance(origin.get("ref"), str)
+            ]
+            for need in [*_declared_needs(source), *texts]:
                 if _declared_base(need) in per_candidate:
                     refuse(
                         sources,
@@ -894,6 +900,13 @@ class _Loader:
                     f"{u.where} is a candidate origin, which only a grounded plan declaration "
                     "holds",
                 )
+            elif u.base in per_candidate and u.role in ("requirement", "source-requirement"):
+                self.fail(
+                    4,
+                    (u.owner, u.ref) if u.owner else (u.ref,),
+                    f"{u.where} names {_q(u.ref)}, a grounded declared ref, which no requirement "
+                    "names",
+                )
             elif u.base in per_candidate and (
                 u.role == "context-slot"
                 or (u.role in ("origin", "plan-slot") and self.d.plans[u.owner].grounded is None)
@@ -1141,7 +1154,8 @@ class _Loader:
     ) -> None:
         seen: set[bytes] = set()
         for member in members:
-            if (refs and _parsed(member) is None) or domain_error(member, MAX_DOCUMENT_DEPTH):
+            unparsed = refs and _parsed(member) is None and not _candidate_read(member)
+            if unparsed or domain_error(member, MAX_DOCUMENT_DEPTH):
                 continue
             key = _held(member)
             if key in seen:
@@ -1632,7 +1646,8 @@ class _Loader:
         per_candidate = _per_candidate_refs(self.d)
         for u in self.uses:
             set_ref = per_candidate.get(u.base)
-            if set_ref is None or not u.parsed.fields or u.role == "grounding":
+            plan_role = u.role in ("origin", "plan-slot")  # the plan check's, and check 4's
+            if set_ref is None or not u.parsed.fields or u.role == "grounding" or plan_role:
                 continue
             owner = self.d.rules.get(u.owner) or self.d.sources.get(u.owner)
             if owner is None or owner.grounded != set_ref:
@@ -1902,7 +1917,7 @@ class _Loader:
                         names,
                         f"{where}: {_q(member)} is a list of records that is no candidate set",
                     )
-                elif inner != Scalar("string"):
+                elif resolve(t, self.defs) != Scalar("string"):  # exactly, not nullable
                     self.fail(
                         9,
                         names,
@@ -2218,7 +2233,7 @@ class _Loader:
                 shown = f"{where}'s step {n} argument {_q(arg)}"
                 if set_ref != plan.grounded:
                     self.fail(
-                        9,
+                        3,
                         (name, origin.ref),
                         f"{shown} names {_q(origin.ref)}, grounded over {_q(set_ref)}, not its "
                         "plan's set",
@@ -2965,6 +2980,11 @@ def _origins(question: Question) -> Iterator[tuple[object, object]]:
         )
         if isinstance(origin, Mapping) and len(cast("Mapping[str, object]", origin)) == 1:
             yield next(iter(cast("Mapping[object, object]", origin).items()))
+
+
+def _candidate_read(member: object) -> bool:
+    """Whether a read set's member is a ``candidate`` read, which no ref spells."""
+    return isinstance(member, str) and is_candidate_read(member)
 
 
 def _declared_needs(source: Source) -> Iterator[str]:

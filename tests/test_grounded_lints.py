@@ -71,3 +71,55 @@ def test_the_dead_question_lint_grounds_a_t_sources_entries() -> None:
     report = dead_questions(sources.LOADED, values=values)
     assert report["questions"] == {sources.OUT: {"status": "not-on-grid", "witness": None}}
     assert report["points"] > 0
+
+
+def test_the_first_search_sets_no_grounded_t_entry_to_unsure() -> None:
+    import dataclasses
+
+    from ommat import Plan, Policy, ReadView
+
+    def policy(r: ReadView) -> Plan:
+        r.read(sources.CITY)
+        return Plan("execute")
+
+    d = dataclasses.replace(
+        sources.design(), policy=Policy(policy, version="1", reads=[sources.CITY])
+    )
+    values: dict[str, list[Any]] = {
+        SET: [[sources.ANA, sources.BO]],
+        sources.CITY: ["Oslo", None],
+    }
+    report = unsure_to_execute(load(d), values=values)
+    assert not any(f["read"].startswith("t:") for f in report["execute"])
+
+
+def test_the_abstention_search_finds_a_plain_question_a_grounded_rule_picks() -> None:
+    import dataclasses
+
+    from ommat import Question, ReadView, Rule, Source, Text
+    from ommat import types as t
+    from ommat.helpers import pick_with_margin
+
+    plain = "q:plain/ok"
+
+    def picked(r: ReadView) -> object:
+        return pick_with_margin(r, plain, 0.6, 0.2)
+
+    d = dataclasses.replace(
+        DESIGN,
+        sources={"plain": Source({plain: Question("noul", Text("Ok?"))}, needs=["t:state"])},
+        rules={
+            **DESIGN.rules,
+            "fit": Rule(
+                FIT,
+                t.label("no", "yes"),
+                picked,
+                version="1",
+                reads=[plain, "candidate"],
+                grounded=SET,
+            ),
+        },
+    )
+    report = unsure_to_execute(load(d), values=VALUES)
+    found = {f["read"]: f.get("via") for f in report["execute"]}
+    assert found[plain] == grounded_ref(FIT, "Ana")

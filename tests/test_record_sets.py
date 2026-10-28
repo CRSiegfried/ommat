@@ -479,3 +479,19 @@ def test_from_record_takes_a_label_set_whose_other_fields_changed() -> None:
         {"default": from_record(record, LOADED)},
     ).record
     assert entries(again)[WHICH]["value"] == entries(record)[WHICH]["value"]
+
+
+def test_the_ledger_refuses_sets_in_a_format_5_record() -> None:
+    from format_6_design import DESIGN as PLAIN
+    from format_6_design import STATE as PLAIN_STATE
+    from format_6_design import binding as plain_binding
+    from ledger_logs import before_key_order
+
+    record = decide_sync(load(PLAIN), PLAIN_STATE, {"default": plain_binding}).record
+    doc = before_key_order(
+        {"log": copy.deepcopy(record.log), "unhashed": copy.deepcopy(record.unhashed)}, 5
+    )
+    doc["log"][1]["sets"] = {}
+    with pytest.raises(InvalidRecord) as info:
+        read_record(rehashed(doc))
+    assert "holds sets, which a format-5 record does not" in str(info.value)
