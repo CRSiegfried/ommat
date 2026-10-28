@@ -814,20 +814,34 @@ def _context_entries(item: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _grounded_refs(
-    kind: str, item: dict[str, Any], grounded: Mapping[str, str], where: str
+    kind: str,
+    item: dict[str, Any],
+    grounded: Mapping[str, str],
+    classes: Mapping[str, Any],
+    where: str,
 ) -> None:
-    """Refuse a grounded ref outside the places a record admits one, or whose declared ref is
-    not a key of the ``settings`` item's ``grounded``."""
+    """Refuse a grounded ref outside the places a record admits one, whose declared ref is
+    not a key of the ``settings`` item's ``grounded``, or whose field path names a field its
+    declared ref's class tree does not hold."""
     for place, ref, admitted in _ref_places(kind, item):
         if not _grounded(ref):
             continue
         if not admitted:
             raise _LedgerError(f"{where}: {place} {ref!r} is a grounded ref, which it never holds")
-        if declared_ref(ref) not in grounded:
+        parsed = parse_ref(ref)  # a grounded ref, so in the grammar; a field path may follow
+        declared = f"{parsed.level}:{parsed.name}"
+        if declared not in grounded:
             raise _LedgerError(
                 f"{where}: {place} {ref!r} is a grounded ref whose declared ref is not grounded "
                 "in the settings"
             )
+        tree: Any = classes.get(declared)
+        for name in parsed.fields:  # a slot's needs key keeps its field path
+            if type(tree) is not dict or name not in tree:
+                raise _LedgerError(
+                    f"{where}: {place} {ref!r} names a field its class tree does not hold"
+                )
+            tree = cast("dict[str, Any]", tree)[name]
 
 
 def _no_set(kind: str, item: dict[str, Any], where: str) -> None:
@@ -1283,7 +1297,7 @@ class Ledger:
         shape(stored, where)
         if kind != "design":
             self._check_format(cast(str, kind), stored, where)
-        _grounded_refs(cast(str, kind), stored, self._grounded, where)
+        _grounded_refs(cast(str, kind), stored, self._grounded, self._classes, where)
         _no_set(cast(str, kind), stored, where)
         commit = self._check_order(cast(str, kind), stored, index, where)
         if kind in _ORDERED and self._format >= KEY_ORDER_FORMAT:

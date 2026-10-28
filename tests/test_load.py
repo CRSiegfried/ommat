@@ -1118,7 +1118,11 @@ def test_a_refused_forms_malformed_ref_provides_nothing() -> None:
 def test_a_refused_source_sharing_an_id_with_a_rule_is_not_reported_at_check_1() -> None:
     # No other check's clause runs on a refused form (check 12).
     design = with_rule(
-        with_source(minimal(), "x", Source({"t:y": t.string}, grounded="t:set")),
+        with_source(
+            minimal(),
+            "x",
+            Source({"t:y": {"type": t.list_(t.string), "candidates": True}}, grounded="t:set"),
+        ),
         "x",
         rule("x"),
     )
@@ -1158,8 +1162,12 @@ REFUSED: list[tuple[Design, str]] = [
         "plan declaration with a candidate origin",
     ),
     (
-        with_source(minimal(), "s", Source({"t:x": t.string}, grounded="t:set")),
-        "grounded source of t: refs",
+        with_source(
+            minimal(),
+            "s",
+            Source({"t:x": {"type": t.list_(t.string), "candidates": True}}, grounded="t:set"),
+        ),
+        "grounded candidate set",
     ),
     (
         with_rule(minimal(), "r", rule("r", grounded="t:set", candidates=True)),

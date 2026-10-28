@@ -77,7 +77,13 @@ from ommat._read_view import (
     UndeclaredRead,
     _Stop,
 )
-from ommat._refs import candidate_values, code_point_sorted, declared_ref, grounded_ref
+from ommat._refs import (
+    candidate_values,
+    code_point_sorted,
+    declared_ref,
+    grounded_ref,
+    parse_ref,
+)
 from ommat._sorter import TurnSorter
 from ommat._table import evaluate, read_inputs
 from ommat._typed import is_a, typed
@@ -418,7 +424,7 @@ def _returned_value(ref: str, value: object, batch: _Batch, types: Mapping[str, 
             q.is_list,
             batch.texts.get(ref, 0),
         )
-    forms = typed(value, types[ref])
+    forms = typed(value, types[declared_ref(ref)])  # a grounded t: ref's, its declared ref's
     if forms is None or (ref in batch.sets and not _distinct(forms[0], batch.sets[ref])):
         return Unavailable(Cause(_C.invalid_return, [ref]))
     return forms
@@ -681,6 +687,11 @@ def _rule_marker(
     if not all(names_cause_ref(loaded, cast(str, r)) or cast(str, r) in board for r in members):
         return None
     return kind(Cause(code, cast("tuple[str, ...]", members)))
+
+
+def _slot_origins(q: Question) -> list[tuple[str, str]]:
+    """Each slot origin of a question's wording, as its tag and its value."""
+    return [cast("tuple[str, str]", next(iter(slot["origin"].items()))) for slot in q.wording.slots]
 
 
 def _marker_document(marker: Undetermined) -> dict[str, object]:
@@ -1026,6 +1037,8 @@ class _Turn:
                 continue
             out = self.label_markers(sid, labels)
             out.update(expanded[sid].markers)
+            for ref, slot_marker in self.slot_markers(sid, expanded[sid]).items():
+                out.setdefault(ref, slot_marker)
             if out:
                 left[sid] = out
                 self.left_out.update(out)
@@ -1314,11 +1327,12 @@ class _Turn:
                 for r in provided
                 if r in self.loaded._candidate_sets
             )
-            # A fresh copy per source, so no source's change reaches another's.
-            needs = {
-                need: _fresh(at(self.board, need))
-                for need in code_point_sorted(self.loaded._needs[sid])
-            }
+            # A fresh copy per source, so no source's change reaches another's; a slot on a
+            # grounded declared ref is each asked candidate's need, under its grounded ref.
+            named = set(self.loaded._needs[sid])
+            for ref in provided:
+                named.update(self.grounded_slots(sid, ref, grounding.candidates.get(ref)))
+            needs = {need: _fresh(at(self.board, need)) for need in code_point_sorted(named)}
             rendered: dict[str, RenderedQuestion] = {}
             for ref in provided:
                 name = declared_ref(ref)  # a per-candidate entry's question is its declared ref's
@@ -1395,7 +1409,7 @@ class _Turn:
         for slot in q.wording.slots:
             tag, origin = next(iter(slot["origin"].items()))
             if tag == "ref":
-                values[slot["name"]] = needs[origin]
+                values[slot["name"]] = needs[self.slot_key(origin, candidate)]
             elif tag == "param":
                 values[slot["name"]] = self.loaded._leaf_value(origin)
             elif candidate is not None:  # a candidate slot of a per-candidate entry
@@ -1422,6 +1436,44 @@ class _Turn:
         # targets guide a reader and are not what was asked.
         hashed = {k: v for k, v in question.items() if k not in ("target", "latent_targets")}
         return hash_value({**hashed, "wording": {**wording, "slots": slots}}, MAX_DOCUMENT_DEPTH)
+
+    def slot_key(self, origin: str, candidate: str | None) -> str:
+        """A slot ref's needs key: a ref on a grounded declared ref, in a per-candidate
+        question, as the candidate's grounded ref, field path kept; any other as spelt."""
+        p = parse_ref(origin)
+        declared = f"{p.level}:{p.name}"
+        if candidate is None or declared not in self.loaded._grounded:
+            return origin
+        return grounded_ref(declared, candidate) + "".join(f".{f}" for f in p.fields)
+
+    def grounded_slots(self, sid: str, ref: str, candidate: str | None) -> list[str]:
+        """The needs keys of a per-candidate entry's slots on grounded declared refs."""
+        if candidate is None:
+            return []
+        q = self.sources[sid].provides[declared_ref(ref)]
+        if not isinstance(q, Question):
+            return []
+        keys = (self.slot_key(o, candidate) for tag, o in _slot_origins(q) if tag == "ref")
+        return [k for k in keys if parse_ref(k).candidate is not None]
+
+    def slot_markers(self, sid: str, grounding: "_Expanded") -> dict[str, Undetermined]:
+        """Each per-candidate entry left out of its batch for a marker on a grounded slot:
+        ``Unavailable`` with ``need-unavailable`` when one holds ``Unavailable``, else
+        ``Unasked`` with ``need-undetermined``, naming each needs key of that kind once, in
+        code-point order."""
+        out: dict[str, Undetermined] = {}
+        for ref in grounding.refs:
+            keys = self.grounded_slots(sid, ref, grounding.candidates.get(ref))
+            found = {k: at(self.board, k) for k in keys}
+            unavailable = [k for k, v in found.items() if is_a(v, Unavailable)]
+            undetermined = [k for k, v in found.items() if is_a(v, Undetermined)]
+            if unavailable:
+                keyed = code_point_sorted(set(unavailable))
+                out[ref] = Unavailable(Cause(_C.need_unavailable, keyed))
+            elif undetermined:
+                keyed = code_point_sorted(set(undetermined))
+                out[ref] = Unasked(Cause(_C.need_undetermined, keyed))
+        return out
 
     async def ask(self, batches: list[_Batch]) -> list[_Returned]:
         """Run the live frontier's calls concurrently, one task per batch; a task that ended

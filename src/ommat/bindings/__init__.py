@@ -3,7 +3,9 @@
 ``extraction_value`` writes an extraction answer in the form a binding returns, its dates,
 times, datetimes and durations in ommat's grammar. ``bounded_warnings`` makes any lines a
 conforming ``warnings``. ``json_value`` writes a need's value as JSON in its record form, and
-``image_need`` reads an image need's media type and bytes. ``prompt_text`` writes a prompt as
+``image_need`` reads an image need's media type and bytes. ``candidate_of`` reads a grounded
+ref's candidate, so a binding of a grounded source answers each candidate's ref.
+``prompt_text`` writes a prompt as
 the record's text, and ``call_result`` folds each request's ``RequestProvenance`` into the
 call's ``CallResult``. The binding conformance suite is ``ommat.bindings.conformance``. Each
 binding ommat ships to a provider library is a module here behind its own extra, which this
@@ -17,6 +19,7 @@ from ommat._binding_kit import (
     RequestProvenance,
     bounded_warnings,
     call_result,
+    candidate_of,
     extraction_value,
     image_need,
     json_value,
@@ -28,6 +31,7 @@ __all__ = [
     "RequestProvenance",
     "bounded_warnings",
     "call_result",
+    "candidate_of",
     "extraction_value",
     "image_need",
     "json_value",

@@ -28,7 +28,7 @@ from typing import Any, cast
 
 from ommat._design import LoadedDesign
 from ommat._read_view import ReadView, Stop, UndeclaredRead, _Stop, _ViewError, walk
-from ommat._refs import parse_ref
+from ommat._refs import entry_ref, parse_ref
 from ommat._types import TypeFailure, read_type
 from ommat._values import UNREPRESENTABLE, exception_walk, string_data, type_name
 
@@ -263,7 +263,10 @@ def at(board: Mapping[str, object], ref: str) -> object:
     """A read of ``ref`` on the live board, whole or by field path, as a view returns it: a
     marker at its base, a null on the path makes it null, and an entry that does not hold its
     path is a ``_ViewError``, by the view's own walk."""
-    return walk(board[base(ref)], parse_ref(ref).fields, ref)
+    entry = entry_ref(ref)
+    # A grounded read whose entry is not on the board reads the marker at its declared ref.
+    value = board[entry] if entry in board or entry == base(ref) else board[base(ref)]
+    return walk(value, parse_ref(ref).fields, ref)
 
 
 def base(ref: str) -> str:

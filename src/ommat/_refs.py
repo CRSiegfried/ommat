@@ -113,6 +113,13 @@ def grounded_ref(declared: str, candidate: str) -> str:
     return f"{declared}[{encode(candidate).decode('utf-8')}]"
 
 
+def entry_ref(ref: str) -> str:
+    """The ref of the entry a read is at: its field path dropped, a grounded bracket kept."""
+    p = parse_ref(ref)
+    declared = f"{p.level}:{p.name}"
+    return declared if p.candidate is None else grounded_ref(declared, p.candidate)
+
+
 def candidate_values(members: object, field: str | None) -> list[str]:
     """A candidate set's candidate values, in its order: each member itself, or a record
     member's candidate field."""

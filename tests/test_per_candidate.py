@@ -259,8 +259,10 @@ REFUSED: list[tuple[Design, str]] = [
     ),
     (over_t(plans={"ask": PlanDeclaration("clarify", grounded="t:s")}), "plan declaration"),
     (
-        over_t(("g", Source({"q:x": per(), "t:y": t.string}, grounded="t:s"))),
-        "grounded source of t: refs",
+        over_t(
+            ("g", Source({"t:y": {"type": t.list_(t.string), "candidates": True}}, grounded="t:s"))
+        ),
+        "grounded candidate set",
     ),
     (
         over_t(("g", Source({"q:x": EXTRACTION}, grounded="t:s")), state=t.record(body=t.string)),
@@ -278,14 +280,22 @@ REFUSED: list[tuple[Design, str]] = [
         over_t(GROUNDED, ("h", Source({"q:z": ONCE}, needs=['q:x["a"]']))),
         "need or slot ref on a grounded declared ref",
     ),
-    (
-        over_t(
-            GROUNDED,
-            ("h", Source({"q:z": Question("noul", Text("Is {a}?", [slot("a", ref="q:x")]))})),
-        ),
-        "need or slot ref on a grounded declared ref",
-    ),
 ]
+
+
+def test_check_4_refuses_a_slot_on_a_grounded_ref_outside_a_per_candidate_question() -> None:
+    facts = ("f", Source({"t:age": t.integer()}, grounded="t:s"))
+    d = over_t(
+        facts,
+        ("h", Source({"q:z": Question("noul", Text("Is {a}?", [slot("a", ref="t:age")]))})),
+    )
+    assert failures(d) == [
+        (
+            4,
+            'source "h"\'s question "q:z" has a slot on "t:age", a grounded declared ref; only a '
+            "per-candidate question holds one",
+        )
+    ]
 
 
 @pytest.mark.parametrize(("d", "says"), REFUSED)
@@ -1048,7 +1058,7 @@ def test_a_grounded_ref_with_a_field_path_is_refused() -> None:
         call = next(i for i in log if i["item"] == "call")
         call["outcome"]["failed"]["refs"][0] += ".f"
 
-    refused(edited(record, with_field), "is a grounded ref whose declared ref is not grounded")
+    refused(edited(record, with_field), "names a field its class tree does not hold")
 
 
 GROUNDED_REF = grounded_ref(OUT, "Elm Row")
@@ -1105,9 +1115,9 @@ def test_a_plan_or_verdict_holds_a_grounded_ref_only_in_a_cause(
     from ommat._ledger import _grounded_refs, _LedgerError  # pyright: ignore[reportPrivateUsage]
 
     with pytest.raises(_LedgerError, match="never holds"):
-        _grounded_refs(kind, {"item": kind, **item}, NAMED, "item")
+        _grounded_refs(kind, {"item": kind, **item}, NAMED, {}, "item")
     # The places the ledger admits take it.
-    _grounded_refs("entry", {"item": "entry", "ref": GROUNDED_REF}, NAMED, "item")
+    _grounded_refs("entry", {"item": "entry", "ref": GROUNDED_REF}, NAMED, {}, "item")
 
 
 _MARKER = {"kind": "Unsure", "cause": {"code": "abstained", "refs": [GROUNDED_REF]}}
@@ -1130,6 +1140,6 @@ def test_a_plan_s_causes_may_name_a_grounded_ref(item: dict[str, Any]) -> None:
     # naming one candidate, passed on into a flagged context entry, does not break the turn.
     from ommat._ledger import _grounded_refs, _LedgerError  # pyright: ignore[reportPrivateUsage]
 
-    _grounded_refs("plan", {"item": "plan", **item}, NAMED, "item")
+    _grounded_refs("plan", {"item": "plan", **item}, NAMED, {}, "item")
     with pytest.raises(_LedgerError, match="not grounded in the settings"):
-        _grounded_refs("plan", {"item": "plan", **item}, {}, "item")
+        _grounded_refs("plan", {"item": "plan", **item}, {}, {}, "item")

@@ -36,6 +36,7 @@ def test_the_package_re_exports_the_core_functions() -> None:
         "RequestProvenance",
         "bounded_warnings",
         "call_result",
+        "candidate_of",
         "extraction_value",
         "image_need",
         "json_value",

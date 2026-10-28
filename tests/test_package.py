@@ -121,6 +121,7 @@ BINDINGS = {
     "RequestProvenance",
     "bounded_warnings",
     "call_result",
+    "candidate_of",
     "extraction_value",
     "image_need",
     "json_value",

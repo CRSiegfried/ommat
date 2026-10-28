@@ -2,8 +2,8 @@
 answer in the form a binding returns, its temporal values in ommat's grammar;
 ``bounded_warnings`` makes any lines a conforming ``warnings``; ``json_value`` writes a need's
 value as JSON in its record form; ``image_need`` reads an image need's media type and bytes;
-``prompt_text`` writes a prompt as text; and ``call_result`` folds each request's
-``RequestProvenance`` into the call's ``CallResult``.
+``prompt_text`` writes a prompt as text; ``candidate_of`` reads a grounded ref's candidate;
+and ``call_result`` folds each request's ``RequestProvenance`` into the call's ``CallResult``.
 
 Their public home is ``ommat.bindings``. They live here, in the core, so that ``from_record``
 calls the same functions without ``import ommat`` importing ``ommat.bindings``. Each is public
@@ -24,6 +24,7 @@ from ommat._interpret import (
     _record_form,  # pyright: ignore[reportPrivateUsage]
 )
 from ommat._provenance import DETAILS
+from ommat._refs import parse_ref
 from ommat._values import described, escape_surrogates
 
 _TAIL = 64
@@ -201,6 +202,17 @@ def prompt_text(prompt: object) -> str | None:
         raise TypeError(f"a prompt {described(prompt)} is not a str, a mapping or None")
     _string_keys(cast(object, prompt))
     return json.dumps(prompt, default=_object)
+
+
+def candidate_of(ref: object) -> str | None:
+    """A grounded ref's candidate, the bracketed JSON string read as the grounded ref form
+    says; ``None`` for a ref with no bracket, a malformed one, or anything but a string."""
+    if not isinstance(ref, str):
+        return None
+    try:
+        return parse_ref(ref).candidate
+    except ValueError:  # outside the ref grammar
+        return None
 
 
 def _string_keys(value: object) -> None:

@@ -18,14 +18,13 @@ from ommat._answer import AnswerKind, ValueType
 from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
 from ommat._binding_kit import bounded_warnings
 from ommat._canonical import _CanonicalError, encode, ordered
-from ommat._component import base
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
 from ommat._interpret import _record_form
 from ommat._ledger import Record, read_record
 from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
-from ommat._refs import _RefError, candidate_values, declared_ref, parse_ref
+from ommat._refs import _RefError, candidate_values, declared_ref, entry_ref, parse_ref
 from ommat._typed import decoded
 from ommat._values import KEY_ORDER_FORMAT, clipped, type_name
 
@@ -108,7 +107,7 @@ class FixtureBinding:
                 # The ledger refuses a q: value that is not an answer's object of its recorded
                 # kind, live and read back, so each has that kind's members.
                 return _binding_form(cast("dict[str, Any]", value))
-            return decoded(value, self._types[ref])
+            return decoded(value, self._types[declared_ref(ref)])
         marker = cast("dict[str, Any]", entry["marker"])
         code = marker["cause"]["code"]
         if marker["kind"] == "Unavailable" and code in _RETURNED_MARKERS:
@@ -250,7 +249,7 @@ class _FromRecord:
                 values[ref] = (
                     _binding_form(cast("dict[str, Any]", entry["value"]))
                     if ref.startswith("q:")
-                    else decoded(entry["value"], self._types[ref])
+                    else decoded(entry["value"], self._types[declared_ref(ref)])
                 )
             else:
                 marker = cast("dict[str, Any]", entry["marker"])
@@ -267,7 +266,7 @@ class _FromRecord:
         6; a marker, a missing entry or path, a need that is not a ref and a value outside the
         value domain differ."""
         try:
-            entry = self._entries.get(base(need))
+            entry = self._entries.get(entry_ref(need))
             if entry is None or "value" not in entry:
                 return True
             stored = walk(entry["value"], parse_ref(need).fields, need)

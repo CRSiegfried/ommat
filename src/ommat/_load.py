@@ -395,8 +395,11 @@ class _Loader:
             what = f"source {_q(sid)}"
             if source.grounded is not None:
                 self.grounded.add(sid)
-                if any(not isinstance(p, Question) for p in source.provides.values()):
-                    refuse(sources, (sid,), what, "grounded source of t: refs")
+                for ref, provided in source.provides.items():
+                    if isinstance(provided, Mapping) and cast("Mapping[str, Any]", provided).get(
+                        "candidates"
+                    ):
+                        refuse(sources, (sid, ref), f"{what}'s {_q(ref)}", "grounded candidate set")
                 for ref, question in _questions(source):
                     if ref not in per_candidate:
                         continue
@@ -405,7 +408,7 @@ class _Loader:
                         refuse(sources, (sid, ref), shown, _PER_CANDIDATE_EXTRACTION)
                     elif isinstance(question.labels, Mapping):
                         refuse(sources, (sid, ref), shown, _PER_CANDIDATE_LABEL_SET)
-            for need in _named_needs(source):
+            for need in _declared_needs(source):
                 if _declared_base(need) in per_candidate:
                     refuse(
                         sources,
@@ -807,9 +810,11 @@ class _Loader:
                     f"{where} has a candidate slot; a source's slots hold candidate only when it "
                     "is grounded",
                 )
+        self.check_4_grounded_slots()
         holding = {sid for sid, _, _ in self.candidates}
         for sid, source in self.sources():
-            if source.grounded is not None and sid not in holding:
+            asks = any(ref.startswith("q:") for ref in source.provides)
+            if source.grounded is not None and sid not in holding and asks:
                 self.fail(
                     4,
                     (sid,),
@@ -831,6 +836,33 @@ class _Loader:
                 self.fail(4, names, f"{u.where} names {_q(u.ref)}, a grounded ref")
         self.check_4_helpers()
         self.check_4_grounded()
+
+    def check_4_grounded_slots(self) -> None:
+        """Only a per-candidate question holds a slot on a grounded declared ref, and only on
+        one grounded over its own set."""
+        per_candidate = _per_candidate_refs(self.d)
+        for sid, source in self.sources():
+            for ref, slot in _slots(source):
+                tag, value = next(iter(slot["origin"].items()))
+                if tag != "ref" or not isinstance(value, str):
+                    continue
+                set_ref = per_candidate.get(_declared_base(value) or "")
+                if set_ref is None:
+                    continue
+                if ref not in per_candidate:
+                    self.fail(
+                        4,
+                        (sid, value),
+                        f"source {_q(sid)}'s question {_q(ref)} has a slot on {_q(value)}, a "
+                        "grounded declared ref; only a per-candidate question holds one",
+                    )
+                elif set_ref != source.grounded:
+                    self.fail(
+                        4,
+                        (sid, value),
+                        f"source {_q(sid)}'s question {_q(ref)} has a slot on {_q(value)}, "
+                        f"grounded over {_q(set_ref)}, not its source's set",
+                    )
 
     def check_4_grounded(self) -> None:
         """Only a grounded rule or table reads ``candidate`` or ``candidate.f``; a table reads a
@@ -1573,8 +1605,8 @@ class _Loader:
             set_ref = per_candidate.get(u.base)
             if set_ref is None or not u.parsed.fields or u.role == "grounding":
                 continue
-            rule = self.d.rules.get(u.owner)
-            if rule is None or rule.grounded != set_ref:
+            owner = self.d.rules.get(u.owner) or self.d.sources.get(u.owner)
+            if owner is None or owner.grounded != set_ref:
                 self.fail(
                     9,
                     (u.owner, u.ref),
@@ -2373,8 +2405,11 @@ class _Loader:
 
     def needs(self) -> dict[str, frozenset[str]]:
         out: dict[str, set[str]] = {sid: set(s.needs) for sid, s in self.sources()}
+        per_candidate = _per_candidate_refs(self.d)
         for u in self.uses:
-            if u.role in ("slot", "text"):
+            # A slot on a grounded declared ref is a need of each candidate's question alone,
+            # given under its grounded ref.
+            if u.role in ("slot", "text") and u.base not in per_candidate:
                 out[u.owner].add(u.ref)
         return {sid: frozenset(refs) for sid, refs in out.items()}
 
@@ -2829,6 +2864,9 @@ def _per_candidate_refs(design: Design) -> dict[str, str]:
         for ref, question in _questions(source):
             if any(tag == "candidate" for tag, _ in _origins(question)):
                 out[ref] = source.grounded
+        for ref in source.provides:
+            if ref.startswith("t:"):
+                out[ref] = source.grounded
     return out
 
 
@@ -2846,17 +2884,13 @@ def _origins(question: Question) -> Iterator[tuple[object, object]]:
             yield next(iter(cast("Mapping[object, object]", origin).items()))
 
 
-def _named_needs(source: Source) -> Iterator[str]:
-    """A source's needs and its questions' slot refs, as strings."""
+def _declared_needs(source: Source) -> Iterator[str]:
+    """A source's declared needs, as strings."""
     needs = cast(object, source.needs)
     if isinstance(needs, Sequence) and not isinstance(needs, str):
         for need in cast("Sequence[object]", needs):
             if isinstance(need, str):
                 yield need
-    for _, question in _questions(source):
-        for tag, value in _origins(question):
-            if tag == "ref" and isinstance(value, str):
-                yield value
 
 
 def _declared_base(ref: str) -> str | None:
