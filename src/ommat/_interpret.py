@@ -689,6 +689,13 @@ def _rule_marker(
     return kind(Cause(code, cast("tuple[str, ...]", members)))
 
 
+def _on_board(board: Mapping[str, object], ref: str) -> bool:
+    """Whether a read's entry, or its grounded declared ref's marker, is on the board."""
+    p = parse_ref(ref)
+    declared = f"{p.level}:{p.name}"
+    return declared in board or grounded_ref(declared, cast(str, p.candidate)) in board
+
+
 def _slot_origins(q: Question) -> list[tuple[str, str]]:
     """Each slot origin of a question's wording, as its tag and its value."""
     return [cast("tuple[str, str]", next(iter(slot["origin"].items()))) for slot in q.wording.slots]
@@ -1287,7 +1294,7 @@ class _Turn:
         out: dict[str, Undetermined] = {}
         for ref in code_point_sorted(self.sources[sid].provides):
             set_ref = self.loaded._label_sets.get(ref)
-            if set_ref is None:
+            if set_ref is None or set_ref not in self.board:  # off the board: the cut's marker
                 continue
             value = self.board[set_ref]
             # Never a truth test on the set's value: a marker's `__bool__` raises.
@@ -1481,7 +1488,8 @@ class _Turn:
         out: dict[str, Undetermined] = {}
         for ref in grounding.refs:
             keys = self.grounded_slots(sid, ref, grounding.candidates.get(ref))
-            found = {k: at(self.board, k) for k in keys}
+            # A slot's entry off the board, its provider cut, leaves the cut's marker.
+            found = {k: at(self.board, k) for k in keys if _on_board(self.board, k)}
             unavailable = [k for k, v in found.items() if is_a(v, Unavailable)]
             undetermined = [k for k, v in found.items() if is_a(v, Undetermined)]
             if unavailable:
@@ -1552,10 +1560,17 @@ class _Turn:
         # Every expansion before any write: a pending set's provider marked first must not
         # turn a grounded source's cut marker into the set's need marker.
         grounding = {sid: self.expanded(sid) for sid in pending}
+        # A question the source's asking would leave out keeps its own marker under the cut,
+        # judged on the board as the cut finds it, before any cut marker is written.
+        own: dict[str, Undetermined] = {}
+        for sid in pending:
+            own.update(self.label_markers(sid, {}))
+            own.update(grounding[sid].markers)
+            for ref, slot_marker in self.slot_markers(sid, grounding[sid]).items():
+                own.setdefault(ref, slot_marker)
         for sid in pending:
             for ref in grounding[sid].refs:
-                # A question left out of its batch keeps its own marker under the cut.
-                kept = self.left_out.get(ref, grounding[sid].markers.get(ref, marker))
+                kept = self.left_out.get(ref, own.get(ref, marker))
                 self.write(ref, n, None, kept)
         for sid in held:
             self.sorter.done(sid)

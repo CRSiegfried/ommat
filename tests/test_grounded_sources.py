@@ -409,3 +409,14 @@ def test_check_12_refuses_an_extraction_reading_a_grounded_declared_ref() -> Non
         load(design(sources={**design().sources, "ex": ex}))
     assert [f.check for f in info.value.failures] == [12]
     assert "need or slot ref on a grounded declared ref" in str(info.value)
+
+
+def test_under_a_round_bound_cut_a_marked_slot_keeps_its_own_marker() -> None:
+    del CITIES["Bo"]
+    e = entries(decided(settings=RunSettings(round_bound=1)))
+    assert marker(e[grounded_ref(OUT, "Bo")]) == (
+        "Unavailable",
+        "need-unavailable",
+        [grounded_ref(CITY, "Bo")],
+    )
+    assert marker(e[grounded_ref(OUT, "Ana")]) == ("Unasked", "round-bound", [])
