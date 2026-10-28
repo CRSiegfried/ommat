@@ -793,3 +793,90 @@ def test_only_a_choice_may_be_candidate_valued(kind: str) -> None:
     )
     with pytest.raises(InvalidDesign, match="only a choice may have"):
         load(d)
+
+
+# ---------------------------------------------------------------------------------------------
+# Value cells over a pick
+
+
+def routed(*rows: Any, inputs: Any = None) -> Design:
+    from ommat import Helper, Parameter, Table
+
+    pick = Helper("pick_with_margin", "q:sender", bar="bar", margin="margin")
+    route = Table(
+        "d:route",
+        t.label("none", "several", "unsure", "named", "picked"),
+        "F",
+        [pick] if inputs is None else inputs,
+        list(rows)
+        or [["none", "none"], ["several", "several"], [Unsure, "unsure"], ["-", "named"]],
+    )
+    d = design()
+    return Design(
+        name=d.name,
+        state=d.state,
+        sources=d.sources,
+        rules={"route": route},
+        parameters={
+            "bar": Parameter(t.number(0, 1), 0.6),
+            "margin": Parameter(t.number(0, 1), 0.2),
+        },
+        policy=Policy(inform, version="1", reads=["d:route"]),
+    )
+
+
+@pytest.mark.parametrize(
+    ("top", "route"),
+    [("none", "none"), ("several", "several"), ("ana@x.org", "named"), (None, "unsure")],
+)
+def test_a_value_cell_over_a_pick_names_a_fixed_label(top: str | None, route: str) -> None:
+    flat = {"none": 0.3, "several": 0.3, "ana@x.org": 0.4}
+    model = Model(top=top) if top else Model(answers={"q:sender": flat})
+    assert entries(run(["ana@x.org"], model, routed()))["d:route"]["value"] == route
+
+
+def test_a_one_of_cell_over_a_pick_names_fixed_labels() -> None:
+    d = routed([{"one_of": ["none", "several"]}, "none"], ["-", "named"])
+    assert entries(run(["ana@x.org"], Model(top="several"), d))["d:route"]["value"] == "none"
+
+
+@pytest.mark.parametrize("cell", ["ana@x.org", "nobody", {"one_of": ["none", "ana@x.org"]}])
+def test_a_value_cell_over_a_pick_naming_no_fixed_label_fails_check_9(cell: Any) -> None:
+    from ommat import InvalidDesign
+
+    with pytest.raises(InvalidDesign) as raised:
+        load(routed([cell, "named"], ["-", "none"]))
+    (failure,) = raised.value.failures
+    assert failure.check == 9
+    assert (
+        'not a fixed label of the input\'s candidate-valued label set (fixed labels: "none", '
+        in (failure.message)
+    )
+
+
+def test_a_value_cell_over_a_bare_string_still_fails_check_9() -> None:
+    from ommat import InvalidDesign
+
+    with pytest.raises(InvalidDesign, match="a value cell stands only over a label"):
+        load(routed(["none", "none"], ["-", "named"], inputs=[SET]))
+
+
+def test_the_dead_lint_reaches_a_fixed_label_row() -> None:
+    from ommat.helpers import dead_questions
+
+    def by_route(r: Any) -> Plan:
+        if r.read("d:route") == "none":
+            return Plan("clarify", reply="Who?")
+        return Plan("inform", reply="ok")
+
+    d = routed()
+    d = Design(
+        name=d.name,
+        state=d.state,
+        sources=d.sources,
+        rules=d.rules,
+        parameters=d.parameters,
+        policy=Policy(by_route, version="1", reads=["d:route"]),
+    )
+    report = dead_questions(load(d), values={**SETS, "t:state.candidates": [[]]})
+    assert report["questions"]["q:sender"]["status"] == "live"

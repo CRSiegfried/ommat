@@ -6,6 +6,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Added
 
+- A value cell (`is` or `one_of`) over a `pick_with_margin` or `pick_with_thresholds` input whose question has a candidate-valued label set may name one of its fixed labels, such as `none`; the input stays `string`, and a cell naming any other value still fails check 9, now listing the fixed labels.
+
 - The lints and the lens over grounded forms: `unsure_to_execute`'s first search fills a grounded declared read's set as a declared read and sets each grounded entry to `Unsure` in turn, its abstention search counts a grounded rule's one-ref pick at the subject's candidate and gives `via` the entry naming the subject's declared ref, and a grounded `t:` source's entries range over their declaration's points. A cell over a `candidate` read adds nothing to the grid. The lens links a `candidate` read, a candidate origin and a literal's `set` to the set's card.
 
 - Grounded plan declarations: an `execute` plan declaration may be grounded over a candidate set, its arguments taking `Origin(candidate=ref)`. Compile expands one copy of its steps per candidate, the candidate origin becoming `{"literal": member, "set": ref}`, an origin on a grounded declared ref the candidate's grounded ref, and a binding the same copy's step; the row naming it matches only when the set and every expanded origin hold a value, and rule 2 names the set first. The ledger admits the literal's `set` and a grounded step argument from record format 7, checking the set, and `redact` digests the literal under the set's tree.

@@ -1748,6 +1748,9 @@ class _Loader:
         names = (owner,)
         reads = [cast(str, i["read"]) for i in inputs]
         types = [self.input_type(owner, where, i) for i in inputs]
+        fixed = [
+            None if t is None else self.pick_fixed(i) for t, i in zip(types, inputs, strict=True)
+        ]
         counts = Counter(reads)
         for n, i in enumerate(inputs, 1):
             self.check_9_helper(owner, f"{where}'s input {n}", i)
@@ -1775,7 +1778,9 @@ class _Loader:
                 self.fail(9, names, f"{shown} has {len(cells)} cells for its {len(inputs)} inputs")
                 continue
             for n, cell in enumerate(cells):
-                self.check_9_cell(owner, f"{shown}'s cell {n + 1}", cell, n, reads, types, named)
+                self.check_9_cell(
+                    owner, f"{shown}'s cell {n + 1}", cell, n, reads, types, fixed, named
+                )
             if table is not None:
                 self.check_9_output(owner, shown, row["output"], hit, outputs, reads, types, named)
         if table is None:
@@ -1784,6 +1789,19 @@ class _Loader:
         own = any(f.check in (6, 8, 9) and owner in f.names for f in self.failures)
         if hit in ("U", "A") and not own:
             self.check_9_overlap(owner, where, table, types)
+
+    def pick_fixed(self, i: Mapping[str, Any]) -> tuple[str, ...] | None:
+        """A pick input's fixed label names when its question has a candidate-valued label set,
+        which a value cell over it may name; ``None`` for any other input."""
+        if i["helper"] not in ("pick_with_margin", "pick_with_thresholds"):
+            return None
+        parsed = _parsed(cast(str, i["read"]))
+        if parsed is None or parsed.level != "q":
+            return None
+        question = self.question(f"q:{parsed.name}")
+        if not isinstance(question.labels, Mapping):
+            return None
+        return tuple(label_parts(_fixed(question.labels))[0])
 
     def check_9_helper(self, owner: str, where: str, i: Mapping[str, Any]) -> None:
         """A helper's ``params`` name each argument of its signature after the read, and no
@@ -1869,6 +1887,7 @@ class _Loader:
         n: int,
         reads: Sequence[str],
         types: Sequence[Type | None],
+        fixed: Sequence[tuple[str, ...] | None],
         named: Callable[..., int | None],
     ) -> None:
         names = (owner,)
@@ -1892,8 +1911,11 @@ class _Loader:
         if isinstance(inner, Nullable):
             inner = resolve(inner.inner, self.defs)
         if tag in ("is", "one_of"):
+            names_n = fixed[n]
             for value in [member] if tag == "is" else cast("list[object]", member):
-                problem = _value_cell(value, inner)
+                problem = (
+                    _value_cell(value, inner) if names_n is None else _fixed_cell(value, names_n)
+                )
                 if problem is not None:
                     self.fail(
                         9, names, f"{where}: {problem} over {_q(reads[n])}, of type {render(t)}"
@@ -2868,6 +2890,18 @@ def _value_cell(value: object, t: Type) -> str | None:
             return f"{value} is outside the input's interval"
         return None
     return "a value cell stands only over a label, boolean or integer input"
+
+
+def _fixed_cell(value: object, names: tuple[str, ...]) -> str | None:
+    """Why a value cell over a candidate-valued pick does not name one of its fixed labels,
+    or ``None``: the candidates are named per turn, so a cell names only the fixed part."""
+    if isinstance(value, str) and value in names:
+        return None
+    allowed = ", ".join(encode(v).decode("utf-8") for v in names) or "none"
+    return (
+        f"{encode(value).decode('utf-8')} is not a fixed label of the input's candidate-valued "
+        f"label set (fixed labels: {allowed})"
+    )
 
 
 def _numeric_base(t: Type) -> str | None:
