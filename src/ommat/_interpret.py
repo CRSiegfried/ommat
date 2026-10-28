@@ -1564,8 +1564,11 @@ class _Turn:
         # judged on the board as the cut finds it, before any cut marker is written.
         own: dict[str, Undetermined] = {}
         for sid in pending:
-            own.update(self.label_markers(sid, {}))
             own.update(grounding[sid].markers)
+            if self.gated_at_cut(sid):
+                continue  # the source's own markers come first, and the cut stands for them
+            for ref, left in self.label_markers(sid, {}).items():
+                own.setdefault(ref, left)
             for ref, slot_marker in self.slot_markers(sid, grounding[sid]).items():
                 own.setdefault(ref, slot_marker)
         for sid in pending:
@@ -1575,6 +1578,20 @@ class _Turn:
         for sid in held:
             self.sorter.done(sid)
         self.drain(n)
+
+    def gated_at_cut(self, sid: str) -> bool:
+        """Whether a source the cut finds unasked has a marker of its own on the board as the
+        cut finds it: a need holding a marker, or a determined source requirement that does
+        not hold. Its ``when`` is not run."""
+        needs = set(self.loaded._needs[sid])
+        requirement = self.sources[sid].requirement
+        if requirement is not None:
+            needs.add(requirement.ref)
+        if any(is_a(self.board.get(base(n)), Undetermined) for n in needs):
+            return True
+        if requirement is None or requirement.ref not in self.board:
+            return False
+        return self.requirement_marker(sid) is not None
 
     def drain(self, n: int) -> None:
         """``get_ready()`` until ``is_active()`` is false: a source is done with no write, a

@@ -420,3 +420,19 @@ def test_under_a_round_bound_cut_a_marked_slot_keeps_its_own_marker() -> None:
         [grounded_ref(CITY, "Bo")],
     )
     assert marker(e[grounded_ref(OUT, "Ana")]) == ("Unasked", "round-bound", [])
+
+
+def test_under_a_cut_a_source_with_a_marked_need_takes_no_slot_marker() -> None:
+    import dataclasses
+
+    def bad(r: ReadView) -> object:
+        raise RuntimeError("bad")
+
+    ask = dataclasses.replace(design().sources["ask"], needs=["d:bad"])
+    d = design(
+        sources={**design().sources, "ask": ask},
+        rules={**design().rules, "bad": Rule("d:bad", t.string, bad, version="1")},
+    )
+    del CITIES["Bo"]
+    e = entries(decided(loaded=load(d), settings=RunSettings(round_bound=1)))
+    assert marker(e[grounded_ref(OUT, "Bo")]) == ("Unasked", "round-bound", [])
