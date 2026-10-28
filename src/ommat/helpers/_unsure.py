@@ -33,12 +33,13 @@ policy refusing the marker there would not have executed in the run.
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, cast
 
+from ommat._binding_kit import candidate_of
 from ommat._canonical import encode
 from ommat._compile import table_choice
 from ommat._component import base, call
 from ommat._design import LoadedDesign
 from ommat._interpret import _marker_document
-from ommat._markers import Cause, CauseCode, PlanKind, Unsure
+from ommat._markers import Cause, CauseCode, PlanKind, Unasked, Unsure
 from ommat._plan import Plan
 from ommat._read_view import ComponentKind, ReadView, Role, is_candidate_read, walk
 from ommat._refs import code_point_sorted, declared_ref, grounded_ref, parse_ref
@@ -77,6 +78,10 @@ def unsure_to_execute(
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     declared = code_point_sorted(set(loaded._reads[_POLICY]))
     top = [r for r in declared if not any(r.startswith(o + ".") for o in declared)]
+    # A grounded declared read's set is filled and held as a declared read is.
+    sets = {r: loaded._grounded[r] for r in top if r in loaded._grounded}
+    held_sets = code_point_sorted(set(sets.values()) - set(top))
+    filled_reads = code_point_sorted({*top, *held_sets})
     lineage = _lineage(loaded)
     subjects = _subjects(loaded, lineage)
     runs_fills: dict[str, list[Point]] = {}
@@ -84,36 +89,132 @@ def unsure_to_execute(
     if subjects:
         sources = loaded._design.sources.values()
         provided = code_point_sorted({ref for src in sources for ref in src.provides} | {_STATE})
-        fills, runs_fills, narrowed = fill_both(loaded, top, provided, values)
+        fills, runs_fills, narrowed = fill_both(loaded, filled_reads, provided, values)
     else:
-        fills = fill(loaded, top, values)
-    points = 0
-    execute: list[dict[str, Any]] = []
-    for unsure in code_point_sorted({base(r) for r in declared if r.startswith("d:")}):
-        if _never_unsure(loaded, loaded._providers[unsure]):
-            continue
-        rid = loaded._providers[unsure]
-        writer = set(_refs_read(loaded, rid))
-        if len(writer) < len(loaded._reads[rid]):  # a candidate read names its set's ref
-            writer.add(cast(str, loaded._design.rules[rid].grounded))
-        marker = Unsure(Cause(CauseCode.abstained, code_point_sorted(writer)))
-        shown_marker = _marker_document(marker)  # the record's marker form, interpret's
-        others = [r for r in top if base(r) != unsure]
-        for combo in grid_order([fills[r] for r in others]):
-            point = dict(zip(others, combo, strict=True))
-            points += 1
-            if _executes(loaded, _board(point, unsure, marker)):
-                shown = {
-                    r: fresh(shown_marker) if base(r) == unsure else _record(r, top, point)
-                    for r in declared
-                }
-                execute.append({"read": unsure, "point": shown})
+        fills = fill(loaded, filled_reads, values)
+    first = _FirstSearch(loaded, declared, top, sets, held_sets, fills)
+    execute = first.run()
+    points = first.points
     if subjects:
         flagged = {item["read"] for item in execute}
         runs, found = _abstentions(loaded, lineage, subjects, runs_fills, flagged)
         points += runs
         execute += found
     return {"points": points, "execute": execute, "narrowed": narrowed}
+
+
+class _FirstSearch:
+    """The first search: each ``d:`` base ref the policy declares, and each grounded entry of
+    a grounded declared read, set in turn to ``Unsure`` while the other reads range over
+    their points, the grounded entries crossing last, in code-point order."""
+
+    def __init__(
+        self,
+        loaded: LoadedDesign,
+        declared: list[str],
+        top: list[str],
+        sets: dict[str, str],
+        held_sets: list[str],
+        fills: dict[str, list[Point]],
+    ) -> None:
+        self.loaded = loaded
+        self.declared = declared
+        self.sets = sets  # each grounded declared read's set
+        self.fills = fills
+        # The reads filled on their own: every top read but a grounded one, and each set.
+        self.plain = code_point_sorted({*(r for r in top if r not in sets), *held_sets})
+        self.points = 0
+        self.found: list[tuple[str, dict[str, Any]]] = []
+
+    def run(self) -> list[dict[str, Any]]:
+        units = {base(r) for r in self.declared if r.startswith("d:") and r not in self.sets}
+        for unsure in code_point_sorted(units):
+            if _never_unsure(self.loaded, self.loaded._providers[unsure]):
+                continue
+            marker = self.marker(unsure)
+            others = [r for r in self.plain if base(r) != unsure]
+            for combo in grid_order([self.fills[r] for r in others]):
+                point = dict(zip(others, combo, strict=True))
+                self.cross(point, self.entries(point, unsure), {unsure: marker}, unsure)
+        if self.sets:
+            for combo in grid_order([self.fills[r] for r in self.plain]):
+                point = dict(zip(self.plain, combo, strict=True))
+                entries = self.entries(point, None)
+                for target in code_point_sorted(entries):
+                    declared = declared_ref(target)
+                    if _never_unsure(self.loaded, self.loaded._providers[declared]):
+                        continue
+                    rest = {e: p for e, p in entries.items() if e != target}
+                    self.cross(point, rest, {target: self.marker(declared)}, target)
+        # By read in code-point order, then in the order the points were crossed.
+        ordered = sorted(enumerate(self.found), key=lambda f: (f[1][0], f[0]))
+        return [item for _, (_, item) in ordered]
+
+    def marker(self, ref: str) -> Unsure:
+        """``Unsure`` with ``abstained`` naming the declared reads of the rule writing ``ref``,
+        a ``candidate`` read by its set's ref, in code-point order, each once."""
+        rid = self.loaded._providers[ref]
+        writer = set(_refs_read(self.loaded, rid))
+        if len(writer) < len(self.loaded._reads[rid]):
+            writer.add(cast(str, self.loaded._design.rules[rid].grounded))
+        return Unsure(Cause(CauseCode.abstained, code_point_sorted(writer)))
+
+    def entries(self, point: Mapping[str, Point], unsure: str | None) -> dict[str, list[Point]]:
+        """Each grounded entry the point's sets ground, with its declaration's points; none
+        over a set set to ``Unsure``."""
+        out: dict[str, list[Point]] = {}
+        for read, set_ref in self.sets.items():
+            if set_ref == unsure:
+                continue
+            members = point[set_ref].live
+            for c in _candidates(members, self.loaded._candidate_sets.get(set_ref)):
+                entry = grounded_ref(read, c)
+                out[entry] = entry_points(self.fills[read], entry)
+        return out
+
+    def cross(
+        self,
+        point: dict[str, Point],
+        entries: dict[str, list[Point]],
+        markers: dict[str, Unsure],
+        read: str,
+    ) -> None:
+        names = code_point_sorted(entries)
+        for combo in grid_order([entries[n] for n in names]):
+            given = {**point, **dict(zip(names, combo, strict=True))}
+            self.points += 1
+            board = _board(given, markers)
+            for grounded, set_ref in self.sets.items():
+                if set_ref in markers:  # the set's need marker at the declared ref
+                    board[grounded] = Unasked(Cause(CauseCode.need_undetermined, [set_ref]))
+            if _executes(self.loaded, board):
+                self.found.append((read, {"read": read, "point": self.shown(given, markers)}))
+
+    def shown(self, given: Mapping[str, Point], markers: Mapping[str, Unsure]) -> dict[str, Any]:
+        """Every declared read as the point fills it, a marker in the record's form, a
+        grounded declared read as its candidates' entries, and each set held beside them."""
+        out: dict[str, Any] = {}
+        for r in code_point_sorted({*self.declared, *self.sets.values()}):
+            if base(r) in markers:
+                out[r] = _marker_document(markers[base(r)])
+            elif r in self.sets:
+                set_ref = self.sets[r]
+                if set_ref in markers:
+                    marker = Unasked(Cause(CauseCode.need_undetermined, [set_ref]))
+                    out[r] = _marker_document(marker)
+                    continue
+                field = self.loaded._candidate_sets.get(set_ref)
+                shown: dict[str, Any] = {}
+                for c in _candidates(given[set_ref].live, field):  # in the set's order
+                    entry = grounded_ref(r, c)
+                    if entry in markers:
+                        shown[c] = _marker_document(markers[entry])
+                    else:
+                        shown[c] = fresh(given[entry].record)
+                out[r] = shown
+            else:
+                out[r] = _record(r, self.plain, given)
+        return out
 
 
 def _never_unsure(loaded: LoadedDesign, rid: str) -> bool:
@@ -245,7 +346,7 @@ def _abstentions(
                         f"the candidate set {set_ref!r} changes within one assignment of the "
                         "other reads, so the lint cannot fix its grounded entries"
                     )
-            if _rests(done[3], subject, rules, picked):
+            if _rests(done[3], subject, rules, picked, grounded):
                 shown = {ref: fresh(given[ref].record) for ref in code_point_sorted(given)}
                 shown.update(done[1])
                 found[subject] = {"read": subject, "point": shown}
@@ -288,14 +389,20 @@ def _one_at_a_time(lists: Sequence[list[Point]]) -> Iterator[tuple[Point, ...]]:
 
 
 def _rests(
-    log: Sequence[Mapping[str, Any]], subject: str, rules: set[str], picked: set[str]
+    log: Sequence[Mapping[str, Any]],
+    subject: str,
+    rules: set[str],
+    picked: set[str],
+    grounded: Mapping[str, str],
 ) -> bool:
     """Whether a run's ``execute`` plan rests on the abstention at ``subject``: it was written
     as an abstention answer, and a lineage rule returned a pick or ``extract`` over its
     question, the one-ref helpers for a plain question and the per-candidate picks for a
-    grounded entry, or a lineage table has a pick or ``extract`` input over it."""
+    grounded entry, or a lineage rule grounded over the subject's set returned a one-ref pick
+    over its question in its entry at the subject's candidate, or a lineage table has a pick
+    or ``extract`` input over it."""
     question_ref = declared_ref(subject)
-    helpers = _ONE if subject == question_ref else _EACH
+    plain = subject == question_ref
     written = {i["ref"]: i for i in log if i["item"] == "entry"}
     plan = next(i for i in log if i["item"] == "plan")
     entry = written.get(subject)
@@ -303,34 +410,62 @@ def _rests(
         return False
     if not is_abstention(entry["value"]):
         return False
-    if subject == question_ref and question_ref in picked:
+    if question_ref in picked:  # a grounded table reads a per-candidate question's entry
         return True
+
+    def returned(ref: str, helpers: frozenset[str]) -> bool:
+        return any(
+            item["helper"] in helpers and item["refs"] == [question_ref] == item["rested_on"]
+            for item in written.get(ref, {}).get("derivation", [])
+        )
+
+    if any(returned(ref, _ONE if plain else _EACH) for ref in rules):
+        return True
+    if plain:
+        return False
+    candidate = cast(str, candidate_of(subject))
     return any(
-        item["helper"] in helpers and item["refs"] == [question_ref] == item["rested_on"]
+        returned(grounded_ref(ref, candidate), _ONE)
         for ref in rules
-        for item in written.get(ref, {}).get("derivation", [])
+        if grounded.get(ref) == grounded[question_ref]
     )
 
 
 def _via(log: Sequence[Mapping[str, Any]], subject: str, flagged: set[str]) -> str | None:
-    """The first ``d:`` read, in code-point order, the first search reported and the run
-    wrote as an ``Unsure`` naming ``subject``: a policy refusing that marker would not have
+    """The first ``d:`` read, a grounded entry included, in code-point order, the first search
+    reported and the run wrote as an ``Unsure`` naming ``subject``, or, at a grounded entry at
+    the subject's candidate, its declared ref: a policy refusing that marker would not have
     executed in the run."""
+    candidate = candidate_of(subject)
+
+    def names(item: Mapping[str, Any]) -> bool:
+        refs = item["marker"]["cause"]["refs"]
+        if subject in refs:
+            return True
+        return (
+            candidate is not None
+            and candidate_of(item["ref"]) == candidate
+            and declared_ref(subject) in refs
+        )
+
     met = [
         item["ref"]
         for item in log
         if item["item"] == "entry"
         and item["ref"] in flagged
         and item.get("marker", {}).get("kind") == "Unsure"
-        and subject in item["marker"]["cause"]["refs"]
+        and names(item)
     ]
     return code_point_sorted(met)[0] if met else None
 
 
-def _board(point: Mapping[str, Point], unsure: str, marker: Unsure) -> dict[str, object]:
-    """A fresh board: each read's live value at its path, and the marker at ``unsure``."""
-    board: dict[str, object] = {unsure: marker}
+def _board(point: Mapping[str, Point], markers: Mapping[str, Unsure]) -> dict[str, object]:
+    """A fresh board: each read's live value at its path, a grounded entry at its grounded
+    ref, and each marker at its ref."""
+    board: dict[str, object] = dict(markers)
     for read, p in point.items():
+        if read in markers:
+            continue
         fields = parse_ref(read).fields
         if not fields:
             board[read] = fresh(p.live)

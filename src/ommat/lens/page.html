@@ -210,14 +210,21 @@ const planOrigins = (c, plans, tag) => {
   const out = [];
   for (const row of arr(obj(c).rows)) {
     const plan = obj(obj(plans)[obj(row).plan]);
-    for (const step of arr(plan.steps)) for (const o of Object.values(obj(obj(step).arguments))) if (tag === "ref" && str(obj(o).ref)) out.push(o.ref);
+    // A grounded plan reads its set, whose card a candidate origin links to as well.
+    if (tag === "ref" && str(plan.grounded)) out.push(plan.grounded);
+    for (const step of arr(plan.steps)) for (const o of Object.values(obj(obj(step).arguments))) {
+      if (tag === "ref" && str(obj(o).ref)) out.push(o.ref);
+      if (tag === "ref" && str(obj(o).candidate)) out.push(o.candidate);
+    }
     for (const text of [plan.reason, plan.reply]) for (const slot of arr(obj(text).slots)) if (str(obj(obj(slot).origin)[tag])) out.push(slot.origin[tag]);
   }
   return out;
 };
+// A grounded component's candidate read links to its set's card (§candidate-sets).
+const isCandidateRead = (r) => r === "candidate" || (str(r) && r.startsWith("candidate."));
 const readsOf = (c, plans) => (obj(c).form === "table"
   ? [...new Set([...arr(obj(c).inputs).map((i) => obj(i).read), ...planOrigins(c, plans, "ref")])]
-  : obj(c).reads);
+  : arr(obj(c).reads)).map((r) => (isCandidateRead(r) && str(obj(c).grounded) ? c.grounded : r));
 const paramsOf = (c, plans) => {
   if (obj(c).form !== "table") return obj(c).params;
   const out = arr(obj(c).inputs).flatMap((i) => Object.values(obj(obj(i).params)));
@@ -331,7 +338,7 @@ function build(record, design) {
     for (const d of arr(plan.derivation)) link("plan", obj(d).refs, "helper " + obj(d).helper, "record");
     link("plan", obj(plan.cause).refs, "named in the plan's cause", "record");
     for (const step of arr(plan.steps)) {
-      for (const o of Object.values(obj(obj(step).arguments))) link("plan", [obj(o).ref], "a step's argument", "record");
+      for (const o of Object.values(obj(obj(step).arguments))) link("plan", [obj(o).ref, obj(o).set], "a step's argument", "record");
       for (const q of arr(obj(step).requirements)) link("plan", [obj(q).ref], "a step's requirement", "record");
     }
     for (const c of arr(obj(plan.context).entries)) link("plan", [obj(c).ref], "a context entry", "record");

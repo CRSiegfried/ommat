@@ -735,6 +735,44 @@ def test_the_design_links_its_context_block_and_candidate_valued_labels(tmp_path
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_the_design_links_candidate_reads_and_origins_to_their_set(tmp_path: Path) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const g = buildDesign({ parameters: {},
+            sources: { look: { provides: { "t:set": {} } } },
+            rules: { fit: { provides: "d:fit", reads: ["candidate", "candidate.age"],
+              grounded: "t:set" } },
+            policy: { form: "table", inputs: [], rows: [{ cells: [], plan: "mail" }] },
+            plans: { mail: { grounded: "t:set",
+              steps: [{ arguments: { who: { candidate: "t:set" } } }] } } });
+          const ins = (n) => (g.inputs.get(n) || []).map((x) => [x.node, x.how]);
+          return { rule: ins("e:d:fit"), plan: ins("plan") }; })()""",
+    )
+    assert ["e:t:set", "rule fit reads it"] in shown["rule"]
+    assert ["e:t:set", "the policy reads it"] in shown["plan"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_the_turn_links_a_set_literal_to_its_set(tmp_path: Path) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const t = build({ log: [
+            { item: "design", hash: "h", format: 7, helpers: 3 },
+            { item: "settings", providers: { "d:s": "s" }, grounded: {}, sets: { "d:s": null } },
+            { item: "entry", ref: "d:s", round: 0, call: null, value: ["a"] },
+            { item: "plan", kind: "execute", cause: null, reason: null, reply: null,
+              steps: [{ tool: "x", arguments: { a: { literal: "a", set: "d:s" } },
+                requirements: [] }] }] }, null);
+          return (t.inputs.get("plan") || []).map((x) => [x.node, x.how]); })()""",
+    )
+    assert ["e:d:s", "a step's argument"] in shown
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
 def test_a_selected_question_keeps_its_own_targets_and_a_stub_names_each_reason(
     tmp_path: Path,
 ) -> None:

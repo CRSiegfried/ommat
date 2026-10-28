@@ -625,7 +625,10 @@ def is_abstention(value: object) -> bool:
 
 
 def entry_points(points: Sequence[Point], ref: str) -> list[Point]:
-    """A grounded entry's points: its declared question's, the marker last naming ``ref``."""
+    """A grounded entry's points: its declaration's, a question's marker last naming ``ref``;
+    a grounded ``t:`` ref's as its declaration's, which hold no marker."""
+    if not ref.startswith("q:"):
+        return list(points)
     return [*points[:-1], _refused(ref)]
 
 

@@ -3127,7 +3127,7 @@ def _table_boundaries(table: Mapping[str, Any], leaves: Mapping[str, Any]) -> di
     parameter comparison over a bare ``d:`` or ``t:`` read under that read, an integer literal
     in a comparison or a value cell as its value; over a ``mass`` input under ``mass`` with
     the set its ``labels`` leaf holds; over an ``extract`` input under ``value``. A cell over
-    a ``size`` input or another input adds nothing."""
+    a ``size`` input, a ``candidate`` read or another input adds nothing."""
     inputs = cast("list[dict[str, Any]]", table["inputs"])
     out: dict[str, Any] = {}
 
@@ -3152,6 +3152,8 @@ def _table_boundaries(table: Mapping[str, Any], leaves: Mapping[str, Any]) -> di
             ((tag, member),) = cast("dict[str, Any]", cell).items()
             i = inputs[n]
             helper, read = i["helper"], cast(str, i["read"])
+            if is_candidate_read(read):
+                continue  # a cell over the candidate adds nothing (§candidate-sets)
             if tag in ("is", "one_of"):
                 # An integer value cell is a literal boundary of a bare numeric read.
                 values = [member] if tag == "is" else cast("list[object]", member)
