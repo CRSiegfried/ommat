@@ -59,7 +59,15 @@ def compile_turn(
         return plan, verdict
     policy = cast(Policy, loaded._design.policy)
     leaves = {path: loaded._leaf_value(path) for path in policy.params}
-    view = ReadView(Role(ComponentKind.policy, _POLICY), policy.reads, policy.params, board, leaves)
+    view = ReadView(
+        Role(ComponentKind.policy, _POLICY),
+        policy.reads,
+        policy.params,
+        board,
+        leaves,
+        grounded=loaded._grounded,
+        sets=loaded._candidate_sets,
+    )
     called = call(loaded._callables[_POLICY], view)
     stop, error = called.stop, called.error
     unnamed: str | None = None
@@ -357,7 +365,15 @@ def table_choice(
     table = loaded._table(_POLICY)
     reads, params = loaded._reads[_POLICY], loaded._params[_POLICY]
     leaves = {path: loaded._leaf_value(path) for path in params}
-    view = ReadView(Role(ComponentKind.policy, _POLICY), reads, params, board, leaves)
+    view = ReadView(
+        Role(ComponentKind.policy, _POLICY),
+        reads,
+        params,
+        board,
+        leaves,
+        grounded=loaded._grounded,
+        sets=loaded._candidate_sets,
+    )
     inputs = cast("list[dict[str, Any]]", table["inputs"])
     rows = cast("list[dict[str, Any]]", table["rows"])
     declarations = loaded._design.plans

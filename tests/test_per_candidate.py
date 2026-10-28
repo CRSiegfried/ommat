@@ -253,7 +253,10 @@ LABEL_SET = Question(
 )
 
 REFUSED: list[tuple[Design, str]] = [
-    (with_rule(over_t(), "r", rule("r", grounded="t:s")), "grounded rule"),
+    (
+        with_rule(over_t(), "r", rule("r", grounded="t:s", candidates=True)),
+        "grounded candidate set",
+    ),
     (over_t(plans={"ask": PlanDeclaration("clarify", grounded="t:s")}), "plan declaration"),
     (
         over_t(("g", Source({"q:x": per(), "t:y": t.string}, grounded="t:s"))),

@@ -1144,14 +1144,15 @@ def table(provides: str, **changes: Any) -> Table:
 
 
 def grounded(provides: str, **changes: Any) -> Table:
-    """A table grounded over a candidate set: a form check 12 refuses."""
-    return table(provides, grounded="t:set", **changes)
+    """A table grounded over a candidate set that is itself a candidate set: nested grounding,
+    a form check 12 refuses."""
+    return table(provides, grounded="t:set", **{"candidates": True, **changes})
 
 
 CANDIDATE_SLOT = Text("Which {c}?", [{"name": "c", "origin": {"candidate": "t:set"}}])
 
 REFUSED: list[tuple[Design, str]] = [
-    (with_rule(minimal(), "tab", grounded("d:tab")), "grounded table"),
+    (with_rule(minimal(), "tab", grounded("d:tab")), "grounded candidate set"),
     (
         minimal(plans={"ask": PlanDeclaration("clarify", reply=CANDIDATE_SLOT)}),
         "plan declaration with a candidate origin",
@@ -1160,7 +1161,10 @@ REFUSED: list[tuple[Design, str]] = [
         with_source(minimal(), "s", Source({"t:x": t.string}, grounded="t:set")),
         "grounded source of t: refs",
     ),
-    (with_rule(minimal(), "r", rule("r", grounded="t:set")), "grounded rule"),
+    (
+        with_rule(minimal(), "r", rule("r", grounded="t:set", candidates=True)),
+        "grounded candidate set",
+    ),
     (
         minimal(plans={"ask": PlanDeclaration("clarify", grounded="t:set")}),
         "grounded plan declaration",
@@ -1177,10 +1181,18 @@ def test_check_12_names_each_refused_form(design: Design, form: str) -> None:
 @pytest.mark.parametrize(
     "design",
     [
-        with_rule(minimal(), "tab", Table("d:tab", t.boolean, "X", [], [], grounded="t:set")),
+        with_rule(
+            minimal(),
+            "tab",
+            Table("d:tab", t.boolean, "X", [], [], grounded="t:set", candidates=True),
+        ),
         with_rule(minimal(), "tab", grounded("d:tab", order="first")),
-        with_rule(minimal(), "tab", grounded("d:tab", candidates=1)),
-        with_rule(minimal(), "tab", Table("d:tab", t.boolean, "U", {1, 2}, [], grounded="t:set")),  # type: ignore[arg-type]
+        with_rule(minimal(), "tab", grounded("d:tab", target=1)),
+        with_rule(
+            minimal(),
+            "tab",
+            Table("d:tab", t.boolean, "U", {1, 2}, [], grounded="t:set", candidates=True),  # type: ignore[arg-type]
+        ),
         minimal(plans={"ask": PlanDeclaration(1, grounded="t:set")}),  # type: ignore[arg-type]
         minimal(plans={"ask": PlanDeclaration("clarify", steps="send", grounded="t:set")}),  # type: ignore[arg-type]
         minimal(plans={"ask": PlanDeclaration("clarify", steps=[{1, 2}], grounded="t:set")}),
@@ -1200,13 +1212,15 @@ def test_a_refused_form_still_provides_for_checks_2_and_3() -> None:
     clash = with_rule(
         with_source(minimal(), "s", Source({"t:x": t.string})),
         "tab",
-        Table("t:x", t.boolean, "U", [], [], grounded="t:set"),
+        Table("t:x", t.boolean, "U", [], [], grounded="t:set", candidates=True),
     )
     assert checks(clash) == {2, 12}
 
 
 def test_no_other_clause_runs_on_a_refused_form() -> None:
-    design = with_rule(minimal(), "Bad", Table("d:Bad", "nope<", "U", [], [], grounded="t:set"))
+    design = with_rule(
+        minimal(), "Bad", Table("d:Bad", "nope<", "U", [], [], grounded="t:set", candidates=True)
+    )
     assert checks(design) == {12}
 
 

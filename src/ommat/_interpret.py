@@ -70,6 +70,7 @@ from ommat._provenance import (
 )
 from ommat._read_view import (
     ComponentKind,
+    Current,
     ReadView,
     RequireStopped,
     Role,
@@ -289,6 +290,18 @@ class _Batch:
     call: tuple[SourceCall, ...]
     timeout: float
     cost: Fraction
+
+
+@dataclass(frozen=True, slots=True)
+class _Outcome:
+    """One call of a rule or table: what it writes, its ``derivation`` or ``rows``, the
+    exception or stop text for ``exceptions`` and an undeclared read for ``reads``."""
+
+    written: "Written"
+    derivation: list[dict[str, list[str] | str]] | None
+    rows: list[int] | None
+    exception: BaseException | None
+    unnamed: str | None
 
 
 @dataclass(slots=True)
@@ -841,13 +854,52 @@ class _Turn:
                 self.sorter.done(rid)
 
     def fire(self, rid: str, n: int) -> None:
-        """Call a rule on its read view and write its entry by the read view's order of outcomes:
-        the first undeclared read, the first ``require`` stop, a raise, an invalid return,
-        the returned value."""
+        """Run a rule, or a grounded rule once per candidate, and write its entries."""
         r = self.rules[rid]
-        if isinstance(r, Table):
-            self.fire_table(rid, r, n)
+        if r.grounded is not None:
+            self.fire_grounded(rid, r, n)
             return
+        self.write_outcome(r.provides, n, self.outcome(rid, r, None))
+
+    def fire_grounded(self, rid: str, r: Rule | Table, n: int) -> None:
+        """Run a grounded rule or table once per candidate, in its set's order, each on a read
+        view whose current candidate is that candidate, then write every entry in ref
+        code-point order. Over a set holding a marker, the set's need marker at the declared
+        ref, with no ``derivation`` or ``rows``; over an empty set, nothing."""
+        set_ref = cast(str, r.grounded)
+        value = self.board[set_ref]
+        # Never a truth test on the set's value: a marker's `__bool__` raises.
+        if is_a(value, Unavailable):
+            self.write(r.provides, n, None, Unavailable(Cause(_C.need_unavailable, [set_ref])))
+            return
+        if is_a(value, Undetermined):
+            self.write(r.provides, n, None, Unasked(Cause(_C.need_undetermined, [set_ref])))
+            return
+        members = cast("Sequence[object]", value)
+        values = candidate_values(members, self.loaded._candidate_sets[set_ref])
+        outcomes: dict[str, _Outcome] = {}
+        for member, candidate in zip(members, values, strict=True):
+            current = Current(set_ref, member, candidate)
+            outcomes[grounded_ref(r.provides, candidate)] = self.outcome(rid, r, current)
+        for ref in code_point_sorted(outcomes):
+            self.write_outcome(ref, n, outcomes[ref])
+
+    def outcome(self, rid: str, r: Rule | Table, current: Current | None) -> "_Outcome":
+        if isinstance(r, Table):
+            return self.table_outcome(rid, r, current)
+        return self.rule_outcome(rid, r, current)
+
+    def write_outcome(self, ref: str, n: int, outcome: "_Outcome") -> None:
+        index = self.write(ref, n, None, outcome.written, outcome.derivation, rows=outcome.rows)
+        if outcome.exception is not None:  # whatever the outcome, a stop's included
+            self.ledger.write_unhashed("exceptions", exception_record(outcome.exception), index)
+        if outcome.unnamed is not None:
+            self.ledger.write_unhashed("reads", outcome.unnamed, index)
+
+    def rule_outcome(self, rid: str, r: Rule, current: Current | None) -> "_Outcome":
+        """Call a function rule on its read view and judge it by the read view's order of
+        outcomes: the first undeclared read, the first ``require`` stop, a raise, an invalid
+        return, the returned value."""
         leaves = {path: self.loaded._leaf_value(path) for path in r.params}
         view = ReadView(
             Role(ComponentKind.rule, rid),
@@ -857,6 +909,7 @@ class _Turn:
             leaves,
             grounded=self.loaded._grounded,
             sets=self.loaded._candidate_sets,
+            current=current,
         )
         called = call(self.loaded._callables[rid], view)
         stop, error, returned = called.stop, called.error, called.returned
@@ -879,24 +932,26 @@ class _Turn:
             if is_a(returned, Undetermined):
                 value: Written | None = _rule_marker(returned, self.loaded, self.board)
             else:
-                value = typed(returned, self.loaded._types[r.provides])
-                if (
-                    value is not None
-                    and r.provides in self.loaded._candidate_sets
-                    and not _distinct(value[0], self.loaded._candidate_sets[r.provides])
-                ):
-                    value = None  # a candidate set's members are distinct, never merged
+                value = self.typed_value(r.provides, returned)
             written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value
-        index = self.write(r.provides, n, None, written, called.derivation)
-        if called.text is not None:  # whatever the outcome, a stop's included
-            self.ledger.write_unhashed("exceptions", exception_record(called.text), index)
-        if unnamed is not None:
-            self.ledger.write_unhashed("reads", unnamed, index)
+        return _Outcome(written, called.derivation, None, called.text, unnamed)
 
-    def fire_table(self, rid: str, r: Table, n: int) -> None:
+    def typed_value(self, provides: str, returned: object) -> Written | None:
+        """A component's returned value as written, or ``None`` when its type does not hold
+        it or, for a candidate set, its candidate values repeat."""
+        value = typed(returned, self.loaded._types[provides])
+        if (
+            value is not None
+            and provides in self.loaded._candidate_sets
+            and not _distinct(value[0], self.loaded._candidate_sets[provides])
+        ):
+            return None  # a candidate set's members are distinct, never merged
+        return value
+
+    def table_outcome(self, rid: str, r: Table, current: Current | None) -> "_Outcome":
         """Evaluate a rule table: its inputs read and its helpers called in input order, on a
-        read view over its reads and leaves, then its rows; write its entry with ``rows``. A
-        helper that raises, or a comparison of incomparable values, is ``Unavailable`` with
+        read view over its reads and leaves, then its rows, giving its ``rows``. A helper
+        that raises, or a comparison of incomparable values, is ``Unavailable`` with
         ``raised``, no row tested."""
         table = self.loaded._table(rid)
         reads, params = self.loaded._reads[rid], self.loaded._params[rid]
@@ -909,6 +964,7 @@ class _Turn:
             leaves,
             grounded=self.loaded._grounded,
             sets=self.loaded._candidate_sets,
+            current=current,
         )
         inputs = cast("list[dict[str, Any]]", table["inputs"])
         rows: list[int] = []
@@ -933,19 +989,11 @@ class _Turn:
             if isinstance(outcome.value, Undetermined):  # the engine's own marker
                 written = outcome.value
             else:
-                value = typed(outcome.value, self.loaded._types[r.provides])
-                if (
-                    value is not None
-                    and r.provides in self.loaded._candidate_sets
-                    and not _distinct(value[0], self.loaded._candidate_sets[r.provides])
-                ):
-                    value = None  # a candidate set's members are distinct, never merged
+                value = self.typed_value(r.provides, outcome.value)
                 written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value
         finally:
             view.close()
-        index = self.write(r.provides, n, None, written, rows=rows)
-        if raised is not None:
-            self.ledger.write_unhashed("exceptions", exception_record(raised), index)
+        return _Outcome(written, None, rows, raised, None)
 
     # -- the source phase --------------------------------------------------------------------
 

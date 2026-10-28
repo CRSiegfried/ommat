@@ -40,7 +40,7 @@ from ommat._design import LoadedDesign
 from ommat._interpret import _marker_document
 from ommat._markers import Cause, CauseCode, PlanKind, Unsure
 from ommat._plan import Plan
-from ommat._read_view import ComponentKind, ReadView, Role, walk
+from ommat._read_view import ComponentKind, ReadView, Role, is_candidate_read, walk
 from ommat._refs import code_point_sorted, declared_ref, grounded_ref, parse_ref
 from ommat._values import type_name
 from ommat.helpers._dead import _STATE, _At, _candidates, _run
@@ -92,8 +92,11 @@ def unsure_to_execute(
     for unsure in code_point_sorted({base(r) for r in declared if r.startswith("d:")}):
         if _never_unsure(loaded, loaded._providers[unsure]):
             continue
-        writer = loaded._reads[loaded._providers[unsure]]
-        marker = Unsure(Cause(CauseCode.abstained, code_point_sorted(set(writer))))
+        rid = loaded._providers[unsure]
+        writer = set(_refs_read(loaded, rid))
+        if len(writer) < len(loaded._reads[rid]):  # a candidate read names its set's ref
+            writer.add(cast(str, loaded._design.rules[rid].grounded))
+        marker = Unsure(Cause(CauseCode.abstained, code_point_sorted(writer)))
         shown_marker = _marker_document(marker)  # the record's marker form, interpret's
         others = [r for r in top if base(r) != unsure]
         for combo in grid_order([fills[r] for r in others]):
@@ -142,11 +145,16 @@ def _lineage(loaded: LoadedDesign) -> set[str]:
     return seen
 
 
+def _refs_read(loaded: LoadedDesign, rid: str) -> list[str]:
+    """A rule's reads that are refs: a grounded rule's ``candidate`` reads left out."""
+    return [r for r in loaded._reads[rid] if not is_candidate_read(r)]
+
+
 def _subjects(loaded: LoadedDesign, lineage: set[str]) -> list[str]:
     """The questions a lineage rule reads; load refuses a per-candidate extraction, so a
     per-candidate one is of a probability kind."""
     rules = loaded._design.rules
-    read = {base(r) for rid in lineage if rid in rules for r in loaded._reads[rid]}
+    read = {base(r) for rid in lineage if rid in rules for r in _refs_read(loaded, rid)}
     return code_point_sorted(ref for ref in read if ref.startswith("q:"))
 
 
@@ -156,7 +164,7 @@ def _ranging(loaded: LoadedDesign, lineage: set[str]) -> set[str]:
     used = {base(r) for r in loaded._reads[_POLICY]}
     for node in lineage:
         if node in loaded._design.rules:
-            used |= {base(r) for r in loaded._reads[node]}
+            used |= {base(r) for r in _refs_read(loaded, node)}
             continue
         source = loaded._design.sources[node]
         used |= {base(r) for r in loaded._needs[node]}
@@ -341,7 +349,15 @@ def _executes(loaded: LoadedDesign, board: dict[str, object]) -> bool:
         return table_choice(loaded, board)[0].kind is PlanKind.execute
     reads, params = loaded._reads[_POLICY], loaded._params[_POLICY]
     leaves = {path: loaded._leaf_value(path) for path in params}
-    view = ReadView(Role(ComponentKind.policy, _POLICY), reads, params, board, leaves)
+    view = ReadView(
+        Role(ComponentKind.policy, _POLICY),
+        reads,
+        params,
+        board,
+        leaves,
+        grounded=loaded._grounded,
+        sets=loaded._candidate_sets,
+    )
     called = call(loaded._callables[_POLICY], view)
     if called.stop is not None or called.error is not None:
         return False

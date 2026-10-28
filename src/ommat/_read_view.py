@@ -10,10 +10,13 @@ compile's, not the view's.
 A ``when``'s view is given the state's type, its definitions resolved at every depth, and
 reads ``t:state`` by any field path that type gives: one naming a record field at each depth.
 
-A read of a per-candidate question's declared ref returns its need marker when one was written,
-else a ``dict`` from each candidate of its set, in the set's order, to its grounded entry; the
-set's ref is read by any component that reads such a ref. A declared read with a grounded
-bracket is an engine defect here, since load refuses one.
+A read of a grounded declared ref returns the marker written there, if one was, else a ``dict``
+from each candidate value of its set, in the set's order, to its grounded entry; the set's ref
+is read by any component that reads such a ref. A grounded rule's view has a current candidate:
+it reads ``candidate`` and ``candidate.f`` as that candidate's value and fields, and a declared
+ref grounded over its own set as that candidate's entry, field path allowed, or as the marker
+written at the declared ref. A declared read with a grounded bracket is an engine defect here,
+since load refuses one.
 """
 
 import enum
@@ -27,6 +30,12 @@ from ommat._types import Type, TypeFailure, read_type
 from ommat._values import described, guarded_repr, string_data
 
 _STATE = "t:state"
+_CANDIDATE = "candidate"
+
+
+def is_candidate_read(ref: str) -> bool:
+    """Whether a read is ``candidate`` or ``candidate.f``, which no ref spells."""
+    return ref == _CANDIDATE or ref.startswith(_CANDIDATE + ".")
 
 
 class ComponentKind(enum.StrEnum):
@@ -150,6 +159,16 @@ def walk(value: object, fields: Sequence[str], ref: str) -> object:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class Current:
+    """A grounded component's current candidate: its set's ref, the member and the member's
+    candidate value."""
+
+    set_ref: str
+    member: object
+    value: str
+
+
 @dataclass(slots=True)
 class _Item:
     helper: str
@@ -179,6 +198,7 @@ class ReadView:
     __slots__ = (
         "_board",
         "_closed",
+        "_current",
         "_depth",
         "_grounded",
         "_leaves",
@@ -202,10 +222,12 @@ class ReadView:
         state: Type | None = None,
         grounded: Mapping[str, str] | None = None,
         sets: Mapping[str, str | None] | None = None,
+        current: Current | None = None,
     ) -> None:
         self._role = role
         self._grounded: Mapping[str, str] = {} if grounded is None else grounded
         self._sets: Mapping[str, str | None] = {} if sets is None else sets
+        self._current = current
         if (role.kind is ComponentKind.when) != (state is not None):
             raise _ViewError("a when's view, and only a when's, takes the state's type")
         self._state = state
@@ -216,6 +238,11 @@ class ReadView:
         declared |= {self._grounded[r] for r in declared if r in self._grounded}
         self._reads: dict[str, _Path] = {}
         for ref in sorted(declared):
+            if is_candidate_read(ref):
+                if current is None:
+                    raise _ViewError(f"the declared read {ref!r} has no current candidate")
+                self._reads[ref] = _Path(_CANDIDATE, tuple(ref.split(".")[1:]))
+                continue
             try:
                 p = parse_ref(ref)
             except ValueError:
@@ -223,7 +250,11 @@ class ReadView:
             if p.candidate is not None:
                 raise _ViewError(f"the declared read {ref!r} is grounded, outside this engine")
             path = _Path(f"{p.level}:{p.name}", p.fields)
-            if path.base in self._grounded:
+            if self._own(path.base):
+                assert current is not None
+                if path.base not in board and grounded_ref(path.base, current.value) not in board:
+                    raise _ViewError(f"the board holds no entry for the declared read {ref!r}")
+            elif path.base in self._grounded:
                 if path.fields:
                     raise _ViewError(
                         f"the declared read {ref!r} has a field path; load refuses one"
@@ -259,9 +290,41 @@ class ReadView:
             path = self._state_path(key)
         if path is None:
             self._stop(_UndeclaredStop(UndeclaredRead.of(ref, Access.read)))
+        if path.base == _CANDIDATE:
+            assert self._current is not None
+            current = self._current
+            return (
+                walk(current.member, path.fields, string_data(ref))
+                if path.fields
+                else current.value
+            )
         if path.base in self._grounded and path.base not in self._board:
+            if self._own(path.base):
+                assert self._current is not None
+                entry = self._board[grounded_ref(path.base, self._current.value)]
+                return walk(entry, path.fields, string_data(ref))
             return self._per_candidate(path.base)
         return walk(self._board[path.base], path.fields, string_data(ref))
+
+    def _own(self, declared: str) -> bool:
+        """Whether a declared ref is grounded over this view's current candidate's set."""
+        current = self._current
+        return current is not None and self._grounded.get(declared) == current.set_ref
+
+    def cause_refs(self, refs: Iterable[str]) -> tuple[str, ...]:
+        """Refs as a cause or the helper log names them: a ``candidate`` or ``candidate.f``
+        read as its set's ref, which is then named once, in order; any other ref as given."""
+        if self._current is None:
+            return tuple(refs)
+        set_ref = self._current.set_ref
+        out: list[str] = []
+        for ref in refs:
+            if is_candidate_read(ref) or ref == set_ref:
+                if set_ref in out:
+                    continue
+                ref = set_ref
+            out.append(ref)
+        return tuple(out)
 
     def _per_candidate(self, declared: str) -> dict[str, object]:
         """A per-candidate question's entries by candidate value, in its set's order."""
@@ -353,7 +416,7 @@ def open_call(view: ReadView, helper: str, refs: Sequence[str]) -> int | None:
     if nested:
         return None
     log = view._log  # pyright: ignore[reportPrivateUsage]
-    log.append(_Item(helper, tuple(refs)))
+    log.append(_Item(helper, view.cause_refs(refs)))
     return len(log) - 1
 
 
@@ -361,4 +424,4 @@ def close_call(view: ReadView, index: int | None, rested_on: Sequence[str] | Non
     """End a helper call; fill ``rested_on`` when it returned, leave it empty when not."""
     view._depth -= 1  # pyright: ignore[reportPrivateUsage]
     if index is not None and rested_on is not None:
-        view._log[index].rested_on = tuple(rested_on)  # pyright: ignore[reportPrivateUsage]
+        view._log[index].rested_on = view.cause_refs(rested_on)  # pyright: ignore[reportPrivateUsage]

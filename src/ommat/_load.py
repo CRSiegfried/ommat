@@ -67,6 +67,7 @@ from ommat._design import (
 from ommat._form import X_ROLES, check_form
 from ommat._markers import PlanKind
 from ommat._plan import Binding, Origin, Step, step_document
+from ommat._read_view import is_candidate_read
 from ommat._refs import (
     _ParsedRef,
     code_point_sorted,
@@ -228,6 +229,7 @@ def _load_document(given: bytes | Mapping[str, Any], functions: Mapping[str, Any
 
 
 _q = quote
+_NO_TABLE = "\0"  # no table owns the use
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +274,9 @@ class _Loader:
         self.providers: dict[str, list[str | None]] = {}
         self.uses: list[_Use] = []
         self.candidates: list[tuple[str, str, str]] = []  # each candidate slot's source
+        # Each candidate read, which no ref spells: its owner, where it is, the read and its
+        # role, a read or a boundary's key.
+        self.candidate_reads: list[tuple[str, str, str, str]] = []
         self.defs: dict[str, Type] = {}
         self.tainted: set[str] = set()
         # Each definition's size, and each provided ref's and the state's, once it passes.
@@ -411,9 +416,9 @@ class _Loader:
         for rid, rule in self.d.rules.items():
             what = f"rule {_q(rid)}"
             if rule.grounded is not None:
-                form = "grounded table" if isinstance(rule, Table) else "grounded rule"
-                refuse(rules, (rid,), what, form)
                 self.grounded.add(rid)
+                if rule.candidates:
+                    refuse(rules, (rid,), what, "grounded candidate set")
         for name, plan in self.d.plans.items():
             what = f"plan declaration {_q(name)}"
             if plan.grounded is not None:
@@ -460,6 +465,13 @@ class _Loader:
                 return
         self.providers.setdefault(ref, []).append(provider)
 
+    def read_use(self, owner: str, where: str, role: str, ref: str) -> None:
+        """A component's read: a ``candidate`` read kept apart, any other a use."""
+        if isinstance(cast(object, ref), str) and is_candidate_read(ref):
+            self.candidate_reads.append((owner, where, ref, "read"))
+        else:
+            self.use(owner, where, role, ref)
+
     def use(self, owner: str, where: str, role: str, ref: str) -> None:
         parsed = self.ref(ref, where, owner)
         if parsed is not None:
@@ -498,22 +510,25 @@ class _Loader:
                 for member, origin in _extraction_origins(question):
                     shown = f"{where}'s question {_q(ref)}'s {member}"
                     self.use(sid, shown, "text", origin["ref"])
+        for rid, rule in self.components():
+            if rule.grounded is not None:
+                self.use(rid, f"rule {_q(rid)}'s grounding", "grounding", rule.grounded)
         for rid, rule in self.rules():
             for ref in rule.reads:
-                self.use(rid, f"rule {_q(rid)}", "read", ref)
+                self.read_use(rid, f"rule {_q(rid)}", "read", ref)
         for rid, table in self.tables():
             for n, i in enumerate(table.inputs, 1):
                 role = "read" if i["helper"] is None else "helper"
-                self.use(rid, f"rule {_q(rid)}'s input {n}", role, i["read"])
+                self.read_use(rid, f"rule {_q(rid)}'s input {n}", role, i["read"])
             self.table_refs(rid, f"rule {_q(rid)}", table.inputs, table.rows)
         policy = self.policy()
         if policy is not None:
             for ref in policy.reads:
-                self.use("policy", "the policy", "policy", ref)
+                self.read_use("policy", "the policy", "policy", ref)
         policy_table = self.policy_table()
         if policy_table is not None:
             for n, i in enumerate(policy_table.inputs, 1):
-                self.use("policy", f"the policy table's input {n}", "policy", i["read"])
+                self.read_use("policy", f"the policy table's input {n}", "policy", i["read"])
             self.table_refs("policy", "the policy table", policy_table.inputs, policy_table.rows)
         for name, plan in self.plans():
             where = f"plan declaration {_q(name)}"
@@ -544,7 +559,10 @@ class _Loader:
             for key in boundaries:
                 # Check 3 finds each key's provider and check 7 its form; check 4 gives a
                 # key no level test, since check 9 holds it to its component's reads.
-                self.use(owner, f"{where}'s boundaries", "boundary", key)
+                if isinstance(cast(object, key), str) and is_candidate_read(key):
+                    self.candidate_reads.append((owner, f"{where}'s boundaries", key, "boundary"))
+                else:
+                    self.use(owner, f"{where}'s boundaries", "boundary", key)
         for requirement in self.d.requirements:
             # A requirement names a whole estimate: a field path fails check 7
             # and, refused, the ref is left out of every other check.
@@ -598,7 +616,8 @@ class _Loader:
             if isinstance(output, dict) and "ref" in output:
                 named.append(cast("dict[str, str]", output)["ref"])
             for ref in named:
-                self.ref(ref, f"{where}'s row {k}", owner)
+                if not is_candidate_read(ref):  # a candidate read is no ref (check 7)
+                    self.ref(ref, f"{where}'s row {k}", owner)
 
     def context_entries(self) -> tuple[ContextEntry, ...]:
         """The context block's entries check 10's form test kept, none with no block."""
@@ -811,6 +830,37 @@ class _Loader:
             elif u.parsed.candidate is not None:
                 self.fail(4, names, f"{u.where} names {_q(u.ref)}, a grounded ref")
         self.check_4_helpers()
+        self.check_4_grounded()
+
+    def check_4_grounded(self) -> None:
+        """Only a grounded rule or table reads ``candidate`` or ``candidate.f``; a table reads a
+        grounded declared ref only when grounded over the same set, and the policy table none."""
+        for owner, where, read, role in self.candidate_reads:
+            if role == "boundary":
+                continue  # check 9's
+            rule = self.d.rules.get(owner)
+            if rule is None or rule.grounded is None:
+                self.fail(
+                    4,
+                    (owner,),
+                    f"{where} reads {_q(read)}, which only a grounded rule or table reads",
+                )
+        per_candidate = _per_candidate_refs(self.d)
+        tables: list[tuple[str, str | None]] = [(r, t.grounded) for r, t in self.tables()]
+        if self.policy_table() is not None:
+            tables.append(("policy", None))
+        for u in self.uses:
+            grounding = next((g for owner, g in tables if owner == u.owner), _NO_TABLE)
+            if grounding is _NO_TABLE or u.role in ("grounding", "boundary"):
+                continue
+            set_ref = per_candidate.get(u.base)
+            if set_ref is not None and set_ref != grounding:
+                self.fail(
+                    4,
+                    (u.owner, u.ref),
+                    f"{u.where} reads {_q(u.ref)}, a grounded declared ref; a table reads one "
+                    "only when grounded over its set",
+                )
 
     def helper_inputs(self) -> Iterator[tuple[str, str, int, dict[str, Any]]]:
         """Each helper input of a table: its owner, where it is, its position and its input."""
@@ -832,6 +882,12 @@ class _Loader:
             helper, read = i["helper"], i["read"]
             if helper not in HELPERS:
                 continue  # check 6's
+            if is_candidate_read(read):
+                if helper != "size":
+                    self.fail(
+                        4, (owner,), f"{where}: {helper} reads {_q(read)}, which is not a question"
+                    )
+                continue
             parsed = _parsed(read)
             if parsed is None:
                 continue  # check 7's
@@ -1493,6 +1549,59 @@ class _Loader:
                     )
         self.check_9_boundaries()
         self.check_9_tables()
+        self.check_9_grounded()
+
+    def check_9_grounded(self) -> None:
+        """A ``candidate.f`` read names a field of its set's record type, and ``candidate``
+        none deeper; no ``boundaries`` field names a candidate read; only a component grounded
+        over a declared ref's own set reads it by a field path."""
+        for owner, where, read, role in self.candidate_reads:
+            if role == "boundary":
+                self.fail(9, (owner,), f"{where} names {_q(read)}, a candidate read")
+                continue
+            rule = self.d.rules.get(owner)
+            if rule is None or rule.grounded is None:
+                continue  # check 4's
+            if self.candidate_read_type(owner, read) is None:
+                self.fail(
+                    9,
+                    (owner,),
+                    f"{where} reads {_q(read)}, which names no field of its set's candidate",
+                )
+        per_candidate = _per_candidate_refs(self.d)
+        for u in self.uses:
+            set_ref = per_candidate.get(u.base)
+            if set_ref is None or not u.parsed.fields or u.role == "grounding":
+                continue
+            rule = self.d.rules.get(u.owner)
+            if rule is None or rule.grounded != set_ref:
+                self.fail(
+                    9,
+                    (u.owner, u.ref),
+                    f"{u.where} reads {_q(u.ref)} by a field path; only a component grounded over "
+                    f"{_q(set_ref)} reads {_q(u.base)} so",
+                )
+
+    def candidate_read_type(self, owner: str, read: str) -> Type | None:
+        """A grounded component's ``candidate`` read's type: ``string``, the candidate value;
+        a ``candidate.f`` read's, the field ``f`` of its set's record type; ``None`` when the
+        read names no such field, or an earlier check refused the set."""
+        rule = self.d.rules[owner]
+        assert rule.grounded is not None
+        if read == "candidate":
+            return _STRING
+        field = self.set_field(rule.grounded)
+        t = self.types.get(rule.grounded)
+        path = read.split(".")[1:]
+        if not isinstance(field, str) or t is None or len(path) != 1:
+            return None
+        outer = resolve(t, self.defs)
+        if not isinstance(outer, ListOf):
+            return None
+        item = resolve(outer.item, self.defs)
+        if not isinstance(item, RecordOf):
+            return None
+        return dict(item.fields).get(path[0])
 
     # --- check 9 over tables and plan declarations (§decision-tables) ----------------------
 
@@ -1500,6 +1609,16 @@ class _Loader:
         """A table input's type: a bare read's, ``answer`` for a ``q:`` one; a helper's
         return; ``None`` when an earlier check refused what it rests on."""
         read, helper = cast(str, i["read"]), i["helper"]
+        if is_candidate_read(read):
+            rule = self.d.rules.get(owner)
+            if rule is None or rule.grounded is None:
+                return None
+            t = self.candidate_read_type(owner, read)
+            if helper is None:
+                return t
+            if helper != "size" or t is None:
+                return None
+            return _COUNT if isinstance(resolve(t, self.defs), ListOf) else None
         parsed = _parsed(read)
         if parsed is None:
             return None
@@ -2692,9 +2811,18 @@ _GROUNDED_NEED = "need or slot ref on a grounded declared ref"
 
 
 def _per_candidate_refs(design: Design) -> dict[str, str]:
-    """Each per-candidate question's declared ref and its grounding set: a question of a
-    grounded source that holds a candidate slot (§candidate-sets)."""
+    """Each grounded declared ref and its grounding set: a question of a grounded source that
+    holds a candidate slot, and a grounded rule's or table's own ref (§candidate-sets)."""
     out: dict[str, str] = {}
+    for rule in design.rules.values():
+        grounded = getattr(rule, "grounded", None)
+        provides = getattr(rule, "provides", None)
+        if (
+            isinstance(cast(object, rule), Rule | Table)
+            and isinstance(grounded, str)
+            and isinstance(provides, str)
+        ):
+            out[provides] = grounded
     for source in design.sources.values():
         if not isinstance(cast(object, source), Source) or not isinstance(source.grounded, str):
             continue
@@ -3559,10 +3687,31 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
                 (rid,),
                 f"rule {_q(rid)} names a candidate field, which format {fmt} does not have",
             )
+    if fmt < CANDIDATE_FIELD_FORMAT:
+        components = [(f"rule {_q(rid)}", (rid,), r) for rid, r in _objects(doc["rules"])]
+        policy = _object(doc["policy"])
+        if policy is not None:
+            components.append(("the policy", ("policy",), policy))
+        for where, names, component in components:
+            if any(is_candidate_read(read) for read in _component_reads(component)):
+                yield names, f"{where} reads candidate, which format {fmt} does not have"
     for sid, source in _objects(doc["sources"]):
         yield from _source_failures(sid, source, fmt)
     for name, tool in _objects(doc["tools"]):
         yield from _missing_or_extra(tool, frozenset(), f"tool {_q(name)}", (name,))
+
+
+def _component_reads(component: Mapping[str, Any]) -> Iterator[str]:
+    """Each read a document's function rule, table or policy spells: its ``reads``, or each
+    input's ``read``; anything of another form skipped, as check 11's member test reports."""
+    reads: object = component.get("reads")
+    if isinstance(reads, list):
+        yield from (r for r in cast("list[object]", reads) if isinstance(r, str))
+    inputs: object = component.get("inputs")
+    if isinstance(inputs, list):
+        for i in cast("list[object]", inputs):
+            if isinstance(i, dict) and isinstance(cast("dict[str, Any]", i).get("read"), str):
+                yield cast("dict[str, str]", i)["read"]
 
 
 _INPUT = frozenset({"read", "helper", "params"})

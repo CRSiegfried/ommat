@@ -79,10 +79,11 @@ def _withheld(call: Call, ref: str) -> Unavailable:
     return Unavailable(Cause(CauseCode.required, [ref]))
 
 
-def _conflict(call: Call, determined: list[tuple[str, object]]) -> Unsure:
+def _conflict(r: ReadView, call: Call, determined: list[tuple[str, object]]) -> Unsure:
     refs = [ref for ref, _ in determined]
     call.rested_on(refs)
-    return Unsure(Cause(CauseCode.conflict, refs))
+    # A candidate read names its set's ref, each once (§candidate-sets).
+    return Unsure(Cause(CauseCode.conflict, r.cause_refs(refs)))
 
 
 def unique(r: ReadView, *refs: str) -> object:
@@ -96,7 +97,7 @@ def unique(r: ReadView, *refs: str) -> object:
         if not determined:
             return _none_determined(call, inputs)
         if len(determined) > 1:
-            return _conflict(call, determined)
+            return _conflict(r, call, determined)
         unavailable = _first_unavailable(inputs)
         if unavailable is not None:
             return _withheld(call, unavailable)
@@ -116,7 +117,7 @@ def agree(r: ReadView, *refs: str) -> object:
         if not determined:
             return _none_determined(call, inputs)
         if len({_bytes(v) for _, v in determined}) > 1:
-            return _conflict(call, determined)
+            return _conflict(r, call, determined)
         unavailable = _first_unavailable(inputs)
         if unavailable is not None:
             return _withheld(call, unavailable)
