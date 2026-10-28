@@ -218,3 +218,48 @@ def test_a_d_set_that_changes_within_an_assignment_is_refused() -> None:
     )
     with pytest.raises(ValueError, match="'d:s2' changes within one assignment"):
         dead_questions(load(design), values={"t:s1": [["a"]]})
+
+
+def test_a_question_that_decides_a_candidate_set_is_live() -> None:
+    """Runs whose other reads agree compare at their grounded entries' first points, whatever
+    entries each grounds, so a gate that empties the set is live."""
+    from designs import slot as _slot
+    from ommat import Answer, Design, Plan, Policy, Question, ReadView, Rule, Source, Text
+    from ommat import load as _load
+    from ommat import types as _t
+    from ommat.helpers import dead_questions as _dead
+
+    person = _t.record(name=_t.string)
+
+    def finder(r: ReadView) -> object:
+        gate = r.read("q:gate")
+        yes = isinstance(gate, Answer) and gate.probabilities["yes"] >= 0.99
+        return [{"name": "Ana"}] if yes else []
+
+    def count(r: ReadView) -> object:
+        found: object = r.read("d:s")
+        return f"n={len(cast('list[object]', found))}" if isinstance(found, list) else "m"
+
+    def plan(r: ReadView) -> Plan:
+        return Plan("clarify", reply=str(r.read("d:n")))
+
+    design = Design(
+        name="gate",
+        state=_t.record(),
+        sources={
+            "g": Source({"q:gate": Question("noul", Text("Gate?"))}),
+            "two": Source(
+                {"q:two": Question("noul", Text("Is {c}?", [_slot("c", candidate="d:s")]))},
+                grounded="d:s",
+            ),
+        },
+        rules={
+            "s": Rule(
+                "d:s", _t.list_(person), finder, version="1", reads=["q:gate"], candidates="name"
+            ),
+            "n": Rule("d:n", _t.string, count, version="1", reads=["d:s"]),
+        },
+        policy=Policy(plan, version="1", reads=["d:n"]),
+    )
+    report = _dead(_load(design))
+    assert report["questions"]["q:gate"]["status"] == "live"

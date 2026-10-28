@@ -17,7 +17,10 @@ set's value is fixed, a ``t:`` set's by the point and a ``d:`` set's by a probe 
 grounded entry at its first point, which counts as that run. Each candidate grounds one entry,
 filled as its declaration is with its own marker last, and the entries cross after the other
 reads in code-point order of their grounded refs, so each assignment holds a block of runs
-whose size follows its sets. An empty set, or one holding a marker, grounds nothing.
+whose size follows its sets. An empty set, or one holding a marker, grounds nothing. Two runs
+whose other reads agree are compared too when each holds every grounded entry at its first
+point, whatever entries each grounds, so a read whose answer changes a set is judged by the
+plan and verdict that change gives.
 """
 
 import itertools
@@ -210,9 +213,22 @@ def _items(entries: Mapping[str, int]) -> tuple[tuple[str, int], ...]:
 _Key = tuple[object, ...]  # what a comparison holds fixed: all of a run's point but one read
 
 
+_FIRSTS = "firsts"  # a run holding every grounded entry at its first point
+
+
 def _read_keys(ran: Sequence[_Ran], k: int) -> list[list[_Key]]:
-    """Each run's key for the ``k``-th other read: every other read and every entry fixed."""
-    return [[(r.at[:k] + r.at[k + 1 :], _items(r.entries))] for r in ran]
+    """Each run's keys for the ``k``-th other read: every other read and every entry fixed;
+    and, for a run holding every grounded entry at its first point, every other read fixed
+    whatever entries it grounds, so a read whose points change a candidate set is compared
+    across the sets it gives."""
+    out: list[list[_Key]] = []
+    for r in ran:
+        rest = r.at[:k] + r.at[k + 1 :]
+        keys: list[_Key] = [(rest, _items(r.entries))]
+        if not any(r.entries.values()):
+            keys.append((rest, _FIRSTS))
+        out.append(keys)
+    return out
 
 
 def _entry_keys(ran: Sequence[_Ran], ref: str) -> list[list[_Key]]:

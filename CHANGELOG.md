@@ -26,6 +26,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Changed
 
+- `dead_questions` also compares two runs that agree on every other read and hold each grounded entry at its first point, whatever entries each grounds, so a question whose answer changes a candidate set, such as a gate a finder rule reads, can be `live`.
+
 - `load` no longer refuses a decision table, a data rule, the policy table or a plan declaration. `Table`, `PolicyTable` and `PlanDeclaration` copy their sequence fields when built.
 
 - `dead_questions` and `unsure_to_execute` take a `values` key for a label question with no grid entry: its list is the labels to try, each at 1, in place of every label, so a question of many labels no rule bounds costs only the labels a caller names. Each report gains `narrowed`, those questions in code-point order. A key for such a question was a `ValueError`; a key for a question the grid fills still is.
