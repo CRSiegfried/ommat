@@ -212,7 +212,8 @@ def _abstentions(
             sets.update(_run(loaded, _At(point, firsts), keys)[2])
         entries: dict[str, list[Point]] = {}
         for ref in firsts:
-            for c in _candidates(sets.get(grounded[ref])):
+            set_ref = grounded[ref]
+            for c in _candidates(sets.get(set_ref), loaded._candidate_sets.get(set_ref)):
                 entry = grounded_ref(ref, c)
                 points = entry_points(fills[ref], entry)
                 entries[entry] = points if ref in ranging else points[:1]

@@ -391,7 +391,8 @@ def test_the_call_item_keys_a_per_candidate_question_by_its_declared_ref_once() 
 def test_the_settings_item_names_each_grounded_refs_set() -> None:
     record = decided()
     assert record.log[1]["grounded"] == {OUT: SET}
-    assert record.log[0]["format"] == 6
+    assert record.log[1]["sets"] == {SET: None}
+    assert record.log[0]["format"] == 7
 
 
 def test_a_question_identity_is_one_across_candidates_and_turns() -> None:
@@ -688,7 +689,15 @@ def test_a_grounding_set_whose_class_tree_is_no_class_name_is_refused() -> None:
     def change(log: list[dict[str, Any]]) -> None:
         log[1]["classes"][SET] = ["open"]
 
-    refused(edited(decided([]), change), "whose class tree is not a class name")
+    refused(edited(decided([]), change), "which is not null over a class name")
+
+
+def test_a_format_6_grounding_set_whose_class_tree_is_no_class_name_is_refused() -> None:
+    doc = document(decided([]))
+    doc["log"][0]["format"] = 6
+    del doc["log"][1]["sets"]
+    doc["log"][1]["classes"][SET] = ["open"]
+    refused(rehashed(doc), "whose class tree is not a class name")
 
 
 def test_a_format_6_settings_item_without_grounded_is_refused() -> None:

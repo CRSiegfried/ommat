@@ -35,6 +35,7 @@ from ommat._typed import is_a
 from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH, type_name
 
 _OPEN = "open"
+_CONTENT = "content"
 
 
 def _closed(record: object) -> Record:
@@ -252,12 +253,15 @@ def redact(record: Record, root_key: bytes) -> bytes:
     walk = _Walk(turn_key(key, record_hash))
     log = closed.log
     classes: dict[str, Any] = {}
+    fields: dict[str, str | None] = {}
     for item in log:
         if item["item"] == "settings":
             classes = cast("dict[str, Any]", item["classes"])
             walk.grounded = cast("dict[str, str]", item.get("grounded", {}))
+            fields = cast("dict[str, str | None]", item.get("sets", {}))
     walk.classes = classes
-    walk.sets = _candidate_sets(log, classes)
+    walk.fields = fields
+    walk.sets = _candidate_sets(log, classes, fields)
     view = {
         "log": [walk.item(item, classes) for item in log],
         "unhashed": walk.unhashed(closed.unhashed),
@@ -277,12 +281,23 @@ def _root_key(root_key: object) -> bytes:
     return key
 
 
+def candidate_class(classes: dict[str, Any], fields: dict[str, str | None], set_ref: str) -> Any:
+    """A candidate's class: the class name a ``list<string>`` set's tree is, or for a set of
+    records its candidate field's node, by the ``settings`` item's ``sets``; ``content`` where
+    the item holds no class name for it."""
+    tree = classes.get(set_ref, _CONTENT)
+    field = fields.get(set_ref)
+    if field is not None and type(tree) is dict:
+        tree = cast("dict[str, Any]", tree).get(field, _CONTENT)
+    return tree if type(tree) is str else _CONTENT
+
+
 def _candidate_sets(
-    log: list[dict[str, Any]], classes: dict[str, Any]
+    log: list[dict[str, Any]], classes: dict[str, Any], fields: dict[str, str | None]
 ) -> dict[tuple[int, str], tuple[frozenset[str], Any]]:
     """Each candidate-valued choice a call item asked, keyed by the call's log index and its
-    ``q:`` ref: its fixed names and its set's class, the class name a ``list<string>`` set's
-    tree is; under a set the settings item holds no tree for, ``content``."""
+    ``q:`` ref: its fixed names and its candidates' class; under a set the settings item holds
+    no tree for, ``content``."""
     found: dict[tuple[int, str], tuple[frozenset[str], Any]] = {}
     for index, item in enumerate(log):
         if item["item"] != "call":
@@ -297,10 +312,12 @@ def _candidate_sets(
                 for label in cast("list[Any]", declared["fixed"])
             )
             try:
-                tree = classes.get(declared_ref(cast(str, declared["candidates"])), "content")
+                set_ref = declared_ref(cast(str, declared["candidates"]))
             except ValueError:  # a ref outside the grammar names no tree
-                tree = "content"
-            found[(index, ref)] = (fixed, tree if type(tree) is str else "content")
+                tree: Any = _CONTENT
+            else:
+                tree = candidate_class(classes, fields, set_ref)
+            found[(index, ref)] = (fixed, tree)
     return found
 
 
@@ -312,11 +329,12 @@ class _Walk:
         self.sets: dict[tuple[int, str], tuple[frozenset[str], Any]] = {}
         self.grounded: dict[str, str] = {}
         self.classes: dict[str, Any] = {}
+        self.fields: dict[str, str | None] = {}
 
     def ref(self, ref: Any) -> Any:
         """A ref with any grounded bracket's candidate replaced by its keyed digest under the
-        class of the set the ``settings`` item's ``grounded`` names, open passing; any other
-        ref, or a role name, as it is."""
+        candidate's class, of the set the ``settings`` item's ``grounded`` names, open passing;
+        any other ref, or a role name, as it is."""
         if type(ref) is not str:
             return ref
         try:
@@ -326,7 +344,7 @@ class _Walk:
         if parsed.candidate is None:
             return ref
         declared = f"{parsed.level}:{parsed.name}"
-        if self.classes[self.grounded[declared]] == _OPEN:
+        if candidate_class(self.classes, self.fields, self.grounded[declared]) == _OPEN:
             return ref
         written = grounded_ref(declared, self.digest(parsed.candidate))
         return written + "".join(f".{field}" for field in parsed.fields)

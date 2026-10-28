@@ -42,7 +42,7 @@ def test_a_stored_format_5_record_replays_under_its_design_with_the_helper_versi
     rerun, findings = replay_sync(read_record((FORMAT_5 / "record.json").read_bytes()), loaded)
     assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}]
     assert rerun is not None
-    assert rerun.log[0] == {"item": "design", "hash": FORMAT_5_DESIGN, "format": 6, "helpers": 3}
+    assert rerun.log[0] == {"item": "design", "hash": FORMAT_5_DESIGN, "format": 7, "helpers": 3}
     state = next(i for i in rerun.log if i["item"] == "entry" and i["ref"] == "t:state")
     assert list(state["value"]) == ["body", "subject"]  # the format-5 design's spelling
     # The rule builds zeta first; the rerun renders the slot sorted, as the format-5 engine did.

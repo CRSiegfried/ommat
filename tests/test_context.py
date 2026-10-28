@@ -549,7 +549,7 @@ def one(ref: str, text: Text | Any) -> Context:
 def test_the_document_holds_the_block_and_loads_back_to_its_own_hash() -> None:
     ld = loaded()
     doc = decode(ld.document)
-    assert doc["format"] == 7
+    assert doc["format"] == 8
     assert doc["context"]["entries"][0] == {
         "ref": "d:refund",
         "text": {"template": "Refund requested: {r}", "slots": [slot("r", ref="d:refund")]},

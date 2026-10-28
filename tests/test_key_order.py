@@ -305,7 +305,7 @@ def test_a_format_5_record_replays_with_no_finding_though_the_replay_holds_order
     again, findings = replay_sync(old, loaded)
     assert findings == []
     assert again is not None
-    assert again.log[0]["format"] == 6
+    assert again.log[0]["format"] == 7
     assert entry(again, "d:built")["order"] == {"1": [1, 0]}
 
 
@@ -515,7 +515,7 @@ def check_param_functions() -> dict[str, Any]:
 def test_a_document_from_format_6_writes_each_order_and_loads_back_to_its_own_hash() -> None:
     loaded = load(ordered_design())
     doc = decode(loaded.document)
-    assert doc["format"] == 7
+    assert doc["format"] == 8
     assert doc["sources"]["ask"]["payload_order"] == {"0": [1, 2, 0], "1": [1, 0]}
     assert doc["parameters"]["weights"]["order"] == {"0": [1, 0]}
     assert doc["sources"]["ask"]["provides"]["q:it"]["wording"]["order"] == {"0": [2, 1, 0]}

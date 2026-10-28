@@ -42,7 +42,7 @@ from ommat._design import (
     new_failure,
 )
 from ommat._plan import Step
-from ommat._refs import code_point_sorted, parse_ref
+from ommat._refs import code_point_sorted, is_segment, parse_ref
 from ommat._table import NotationError, input_form, row_form
 from ommat._values import (
     MAX_DEPTH,
@@ -133,6 +133,15 @@ class _Form:
             return value
         self.fail(names, f"{where} is not a boolean")
         return default
+
+    def candidates(self, value: object, where: str, names: tuple[str, ...]) -> bool | str:
+        """A ``candidates`` member: ``false``, ``true`` or a candidate field's name."""
+        if type(value) is bool:
+            return value
+        if isinstance(value, str) and is_scalar_string(value) and is_segment(string_data(value)):
+            return string_data(value)
+        self.fail(names, f"{where} is not a boolean or a field name")
+        return False
 
     def function(self, value: object, where: str, names: tuple[str, ...], key: str) -> bool:
         if key in self.unresolved:
@@ -366,8 +375,8 @@ class _Form:
         if isinstance(value, Mapping):
             members = cast("Mapping[object, Any]", value)
             if "type" in members and set(members) <= {"type", "candidates"}:
-                candidates = self.boolean(
-                    members.get("candidates", False), False, f"{where}'s candidates", names
+                candidates = self.candidates(
+                    members.get("candidates", False), f"{where}'s candidates", names
                 )
                 text = members["type"]
                 if issubclass(type(text), str):
@@ -637,7 +646,7 @@ class _Form:
             reads=self.strings(r.reads, f"{where}'s reads", names),
             params=self.strings(r.params, f"{where}'s params", names),
             boundaries=self.boundaries(r.boundaries, where, names),
-            candidates=self.boolean(r.candidates, False, f"{where}'s candidates", names),
+            candidates=self.candidates(r.candidates, f"{where}'s candidates", names),
             grounded=self.string(r.grounded, f"{where}'s grounding ref", names),
             target=self.string(r.target, f"{where}'s target", names),
         )
@@ -708,7 +717,7 @@ class _Form:
             inputs=inputs,
             rows=rows,
             order=order,
-            candidates=self.boolean(r.candidates, False, f"{where}'s candidates", names),
+            candidates=self.candidates(r.candidates, f"{where}'s candidates", names),
             grounded=self.string(r.grounded, f"{where}'s grounding ref", names),
             target=self.string(r.target, f"{where}'s target", names),
         )

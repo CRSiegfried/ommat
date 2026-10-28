@@ -21,6 +21,7 @@ canonical bytes differ. Replay reads nothing from ``unhashed``.
 
 import asyncio
 import enum
+from collections.abc import Mapping
 from typing import Any, cast
 
 from ommat._canonical import decode, encode
@@ -29,7 +30,7 @@ from ommat._design import LoadedDesign
 from ommat._fixture import FixtureBinding, RecordedCalls
 from ommat._interpret import SORTED_TEXT
 from ommat._ledger import _ITEM_DEPTH, Observer, Record
-from ommat._refs import code_point_sorted
+from ommat._refs import candidate_values, code_point_sorted
 from ommat._typed import decoded
 from ommat._values import CONTEXT_FORMAT, KEY_ORDER_FORMAT, type_name
 from ommat.helpers import HELPERS
@@ -160,7 +161,9 @@ def _findings(
         found.append(
             {"kind": _K.helpers_mismatch, "recorded": design["helpers"], "replayed": HELPERS}
         )
-    found += _call_findings(rerun, asked, calls, _by_ref(answers), _by_ref(rerun))
+    found += _call_findings(
+        rerun, asked, calls, _by_ref(answers), _by_ref(rerun), loaded._candidate_sets
+    )
     found += _entry_findings(log, rerun, loaded)
     for kind in (_K.plan, _K.verdict):
         mine, theirs = _first(log, kind.value), _first(rerun, kind.value)
@@ -177,12 +180,20 @@ def _by_ref(log: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {item["ref"]: item for item in log if item["item"] == "entry"}
 
 
-def _candidates_differ(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
-    """Whether two entries of a candidate set hold different members, in order, by canonical
-    bytes; a missing entry or a marker on either side differs."""
+def _candidates_differ(
+    a: dict[str, Any] | None, b: dict[str, Any] | None, field: str | None
+) -> bool:
+    """Whether two entries of a candidate set hold different candidate values, in order, by
+    canonical bytes; a missing entry, a marker on either side, or a member of neither form
+    differs."""
     if a is None or b is None or "value" not in a or "value" not in b:
         return True
-    return encode(a["value"], _ITEM_DEPTH) != encode(b["value"], _ITEM_DEPTH)
+    try:
+        return encode(candidate_values(a["value"], field), _ITEM_DEPTH) != encode(
+            candidate_values(b["value"], field), _ITEM_DEPTH
+        )
+    except (KeyError, TypeError):  # a member that is no record holding the field
+        return True
 
 
 def _call_findings(
@@ -191,13 +202,15 @@ def _call_findings(
     calls: RecordedCalls,
     answered: dict[str, dict[str, Any]],
     replayed: dict[str, dict[str, Any]],
+    sets: Mapping[str, str | None],
 ) -> list[Finding]:
     """``not-in-record`` per fixture call, by first source id, then one ``ref-not-in-record``
     and one ``question-changed`` for the run. The replay record's call items give one per
     fixture call, the sources it asked and their questions' identities; the fixture's ``asked``
     map gives the refs each source was asked. ``question-changed`` compares identities, and for
-    a candidate-valued label set the set's entry in the replay record against the answering
-    log's, over which the recorded answer was given."""
+    a candidate-valued label set the set's candidate values in the replay record against the
+    answering log's, over which the recorded answer was given, by the candidate field of the
+    design replay ran under."""
     missing: list[list[str]] = []
     refs: set[str] = set()
     changed: set[str] = set()
@@ -228,7 +241,9 @@ def _call_findings(
                 # Equal identities name one set: the identity hashes the set's ref.
                 if before[ref]["identity"] != question["identity"] or (
                     named is not None
-                    and _candidates_differ(replayed.get(named), answered.get(named))
+                    and _candidates_differ(
+                        replayed.get(named), answered.get(named), sets.get(named)
+                    )
                 ):
                     changed.add(ref)
     found: list[Finding] = [
@@ -280,17 +295,17 @@ def _first(log: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
     return next((item for item in log if item["item"] == kind), None)
 
 
-_FORMAT_6_MEMBERS = ("order", "grounded")
-"""The members format 6 adds to an item, which a record before it does not hold."""
+_LATER_MEMBERS = ("order", "grounded", "sets")
+"""The members formats 6 and 7 add to an item, which a record before them does not hold."""
 
 
 def _differ(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
     """Two items, or a side holding none, compared by canonical bytes, ``order`` and a settings
-    item's ``grounded`` included; an item of a record before format 6 holds neither, and is
-    compared without the other side's."""
+    item's ``grounded`` and ``sets`` included; an item of a record before the format adding
+    one does not hold it, and is compared without the other side's."""
     if a is None or b is None:
         return a is not b
-    for member in _FORMAT_6_MEMBERS:
+    for member in _LATER_MEMBERS:
         if (member in a) != (member in b):
             a = {k: v for k, v in a.items() if k != member}
             b = {k: v for k, v in b.items() if k != member}

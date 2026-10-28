@@ -148,6 +148,7 @@ def open_ledger(
             "providers": dict(loaded._providers),
             "classes": loaded._classes,
             "grounded": dict(loaded._grounded),
+            "sets": dict(loaded._candidate_sets),
         }
     )
     ledger.append({"item": "entry", "ref": "t:state", "round": 0, "call": None, "value": state})

@@ -76,7 +76,7 @@ from ommat._read_view import (
     UndeclaredRead,
     _Stop,
 )
-from ommat._refs import code_point_sorted, declared_ref, grounded_ref
+from ommat._refs import candidate_values, code_point_sorted, declared_ref, grounded_ref
 from ommat._sorter import TurnSorter
 from ommat._table import evaluate, read_inputs
 from ommat._typed import is_a, typed
@@ -283,8 +283,9 @@ class _Batch:
     """The labels each ``q:`` ref was passed with."""
     texts: dict[str, int]
     """Each extraction ``q:`` ref's text length in code points, which its spans index."""
-    sets: frozenset[str]
-    """The batch's ``t:`` refs declared candidate sets, whose members must be distinct."""
+    sets: dict[str, str | None]
+    """The batch's ``t:`` refs declared candidate sets, whose candidate values must be
+    distinct, each with its candidate field."""
     call: tuple[SourceCall, ...]
     timeout: float
     cost: Fraction
@@ -405,15 +406,16 @@ def _returned_value(ref: str, value: object, batch: _Batch, types: Mapping[str, 
             batch.texts.get(ref, 0),
         )
     forms = typed(value, types[ref])
-    if forms is None or (ref in batch.sets and not _distinct(forms[0])):
+    if forms is None or (ref in batch.sets and not _distinct(forms[0], batch.sets[ref])):
         return Unavailable(Cause(_C.invalid_return, [ref]))
     return forms
 
 
-def _distinct(members: object) -> bool:
-    """Whether a candidate set's record-form members are distinct by canonical bytes."""
-    listed = cast("list[object]", members)
-    return len({encode(m) for m in listed}) == len(listed)
+def _distinct(members: object, field: str | None) -> bool:
+    """Whether a candidate set's record-form members' candidate values are distinct by
+    canonical bytes."""
+    values = candidate_values(members, field)
+    return len({encode(v) for v in values}) == len(values)
 
 
 def answer_written(
@@ -854,6 +856,7 @@ class _Turn:
             self.board,
             leaves,
             grounded=self.loaded._grounded,
+            sets=self.loaded._candidate_sets,
         )
         called = call(self.loaded._callables[rid], view)
         stop, error, returned = called.stop, called.error, called.returned
@@ -877,7 +880,11 @@ class _Turn:
                 value: Written | None = _rule_marker(returned, self.loaded, self.board)
             else:
                 value = typed(returned, self.loaded._types[r.provides])
-                if value is not None and r.candidates and not _distinct(value[0]):
+                if (
+                    value is not None
+                    and r.provides in self.loaded._candidate_sets
+                    and not _distinct(value[0], self.loaded._candidate_sets[r.provides])
+                ):
                     value = None  # a candidate set's members are distinct, never merged
             written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value
         index = self.write(r.provides, n, None, written, called.derivation)
@@ -901,6 +908,7 @@ class _Turn:
             self.board,
             leaves,
             grounded=self.loaded._grounded,
+            sets=self.loaded._candidate_sets,
         )
         inputs = cast("list[dict[str, Any]]", table["inputs"])
         rows: list[int] = []
@@ -909,7 +917,13 @@ class _Turn:
         try:
             values = read_inputs(inputs, view, leaves)
             outcome = evaluate(
-                table["rows"], r.hit, table["order"], [i["read"] for i in inputs], values, leaves
+                table["rows"],
+                r.hit,
+                table["order"],
+                [i["read"] for i in inputs],
+                values,
+                leaves,
+                fields=self.loaded._candidate_sets,
             )
         except Exception as exc:  # a helper's raise, or an incomparable comparison
             raised = exc
@@ -920,7 +934,11 @@ class _Turn:
                 written = outcome.value
             else:
                 value = typed(outcome.value, self.loaded._types[r.provides])
-                if value is not None and r.candidates and not _distinct(value[0]):
+                if (
+                    value is not None
+                    and r.provides in self.loaded._candidate_sets
+                    and not _distinct(value[0], self.loaded._candidate_sets[r.provides])
+                ):
                     value = None  # a candidate set's members are distinct, never merged
                 written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value
         finally:
@@ -1176,7 +1194,7 @@ class _Turn:
                 markers[ref] = Unasked(Cause(_C.need_undetermined, [set_ref]))
                 refs.append(ref)
             else:
-                for candidate in cast("Sequence[str]", value):
+                for candidate in candidate_values(value, self.loaded._candidate_sets[set_ref]):
                     grounded = grounded_ref(ref, candidate)
                     candidates[grounded] = candidate
                     refs.append(grounded)
@@ -1202,7 +1220,7 @@ class _Turn:
             if is_a(value, Undetermined):
                 out[ref] = Unasked(Cause(_C.need_undetermined, [set_ref]))
                 continue
-            candidates = tuple(cast("Sequence[str]", value))
+            candidates = tuple(candidate_values(value, self.loaded._candidate_sets[set_ref]))
             names, descriptions = self.loaded._labels[ref]
             if not candidates:
                 out[ref] = Unasked(Cause(_C.when_false, [set_ref]))
@@ -1236,14 +1254,18 @@ class _Turn:
         questions: dict[str, Question] = {}
         passed_labels: dict[str, tuple[str, ...]] = {}
         texts: dict[str, int] = {}
-        sets: set[str] = set()
+        sets: dict[str, str | None] = {}
         calls: list[SourceCall] = []
         for sid in sids:
             source = self.sources[sid]
             # A question left out of the batch is neither passed nor among its refs.
             grounding = expanded[sid]
             provided = [r for r in grounding.refs if r not in left.get(sid, {})]
-            sets.update(r for r in provided if r in self.loaded._candidate_sets)
+            sets.update(
+                (r, self.loaded._candidate_sets[r])
+                for r in provided
+                if r in self.loaded._candidate_sets
+            )
             # A fresh copy per source, so no source's change reaches another's.
             needs = {
                 need: _fresh(at(self.board, need))
@@ -1284,7 +1306,7 @@ class _Turn:
             questions=questions,
             labels=passed_labels,
             texts=texts,
-            sets=frozenset(sets),
+            sets=sets,
             call=tuple(calls),
             # The largest declared, else the run setting's.
             timeout=max(declared) if declared else self.timeout,

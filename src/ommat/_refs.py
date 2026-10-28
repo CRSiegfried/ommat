@@ -8,7 +8,7 @@ Cause refs such as ``rule:N``, ``step:N``, ``policy`` and ``codec`` are not refs
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -111,6 +111,15 @@ def grounded_ref(declared: str, candidate: str) -> str:
     """The ref of a per-candidate entry: the declared ref, then the candidate as RFC 8785
     serializes a string, in brackets (§grounded-ref-form)."""
     return f"{declared}[{encode(candidate).decode('utf-8')}]"
+
+
+def candidate_values(members: object, field: str | None) -> list[str]:
+    """A candidate set's candidate values, in its order: each member itself, or a record
+    member's candidate field."""
+    listed = cast("Sequence[object]", members)
+    if field is None:
+        return [cast(str, m) for m in listed]
+    return [cast(str, cast("Mapping[str, object]", m)[field]) for m in listed]
 
 
 def is_declared_name(value: object) -> bool:

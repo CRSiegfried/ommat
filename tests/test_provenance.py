@@ -545,7 +545,7 @@ def test_a_format_4_record_redacts_with_its_snapshot_open_and_replays_at_format_
     rerun, findings = replay_sync(old, LOADED)
     assert findings == []
     assert rerun is not None
-    assert rerun.log[0]["format"] == 6
+    assert rerun.log[0]["format"] == 7
     assert call_item(rerun)["revision"] is None  # replay calls no model
 
 
@@ -589,7 +589,7 @@ def test_a_stored_format_4_design_loads_to_its_own_hash_and_its_record_replays()
         {"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}
     ]  # a record of an older helper version
     assert rerun is not None
-    assert rerun.log[0] == {"item": "design", "hash": FORMAT_4_DESIGN, "format": 6, "helpers": 3}
+    assert rerun.log[0] == {"item": "design", "hash": FORMAT_4_DESIGN, "format": 7, "helpers": 3}
 
 
 def call_item_of(view: dict[str, Any]) -> dict[str, Any]:

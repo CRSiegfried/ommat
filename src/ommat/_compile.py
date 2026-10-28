@@ -370,7 +370,16 @@ def table_choice(
             ]
             for k, row in enumerate(rows)
         }
-        outcome = evaluate(rows, "F", None, [i["read"] for i in inputs], values, leaves, conditions)
+        outcome = evaluate(
+            rows,
+            "F",
+            None,
+            [i["read"] for i in inputs],
+            values,
+            leaves,
+            conditions,
+            loaded._candidate_sets,
+        )
         if outcome.plan is None:
             refs = list(cast(Undetermined, outcome.value).cause.refs)
             return engine_plan(PlanKind.escalate, Cause(_C.required, refs)), outcome.rows, None

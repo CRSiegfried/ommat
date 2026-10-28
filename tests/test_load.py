@@ -77,7 +77,7 @@ def src_hash(fn: Callable[..., Any]) -> str:
 def test_a_minimal_design_writes_every_member_with_its_default() -> None:
     loaded = load(minimal())
     assert decode(loaded.document) == {
-        "format": 7,
+        "format": 8,
         "name": None,
         "state": "record{}",
         "sources": {},
@@ -1157,22 +1157,6 @@ REFUSED: list[tuple[Design, str]] = [
         "plan declaration with a candidate origin",
     ),
     (
-        with_source(
-            minimal(),
-            "s",
-            Source({"t:set": {"type": t.list_(t.record(name=t.string)), "candidates": True}}),
-        ),
-        "candidate set of records",
-    ),
-    (
-        with_rule(
-            minimal(),
-            "r",
-            rule("r", outputs=t.list_(t.record(name=t.string)), candidates=True),
-        ),
-        "candidate set of records",
-    ),
-    (
         with_source(minimal(), "s", Source({"t:x": t.string}, grounded="t:set")),
         "grounded source of t: refs",
     ),
@@ -2212,7 +2196,7 @@ def test_a_label_set_over_a_sources_set_loads_with_an_edge_and_no_need() -> None
     loaded = load(over("t:s", ("set", SET)))
     assert loaded._labels["q:x"] == (("none",), (None,))
     assert loaded._label_sets == {"q:x": "t:s"}
-    assert loaded._candidate_sets == frozenset({"t:s"})
+    assert loaded._candidate_sets == {"t:s": None}
     assert loaded._needs["s"] == frozenset()
     assert loaded._graph["s"] == frozenset({"set"})
 
@@ -2300,22 +2284,21 @@ def test_a_candidate_set_through_a_definition_of_list_string_loads() -> None:
     [
         minimal(
             types={"person": t.record(name=t.string)},
-            sources={"set": Source({"t:s": {"type": "list<person>", "candidates": True}})},
+            sources={"set": Source({"t:s": {"type": "list<person>", "candidates": "name"}})},
         ),
         minimal(
             types={"people": t.list_(t.record(name=t.string))},
-            sources={"set": Source({"t:s": {"type": "people", "candidates": True}})},
+            sources={"set": Source({"t:s": {"type": "people", "candidates": "name"}})},
         ),
     ],
 )
-def test_a_candidate_set_of_records_through_a_definition_fails_check_12(design: Design) -> None:
-    (failure,) = only(design, 12)
-    assert "candidate set of records, which this engine does not implement" in failure.message
+def test_a_candidate_set_of_records_through_a_definition_loads(design: Design) -> None:
+    assert dict(load(design)._candidate_sets) == {"t:s": "name"}
 
 
-def test_a_question_over_a_set_of_records_reports_check_12_alone() -> None:
-    source = Source({"t:s": {"type": t.list_(t.record(name=t.string)), "candidates": True}})
-    only(over("t:s", ("set", source)), 12)
+def test_a_question_over_a_set_of_records_loads() -> None:
+    source = Source({"t:s": {"type": t.list_(t.record(name=t.string)), "candidates": "name"}})
+    assert load(over("t:s", ("set", source)))._label_sets
 
 
 def test_a_cycle_through_a_label_set_edge_fails_check_5() -> None:

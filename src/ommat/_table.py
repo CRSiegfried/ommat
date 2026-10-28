@@ -436,8 +436,10 @@ class _Table:
         reads: Sequence[str],
         values: Sequence[object],
         leaves: Mapping[str, Any],
+        fields: Mapping[str, str | None],
     ) -> None:
         self.reads = list(reads)
+        self.fields = fields
         self.values = list(values)
         self.by_read = dict(zip(self.reads, self.values, strict=True))
         self.leaves = leaves
@@ -475,7 +477,11 @@ class _Table:
                 return False, [j] if type(listed) is Unavailable else []
             if type(listed) is not list and type(listed) is not tuple:
                 raise Incomparable(member)
-            return any(_equal(value, m) for m in cast("Sequence[object]", listed)), []
+            members = cast("Sequence[object]", listed)
+            field = self.fields.get(member)
+            if field is not None:  # a candidate set of records: each member's candidate field
+                members = [cast("Mapping[str, object]", m)[field] for m in members]
+            return any(_equal(value, m) for m in members), []
         if not _number(value):
             raise Incomparable(self.reads[i])
         if tag == "between":
@@ -559,12 +565,14 @@ def evaluate(
     values: Sequence[object],
     leaves: Mapping[str, Any],
     conditions: Mapping[int, Sequence[Condition]] | None = None,
+    fields: Mapping[str, str | None] | None = None,
 ) -> Outcome:
     """A table over its inputs' ``values``, in input order, each read once: its result under
     ``hit`` and the marker contract. ``conditions`` gives the policy table's plan origins and
     slots by row position from 0; a rule table's pass-through is a condition of its own row.
-    Raises ``Incomparable``."""
-    t = _Table(reads, values, leaves)
+    ``fields`` gives each candidate set's candidate field, by which an ``in`` cell over a set
+    of records tests each member. Raises ``Incomparable``."""
+    t = _Table(reads, values, leaves, {} if fields is None else fields)
     policy = conditions is not None
     matched: list[int] = []
     failed: list[tuple[int, str]] = []  # rows that failed only on Unavailable, with the ref

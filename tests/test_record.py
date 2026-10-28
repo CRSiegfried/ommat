@@ -275,8 +275,8 @@ def test_bytes_that_are_not_utf8_json_are_refused_with_the_parse_error_chained(
         (document(["design"]), "no design item first"),
         ({"log": {"item": "design"}, "unhashed": {}}, "no design item first"),
         (
-            document([{**DESIGN, "format": 7}]),
-            "format 7 is not one this reader knows: 1, 2, 3, 4, 5, 6",
+            document([{**DESIGN, "format": 8}]),
+            "format 8 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7",
         ),
         (document([{**DESIGN, "format": True}]), "format True is not one"),
         (document([{**DESIGN, "format": 1.0}]), "format 1.0 is not one"),
@@ -673,7 +673,7 @@ def test_a_long_format_string_is_clipped_in_its_message() -> None:
         read_record(document(log))
     assert str(info.value) == (
         f"the record is invalid: the record's format {'f' * 64!r}... (1000000 code points) "
-        "is not one this reader knows: 1, 2, 3, 4, 5, 6"
+        "is not one this reader knows: 1, 2, 3, 4, 5, 6, 7"
     )
 
 

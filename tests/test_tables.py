@@ -899,8 +899,8 @@ def test_redact_digests_a_plans_rendered_text_and_keeps_its_slots() -> None:
     assert plan["rows"] == [2, 3]
 
 
-GOLDEN_DESIGN = "sha256:026f125597b88dd0af9a8a011d791c765e50c0e71c728c82d0580656d5da3388"
-GOLDEN_RECORD = "sha256:b3fef95440fa90531d9de7fbb80249cb3c976c898ac9043c47be537dc01a8c88"
+GOLDEN_DESIGN = "sha256:f64d9167206693cd74bf87a0adbaaa2c74750a3e8bb6b985ede51b46ad2540ca"
+GOLDEN_RECORD = "sha256:5d68794a908a248bd99981b35457e47bced5342ef7fd9258546edf49b4c53df7"
 
 
 def test_a_golden_table_turn() -> None:

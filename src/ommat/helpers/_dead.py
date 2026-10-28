@@ -129,7 +129,8 @@ def _block(
         sets.update(probe[2])
     entries: dict[str, list[Point]] = {}
     for ref in firsts:
-        for candidate in _candidates(sets.get(loaded._grounded[ref])):
+        set_ref = loaded._grounded[ref]
+        for candidate in _candidates(sets.get(set_ref), loaded._candidate_sets.get(set_ref)):
             entry = grounded_ref(ref, candidate)
             entries[entry] = entry_points(fills[ref], entry)
     names = code_point_sorted(entries)
@@ -189,11 +190,17 @@ def _run(
     return (encode(plan, _ITEM_DEPTH), encode(verdict, _ITEM_DEPTH)), entries, sets, log
 
 
-def _candidates(value: object) -> list[str]:
-    """The candidates a set's value grounds: none for a marker, a missing entry or no list."""
+def _candidates(value: object, field: str | None) -> list[str]:
+    """The candidate values a set's value grounds: each member, or a record member's candidate
+    field; none for a marker, a missing entry or no list, and no member of another form."""
     if type(value) is not list:
         return []
-    return list(dict.fromkeys(c for c in cast("list[object]", value) if type(c) is str))
+    members = cast("list[object]", value)
+    if field is not None:
+        members = [
+            cast("dict[str, object]", m).get(field) if type(m) is dict else None for m in members
+        ]
+    return list(dict.fromkeys(c for c in members if type(c) is str))
 
 
 def _items(entries: Mapping[str, int]) -> tuple[tuple[str, int], ...]:

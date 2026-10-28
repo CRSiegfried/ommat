@@ -344,7 +344,7 @@ def test_an_extraction_asked_as_stored_differs_in_no_member() -> None:
         AnswerKind.extraction, "What?", (), value_type=ValueType.number, text="t:state.body"
     )
     stored_e = {"kind": "extraction", "labels": None, "value_type": "number", "is_list": False}
-    assert _differing(extract, stored_e, {}) == ""
+    assert _differing(extract, stored_e, {}, {}) == ""
 
 
 # ---------------------------------------------------------------------------------------------

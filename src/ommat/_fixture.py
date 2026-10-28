@@ -25,7 +25,7 @@ from ommat._interpret import _record_form
 from ommat._ledger import Record, read_record
 from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
-from ommat._refs import _RefError, declared_ref, parse_ref
+from ommat._refs import _RefError, candidate_values, declared_ref, parse_ref
 from ommat._typed import decoded
 from ommat._values import KEY_ORDER_FORMAT, clipped, type_name
 
@@ -195,6 +195,9 @@ class _FromRecord:
         self._entries = {cast(str, i["ref"]): i for i in log if i["item"] == "entry"}
         # A record before format 6 holds no order, so its needs are compared without it.
         self._held = log[0]["format"] >= KEY_ORDER_FORMAT
+        # Each candidate set's candidate field, by which its stored labels are rendered; a
+        # record before format 7 holds only list<string> sets.
+        self._sets = cast("dict[str, str | None]", log[1].get("sets", {}))
         self._types = loaded._types
         self._note = f"answered from record {record.record_hash}"
 
@@ -230,7 +233,10 @@ class _FromRecord:
         for ref in refs:
             if ref in source.questions:
                 why = _differing(
-                    source.questions[ref], stored.get(declared_ref(ref)), self._entries
+                    source.questions[ref],
+                    stored.get(declared_ref(ref)),
+                    self._entries,
+                    self._sets,
                 )
                 if why:
                     values[ref] = unsupported
@@ -277,10 +283,12 @@ def _differing(
     asked: RenderedQuestion,
     stored: dict[str, Any] | None,
     entries: Mapping[str, Mapping[str, Any]],
+    sets: Mapping[str, str | None],
 ) -> str:
     """Why the asked question is not the call item's ``questions`` entry, or empty when it is.
-    A candidate-valued set's stored labels are its fixed part, then the members of its set's
-    entry in the same record, in order; a set with no stored value refuses the question."""
+    A candidate-valued set's stored labels are its fixed part, then the candidate values of
+    its set's entry in the same record, in order, by the record's ``sets``; a set with no
+    stored value refuses the question."""
     if stored is None:
         return "its kind, labels, value type and list flag differ from the stored question's"
     kind = AnswerKind(asked.kind)
@@ -306,11 +314,19 @@ def _differing(
                 f"{marker['kind']} {marker['cause']['code']}"
             )
         value = entry["value"]
-        # Anything but a list gives no labels: they differ, and nothing raises.
-        listed = cast("list[object]", value)
+        # Anything but a list of the set's form gives no labels: they differ, and nothing
+        # raises.
+        try:
+            listed: list[str] | None = candidate_values(value, sets.get(set_ref))
+        except (KeyError, TypeError):
+            listed = None
         k = cast(int, declared["at"])
         fixed = cast("list[object]", declared["fixed"])
-        recorded = [*fixed[:k], *listed, *fixed[k:]] if type(value) is list else None
+        recorded = (
+            [*fixed[:k], *listed, *fixed[k:]]
+            if type(value) is list and listed is not None
+            else None
+        )
     found: list[str] = []
     if stored["kind"] != kind.value:
         found.append("kind")

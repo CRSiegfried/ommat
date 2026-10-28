@@ -317,13 +317,14 @@ def rehashed(doc: dict[str, Any], *, reorder: bool = True) -> dict[str, Any]:
 
 def before_key_order(doc: dict[str, Any], fmt: int = KEY_ORDER_FORMAT - 1) -> dict[str, Any]:
     """A current record document made format ``fmt``, before format 6: the format number set,
-    each item's ``order`` and the settings item's ``grounded`` dropped, its objects left in the
-    order they hold. Its ``hash`` is left to recompute."""
+    each item's ``order`` and the settings item's ``grounded`` and ``sets`` dropped, its objects
+    left in the order they hold. Its ``hash`` is left to recompute."""
     doc["log"][0]["format"] = fmt
     for item in doc["log"]:
         item.pop("order", None)
         if item["item"] == "settings":
             item.pop("grounded", None)
+            item.pop("sets", None)
     return doc
 
 

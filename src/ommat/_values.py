@@ -30,14 +30,14 @@ deepest member."""
 MAX_DOCUMENT_DEPTH = 128
 """The deepest a document the encoder writes or a reader parses nests."""
 
-RECORD_FORMAT = 6
+RECORD_FORMAT = 7
 """The format number this engine writes into a record. It reads every record format from 1 up
 to it, each under that format's rules."""
 
 RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
 """The record formats this engine reads."""
 
-DESIGN_FORMAT = 7
+DESIGN_FORMAT = 8
 """The format number this engine writes into a design document, which changes only when a
 design rule changes. It reads every design format from 1 up to it."""
 
@@ -100,6 +100,14 @@ under ``grounded``, and whose log may hold a grounded ref."""
 TARGETS_FORMAT = 7
 """The first design format whose document holds ``targets``, a question's ``target`` and
 ``latent_targets``, and a rule's ``target``."""
+
+CANDIDATE_FIELD_FORMAT = 8
+"""The first design format whose ``candidates`` member may name a candidate field, for a
+candidate set of records."""
+
+SETS_FORMAT = 7
+"""The first record format whose ``settings`` item names each candidate set's candidate field,
+under ``sets``."""
 
 
 def string_data(value: str) -> str:

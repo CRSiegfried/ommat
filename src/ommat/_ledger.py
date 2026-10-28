@@ -53,6 +53,7 @@ from ommat._values import (
     PROFILE_FORMAT,
     RECORD_FORMAT,
     RECORD_FORMATS,
+    SETS_FORMAT,
     UNSUPPORTED_FORMAT,
     WARNINGS_FORMAT,
     clipped,
@@ -703,7 +704,7 @@ _SHAPES: dict[str, _Check] = {
     "design": _shape({"hash": _STR, "format": _INT, "helpers": _INT}),
     "settings": _shape(
         {"settings": _run_settings, "providers": _OBJECT, "classes": _OBJECT},
-        {"grounded": _OBJECT},
+        {"grounded": _OBJECT, "sets": _OBJECT},
     ),
     "entry": cast(_Check, _entry_shape),
     "call": _shape(
@@ -1055,8 +1056,9 @@ _INDEX_KEY = re.compile(r"0|[1-9][0-9]*")
 
 def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
     """Refuse a ``settings`` item's ``grounded`` before format 6 or its absence from it, and a
-    map that is not keyed by declared refs that are keys of ``providers``, each naming a set
-    that is a key of ``providers``, not itself grounded, whose class tree is a class name."""
+    map that is not keyed by declared refs that are keys of ``providers``, each naming a set:
+    from format 7 a key of ``sets``, before it a key of ``providers``, not itself grounded,
+    whose class tree is a class name."""
     if fmt < GROUNDED_FORMAT:
         if "grounded" in item:
             raise _LedgerError(f"{where} holds grounded, which a format-{fmt} record does not")
@@ -1066,6 +1068,7 @@ def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
     grounded = cast("dict[str, Any]", item["grounded"])
     providers = cast("dict[str, Any]", item["providers"])
     classes = cast("dict[str, Any]", item["classes"])
+    sets = _check_sets(item, fmt, where)
     for key, set_ref in grounded.items():
         if not _declared(key) or key not in providers:
             raise _LedgerError(
@@ -1080,10 +1083,47 @@ def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
             raise _LedgerError(
                 f"{where}'s grounded names {set_ref!r} for {key!r}, not an ungrounded provided ref"
             )
-        if type(classes.get(set_ref)) is not str:
+        if sets is not None:
+            if set_ref not in sets:
+                raise _LedgerError(f"{where}'s grounded names {set_ref!r}, which is no key of sets")
+        elif type(classes.get(set_ref)) is not str:
             raise _LedgerError(
                 f"{where}'s grounded names {set_ref!r}, whose class tree is not a class name"
             )
+
+
+def _check_sets(item: dict[str, Any], fmt: int, where: str) -> dict[str, Any] | None:
+    """Refuse a ``settings`` item's ``sets`` before format 7 or its absence from it, and a map
+    that is not keyed by declared refs that are keys of ``providers``, each value null where
+    the set's class tree is a class name, or a field of its member record's tree whose node is
+    a class name. The map, from format 7; ``None`` before it."""
+    if fmt < SETS_FORMAT:
+        if "sets" in item:
+            raise _LedgerError(f"{where} holds sets, which a format-{fmt} record does not")
+        return None
+    if "sets" not in item:
+        raise _LedgerError(f"{where} has no 'sets' member")
+    sets = cast("dict[str, Any]", item["sets"])
+    providers = cast("dict[str, Any]", item["providers"])
+    classes = cast("dict[str, Any]", item["classes"])
+    for key, field in sets.items():
+        if not _declared(key) or key not in providers:
+            raise _LedgerError(f"{where}'s sets has the key {key!r}, not a provided declared ref")
+        tree = classes.get(key)
+        if field is None:
+            fits = type(tree) is str
+        else:
+            fits = (
+                type(field) is str
+                and type(tree) is dict
+                and type(cast("dict[str, Any]", tree).get(field)) is str
+            )
+        if not fits:
+            raise _LedgerError(
+                f"{where}'s sets names {field!r} for {key!r}, which is not null over a class "
+                "name or a field of its member record's tree"
+            )
+    return sets
 
 
 def _declared(ref: object) -> bool:

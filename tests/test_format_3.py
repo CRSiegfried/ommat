@@ -104,7 +104,7 @@ def test_a_format_2_record_replays_under_its_format_2_design_with_the_helper_ver
     again, findings = replay_sync(format_2_record(), format_2_design())
     assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}]
     assert again is not None
-    assert again.log[0]["format"] == 6  # the engine writes its own format
+    assert again.log[0]["format"] == 7  # the engine writes its own format
     assert decode(again.document)["hash"] == again.record_hash
 
 
@@ -141,7 +141,7 @@ def test_a_format_2_design_decides_a_turn_at_the_engines_format() -> None:
     record = decide_sync(
         format_2_design(), stored_state, {"mail": nothing, "default": nothing}
     ).record
-    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 6, "helpers": 3}
+    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 7, "helpers": 3}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -262,7 +262,7 @@ def test_a_described_design_loads_and_writes_its_labels_as_declared() -> None:
     loaded = load(described())
     asked = decode(loaded.document)["sources"]["ask"]["provides"]["q:tone"]
     assert asked["labels"] == [WARM, "cold"]
-    assert decode(loaded.document)["format"] == 7
+    assert decode(loaded.document)["format"] == 8
     assert loaded._labels["q:tone"] == (("warm", "cold"), ("Friendly or grateful", None))
     assert loaded._labels["q:other"] == (("yes", "no"), (None, None))
 
@@ -1119,8 +1119,8 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden described record
 
-GOLDEN_DESIGN = "sha256:9e67ed7ae13c3b3c04fbc40d536a6c1ca24cb190993ab616efe9cfc4b963fe38"
-GOLDEN_RECORD = "sha256:2e0e64f520eb68a706fbb0c623375c7266e528abc1b402022697540bfab17c00"
+GOLDEN_DESIGN = "sha256:7aecaafea0751beef3927e842e5deddfb5983595fb6a38ab7b53ad6e712985f0"
+GOLDEN_RECORD = "sha256:1a21b9e6ca049c83c644365e20d6ab28d49cc45a68ee5be9bdc485cd7fe26b6b"
 
 
 def golden() -> Record:

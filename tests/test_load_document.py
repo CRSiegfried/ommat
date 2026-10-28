@@ -385,17 +385,11 @@ def refused_form_docs() -> list[tuple[dict[str, Any], str]]:
     }
     grounded_plan = plan_doc()
     grounded_plan["plans"]["ask"]["grounded"] = "t:set"
-    candidates = doc_of(designs.with_source(minimal(), "s", designs.lookup_source()))
-    candidates["sources"]["s"]["provides"]["t:lookup"] = {
-        "type": "list<record{name: string}>",
-        "candidates": True,
-    }
     grounded = doc_of(designs.with_source(minimal(), "s", designs.lookup_source()))
     grounded["sources"]["s"]["grounded"] = "t:set"
     return [
         (table, "grounded table"),
         (grounded_plan, "grounded plan declaration"),
-        (candidates, "candidate set of records"),
         (grounded, "grounded source of t: refs"),
     ]
 

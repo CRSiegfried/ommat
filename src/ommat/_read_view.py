@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, NoReturn, cast
 
 from ommat._markers import Undetermined
-from ommat._refs import grounded_ref, parse_ref
+from ommat._refs import candidate_values, grounded_ref, parse_ref
 from ommat._types import Type, TypeFailure, read_type
 from ommat._values import described, guarded_repr, string_data
 
@@ -186,6 +186,7 @@ class ReadView:
         "_params",
         "_reads",
         "_role",
+        "_sets",
         "_state",
         "_stops",
     )
@@ -200,9 +201,11 @@ class ReadView:
         *,
         state: Type | None = None,
         grounded: Mapping[str, str] | None = None,
+        sets: Mapping[str, str | None] | None = None,
     ) -> None:
         self._role = role
         self._grounded: Mapping[str, str] = {} if grounded is None else grounded
+        self._sets: Mapping[str, str | None] = {} if sets is None else sets
         if (role.kind is ComponentKind.when) != (state is not None):
             raise _ViewError("a when's view, and only a when's, takes the state's type")
         self._state = state
@@ -261,10 +264,10 @@ class ReadView:
         return walk(self._board[path.base], path.fields, string_data(ref))
 
     def _per_candidate(self, declared: str) -> dict[str, object]:
-        """A per-candidate question's entries by candidate, in its set's order."""
-        members = cast("Sequence[str]", self._board[self._grounded[declared]])
+        """A per-candidate question's entries by candidate value, in its set's order."""
+        set_ref = self._grounded[declared]
         out: dict[str, object] = {}
-        for candidate in members:
+        for candidate in candidate_values(self._board[set_ref], self._sets.get(set_ref)):
             grounded = grounded_ref(declared, candidate)
             if grounded not in self._board:
                 raise _ViewError(f"the board holds no entry for {grounded!r}")

@@ -112,6 +112,7 @@ from ommat._types import (
     value_conforms,
 )
 from ommat._values import (
+    CANDIDATE_FIELD_FORMAT,
     CANDIDATE_FORMAT,
     CONTEXT_FORMAT,
     DESCRIPTION_FORMAT,
@@ -227,7 +228,6 @@ def _load_document(given: bytes | Mapping[str, Any], functions: Mapping[str, Any
 
 
 _q = quote
-_RECORD_SET = "candidate set of records"
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,16 +408,8 @@ class _Loader:
                         f"{what}'s need or slot ref {_q(need)}",
                         _GROUNDED_NEED,
                     )
-            for ref, provided in source.provides.items():
-                if isinstance(provided, Question):
-                    continue
-                declared = cast("Mapping[str, Any]", provided)
-                if declared["candidates"] and self.of_records(declared["type"]):
-                    refuse(sources, (sid, ref), f"{what}'s {_q(ref)}", _RECORD_SET)
         for rid, rule in self.d.rules.items():
             what = f"rule {_q(rid)}"
-            if rule.candidates and self.of_records(rule.outputs):
-                refuse(rules, (rid,), what, _RECORD_SET)
             if rule.grounded is not None:
                 form = "grounded table" if isinstance(rule, Table) else "grounded rule"
                 refuse(rules, (rid,), what, form)
@@ -436,32 +428,6 @@ class _Loader:
                 refuse(
                     self.refused_plans, (name,), what, "plan declaration with a candidate origin"
                 )
-
-    def of_records(self, text: object) -> bool:
-        """Whether a candidate set's type text is a list of a record type, its definitions
-        followed by name; a text that does not parse or resolve is left to check 10."""
-        if not isinstance(text, str):
-            return False
-        t = parse_type(text, nullable=False)
-        seen: set[str] = set()
-        while True:
-            if isinstance(t, ListOf):
-                t = t.item
-                break
-            if not isinstance(t, Named) or t.name in seen:
-                return False
-            seen.add(t.name)
-            written = self.d.types.get(t.name)
-            if not isinstance(written, str):
-                return False
-            t = parse_type(written, nullable=False)
-        while isinstance(t, Named) and t.name not in seen:
-            seen.add(t.name)
-            written = self.d.types.get(t.name)
-            if not isinstance(written, str):
-                return False
-            t = parse_type(written, nullable=False)
-        return isinstance(t, RecordOf)
 
     # --- gathering, and check 7 ------------------------------------------------------------
 
@@ -727,19 +693,25 @@ class _Loader:
                 yield (rid,), f"rule {_q(rid)}", rule.target
 
     def is_set(self, ref: str) -> bool:
-        """Whether a ref's provider declares it a candidate set: a source's provision with
-        ``candidates`` true, or a rule with ``candidates`` that provides it."""
+        """Whether a ref's provider declares it a candidate set."""
+        return bool(self.set_field(ref))
+
+    def set_field(self, ref: str) -> bool | str:
+        """A ref's provider's ``candidates`` member: a source's provision's, or that of a rule
+        that provides it; false for any other ref."""
         provider = self.providers.get(ref, [None])[0]
         if provider is None:
             return False
         source = self.d.sources.get(provider)
         if source is not None:
             provided = source.provides.get(ref)
-            return isinstance(provided, Mapping) and bool(
-                cast("Mapping[str, Any]", provided).get("candidates")
-            )
+            if not isinstance(provided, Mapping):
+                return False
+            return cast("Mapping[str, Any]", provided).get("candidates") or False
         rule = self.d.rules.get(provider)
-        return rule is not None and bool(rule.candidates) and rule.provides == ref
+        if rule is None or rule.provides != ref:
+            return False
+        return rule.candidates
 
     def extraction_ref(self, ref: str) -> bool:
         """Whether a ``q:`` ref's provider declares it an extraction question."""
@@ -916,6 +888,8 @@ class _Loader:
                     self.fail(1, (name,), f"{shown} is not in the name grammar")
                 if name in _ROLES:
                     self.fail(1, (name,), f"{shown} is a role name")
+                if name == "candidate":
+                    self.fail(1, (name,), f"{shown} is the name a grounded component reads")
                 if kind == "type definition" and name in _WORDS:
                     self.fail(1, (name,), f"{shown} is a word of the type notation")
                 if kind not in ("type definition", "group"):
@@ -1088,18 +1062,57 @@ class _Loader:
             return None
         return parsed
 
-    def candidate_type(self, t: Type, where: str, names: tuple[str, ...]) -> None:
-        """Check 10: a candidate set's type is exactly ``list<string>``, its definitions
-        resolved; check 12 has refused a list of a record type."""
+    def candidate_type(
+        self, t: Type, field: bool | str, where: str, names: tuple[str, ...]
+    ) -> None:
+        """Check 10: a candidate set's type, its definitions resolved, is ``list<string>`` under
+        ``candidates`` true, and under a field's name a list of a record type whose named field
+        is exactly ``string`` and whose other fields are each a scalar, a scalar or null, or a
+        list of a scalar."""
         try:
             outer = resolve(t, self.defs)
             item = resolve(outer.item, self.defs) if isinstance(outer, ListOf) else None
         except ValueError:  # a definition check 10 refused
             return
-        if item != Scalar("string"):
+        if not isinstance(field, str):  # true
+            if item != Scalar("string"):
+                self.fail(
+                    10, names, f"{where} is a candidate set of type {render(t)}, not list<string>"
+                )
+            return
+        if not isinstance(item, RecordOf):
             self.fail(
-                10, names, f"{where} is a candidate set of type {render(t)}, not list<string>"
+                10,
+                names,
+                f"{where} names the candidate field {_q(field)}, but its type {render(t)} is "
+                "not a list of a record type",
             )
+            return
+        fields = dict(item.fields)
+        if field not in fields or resolve(fields[field], self.defs) != Scalar("string"):
+            self.fail(
+                10,
+                names,
+                f"{where}'s candidate field {_q(field)} is not a string field of its record type",
+            )
+        for name, ft in item.fields:
+            if name != field and not self.flat(ft):
+                self.fail(
+                    10,
+                    names,
+                    f"{where}'s field {_q(name)} is not a scalar, a scalar or null, or a list "
+                    "of a scalar; a candidate record's other fields are",
+                )
+
+    def flat(self, t: Type) -> bool:
+        """Whether a candidate record's other field is a scalar, a scalar or null, or a list of
+        a scalar."""
+        t = resolve(t, self.defs)
+        if isinstance(t, Nullable):
+            return _scalar(resolve(t.inner, self.defs))
+        if isinstance(t, ListOf):
+            return _scalar(resolve(t.item, self.defs))
+        return _scalar(t)
 
     def declared(
         self,
@@ -1197,8 +1210,9 @@ class _Loader:
                 t = self.declared(text, True, where, (sid, ref), ref if declared else None)
                 if t is not None and declared:
                     self.types[ref] = t
-                if t is not None and cast("Mapping[str, Any]", provided)["candidates"]:
-                    self.candidate_type(t, where, (sid, ref))
+                field = cast("Mapping[str, Any]", provided)["candidates"]
+                if t is not None and field:
+                    self.candidate_type(t, field, where, (sid, ref))
             if domain_error(source.payload) is not None:
                 self.fail(10, (sid,), f"source {_q(sid)}'s payload is outside the value domain")
             if source.when is not None:
@@ -1216,7 +1230,7 @@ class _Loader:
             if t is not None and provides is not None:
                 self.types[rule.provides] = t
             if t is not None and rule.candidates:
-                self.candidate_type(t, f"rule {_q(rid)}", (rid,))
+                self.candidate_type(t, rule.candidates, f"rule {_q(rid)}", (rid,))
             self.version(rule.version, f"rule {_q(rid)}", rid)
         for rid, table in self.tables():
             provides = table.provides if _declared(table.provides) is not None else None
@@ -1224,7 +1238,7 @@ class _Loader:
             if t is not None and provides is not None:
                 self.types[table.provides] = t
             if t is not None and table.candidates:
-                self.candidate_type(t, f"rule {_q(rid)}", (rid,))
+                self.candidate_type(t, table.candidates, f"rule {_q(rid)}", (rid,))
             if not in_domain(table.inputs) or not in_domain(table.rows):
                 self.fail(
                     10, (rid,), f"rule {_q(rid)}'s inputs or rows are outside the value domain"
@@ -1701,6 +1715,21 @@ class _Loader:
                 self.fail(9, names, f"{where}: {_q(member)} is not a list")
                 return
             item = resolve(listed.item, self.defs)
+            if isinstance(item, RecordOf):  # a candidate set of records, by its field
+                if not isinstance(self.set_field(cast(str, member)), str):
+                    self.fail(
+                        9,
+                        names,
+                        f"{where}: {_q(member)} is a list of records that is no candidate set",
+                    )
+                elif inner != Scalar("string"):
+                    self.fail(
+                        9,
+                        names,
+                        f"{where}: {_q(reads[n])} is not a string, which the candidate field "
+                        f"of {_q(member)} is",
+                    )
+                return
             numeric = _is_numeric(inner) and _is_numeric(item)
             textual = _is_textual(inner) and _is_textual(item)
             if not (numeric or textual):
@@ -2469,8 +2498,13 @@ class _Loader:
             label_sets=MappingProxyType(self.label_sets()),
             grounded=MappingProxyType(dict(sorted(_per_candidate_refs(self.d).items()))),
             label_at=MappingProxyType(self.label_at()),
-            candidate_sets=frozenset(
-                ref for ref in providers if ref[:2] in ("t:", "d:") and self.is_set(ref)
+            # Each candidate set's candidate field, None for a list<string> set.
+            candidate_sets=MappingProxyType(
+                {
+                    ref: None if field is True else field
+                    for ref in code_point_sorted(providers)
+                    if ref[:2] in ("t:", "d:") and (field := self.set_field(ref))
+                }
             ),
             classes_bytes=encode(classes, MAX_DOCUMENT_DEPTH),
             # Each in the order the document holds, which the turn hands on.
@@ -3520,6 +3554,11 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
         )
         if fmt < CANDIDATE_FORMAT and rule.get("candidates") is True:
             yield (rid,), f"rule {_q(rid)} is a candidate set, which format {fmt} does not have"
+        if fmt < CANDIDATE_FIELD_FORMAT and type(rule.get("candidates")) is str:
+            yield (
+                (rid,),
+                f"rule {_q(rid)} names a candidate field, which format {fmt} does not have",
+            )
     for sid, source in _objects(doc["sources"]):
         yield from _source_failures(sid, source, fmt)
     for name, tool in _objects(doc["tools"]):
@@ -3598,6 +3637,8 @@ def _source_failures(
             yield from _missing_or_extra(provided, frozenset({"type", "candidates"}), shown, at)
             if fmt < CANDIDATE_FORMAT and provided.get("candidates") is True:
                 yield at, f"{shown} is a candidate set, which format {fmt} does not have"
+            if fmt < CANDIDATE_FIELD_FORMAT and type(provided.get("candidates")) is str:
+                yield at, f"{shown} names a candidate field, which format {fmt} does not have"
             continue
         extraction = provided.get("kind") == AnswerKind.extraction
         if extraction and fmt < EXTRACTION_FORMAT:

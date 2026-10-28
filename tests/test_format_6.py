@@ -67,7 +67,8 @@ def test_a_stored_format_6_record_replays_under_its_design_with_no_finding() -> 
     rerun, findings = replay_sync(read_record((FORMAT_6 / "record.json").read_bytes()), loaded)
     assert findings == []
     assert rerun is not None
-    assert rerun.record_hash == FORMAT_6_RECORD
+    assert rerun.log[0]["format"] == 7  # written at this engine's format, sets added
+    assert rerun.log[1]["sets"] == {}
 
 
 def test_a_format_6_record_under_the_current_design_differs_only_by_its_design() -> None:

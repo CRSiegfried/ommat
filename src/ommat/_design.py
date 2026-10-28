@@ -62,6 +62,8 @@ def _provision(value: object) -> Any:
     if not all(type(k) is str for k in data) or "type" not in data:
         return proxy
     data["type"] = _string(data["type"])
+    if "candidates" in data:
+        data["candidates"] = _string(data["candidates"])
     return MappingProxyType(data)
 
 
@@ -337,7 +339,9 @@ class Group:
 @dataclass(frozen=True, slots=True)
 class Source:
     """A source. ``provides`` maps each ``q:`` ref to its ``Question``
-    and each ``t:`` ref to its type, or to a mapping of ``type`` and ``candidates``.
+    and each ``t:`` ref to its type, or to a mapping of ``type`` and ``candidates``, ``false``,
+    ``true`` for a ``list<string>`` candidate set or the candidate field's name for a list of
+    records.
     ``grounded`` names a ``list<string>`` candidate set; each question whose wording holds a
     ``{"candidate": <that set>}`` slot is then asked once per candidate."""
 
@@ -379,7 +383,7 @@ class Rule:
     reads: Sequence[str] = ()
     params: Sequence[str] = ()
     boundaries: Mapping[str, Any] | None = None
-    candidates: bool = False
+    candidates: bool | str = False
     grounded: str | None = None
     target: str | None = None
     form: Literal["function"] = field(default="function", init=False)
@@ -393,6 +397,7 @@ class Rule:
             reads=_strings(self.reads),
             params=_strings(self.params),
             boundaries=_mapping(self.boundaries),
+            candidates=_string(self.candidates),
             grounded=_string(self.grounded),
             target=_string(self.target),
         )
@@ -445,7 +450,7 @@ class Table:
     inputs: Sequence[Any]
     rows: Sequence[Any]
     order: Sequence[Any] | None = None
-    candidates: bool = False
+    candidates: bool | str = False
     grounded: str | None = None
     target: str | None = None
     form: Literal["table"] = field(default="table", init=False)
@@ -459,6 +464,7 @@ class Table:
             inputs=_sequence(self.inputs),
             rows=_sequence(self.rows),
             order=_sequence(self.order),
+            candidates=_string(self.candidates),
             grounded=_string(self.grounded),
             target=_string(self.target),
         )
@@ -693,7 +699,8 @@ class LoadedDesign:
     aligned, ``None`` where a label is undescribed, ``yes`` and ``no`` for ``noul`` and none for
     ``extraction``, a candidate-valued label set's fixed part alone; ``_label_sets``, each
     candidate-valued question's set ref, and ``_label_at`` how many of its fixed labels come
-    before the candidates; ``_candidate_sets``, the refs declared candidate sets;
+    before the candidates; ``_candidate_sets``, each declared candidate set's candidate field,
+    ``None`` for a ``list<string>`` set;
     ``_grounded``, each per-candidate question's declared ref and its grounding set's ref;
     ``_requirement_bytes``, each source requirement's values as
     canonical bytes, by source id; ``_context_bytes``, the context block's document object or
@@ -747,7 +754,7 @@ class LoadedDesign:
     _labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]]
     _label_sets: Mapping[str, str]
     _label_at: Mapping[str, int]
-    _candidate_sets: frozenset[str]
+    _candidate_sets: Mapping[str, str | None]
     _grounded: Mapping[str, str]
     _classes_bytes: bytes
     _context_bytes: bytes

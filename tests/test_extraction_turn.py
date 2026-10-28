@@ -636,16 +636,16 @@ def test_a_format_1_record_reads_back_to_its_own_hash() -> None:
 
 def test_the_append_refuses_a_design_item_of_an_unknown_format() -> None:
     ledger = Ledger()
-    with pytest.raises(_LedgerError, match="the format 7 is not one this ledger knows"):
-        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 7, "helpers": 2})
+    with pytest.raises(_LedgerError, match="the format 8 is not one this ledger knows"):
+        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 8, "helpers": 2})
 
 
 def test_a_record_of_an_unknown_format_is_refused() -> None:
     def change(doc: dict[str, Any]) -> None:
-        doc["log"][0]["format"] = 7
+        doc["log"][0]["format"] = 8
 
     with pytest.raises(
-        InvalidRecord, match="format 7 is not one this reader knows: 1, 2, 3, 4, 5, 6"
+        InvalidRecord, match="format 8 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7"
     ):
         read_record(edited(change))
 
@@ -653,8 +653,8 @@ def test_a_record_of_an_unknown_format_is_refused() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden extraction record
 
-GOLDEN_X_DESIGN = "sha256:830aaefc20b2e96ab8b37e975a56bbf27446c5b615046da49965ec8d7bb997f7"
-GOLDEN_X_RECORD = "sha256:3f1cb2a551a1b4d1c2edc540d1c578336fd9c8cb77d3c5301cab9bcace2c75bb"
+GOLDEN_X_DESIGN = "sha256:f1fca2aad96f781351fa962e167c67d07aa048c0a03e22d4da0edf7dfb0413d2"
+GOLDEN_X_RECORD = "sha256:2404a0ae7a92382b399587b71de7757b6d4e428580bc5589e8925db2d5fdf0b9"
 
 
 def test_the_golden_extraction_record() -> None:
@@ -662,7 +662,7 @@ def test_the_golden_extraction_record() -> None:
     assert record.log[0] == {
         "item": "design",
         "hash": GOLDEN_X_DESIGN,
-        "format": 6,
+        "format": 7,
         "helpers": HELPERS,
     }
     assert (record.design_hash, record.record_hash) == (GOLDEN_X_DESIGN, GOLDEN_X_RECORD)
@@ -776,7 +776,7 @@ def test_a_format_1_record_replays_under_its_format_1_design_with_helpers_mismat
     again, findings = replay_sync(record, loaded)
     assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 1, "replayed": HELPERS}]
     assert again is not None
-    assert again.log[0]["format"] == 6  # the engine writes its own format
+    assert again.log[0]["format"] == 7  # the engine writes its own format
 
 
 def test_a_format_1_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
@@ -794,7 +794,7 @@ def test_a_format_1_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
 
     record = decide_sync(loaded, stored_state, {"mail": nothing, "default": nothing}).record
     assert record.log[0]["item"] == "design"
-    assert record.log[0]["format"] == 6  # the engine writes its own format
+    assert record.log[0]["format"] == 7  # the engine writes its own format
 
 
 # ---------------------------------------------------------------------------------------------
