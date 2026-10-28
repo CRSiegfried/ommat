@@ -998,7 +998,10 @@ class _Turn:
         else:
             rows = outcome.rows
             if isinstance(outcome.value, Undetermined):  # the engine's own marker
-                written = outcome.value
+                marker = outcome.value
+                # A grounded table's cause names a candidate read as its set's ref, once.
+                refs = view.cause_refs(marker.cause.refs)
+                written = type(marker)(Cause(marker.cause.code, list(refs)))
             else:
                 value = self.typed_value(r.provides, outcome.value)
                 written = Unavailable(Cause(_C.invalid_return, [rid])) if value is None else value

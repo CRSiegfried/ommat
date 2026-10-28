@@ -513,3 +513,20 @@ def test_check_9_refuses_an_in_cell_over_records_testing_a_nullable_string() -> 
     }
     found = failures(design(rules=rules, state=t.record(people=t.list_(person))))
     assert any(c == 9 and "is not a string" in m for c, m in found)
+
+
+def test_a_grounded_tables_abstention_names_the_set_not_candidate() -> None:
+    table = Table(
+        LEVEL,
+        t.label("adult", "minor"),
+        "F",
+        ["candidate.age", "candidate"],
+        [[">= 18", "-", "adult"]],
+        grounded=SET,
+    )
+    loaded = load(design(rules={**design().rules, "level": table}))
+    e = entries(decided([BO, ZOE], loaded=loaded))
+    assert e[grounded_ref(LEVEL, "Zoë")]["marker"]["cause"] == {
+        "code": "abstained",
+        "refs": [SET],
+    }
