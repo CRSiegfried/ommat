@@ -419,6 +419,14 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "wrong-design",
         "different-turn",
         "invalid-record",
+        "bad-key",
+        "not-held",
+        "hash-mismatch",
+        "held-mismatch",
+        "invalid-entry",
+        "unknown-kind",
+        "held-key",
+        "misfiled-entry",
     }
 
 

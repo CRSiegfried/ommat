@@ -191,10 +191,17 @@ def test_the_pydantic_ai_extra_names_its_floor_and_the_conversation_extra_is_gon
     assert "conversation" not in (metadata("ommat").get_all("Provides-Extra") or [])
 
 
-EVALUATION = {"EvaluationRefusal", "RefusalReason", "use_answers", "use_answers_sync"}
+EVALUATION = {
+    "DesignStore",
+    "EvaluationRefusal",
+    "EvaluationStore",
+    "RefusalReason",
+    "use_answers",
+    "use_answers_sync",
+}
 
 
-def test_ommat_evaluation_exports_exactly_its_jobs_and_refusal() -> None:
+def test_ommat_evaluation_exports_exactly_its_jobs_stores_and_refusal() -> None:
     import ommat.evaluation
 
     assert "evaluation" not in ommat.__all__

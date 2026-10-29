@@ -12,7 +12,7 @@ The spec covers what record format 7 and design format 9 hold and the engine doe
 - the context block a design declares, rendered into the record, and the record views: the escalation view, the handoff view, the transcript view and the redacted view;
 - the conversation renderers, which render a handoff as text and a transcript as Chat Completions or Pydantic AI messages;
 - the record lens, which renders stored records and designs as an HTML page a person reads;
-- replay of a recorded turn with no model call, and the evaluation job `use_answers`;
+- replay of a recorded turn with no model call, the evaluation job `use_answers`, and the design store and the evaluation store;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;
 - the answer kinds: `noul`, `choice` and `score`, which give a probability to each label, and `extraction`, a typed value read from a text, with the probability that the text holds none, the model's reading whatever it answered, its confidence and the span it read;
 - the candidate-valued label set: a `choice` whose labels are a fixed part and the members of a `list<string>` candidate set, rendered each time it is asked;
@@ -341,6 +341,21 @@ An `entry`, `plan` or `verdict` finding compares the two items by canonical byte
 After both records are read and before any replay it raises `EvaluationRefusal`, `reason` in this order: `invalid-record` when a document does not read, carrying the `InvalidRecord` as `error`; `unfinished` for a record with no `verdict` item, then `nothing-to-replay` for one with no state entry, then `wrong-design` for one whose design hash is not `loaded.design_hash`, each for `record` then `other`; and `different-turn` when the two state entries or `settings` items differ as replay compares items, `order` included, an item of a record before format 6 compared without `order` and `grounded`. `turn` is the refused record's hash, `other`'s for `different-turn`, and `None` for `invalid-record`, which carries `error` instead; every other attribute is `None`. A `loaded` that is not exactly a `LoadedDesign` is an `EntryRefusal`, before either record is read.
 
 A replay record, the `Record` that `replay` returns, is a valid `record` or `other`. To compare two models decided under different parameter sets, replay the second's record under the first's loaded design and pass the replay record as `other`; a threshold that makes the rerun ask a source the second never called shows as `not-in-record` in the replay's findings, and its entries come back `not-returned` in `use_answers`'s.
+
+### The stores
+
+Both stores are sync, and each is a directory, its `root`, holding one file per hash, named by the hash's algorithm as a directory and its 64 hex characters as the file name. Each file is written whole by exclusive create: the bytes go to a temporary file beside it, which is then linked under its name, so a reader never sees part of a file and of two writers of one name exactly one succeeds. Neither store replaces a file. Each refusal is an `EvaluationRefusal` whose attributes other than `reason` and `key` are `None`; `key` is a one-item list of the key refused for `bad-key`, `not-held`, `hash-mismatch`, `held-mismatch` and `held-key`, a design hash or a `dict` of an evaluation key's members, and `None` for the others.
+
+`DesignStore(root).keep(loaded)` writes `loaded.document` unchanged at `sha256/<hex>` of `loaded.design_hash`, the hash the loaded design carries, never a key given beside it, and returns `None`; a `loaded` that is not exactly a `LoadedDesign` is a `TypeError`. Keeping a hash it holds compares the stored bytes: equal bytes are accepted, and differing bytes refused with `held-mismatch`. `fetch(key, *, functions=None)` returns the design held under `key`, loaded by `load` with `functions` passed through, refusing in order a `key` that is not `sha256:` and 64 lowercase hex characters with `bad-key`, before any path is built; a key it does not hold with `not-held`; and bytes whose hash is not `key` with `hash-mismatch`, the hash found in the message. `load`'s `InvalidDesign` passes through, so a design whose code the process lacks fails check 11, and a function defined in a function or a lambda needs `functions`.
+
+`EvaluationStore(root).write(entry)` keeps an entry, `{"kind", "format", "key", "value"}`, as its canonical bytes at `<kind>/sha256/<hex>`, `<hex>` that of the hash of `key`'s canonical bytes, and returns `None`. The kinds and their key members, each a string:
+
+- `gold-answer`: `gold_set`, `question`, `turn` and `candidate`;
+- `switching-value`: `record`, `design` and `parameter`;
+- `certificate`: `design` and `sweep`;
+- `group-counts`: `design`, `group`, `split` and `gold_set`.
+
+Before building a path it refuses in order: an entry that is not a `dict` of exactly those four members with `invalid-entry`; a `kind` outside the four with `unknown-kind`, the kind in the message; a `format` that is not an `int`, a `bool` excluded, then a `key` that is not a `dict` of exactly its kind's members, each a `str`, with `invalid-entry`, the first fault in the message; and an entry the canonical encoding refuses, `value` included, with `invalid-entry`, the encoder's reason in the message. An entry under a kind and key it holds is refused with `held-key`, whatever its bytes, and the first entry stands; the check and the write are one step. The store keeps `format` and `value` as given and reads neither. `lookup(kind, key)` refuses `kind` and `key` by the same checks, then returns the entry held under them or `None`; a held file that does not parse as an envelope, by the checks `write` makes, or whose `kind` or hash of its `key` differs from its path, is refused with `misfiled-entry`, the path in the message.
 
 ## Continuing a workflow
 

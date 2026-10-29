@@ -12,19 +12,28 @@ class RefusalReason(enum.StrEnum):
     wrong_design = "wrong-design"
     different_turn = "different-turn"
     invalid_record = "invalid-record"
+    bad_key = "bad-key"
+    not_held = "not-held"
+    hash_mismatch = "hash-mismatch"
+    held_mismatch = "held-mismatch"
+    invalid_entry = "invalid-entry"
+    unknown_kind = "unknown-kind"
+    held_key = "held-key"
+    misfiled_entry = "misfiled-entry"
 
 
 class EvaluationRefusal(Exception):
     """An evaluation job's refusal: ``reason``, and each other attribute what the reason
-    names, else ``None``. ``turn`` is the record hash of the record refused; ``error`` the
-    ``InvalidRecord`` that caused it, also chained."""
+    names, else ``None``. ``key`` is a list of store keys: a design hash for the design store,
+    a key's members by name for the evaluation store. ``turn`` is the record hash of the record
+    refused; ``error`` the ``InvalidRecord`` that caused it, also chained."""
 
     def __init__(
         self,
         message: str,
         *,
         reason: RefusalReason,
-        key: list[dict[str, Any]] | None = None,
+        key: list[Any] | None = None,
         turn: str | None = None,
         ref: str | None = None,
         source: str | None = None,
