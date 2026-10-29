@@ -32,6 +32,8 @@ class RefusalReason(enum.StrEnum):
     unknown_kind = "unknown-kind"
     held_key = "held-key"
     misfiled_entry = "misfiled-entry"
+    unknown_path = "unknown-path"
+    unsupported_leaf = "unsupported-leaf"
     baseline_differs = "baseline-differs"
 
 
