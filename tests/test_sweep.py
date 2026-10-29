@@ -1,8 +1,13 @@
 # pyright: reportPrivateUsage=false
 """The sweep job: the gold copy, carrying its own hash, read back and replayed, from format-1
-and format-2 gold entries and an extraction's (§gold-copy)."""
+and format-2 gold entries and an extraction's (§gold-copy); a passed plan's action, the exact
+binomial tail against scipy where it is installed, the order check and both tests'
+choices (§sweep-scoring)."""
 
 import asyncio
+import json
+import math
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +17,16 @@ import extraction as x
 from ommat import CallResult, Record, decide_sync, read_record
 from ommat._replay import FindingKind, _replay_with
 from ommat.evaluation import EvaluationRefusal, EvaluationStore, RefusalReason
-from ommat.evaluation._sweep import gold_answers, gold_copy
+from ommat.evaluation._sweep import (
+    BONFERRONI,
+    FIXED_SEQUENCE,
+    action,
+    choose,
+    gold_answers,
+    gold_copy,
+    tail,
+    which_test,
+)
 from test_gold_answers import LOADED, ONE, TYPES, key, unfinished
 from test_use_answers import broken
 
@@ -136,3 +150,87 @@ def test_a_failed_call_leaves_no_gold_copy(tmp_path: Path) -> None:
     store = EvaluationStore(tmp_path)
     put(store, record, LABELS)
     assert copy_of(record, store) == "the call that wrote q:date is Failed"
+
+
+# ---------------------------------------------------------------------------------------------
+# The action of a passed execute plan
+
+
+def plan_log(arguments: dict[str, Any], kind: str = "execute", verdict: str = "passed") -> Any:
+    step = {"tool": "notify", "arguments": arguments, "requirements": [{"ref": "d:a"}]}
+    marker = {"kind": "Unavailable", "cause": {"code": "raised", "refs": ["d:m"]}}
+    return [
+        {"item": "entry", "ref": "d:a", "value": {"to": {"name": "ann"}, "n": None}},
+        {"item": "entry", "ref": "d:b", "value": "ann"},
+        {"item": "entry", "ref": "d:m", "marker": marker},
+        {"item": "plan", "kind": kind, "steps": [step], "derivation": [], "rows": [1]},
+        {"item": "verdict", "kind": verdict, "failures": []},
+    ]
+
+
+def test_an_action_replaces_each_board_ref_by_what_it_reads() -> None:
+    literal = {"literal": "x"}
+    got = action(plan_log({"who": {"ref": "d:a.to.name"}, "z": literal, "s": {"step": 1}}))
+    assert got is not None
+    assert json.loads(got) == {
+        "kind": "execute",
+        "steps": [
+            {
+                "tool": "notify",
+                "arguments": {"who": {"value": "ann"}, "z": literal, "s": {"step": 1}},
+                "requirements": [{"ref": "d:a"}],  # requirements stay as written
+            }
+        ],
+    }
+    # Two refs reading one value are one action; a null on the path reads null.
+    assert action(plan_log({"who": {"ref": "d:b"}})) == action(
+        plan_log({"who": {"ref": "d:a.to.name"}})
+    )
+    assert b'{"value":null}' in (action(plan_log({"who": {"ref": "d:a.n"}})) or b"")
+    assert b'"marker":{"cause"' in (action(plan_log({"who": {"ref": "d:m"}})) or b"")
+
+
+def test_only_a_passed_execute_plan_has_an_action() -> None:
+    assert action(plan_log({}, kind="clarify")) is None
+    assert action(plan_log({}, verdict="refused")) is None
+    assert action([]) is None
+
+
+# ---------------------------------------------------------------------------------------------
+# The binomial test
+
+
+@pytest.mark.parametrize(("n", "k"), [(0, 0), (1, 0), (1, 1), (10, 0), (10, 3), (50, 5), (7, 9)])
+def test_the_tail_is_exact(n: int, k: int) -> None:
+    alpha = Fraction(1, 10)
+    expected = sum(
+        math.comb(n, i) * alpha**i * (1 - alpha) ** (n - i) for i in range(min(k, n) + 1)
+    )
+    assert tail(n, alpha, k) == expected
+    assert tail(2, Fraction(1, 2), 0) == Fraction(1, 4)
+
+
+@pytest.mark.parametrize(("n", "k", "alpha"), [(50, 1, 0.1), (400, 12, 0.05), (1000, 0, 0.003)])
+def test_the_tail_agrees_with_scipy(n: int, k: int, alpha: float) -> None:
+    stats = pytest.importorskip("scipy.stats")
+    assert float(tail(n, Fraction(alpha), k)) == pytest.approx(stats.binom.cdf(k, n, alpha))
+
+
+def test_the_order_check_reads_the_dev_split() -> None:
+    assert which_test([0, 0, 1, 4]) == FIXED_SEQUENCE
+    assert which_test([]) == which_test([3]) == FIXED_SEQUENCE
+    assert which_test([0, 2, 1]) == BONFERRONI
+
+
+def test_fixed_sequence_testing_stops_at_the_first_point_not_certifying() -> None:
+    # 0.9**50 is about 0.005, P(Bin(50, 0.1) <= 1) about 0.034, P(<= 5) about 0.62.
+    assert choose(FIXED_SEQUENCE, 50, [0, 1, 5, 0], 0.1, 0.05) == (1, 3)
+    assert choose(FIXED_SEQUENCE, 50, [5, 0], 0.1, 0.05) == (None, 1)
+    assert choose(FIXED_SEQUENCE, 50, [0, 1], 0.1, 0.05) == (1, 2)
+
+
+def test_bonferroni_tests_every_point_at_delta_over_m() -> None:
+    assert choose(BONFERRONI, 50, [5, 0, 1], 0.1, 0.05) == (1, 3)  # 0.034 > 0.05 / 3
+    assert choose(BONFERRONI, 50, [1, 0, 5], 0.1, 0.05) == (1, 3)
+    assert choose(BONFERRONI, 50, [5, 6], 0.1, 0.05) == (None, 2)
+    assert choose(BONFERRONI, 0, [0], 0.1, 0.05) == (None, 1)  # no turn certifies nothing
