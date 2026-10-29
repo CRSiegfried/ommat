@@ -196,6 +196,7 @@ EVALUATION = {
     "EvaluationRefusal",
     "EvaluationStore",
     "RefusalReason",
+    "confirm_group",
     "constant_rule",
     "constant_rule_sync",
     "deciding_inputs",

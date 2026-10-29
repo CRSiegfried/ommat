@@ -81,17 +81,23 @@ def gold_answers(
     asked = _asked(log)
     golds: dict[str, object | None] = {}
     for _, key, refs in _keys(gold_set, turn, asked):
-        entry = results.lookup(KIND, key)
-        if entry is not None and (entry["kind"] != KIND or entry["format"] not in _READ):
-            raise EvaluationRefusal(
-                f"the entry under {key!r} is {entry['kind']} format {entry['format']}, not "
-                f"{KIND} format 1 or 2",
-                reason=_R.unknown_entry,
-                key=[key],
-            )
+        entry = known(results.lookup(KIND, key), key)
         for ref in refs:
             golds[ref] = None if entry is None else entry["value"]
     return {ref: golds[ref] for ref in asked}
+
+
+def known(entry: dict[str, Any] | None, key: dict[str, str]) -> dict[str, Any] | None:
+    """``entry``, a gold answer looked up under ``key`` or ``None``; ``unknown-entry`` for an
+    entry of a kind or format the job does not read."""
+    if entry is not None and (entry["kind"] != KIND or entry["format"] not in _READ):
+        raise EvaluationRefusal(
+            f"the entry under {key!r} is {entry['kind']} format {entry['format']}, not "
+            f"{KIND} format 1 or 2",
+            reason=_R.unknown_entry,
+            key=[key],
+        )
+    return entry
 
 
 def gold_copy(read: Record, log: _Log, golds: dict[str, object | None]) -> Record | str:
