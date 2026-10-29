@@ -4,10 +4,10 @@ contract; and the overlap test load runs for ``U`` and ``A``.
 
 The tagged form is §table-notation's. An input is ``{"read", "helper", "params"}``; a rule
 table's row ``{"cells", "output"}`` and a policy table's ``{"cells", "plan"}``; a cell ``"-"``
-or a one-member object tagged ``is``, ``one_of``, ``marker``, ``>=``, ``>``, ``<=``, ``<``,
-``between`` or ``in``; an operand or an output entry an object tagged ``literal``, ``param`` or
-``ref``, or an output ``{"marker": "Unsure"}``. A cell given as a string is read once by the
-notation, its form decided by how it begins.
+or a one-member object tagged ``is``, ``one_of``, ``marker``, ``markers``, ``known``, ``>=``,
+``>``, ``<=``, ``<``, ``between`` or ``in``; an operand or an output entry an object tagged
+``literal``, ``param`` or ``ref``, or an output ``{"marker": "Unsure"}``. A cell given as a
+string is read once by the notation, its form decided by how it begins.
 
 Evaluation takes the inputs' values, already read and their helpers called, so a raise in a
 helper never reaches it. It tests every row in table order, so ``rows`` lists every match,
@@ -31,6 +31,7 @@ from ommat._refs import is_declared_name, is_ref
 from ommat._values import in_domain, string_data
 
 ANY = "-"
+KNOWN = "Known"
 MARKERS: dict[str, type[Undetermined]] = {
     "Unsure": Unsure,
     "Unavailable": Unavailable,
@@ -38,7 +39,7 @@ MARKERS: dict[str, type[Undetermined]] = {
 }
 _KIND_NAMES = {v: k for k, v in MARKERS.items()}
 COMPARISONS = (">=", ">", "<=", "<")
-CELL_TAGS = frozenset({"is", "one_of", "marker", "markers", *COMPARISONS, "between", "in"})
+CELL_TAGS = frozenset({"is", "one_of", "marker", "markers", "known", *COMPARISONS, "between", "in"})
 ANY_MARKER = "Undetermined"
 OPERAND_TAGS = frozenset({"literal", "param", "ref"})
 OUTPUT_TAGS = frozenset({"literal", "param", "ref", "marker"})
@@ -108,6 +109,8 @@ def _notation(text: str) -> Any:
     cell = text.strip()
     if cell == ANY:
         return ANY
+    if cell == KNOWN:
+        return {"known": True}
     if cell in MARKERS:
         return {"marker": cell}
     if cell == ANY_MARKER:
@@ -187,6 +190,10 @@ def _tagged_cell(cell: Mapping[object, Any]) -> Any:
         if not all(isinstance(k, str) and string_data(k) in MARKERS for k in kinds):
             raise NotationError("a markers cell lists something that is not a marker kind")
         return _markers([string_data(cast(str, k)) for k in kinds])
+    if tag == "known":
+        if value is not True:
+            raise NotationError("a known cell's value is not true")
+        return {"known": True}
     if tag == "in":
         if not isinstance(value, str):
             raise NotationError("an in cell does not name a ref")
@@ -456,6 +463,8 @@ class _Table:
             return type(value) is MARKERS[member], []
         if tag == "markers":
             return any(type(value) is MARKERS[k] for k in member), []
+        if tag == "known":  # a definite no on a marker, which a withheld value could not change
+            return not _marker(value), []
         other = member if tag == "in" else member.get("ref") if tag in COMPARISONS else None
         if other is not None:
             # A cell over two inputs fails on an outage only when every input it tests that is
@@ -761,6 +770,8 @@ def _cell_set(cell: Any, leaves: Mapping[str, Any]) -> _Set:
         return _Set(frozenset({member}), None)
     if tag == "markers":
         return _Set(frozenset(member), None)
+    if tag == "known":
+        return _Set(frozenset(), _ALL)
     if tag == "is":
         return _Set(frozenset(), [member])
     if tag == "one_of":

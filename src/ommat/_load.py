@@ -121,6 +121,7 @@ from ommat._values import (
     DESIGN_FORMATS,
     EXTRACTION_FORMAT,
     KEY_ORDER_FORMAT,
+    KNOWN_FORMAT,
     MAX_DOCUMENT_DEPTH,
     MISSING,
     NOUL_DESCRIPTION_FORMAT,
@@ -1894,7 +1895,7 @@ class _Loader:
         if cell == ANY:
             return
         ((tag, member),) = cast("dict[str, Any]", cell).items()
-        if tag in ("marker", "markers"):
+        if tag in ("marker", "markers", "known"):
             return
         t = types[n]
         if t is None:
@@ -1903,8 +1904,8 @@ class _Loader:
             self.fail(
                 9,
                 names,
-                f"{where} tests the answer at {_q(reads[n])}; only - and marker cells apply to a "
-                "q: input",
+                f"{where} tests the answer at {_q(reads[n])}; only -, Known and marker cells apply "
+                "to a q: input",
             )
             return
         inner = resolve(t, self.defs)
@@ -3860,6 +3861,17 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
                 (rid,),
                 f"rule {_q(rid)} names a candidate field, which format {fmt} does not have",
             )
+    if fmt < KNOWN_FORMAT:
+        tables = [(f"rule {_q(rid)}", (rid,), r) for rid, r in _objects(doc["rules"])]
+        if policy_doc is not None:
+            tables.append(("the policy table", ("policy",), policy_doc))
+        for where, names, table in tables:
+            if any(
+                "known" in cell
+                for row in _items(table.get("rows"))
+                for cell in _items(row.get("cells"))
+            ):
+                yield names, f"{where} holds a Known cell, which format {fmt} does not have"
     if fmt < CANDIDATE_FIELD_FORMAT:
         components = [(f"rule {_q(rid)}", (rid,), r) for rid, r in _objects(doc["rules"])]
         policy = _object(doc["policy"])

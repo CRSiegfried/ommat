@@ -37,7 +37,7 @@ to it, each under that format's rules."""
 RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
 """The record formats this engine reads."""
 
-DESIGN_FORMAT = 8
+DESIGN_FORMAT = 9
 """The format number this engine writes into a design document, which changes only when a
 design rule changes. It reads every design format from 1 up to it."""
 
@@ -104,6 +104,9 @@ TARGETS_FORMAT = 7
 CANDIDATE_FIELD_FORMAT = 8
 """The first design format whose ``candidates`` member may name a candidate field, for a
 candidate set of records."""
+
+KNOWN_FORMAT = 9
+"""The first design format whose tables may hold a ``known`` cell."""
 
 SETS_FORMAT = 7
 """The first record format whose ``settings`` item names each candidate set's candidate field,

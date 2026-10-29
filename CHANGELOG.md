@@ -6,6 +6,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Added
 
+- Design format 9 and the `Known` cell: a table cell, `Known` in the notation and `{"known": true}` in the document, matches any value, null included, and no marker. A row failing on it does not meet marker rule 2, so a policy row holding `Known` over an input gives way to the next row when that input is down, where a row whose plan's origin reads the input would otherwise escalate; the input's entry keeps its marker. A design built in Python has a new design hash; a stored document of formats 1 to 8 loads to its own hash, and load refuses a `known` cell in one. In a design written in Python, a label spelt `Known` is now written `{"is": "Known"}`.
+
 - A value cell (`is` or `one_of`) over a `pick_with_margin` or `pick_with_thresholds` input whose question has a candidate-valued label set may name one of its fixed labels, such as `none`; the input stays `string`, and a cell naming any other value still fails check 9, now listing the fixed labels.
 
 - The lints and the lens over grounded forms: `unsure_to_execute`'s first search fills a grounded declared read's set as a declared read and sets each grounded entry to `Unsure` in turn, its abstention search counts a grounded rule's one-ref pick at the subject's candidate and gives `via` the entry naming the subject's declared ref, and a grounded `t:` source's entries range over their declaration's points. A cell over a `candidate` read adds nothing to the grid. The lens links a `candidate` read, a candidate origin and a literal's `set` to the set's card.

@@ -215,8 +215,8 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
     assert any("t:c/size" in line for line in lines)
 
 
-GOLDEN_DESIGN = "sha256:7be83bf4c9cc032f8cf347abb07604ba88f8733d039621e5f0c62b89432f2b20"
-GOLDEN_RECORD = "sha256:ca42cba214d29065a9b0e48eba859339ce5d26119d67f6338f2071acd0dacc3f"
+GOLDEN_DESIGN = "sha256:469a22cefa7c291cad390fdb5a3a7c6a676fd6d33190feef0c4df93ee974f9c9"
+GOLDEN_RECORD = "sha256:9788c0a6da9c9de0b021bb73cc00b8b25225be707aa6eebcf8458a25e5ed73c2"
 
 
 def test_the_golden_per_ref_record() -> None:

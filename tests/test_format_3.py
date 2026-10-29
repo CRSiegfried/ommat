@@ -262,7 +262,7 @@ def test_a_described_design_loads_and_writes_its_labels_as_declared() -> None:
     loaded = load(described())
     asked = decode(loaded.document)["sources"]["ask"]["provides"]["q:tone"]
     assert asked["labels"] == [WARM, "cold"]
-    assert decode(loaded.document)["format"] == 8
+    assert decode(loaded.document)["format"] == 9
     assert loaded._labels["q:tone"] == (("warm", "cold"), ("Friendly or grateful", None))
     assert loaded._labels["q:other"] == (("yes", "no"), (None, None))
 
@@ -1119,8 +1119,8 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden described record
 
-GOLDEN_DESIGN = "sha256:7aecaafea0751beef3927e842e5deddfb5983595fb6a38ab7b53ad6e712985f0"
-GOLDEN_RECORD = "sha256:1a21b9e6ca049c83c644365e20d6ab28d49cc45a68ee5be9bdc485cd7fe26b6b"
+GOLDEN_DESIGN = "sha256:79ad5e48da93e7c30a99f1095f268c8379a3d7f061b682a4a67d003f3f89e370"
+GOLDEN_RECORD = "sha256:8aa1b1aeb6e633a49461a762a05a76c319eefd5cf8c8e278c60992828cebf38f"
 
 
 def golden() -> Record:

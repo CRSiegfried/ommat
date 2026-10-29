@@ -173,20 +173,20 @@ Reason: the customer asked for a refund
 Step 1: refund_order {"order":{"ref":"t:state.order.id","value":"A-1001"}}
 Refund requested: yes
 Order A-1001 is delivered
-Design: support sha256:f7eac65bff144c7cedbaa9b37dd8fbd35944aca9395f394063548320695950a5
-Record: sha256:582a314239ef0a6370dc5ed65e20a4b3c48fd0338fb7c034fb124cb56502eab6
-call om_582a314239ef0a6370dc5ed6_c1 ask {"asks":["q:refund"]}
-result om_582a314239ef0a6370dc5ed6_c1 97 bytes
-call om_582a314239ef0a6370dc5ed6_d decide {"design":{"name":"support","hash":"sha256:f7eac65bff144c7cedbaa9b37dd8fbd35944aca9395f394063548320695950a5"}}
-result om_582a314239ef0a6370dc5ed6_d 481 bytes
-call om_582a314239ef0a6370dc5ed6_s1 refund_order {"order":"A-1001"}
+Design: support sha256:bb5f7c6c348ad87ea480b1868416e93624aa9e39c38a0c990ed67c88342c4df5
+Record: sha256:d380bfe188f37d82e59eb0803fdfd645ff769c4390013e4f19ea8ab31e09afad
+call om_d380bfe188f37d82e59eb080_c1 ask {"asks":["q:refund"]}
+result om_d380bfe188f37d82e59eb080_c1 97 bytes
+call om_d380bfe188f37d82e59eb080_d decide {"design":{"name":"support","hash":"sha256:bb5f7c6c348ad87ea480b1868416e93624aa9e39c38a0c990ed67c88342c4df5"}}
+result om_d380bfe188f37d82e59eb080_d 481 bytes
+call om_d380bfe188f37d82e59eb080_s1 refund_order {"order":"A-1001"}
 Plan: clarify
 Verdict: passed
 Reply: Would you like a refund for this order?
 d:refund: Unsure (abstained)
 Order A-1001 is delivered
-Design: support sha256:f7eac65bff144c7cedbaa9b37dd8fbd35944aca9395f394063548320695950a5
-Record: sha256:3b01c809ad38660ee0d50256cb8ea761bd21e0e7d885cea7643fc3669a556122
+Design: support sha256:bb5f7c6c348ad87ea480b1868416e93624aa9e39c38a0c990ed67c88342c4df5
+Record: sha256:c13cfc133298b93bcdcada917caec734bee95f22bb35ac6858c8fc0811c9e2eb
 ```
 
 ## Hand the calls to a Pydantic AI agent

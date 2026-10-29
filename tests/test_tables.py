@@ -429,7 +429,7 @@ def test_check_9_a_mass_inputs_labels_and_a_bare_question() -> None:
     )
     assert any(c == 9 and "not a label of" in m for c, m in found), found
     found = failures(asked(("tab", tab("F", ["q:urgent"], [["yes", 1]]))))
-    assert any(c == 9 and "only - and marker cells" in m for c, m in found), found
+    assert any(c == 9 and "only -, Known and marker cells" in m for c, m in found), found
     found = failures(asked(("tab", tab("F", ["q:urgent"], [["-", Input("q:urgent")]]))))
     assert any(c == 9 and "cannot be passed through" in m for c, m in found), found
 
@@ -899,8 +899,8 @@ def test_redact_digests_a_plans_rendered_text_and_keeps_its_slots() -> None:
     assert plan["rows"] == [2, 3]
 
 
-GOLDEN_DESIGN = "sha256:f64d9167206693cd74bf87a0adbaaa2c74750a3e8bb6b985ede51b46ad2540ca"
-GOLDEN_RECORD = "sha256:5d68794a908a248bd99981b35457e47bced5342ef7fd9258546edf49b4c53df7"
+GOLDEN_DESIGN = "sha256:e316993246df5e97c63f56f26adab593072fb85bc21c66bd98714a9f701b9a22"
+GOLDEN_RECORD = "sha256:329010b11a575d43f5785b838dd279e9ede9a098dd146ea492450eb670bd309a"
 
 
 def test_a_golden_table_turn() -> None:
@@ -1746,3 +1746,96 @@ def test_the_lint_skips_a_table_that_cannot_write_unsure() -> None:
     )
     report = unsure_to_execute(loaded, values={"d:gate": [1]})
     assert [i["read"] for i in report["execute"]] == ["d:gate"]
+
+
+# ---------------------------------------------------------------------------------------------
+# The Known cell
+
+
+@pytest.mark.parametrize(
+    ("cell", "tagged"),
+    [
+        ("Known", {"known": True}),
+        (" Known ", {"known": True}),
+        ({"known": True}, {"known": True}),
+        ({"is": "Known"}, {"is": "Known"}),
+        ("known", {"is": "known"}),
+    ],
+)
+def test_a_known_cell_is_read(cell: Any, tagged: Any) -> None:
+    from ommat._table import cell_form
+
+    assert cell_form(cell) == tagged
+
+
+@pytest.mark.parametrize("member", [False, 1, "true", None])
+def test_a_known_cell_holding_anything_but_true_fails_check_10(member: Any) -> None:
+    refused(tab("F", ["t:state.n"], [[{"known": member}, 1], ["-", 0]]), 10, "not true")
+
+
+def test_a_known_cell_matches_any_value_and_no_marker() -> None:
+    table = tab("F", ["d:s0"], [["Known", 1], ["-", 2]])
+    for kind, expected in (("value", 1), ("Unsure", 2), ("Unavailable", 2), ("Unasked", 2)):
+        assert value(table, rules=srcs(kind)) == expected
+
+
+def test_a_known_cell_matches_null() -> None:
+    table = tab("F", ["t:state.maybe"], [["Known", 1], ["-", 2]])
+    assert value(table) == 1
+
+
+def test_a_value_row_after_a_known_cell_over_an_outage_does_not_meet_rule_2() -> None:
+    # Over the same outage a value cell escalates and a Known cell gives way to the next row.
+    rules = srcs("Unavailable")
+    assert value(tab("F", ["d:s0"], [[1, 1], ["-", 2]]), rules=rules)["kind"] == "Unavailable"
+    assert value(tab("F", ["d:s0"], [["Known", 1], ["-", 2]]), rules=rules) == 2
+
+
+def test_a_known_cell_lets_a_policy_row_whose_plan_reads_an_outage_give_way() -> None:
+    plans = {
+        **PLANS,
+        "page": PlanDeclaration("execute", [Step("notify", {"who": Origin(ref="d:s0")})]),
+    }
+    rows = [["yes", "Known", "page"], ["yes", "-", "tell"], ["-", "-", "ask"]]
+    design_ = dataclasses.replace(
+        policy_design(),
+        rules={**policy_design().rules, **srcs("Unavailable")},
+        plans=plans,
+        policy=PolicyTable(["d:urgent", "d:s0"], rows),
+    )
+    record = run(load(design_), 0.9)
+    plan = item(record, "plan")
+    assert plan["kind"] == "inform"
+    assert plan["cause"] is None
+    assert plan["rows"] == [2, 3]
+    assert item(record, "entry", "d:s0")["marker"]["kind"] == "Unavailable"
+    # With no Known cell the same outage escalates, naming the origin.
+    rows = [["yes", "-", "page"], ["yes", "-", "tell"], ["-", "-", "ask"]]
+    escalated = item(
+        run(
+            load(dataclasses.replace(design_, policy=PolicyTable(["d:urgent", "d:s0"], rows))), 0.9
+        ),
+        "plan",
+    )
+    assert escalated["kind"] == "escalate"
+    assert escalated["cause"] == {"code": "required", "refs": ["d:s0"]}
+
+
+def test_a_known_cell_stands_over_a_bare_question_and_a_record() -> None:
+    record_input = tab("F", ["t:state"], [["Known", 1], ["-", 0]])
+    load(design(("tab", record_input)))
+    bare = Table("d:tab", "integer", "F", ["q:urgent"], [["Known", 1], ["-", 0]])
+    load(design(("tab", bare), sources={"s": ASK}))
+
+
+def test_a_known_cell_is_written_tagged_and_round_trips() -> None:
+    loaded = load(design(("tab", tab("F", ["t:state.n"], [["Known", 1], ["-", 0]]))))
+    doc = json.loads(loaded.document)
+    assert doc["format"] == 9
+    assert doc["rules"]["tab"]["rows"][0]["cells"][0] == {"known": True}
+    assert load(loaded.document).design_hash == loaded.design_hash
+
+
+def test_a_known_cell_overlaps_a_value_cell_and_no_marker_cell() -> None:
+    load(design(("tab", tab("U", ["t:state.n"], [["Known", 1], ["Undetermined", 2]]))))
+    refused(tab("U", ["t:state.n"], [["Known", 1], [">= 0", 2]]), 9, "overlap")
