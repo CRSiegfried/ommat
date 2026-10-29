@@ -212,6 +212,7 @@ EVALUATION = {
     "switching_values_sync",
     "use_answers",
     "use_answers_sync",
+    "write_gold_answers",
 }
 
 

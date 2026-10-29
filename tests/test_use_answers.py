@@ -443,6 +443,10 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "unsupported-leaf",
         "baseline-differs",
         "unrepresentable-slack",
+        "invalid-label",
+        "conflicting-labels",
+        "unknown-entry",
+        "empty-copy",
     }
 
 

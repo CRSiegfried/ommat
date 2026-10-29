@@ -36,6 +36,10 @@ class RefusalReason(enum.StrEnum):
     unsupported_leaf = "unsupported-leaf"
     baseline_differs = "baseline-differs"
     unrepresentable_slack = "unrepresentable-slack"
+    invalid_label = "invalid-label"
+    conflicting_labels = "conflicting-labels"
+    unknown_entry = "unknown-entry"
+    empty_copy = "empty-copy"
 
 
 class EvaluationRefusal(Exception):
