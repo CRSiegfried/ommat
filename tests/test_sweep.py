@@ -1,19 +1,23 @@
 # pyright: reportPrivateUsage=false
 """The sweep job: the gold copy, carrying its own hash, read back and replayed, from format-1
-and format-2 gold entries and an extraction's (§gold-copy); a passed plan's action, the exact
-binomial tail against scipy where it is installed, the order check and both tests'
-choices (§sweep-scoring)."""
+and format-2 gold entries, an extraction's and a candidate-valued set's (§gold-copy); a passed
+plan's action, the exact binomial tail against a direct sum and scipy, the order check and both
+tests' choices (§sweep-scoring); and the job end to end, each count, the scope and every
+refusal in its order (§sweep)."""
 
 import asyncio
+import dataclasses
 import json
 import math
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 import extraction as x
+import test_label_sets as label_sets
 from ommat import (
     CallResult,
     Design,
@@ -44,21 +48,24 @@ from ommat.evaluation import (
     EvaluationRefusal,
     EvaluationStore,
     RefusalReason,
+    _sweep,
     write_gold_answers,
 )
 from ommat.evaluation._sweep import (
-    BONFERRONI,
-    FIXED_SEQUENCE,
-    action,
-    choose,
-    gold_answers,
-    gold_copy,
+    _BONFERRONI,
+    _FIXED_SEQUENCE,
+    _action,
+    _certifies,
+    _choose,
+    _gold_answers,
+    _gold_copy,
+    _scope,
+    _tail_parts,
+    _which_test,
     sweep_sync,
-    tail,
-    which_test,
 )
 from ommat.helpers import HELPERS
-from test_gold_answers import LOADED, ONE, TYPES, key, unfinished
+from test_gold_answers import LOADED, ONE, TYPES, edited, key, unfinished
 from test_use_answers import broken
 
 R = RefusalReason
@@ -84,7 +91,7 @@ LABELS: dict[str, object] = {
 
 def copy_of(record: Record, store: EvaluationStore) -> Record | str:
     log = record.log
-    return gold_copy(record, log, gold_answers(record.record_hash, log, "g", store))
+    return _gold_copy(record, log, _gold_answers(record.record_hash, log, "g", store))
 
 
 def entry(record: Record, ref: str) -> dict[str, Any]:
@@ -167,10 +174,50 @@ def test_a_turn_with_no_gold_copy_says_why(tmp_path: Path) -> None:
     assert copy_of(broken(), store) == "the record has no state entry"
 
 
-def test_a_label_for_an_extraction_question_is_no_answer(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("ref", "value"), [("q:number", "yes"), ("q:tone", "kind words"), ("q:number", {"value": "x"})]
+)
+def test_a_gold_answer_not_of_its_questions_form_is_an_unknown_entry(
+    tmp_path: Path, ref: str, value: object
+) -> None:
     store = EvaluationStore(tmp_path)
-    put(store, ONE, {**LABELS, "q:number": "yes"}, fmt=1)
-    assert copy_of(ONE, store) == "the gold answer for q:number is no answer to its question"
+    put(store, ONE, {**LABELS, ref: value}, fmt=1 if type(value) is str else 2)
+    with pytest.raises(EvaluationRefusal) as raised:
+        copy_of(ONE, store)
+    assert (raised.value.reason, raised.value.key) == (R.unknown_entry, [key("g", ONE, ref)])
+
+
+def test_a_candidate_valued_sets_labels_are_its_fixed_part_and_candidates(tmp_path: Path) -> None:
+    record = label_sets.run(["ann", "bo"])
+    store = EvaluationStore(tmp_path)
+    labels = {record.record_hash: {"q:sender": "bo", "q:other": "no"}}
+    write_gold_answers("g", [record], labels, results=store)
+    copy = copy_of(record, store)
+    assert isinstance(copy, Record)
+    probabilities = entry(copy, "q:sender")["value"]["probabilities"]
+    assert probabilities == {"none": 0, "several": 0, "ann": 0, "bo": 1}
+    assert read_record(copy.document).record_hash == copy.record_hash
+
+
+def test_a_candidate_set_holding_a_marker_leaves_its_fixed_part_as_the_labels(
+    tmp_path: Path,
+) -> None:
+    def marked(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for item in log:
+            if item.get("ref") == label_sets.SET:
+                del item["value"]
+                cause = {"code": "raised", "refs": [label_sets.SET]}
+                item["marker"] = {"kind": "Unavailable", "cause": cause}
+        return log
+
+    record = edited(label_sets.run(["ann", "bo"]), marked)
+    store = EvaluationStore(tmp_path)
+    labels = {record.record_hash: {"q:sender": "none", "q:other": "no"}}
+    write_gold_answers("g", [record], labels, results=store)
+    copy = copy_of(record, store)
+    assert isinstance(copy, Record)
+    assert entry(copy, "q:sender")["value"]["probabilities"] == {"none": 1, "several": 0}
+    assert read_record(copy.document).record_hash == copy.record_hash
 
 
 def test_a_failed_call_leaves_no_gold_copy(tmp_path: Path) -> None:
@@ -189,11 +236,9 @@ def test_a_failed_call_leaves_no_gold_copy(tmp_path: Path) -> None:
 
 def plan_log(arguments: dict[str, Any], kind: str = "execute", verdict: str = "passed") -> Any:
     step = {"tool": "notify", "arguments": arguments, "requirements": [{"ref": "d:a"}]}
-    marker = {"kind": "Unavailable", "cause": {"code": "raised", "refs": ["d:m"]}}
     return [
         {"item": "entry", "ref": "d:a", "value": {"to": {"name": "ann"}, "n": None}},
         {"item": "entry", "ref": "d:b", "value": "ann"},
-        {"item": "entry", "ref": "d:m", "marker": marker},
         {"item": "plan", "kind": kind, "steps": [step], "derivation": [], "rows": [1]},
         {"item": "verdict", "kind": verdict, "failures": []},
     ]
@@ -201,7 +246,7 @@ def plan_log(arguments: dict[str, Any], kind: str = "execute", verdict: str = "p
 
 def test_an_action_replaces_each_board_ref_by_what_it_reads() -> None:
     literal = {"literal": "x"}
-    got = action(plan_log({"who": {"ref": "d:a.to.name"}, "z": literal, "s": {"step": 1}}))
+    got = _action(plan_log({"who": {"ref": "d:a.to.name"}, "z": literal, "s": {"step": 1}}))
     assert got is not None
     assert json.loads(got) == {
         "kind": "execute",
@@ -214,57 +259,80 @@ def test_an_action_replaces_each_board_ref_by_what_it_reads() -> None:
         ],
     }
     # Two refs reading one value are one action; a null on the path reads null.
-    assert action(plan_log({"who": {"ref": "d:b"}})) == action(
+    assert _action(plan_log({"who": {"ref": "d:b"}})) == _action(
         plan_log({"who": {"ref": "d:a.to.name"}})
     )
-    assert b'{"value":null}' in (action(plan_log({"who": {"ref": "d:a.n"}})) or b"")
-    assert b'"marker":{"cause"' in (action(plan_log({"who": {"ref": "d:m"}})) or b"")
+    assert b'{"value":null}' in (_action(plan_log({"who": {"ref": "d:a.n"}})) or b"")
 
 
 def test_only_a_passed_execute_plan_has_an_action() -> None:
-    assert action(plan_log({}, kind="clarify")) is None
-    assert action(plan_log({}, verdict="refused")) is None
-    assert action([]) is None
+    assert _action(plan_log({}, kind="clarify")) is None
+    assert _action(plan_log({}, verdict="refused")) is None
+    assert _action([]) is None
 
 
 # ---------------------------------------------------------------------------------------------
 # The binomial test
 
 
-@pytest.mark.parametrize(("n", "k"), [(0, 0), (1, 0), (1, 1), (10, 0), (10, 3), (50, 5), (7, 9)])
-def test_the_tail_is_exact(n: int, k: int) -> None:
-    alpha = Fraction(1, 10)
-    expected = sum(
-        math.comb(n, i) * alpha**i * (1 - alpha) ** (n - i) for i in range(min(k, n) + 1)
+def tail(n: int, alpha: Fraction, k: int) -> Fraction:
+    return Fraction(*_tail_parts(n, alpha, k))
+
+
+def direct(n: int, alpha: Fraction, k: int) -> Fraction:
+    """The tail as the direct sum of binomial terms."""
+    return sum(
+        (math.comb(n, i) * alpha**i * (1 - alpha) ** (n - i) for i in range(min(k, n) + 1)),
+        Fraction(0),
     )
-    assert tail(n, alpha, k) == expected
+
+
+@pytest.mark.parametrize("alpha", [Fraction(1, 10), Fraction(1, 2), Fraction(0.05), Fraction(0.3)])
+def test_the_tail_is_exact(alpha: Fraction) -> None:
+    for n in [0, 1, 2, 7, 10, 50, 97]:
+        for k in [0, 1, 3, n // 2, n - 1, n, n + 2]:
+            if k >= 0:
+                assert tail(n, alpha, k) == direct(n, alpha, k), (n, k)
     assert tail(2, Fraction(1, 2), 0) == Fraction(1, 4)
 
 
-@pytest.mark.parametrize(("n", "k", "alpha"), [(50, 1, 0.1), (400, 12, 0.05), (1000, 0, 0.003)])
+@pytest.mark.parametrize(
+    ("n", "k", "alpha"), [(50, 1, 0.1), (400, 12, 0.05), (1000, 0, 0.003), (5000, 40, 0.01)]
+)
 def test_the_tail_agrees_with_scipy(n: int, k: int, alpha: float) -> None:
     stats = pytest.importorskip("scipy.stats")
     assert float(tail(n, Fraction(alpha), k)) == pytest.approx(stats.binom.cdf(k, n, alpha))
 
 
+def test_a_tail_equal_to_the_level_certifies() -> None:
+    assert _certifies(1, 0, 0.5, Fraction(1, 2))  # P(Bin(1, 0.5) <= 0) is exactly 0.5
+    assert not _certifies(1, 0, 0.5, Fraction(1, 2) - Fraction(1, 10**30))
+    assert _choose(_FIXED_SEQUENCE, 1, [0], 0.5, 0.5) == (0, 1)
+
+
+def test_a_large_tail_is_quick() -> None:
+    assert _certifies(20000, 150, 0.01, Fraction(1, 2))
+
+
 def test_the_order_check_reads_the_dev_split() -> None:
-    assert which_test([0, 0, 1, 4]) == FIXED_SEQUENCE
-    assert which_test([]) == which_test([3]) == FIXED_SEQUENCE
-    assert which_test([0, 2, 1]) == BONFERRONI
+    assert _which_test([0, 0, 1, 4]) == _FIXED_SEQUENCE
+    assert _which_test([]) == _which_test([3]) == _FIXED_SEQUENCE
+    assert _which_test([0, 2, 1]) == _BONFERRONI
 
 
 def test_fixed_sequence_testing_stops_at_the_first_point_not_certifying() -> None:
     # 0.9**50 is about 0.005, P(Bin(50, 0.1) <= 1) about 0.034, P(<= 5) about 0.62.
-    assert choose(FIXED_SEQUENCE, 50, [0, 1, 5, 0], 0.1, 0.05) == (1, 3)
-    assert choose(FIXED_SEQUENCE, 50, [5, 0], 0.1, 0.05) == (None, 1)
-    assert choose(FIXED_SEQUENCE, 50, [0, 1], 0.1, 0.05) == (1, 2)
+    assert _choose(_FIXED_SEQUENCE, 50, [0, 1, 5, 0], 0.1, 0.05) == (1, 3)
+    assert _choose(_FIXED_SEQUENCE, 50, [5, 0], 0.1, 0.05) == (None, 1)
+    assert _choose(_FIXED_SEQUENCE, 50, [0, 1], 0.1, 0.05) == (1, 2)
 
 
 def test_bonferroni_tests_every_point_at_delta_over_m() -> None:
-    assert choose(BONFERRONI, 50, [5, 0, 1], 0.1, 0.05) == (1, 3)  # 0.034 > 0.05 / 3
-    assert choose(BONFERRONI, 50, [1, 0, 5], 0.1, 0.05) == (1, 3)
-    assert choose(BONFERRONI, 50, [5, 6], 0.1, 0.05) == (None, 2)
-    assert choose(BONFERRONI, 0, [0], 0.1, 0.05) == (None, 1)  # no turn certifies nothing
+    assert _choose(_BONFERRONI, 50, [5, 0, 1], 0.1, 0.05) == (1, 3)  # 0.034 > 0.05 / 3
+    assert _choose(_BONFERRONI, 50, [1, 0, 5], 0.1, 0.05) == (1, 3)
+    assert _choose(_BONFERRONI, 50, [5, 6], 0.1, 0.05) == (None, 2)
+    assert _choose(_BONFERRONI, 0, [0], 0.1, 0.05) == (None, 1)  # no turn certifies nothing
+    assert _choose(_BONFERRONI, 50, [0, 5], 0.1, 0.05) == (0, 2)  # not the last tested
 
 
 # ---------------------------------------------------------------------------------------------
@@ -472,7 +540,7 @@ def test_no_point_chosen_keeps_no_design(tmp_path: Path) -> None:
     ],
 )
 def test_an_unknown_format_is_refused_first(tmp_path: Path, document: object) -> None:
-    exc = Stores(tmp_path, labelled=False).refused(document, splits=())
+    exc = Stores(tmp_path, labelled=False).refused(document)
     assert exc.reason is R.unknown_format
 
 
@@ -502,13 +570,13 @@ def test_an_unknown_format_is_refused_first(tmp_path: Path, document: object) ->
     ],
 )
 def test_an_invalid_sweep_is_refused(tmp_path: Path, document: object) -> None:
-    exc = Stores(tmp_path, labelled=False).refused(document, splits=())
+    exc = Stores(tmp_path, labelled=False).refused(document)
     assert exc.reason is R.invalid_sweep
     assert exc.error is None
 
 
 def test_a_parse_error_is_chained(tmp_path: Path) -> None:
-    exc = Stores(tmp_path).refused(b"{", splits=())
+    exc = Stores(tmp_path).refused(b"{")
     assert exc.__cause__ is not None
 
 
@@ -669,3 +737,183 @@ def test_sweep_sync_refuses_inside_a_running_loop(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="await sweep"):
         asyncio.run(inside())
+
+
+# ---------------------------------------------------------------------------------------------
+# Each count, the splits' sizes and shapes, and the scope
+
+
+def eager_policy(r: Any) -> Plan:
+    v = r.read("d:spam")
+    if v not in ("yes", "no"):
+        raise RuntimeError("unsure")
+    step = Step("archive", {"what": Origin(ref="d:spam")}, [Requirement("d:spam", v)])
+    return Plan("execute", [step])
+
+
+EAGER_FUNCTIONS = {"policy": eager_policy}
+EAGER = load(
+    dataclasses.replace(
+        SPAM,
+        sources={"ask": SPAM.sources["ask"]},
+        policy=Policy(eager_policy, version="1", reads=["d:spam"]),
+    )
+)
+
+
+def sweep_of(
+    root: Path,
+    dev: list[tuple[Record, str]],
+    cert: list[tuple[Record, str]],
+    points: list[dict[str, Any]],
+    design: LoadedDesign = SPAM_DESIGN,
+    functions: dict[str, Any] = FUNCTIONS,
+) -> dict[str, Any]:
+    """The sweep's entry over two splits, each record with its gold label."""
+    designs, results = DesignStore(root / "designs"), EvaluationStore(root / "results")
+    designs.keep(design)
+    splits: list[tuple[str, list[Record]]] = []
+    for turns in (dev, cert):
+        records = [r for r, _ in turns]
+        labels = {r.record_hash: {"q:spam": g} for r, g in turns}
+        write_gold_answers("g", records, labels, results=results)
+        splits.append((split_id(records), records))
+    doc = sweep_doc(
+        design=design.design_hash, points=points, dev=splits[0][0], certification=splits[1][0]
+    )
+    return sweep_sync(doc, splits, functions=functions, designs=designs, results=results)
+
+
+def test_an_execute_plan_differing_from_the_gold_one_escapes_and_a_broken_plan_counts(
+    tmp_path: Path,
+) -> None:
+    dev = [(spam_turn(n, p, EAGER), g) for n, p, g in [(0, 0.9, "yes"), (1, 0.7, "no")]]
+    dev.append(dev[0])  # a record repeated in its split counts once
+    dev.append((spam_turn(2, 0.2, EAGER), "no"))
+    cert = [(spam_turn(n, p, EAGER), g) for n, p, g in CERT_TURNS if p != 0.55]
+    cert.append((spam_turn(14, 0.1, EAGER), "no"))
+    value = sweep_of(
+        tmp_path, dev, cert, [{"spam/bar": 0.95}, {"spam/bar": 0.0}], EAGER, EAGER_FUNCTIONS
+    )["value"]
+    assert value["counts"]["dev"] == {
+        "turns": 3,
+        "points": [counts(broken=3), counts(matched=2, escaped=1)],  # 0.7 says yes; gold no
+    }
+    assert value["counts"]["certification"] == {
+        "turns": 4,
+        "points": [counts(broken=4), counts(matched=4)],
+    }
+    # Certified on the certification split's 4 turns, 0.5**4 within 0.1; 3 would not be.
+    assert (value["test"], value["chosen"]) == ("fixed-sequence", 1)
+
+
+def test_the_entry_shares_nothing_with_the_callers_document(tmp_path: Path) -> None:
+    document = sweep_doc(points=[{"spam/bar": 0.95}, {"spam/bar": 0.65}])
+    kept = json.loads(json.dumps(document))
+    entry = Stores(tmp_path).run(document)
+    entry["value"]["sweep"]["points"][0]["spam/bar"] = 0.1
+    assert document == kept
+    document["points"].append({})
+    assert len(entry["value"]["sweep"]["points"]) == 2
+
+
+@pytest.mark.parametrize(
+    "splits",
+    [
+        "splits",
+        (),
+        [(split_id(DEV), DEV)],
+        ((split_id(DEV), DEV), (split_id(CERT), CERT), (split_id(CERT), CERT)),
+        ((split_id(DEV), DEV), split_id(CERT)),
+        ((split_id(DEV), DEV), (split_id(CERT), CERT, 1)),
+        ((1, DEV), (split_id(CERT), CERT)),
+        ((split_id(DEV), 5), (split_id(CERT), CERT)),
+        ((split_id(DEV), DEV), (split_id(CERT), b"records")),
+        ((split_id(DEV), {"a": 1}), (split_id(CERT), CERT)),
+    ],
+)
+def test_malformed_splits_are_a_type_error_before_anything_else(
+    tmp_path: Path, splits: object
+) -> None:
+    with pytest.raises(TypeError, match="split"):
+        Stores(tmp_path, labelled=False).run(b"{", splits=splits)
+
+
+def test_a_recorded_failed_call_rerun_unreturned_is_not_determined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def answer(batch: Any, *, seconds: float) -> CallResult:
+        if batch[0].id == "check":
+            raise RuntimeError("down")
+        return CallResult({"q:spam": {"yes": 0.9, "no": 0.1}})
+
+    failed = decide_sync(SPAM_DESIGN, {"n": 30}, {"default": answer}).record
+    real = _sweep._replay_with
+
+    async def unreturned(log: Any, design: Any, answers: Any, **kw: Any) -> Any:
+        rerun, found = await real(log, design, answers, **kw)
+        asked = next(i for i in log if i["item"] == "entry" and i["ref"] == "q:spam")
+        if asked["value"]["probabilities"]["yes"] != 0.9:
+            return rerun, found  # a gold copy
+        marker = {"kind": "Unavailable", "cause": {"code": "not-returned", "refs": ["t:checked"]}}
+        rewritten = [
+            {"item": "entry", "ref": i["ref"], "call": i["call"], "marker": marker}
+            if i["item"] == "entry" and i["ref"] == "t:checked"
+            else i
+            for i in rerun.log
+        ]
+        return SimpleNamespace(log=rewritten), found
+
+    monkeypatch.setattr(_sweep, "_replay_with", unreturned)
+    with pytest.raises(EvaluationRefusal) as raised:
+        sweep_of(tmp_path, [(failed, "yes")], [(CERT[1], "no")], [{"spam/bar": 0.5}])
+    exc = raised.value
+    assert (exc.reason, exc.turn, exc.point) == (R.not_determined, failed.record_hash, 0)
+    assert "not-returned" in str(exc)
+
+
+def test_a_gold_copy_its_replay_does_not_determine_has_no_gold_plan_there(
+    tmp_path: Path,
+) -> None:
+    document = json.loads(SPAM_DESIGN.document)
+    document["parameters"]["spam/bar"]["value"] = 0.95
+    late = spam_turn(21, 0.9, load(document, functions=FUNCTIONS))  # the check never asked
+    with pytest.raises(EvaluationRefusal) as raised:
+        sweep_of(tmp_path, [(late, "yes")], [(CERT[1], "no")], [{"spam/bar": 0.5}])
+    exc = raised.value  # the gold label yes asks the check outside the record
+    assert (exc.reason, exc.turn, exc.point) == (R.no_gold_plan, late.record_hash, 0)
+    assert "not-in-record" in str(exc)
+
+
+@pytest.mark.parametrize("value", [math.inf, 2**60])
+def test_a_point_value_outside_the_domain_is_an_invalid_sweep(
+    tmp_path: Path, value: object
+) -> None:
+    exc = Stores(tmp_path, labelled=False).refused(sweep_doc(points=[{"spam/bar": value}]))
+    assert exc.reason is R.invalid_sweep
+
+
+def test_the_scope_lists_each_call_items_profile() -> None:
+    def call(identity: str | None, elicitation: str | None, **members: object) -> Any:
+        questions = {} if identity is None else {"q:x": {"identity": identity}}
+        return {"item": "call", "questions": questions, "elicitation": elicitation, **members}
+
+    logs = [
+        [call("i2", "e1", snapshot="s1"), {"item": "plan"}],  # before format 5
+        [
+            call(
+                "i1", None, provider="p", model_requested="m1", model_reported=None, revision="r1"
+            ),
+            call(
+                None, "e0", provider=None, model_requested="m0", model_reported="m2", revision=None
+            ),
+            call("i1", "e1", snapshot=None),
+        ],
+    ]
+    assert _scope(logs) == {
+        "questions": ["i1", "i2"],
+        "providers": ["p"],
+        "models": ["m1", "m2"],  # the reported one, else the requested
+        "revisions": ["r1", "s1"],
+        "elicitations": ["e0", "e1"],
+    }

@@ -52,6 +52,8 @@ dev = [
     "rfc8785>=0.1.4",
     # The live recordings of the binding's end-to-end logs call OpenAI and Cloudflare.
     "idia[openai,cloudflare]",
+    # The test-time oracle for the sweep's exact binomial tail.
+    "scipy>=1.17.1",
 ]
 
 [build-system]
