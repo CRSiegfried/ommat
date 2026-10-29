@@ -1839,3 +1839,11 @@ def test_a_known_cell_is_written_tagged_and_round_trips() -> None:
 def test_a_known_cell_overlaps_a_value_cell_and_no_marker_cell() -> None:
     load(design(("tab", tab("U", ["t:state.n"], [["Known", 1], ["Undetermined", 2]]))))
     refused(tab("U", ["t:state.n"], [["Known", 1], [">= 0", 2]]), 9, "overlap")
+
+
+def test_a_collect_leaves_out_a_row_failing_on_known_and_propagates_from_a_value_cell() -> None:
+    rules = srcs("Unavailable")
+    known = tab("C+", ["d:s0", "t:state.n"], [["Known", "-", 1], ["-", "-", 3]])
+    assert value(known, rules=rules) == 3
+    valued = tab("C+", ["d:s0", "t:state.n"], [[1, "-", 1], ["-", "-", 3]])
+    assert value(valued, rules=rules)["cause"] == {"code": "required", "refs": ["d:s0"]}
