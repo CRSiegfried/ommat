@@ -442,6 +442,7 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "unknown-path",
         "unsupported-leaf",
         "baseline-differs",
+        "unrepresentable-slack",
     }
 
 

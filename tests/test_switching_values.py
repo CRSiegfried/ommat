@@ -7,6 +7,8 @@ and the entry written to the store, looked up from it and returned as plain data
 import asyncio
 import copy
 import json
+import math
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,22 +18,28 @@ import extraction as x
 from designs import minimal, slot
 from ommat import (
     CallResult,
+    Context,
+    ContextEntry,
     Helper,
     InvalidDesign,
     InvalidRecord,
     LoadedDesign,
+    Origin,
     Param,
     Parameter,
     Plan,
     Policy,
     Question,
     Record,
+    Requirement,
     Rule,
     Source,
+    Step,
     Table,
     Text,
     decide_sync,
     load,
+    read_record,
 )
 from ommat import types as t
 from ommat._canonical import decode
@@ -41,6 +49,7 @@ from ommat.evaluation import (
     RefusalReason,
     _diff,
     _switching,
+    deciding_inputs_sync,
     switching_values,
     switching_values_sync,
 )
@@ -69,8 +78,12 @@ def on(r: Any) -> bool:
     return r.param("sw/on") and r.read("t:state.flag")
 
 
-def mode(r: Any) -> bool:
-    return r.param("sw/mode") == "a"
+def mode(r: Any) -> str:
+    return r.param("sw/mode")
+
+
+def kfn(r: Any) -> bool:
+    return r.param("lim/k") > 100
 
 
 def flip(r: Any) -> bool:
@@ -85,12 +98,25 @@ def plan_of(r: Any) -> Plan:
     return Plan("inform", reply="ok")
 
 
-STATE_T = t.record(n=t.number(), k=t.integer(), flag=t.boolean)
-STATE: dict[str, Any] = {"n": 7.0, "k": 4, "flag": True}
+STATE_T = t.record(n=t.number(), k=t.integer(), flag=t.boolean, items=t.list_(t.integer()))
+STATE: dict[str, Any] = {"n": 7.0, "k": 4, "flag": True, "items": [1, 2, 3]}
 RULES: dict[str, Any] = {
     "big": Table("d:big", BIG_SMALL, "F", ["t:state.n"], [[">= lim/n", "big"], ["-", "small"]]),
     "many": Table("d:many", BIG_SMALL, "F", ["t:state.k"], [[">= lim/k", "big"], ["-", "small"]]),
     "echo": Table("d:echo", "number", "F", [], [[Param("lim/n")]]),
+    "part": Table(
+        "d:part", "number", "F", ["t:state.n"], [[">= lim/n", Param("lim/n")], ["-", 0.0]]
+    ),
+    "le": Table("d:le", BIG_SMALL, "F", ["t:state.n"], [["<= lim/lt", "big"], ["-", "small"]]),
+    "lt": Table("d:lt", BIG_SMALL, "F", ["t:state.n"], [["< lim/lt", "big"], ["-", "small"]]),
+    "sz": Table(
+        "d:sz",
+        BIG_SMALL,
+        "F",
+        [Helper("size", "t:state.items")],
+        [[">= lim/s", "big"], ["-", "small"]],
+    ),
+    "kfn": Rule("d:kfn", t.boolean, kfn, version="1", reads=["t:state.flag"], params=["lim/k"]),
     "band": Table(
         "d:band",
         'label{"in", "out"}',
@@ -110,7 +136,12 @@ RULES: dict[str, Any] = {
     "hid": Rule("d:hid", t.boolean, hid, version="1", reads=["t:state.n"], params=["lim/n"]),
     "on": Rule("d:on", t.boolean, on, version="1", reads=["t:state.flag"], params=["sw/on"]),
     "mode": Rule(
-        "d:mode", t.boolean, mode, version="1", reads=["t:state.flag"], params=["sw/mode"]
+        "d:mode",
+        t.label("a", "b", "c"),
+        mode,
+        version="1",
+        reads=["t:state.flag"],
+        params=["sw/mode"],
     ),
     "flip": Rule("d:flip", t.boolean, flip, version="1", reads=["t:state.flag"]),
 }
@@ -118,6 +149,8 @@ PARAMETERS: dict[str, Any] = {
     "lim/n": Parameter(t.number(), 5.0),
     "lim/k": Parameter(t.integer(0, 10), 2),
     "lim/f": Parameter(t.number(), 1.0),
+    "lim/lt": Parameter(t.number(), 9.0),
+    "lim/s": Parameter(t.integer(), 1),
     "sw/on": Parameter(t.boolean, False),
     "sw/mode": Parameter(t.label("a", "b", "c"), "a"),
     "band/lo": Parameter(t.number(), 1.0),
@@ -192,7 +225,7 @@ def refusal(*args: Any, **kwargs: Any) -> EvaluationRefusal:
 def test_a_table_cell_is_probed_at_its_input_and_the_gap_and_end_values(tmp_path: Path) -> None:
     value = run(tables_record(), TABLES, "lim/n", tmp_path)["value"]
     assert value["unseen"] == ["hid"]  # it declares the leaf and has no boundaries field
-    assert list(value["entries"]) == ["d:big", "d:echo"]
+    assert list(value["entries"]) == ["d:big", "d:echo", "d:part"]
     assert shape(value["entries"]["d:big"]) == {
         "switching": [7.0],
         "slacks": [None, 2.0],
@@ -201,16 +234,19 @@ def test_a_table_cell_is_probed_at_its_input_and_the_gap_and_end_values(tmp_path
             {"least": 8.0, "greatest": 8.0, "result": "small"},
         ],
     }
-    assert value["entries"]["d:echo"] == "carries"  # a Param output, changing at every value
+    assert value["entries"]["d:echo"] == "carries"  # a Param output
+    assert value["entries"]["d:part"] == "carries"  # a Param row firing below 7 alone
     assert shape(value["plan"]) == shape(value["entries"]["d:big"])  # the reply is d:big
 
 
 def test_an_integer_leaf_takes_integer_points_within_its_interval(tmp_path: Path) -> None:
     value = run(tables_record(), TABLES, "lim/k", tmp_path)["value"]
-    assert value["unseen"] == []
-    assert shape(value["entries"]["d:many"]) == {
-        "switching": [4],
-        "slacks": [None, 2],
+    assert value["unseen"] == ["kfn"]  # no integer interval is enumerated
+    summary = value["entries"]["d:many"]
+    assert type(summary["slacks"][1]) is int
+    assert shape(summary) == {
+        "switching": [10],  # on an integer axis, the upper class's least
+        "slacks": [None, 8],
         "classes": [
             {"least": 0, "greatest": 4, "result": "big"},
             {"least": 10, "greatest": 10, "result": "small"},
@@ -236,14 +272,14 @@ def test_a_value_whose_design_fails_load_marks_its_range_not_loading(tmp_path: P
     value = run(tables_record(), TABLES, "band/lo", tmp_path)["value"]
     assert value["entries"] == {}  # d:band holds wherever the design loads
     plan = value["plan"]
-    assert plan["switching"] == []
-    assert plan["slacks"] == [None, None]
+    assert plan["switching"] == [7.0]  # beside a not-loading class, as beside any
+    assert plan["slacks"] == [None, 6.0]
     (first, last) = plan["classes"]
     assert (first["least"], first["greatest"], last["least"]) == (1.0, 7.0, 8.0)
     (failure,) = last["result"]["not-loading"]
     assert failure["check"] == 9
+    assert failure["names"] == ["band"]
     assert "band" in failure["message"]
-    assert set(failure) == {"check", "names", "message"}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -262,8 +298,12 @@ def test_a_boolean_leaf_is_partitioned_false_first(tmp_path: Path) -> None:
 def test_a_label_leaf_is_partitioned_in_declared_order(tmp_path: Path) -> None:
     value = run(tables_record(), TABLES, "sw/mode", tmp_path)["value"]
     assert shape(value["entries"]["d:mode"]) == {
-        "classes": [{"values": ["a"], "result": True}, {"values": ["b", "c"], "result": False}]
-    }
+        "classes": [
+            {"values": ["a"], "result": "a"},
+            {"values": ["b"], "result": "b"},
+            {"values": ["c"], "result": "c"},
+        ]
+    }  # a lookup giving every label its own result is no carrying
 
 
 # ---------------------------------------------------------------------------------------------
@@ -272,6 +312,10 @@ def test_a_label_leaf_is_partitioned_in_declared_order(tmp_path: Path) -> None:
 
 def calm(r: Any) -> Plan:
     return Plan("inform", reply=r.read("d:th"))
+
+
+def thf(r: Any) -> bool:
+    return r.param("mood/th")["calm"] > 2
 
 
 def mood_design(wording: Text | None = None) -> LoadedDesign:
@@ -299,12 +343,24 @@ def mood_design(wording: Text | None = None) -> LoadedDesign:
                     [Helper("pick_with_margin", "q:mood", bar="mood/bar", margin="mood/m2")],
                     [["calm", "yes"], ["-", "no"]],
                 ),
+                "ms": Table(
+                    "d:ms",
+                    YES_NO,
+                    "F",
+                    [Helper("mass", "q:mood", labels="mood/labels")],
+                    [[">= mood/mbar", "yes"], ["-", "no"]],
+                ),
+                "thf": Rule(
+                    "d:thf", t.boolean, thf, version="1", reads=["q:mood"], params=["mood/th"]
+                ),
             },
             parameters={
                 "mood/th": Parameter(t.mapping(t.number(0, 1)), {"calm": 0.6, "wild": 0.6}),
                 "mood/m": Parameter(t.number(0, 1), 0.2),
                 "mood/bar": Parameter(t.number(0, 1), 0.5),
                 "mood/m2": Parameter(t.number(0, 1), 0.0),
+                "mood/labels": Parameter(t.list_(t.string), ["calm"]),
+                "mood/mbar": Parameter(t.number(0, 1), 0.5),
             },
             policy=Policy(calm, version="1", reads=["d:th"]),
         )
@@ -325,7 +381,7 @@ def mood_record(loaded: LoadedDesign = MOOD) -> Record:
 def test_a_mapping_leaf_varies_each_key_alone(tmp_path: Path) -> None:
     value = run(mood_record(), MOOD, "mood/th", tmp_path)["value"]
     assert set(value) == {"unseen", "keys"}
-    assert value["unseen"] == []
+    assert value["unseen"] == ["thf"]  # it declares the mapping and has no boundaries field
     assert list(value["keys"]) == ["calm", "wild"]
     calm_key = value["keys"]["calm"]
     # Probed at each label's probability: calm passes its threshold up to 0.7.
@@ -375,7 +431,8 @@ def test_a_question_reading_the_leaf_leaves_other_values_not_determined(tmp_path
     classes = value["plan"]["classes"]
     assert [value_of(c["result"]) for c in classes] == ["not-determined", "yes", "not-determined"]
     assert classes[1]["least"] == classes[1]["greatest"] == 0.5
-    assert value["plan"]["switching"] == []
+    assert value["plan"]["switching"] == [0.3, 0.7]  # each facing value compared
+    assert value["plan"]["slacks"] == [-0.2, 0.2]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -479,7 +536,7 @@ def test_unfinished_then_nothing_to_replay_then_wrong_design(tmp_path: Path) -> 
     assert exc.turn == record.record_hash
 
 
-@pytest.mark.parametrize("path", ["lim", "nope", "lim//n", "Lim/n", 3])
+@pytest.mark.parametrize("path", ["lim", "nope", "lim//n", "Lim/n", 3, ["lim"]])
 def test_unknown_path_names_no_leaf(path: Any, tmp_path: Path, no_replay: None) -> None:
     exc = refusal(tables_record(), TABLES, path, tmp_path, functions={"policy": 1})
     assert exc.reason is R.unknown_path
@@ -607,3 +664,302 @@ def test_a_pick_helper_switches_nowhere_but_its_reported_switching_value(tmp_pat
     for v in [i / 100 for i in range(101)]:
         record = decide_sync(at(MOOD, "mood/m", v), STATE, {"default": answer}).record
         assert decided_entry(record, "d:th") == ("yes" if v <= switch else "no"), v
+
+
+# ---------------------------------------------------------------------------------------------
+# Two rounds of probes, and what they leave unseen
+
+
+def constant(r: Any) -> Plan:
+    return Plan("inform", reply="ok")
+
+
+def twice(r: Any) -> float:
+    return 2 * r.param("lim/f") + 1
+
+
+def over(r: Any) -> bool:
+    return r.read("d:y") > r.param("lim/f")
+
+
+def counting_replays(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    seen = [0]
+    real = _switching._replay_with
+
+    async def counted(*args: Any, **kwargs: Any) -> Any:
+        seen[0] += 1
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(_switching, "_replay_with", counted)
+    return seen
+
+
+def test_a_value_each_round_recomputes_ends_at_round_1_and_lists_its_component(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={
+                "cap": Table("d:cap", "number", "F", [], [[Param("lim/n")]]),
+                "chk": Table(
+                    "d:chk", BIG_SMALL, "F", ["d:cap"], [[">= lim/n", "big"], ["-", "small"]]
+                ),
+            },
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Policy(constant, version="1", reads=["d:chk"]),
+        )
+    )
+    seen = counting_replays(monkeypatch)
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
+    assert value["unseen"] == ["chk"]  # d:cap holds every value tried, so chk compares anew
+    assert value["entries"]["d:cap"] == "carries"
+    # Round 0 over 5: 4 and 6; round 1 over 4, 5 and 6: 3, 4.5, 5.5 and 7.
+    assert seen[0] == 2 + 4
+
+
+def test_a_function_computing_from_the_leaf_ends_and_is_unseen(tmp_path: Path) -> None:
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={
+                "y": Rule("d:y", t.number(), twice, version="1", reads=[], params=["lim/f"]),
+                "over": Rule(
+                    "d:over",
+                    t.boolean,
+                    over,
+                    version="1",
+                    reads=["d:y"],
+                    params=["lim/f"],
+                    boundaries={"d:y": ["lim/f"]},
+                ),
+            },
+            parameters={"lim/f": PARAMETERS["lim/f"]},
+            policy=Policy(constant, version="1", reads=["d:over"]),
+        )
+    )
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/f", tmp_path)["value"]
+    assert value["unseen"] == ["over", "y"]  # y has no boundaries; over's round-1 values
+
+
+def three_way(own: float) -> LoadedDesign:
+    return load(
+        minimal(
+            state=STATE_T,
+            rules={
+                "cmp": Table(
+                    "d:cmp",
+                    'label{"eq", "gt", "lt"}',
+                    "F",
+                    ["t:state.n"],
+                    [["> lim/n", "gt"], [">= lim/n", "eq"], ["-", "lt"]],
+                )
+            },
+            parameters={"lim/n": Parameter(t.number(), own)},
+            policy=Policy(constant, version="1", reads=["d:cmp"]),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("own", "slacks"), [(5.0, [None, 2.0]), (7.0, [0.0, 0.0]), (8.0, [-1.0, None])]
+)
+def test_a_three_way_table_gives_classes_whatever_the_own_value(
+    own: float, slacks: list[float | None], tmp_path: Path
+) -> None:
+    loaded = three_way(own)
+    summary = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"][
+        "entries"
+    ]["d:cmp"]
+    assert [value_of(c["result"]) for c in summary["classes"]] == ["gt", "eq", "lt"]
+    assert summary["switching"] == [7.0, 7.0]
+    assert summary["slacks"] == slacks
+
+
+def counted(own: float) -> LoadedDesign:
+    fields = ("a", "b", "c", "d")
+    return load(
+        minimal(
+            state=t.record(**dict.fromkeys(fields, t.number())),
+            rules={
+                "count": Table(
+                    "d:count",
+                    "integer",
+                    "C#",
+                    [f"t:state.{f}" for f in fields],
+                    [["-"] * i + [">= lim/c"] + ["-"] * (3 - i) for i in range(4)],
+                )
+            },
+            parameters={"lim/c": Parameter(t.number(), own)},
+            policy=Policy(constant, version="1", reads=["d:count"]),
+        )
+    )
+
+
+@pytest.mark.parametrize(("own", "slacks"), [(5.5, [-1.5, 1.5]), (7.0, [-3.0, 0.0])])
+def test_the_slacks_are_the_switching_values_bounding_the_own_class(
+    own: float, slacks: list[float], tmp_path: Path
+) -> None:
+    loaded = counted(own)
+    state = {"a": 1.0, "b": 4.0, "c": 7.0, "d": 10.0}
+    summary = run(decide_sync(loaded, state, {}).record, loaded, "lim/c", tmp_path)["value"][
+        "entries"
+    ]["d:count"]
+    assert summary["switching"] == [1.0, 4.0, 7.0, 10.0]
+    assert summary["slacks"] == slacks
+
+
+def test_le_and_lt_cells_switch_at_their_input(tmp_path: Path) -> None:
+    entries = run(tables_record(), TABLES, "lim/lt", tmp_path)["value"]["entries"]
+    assert shape(entries["d:le"])["classes"][0] == {
+        "least": 6.0,
+        "greatest": 6.0,
+        "result": "small",
+    }
+    assert entries["d:le"]["switching"] == [7.0]
+    assert shape(entries["d:lt"])["classes"][0] == {
+        "least": 6.0,
+        "greatest": 7.0,
+        "result": "small",
+    }
+    assert entries["d:lt"]["switching"] == [7.0]
+    assert entries["d:le"]["slacks"] == entries["d:lt"]["slacks"] == [-2.0, None]
+
+
+def test_a_size_input_is_probed_on_a_plain_integer_leaf(tmp_path: Path) -> None:
+    summary = run(tables_record(), TABLES, "lim/s", tmp_path)["value"]["entries"]["d:sz"]
+    assert shape(summary) == {
+        "switching": [4],
+        "slacks": [None, 3],
+        "classes": [
+            {"least": 1, "greatest": 3, "result": "big"},
+            {"least": 4, "greatest": 4, "result": "small"},
+        ],
+    }
+    assert type(summary["slacks"][1]) is int
+
+
+def test_a_mass_input_is_probed_at_the_mass(tmp_path: Path) -> None:
+    summary = run(mood_record(), MOOD, "mood/mbar", tmp_path)["value"]["entries"]["d:ms"]
+    assert summary["switching"] == [0.7]
+    assert summary["slacks"] == [None, 0.2]
+
+
+def test_a_slack_no_float_holds_is_refused_before_the_write(tmp_path: Path) -> None:
+    big = 1.7976931348623157e308
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": Parameter(t.number(), big)},
+            policy=Policy(constant, version="1", reads=["d:big"]),
+        )
+    )
+    record = decide_sync(loaded, {**STATE, "n": -big}, {}).record
+    exc = refusal(record, loaded, "lim/n", tmp_path)
+    assert exc.reason is R.unrepresentable_slack
+    assert exc.path == "lim/n"
+    key = {"record": record.record_hash, "design": loaded.design_hash, "parameter": "lim/n"}
+    assert EvaluationStore(tmp_path).lookup(KIND, key) is None
+
+
+# ---------------------------------------------------------------------------------------------
+# The plan and the verdict
+
+
+def act(r: Any) -> Plan:
+    return Plan("execute", [Step("archive", {"what": Origin(literal="x")})])
+
+
+def test_a_verdict_change_alone_splits_the_plan(tmp_path: Path) -> None:
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Policy(act, version="1", reads=["d:big"]),
+            requirements=[Requirement("d:big", "big")],
+            tools=["archive"],
+        )
+    )
+    plan = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]["plan"]
+    verdicts = [c["result"]["verdict"]["failures"] for c in plan["classes"]]
+    assert len(verdicts[1]) == len(verdicts[0]) + 1  # d:big's plan-level requirement fails
+    assert plan["classes"][0]["result"]["plan"] == plan["classes"][1]["result"]["plan"]
+    assert plan["switching"] == [7.0]
+
+
+def test_a_change_of_context_alone_is_no_plan_change(tmp_path: Path) -> None:
+    entry = ContextEntry(
+        "d:big", Text("{b} over {lim}", [slot("b", ref="d:big"), slot("lim", param="lim/n")])
+    )
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Policy(constant, version="1", reads=["d:big"]),
+            context=Context(entries=[entry]),
+        )
+    )
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
+    assert len(value["entries"]["d:big"]["classes"]) == 2
+    assert len(value["plan"]["classes"]) == 1
+
+
+# ---------------------------------------------------------------------------------------------
+# A record of an older format, the helper version its only difference
+
+FORMAT_5 = Path(__file__).parent / "format_5"
+
+
+def test_both_jobs_take_a_record_whose_only_finding_is_the_helper_version(tmp_path: Path) -> None:
+    loaded = load((FORMAT_5 / "design.json").read_bytes())
+    record = read_record((FORMAT_5 / "record.json").read_bytes())
+    assert deciding_inputs_sync(record, loaded, "d:weights") is not None
+    value = run(record, loaded, "order/weights", tmp_path)["value"]
+    assert value["unseen"] == ["weights"]
+    assert value["keys"]["alpha"]["entries"] == {}  # the rule reads zeta alone
+    classes = value["keys"]["zeta"]["entries"]["d:weights"]["classes"]
+    # No value compares the key, so it is tried at the axis's two ends and its own.
+    assert [c["least"] for c in classes] == [-(2**53 - 1), 2, 2**53 - 1]
+    assert len(value["keys"]["zeta"]["plan"]["classes"]) == 1  # the plan's context alone moves
+
+
+# ---------------------------------------------------------------------------------------------
+# The parts
+
+
+def test_the_margin_probe_rounds_down_when_the_nearest_float_is_above_the_lead() -> None:
+    probe = _switching._margin_probe({"a": 0.123456789012345, "b": 1e-18})
+    lead = Fraction("0.123456789012345") - Fraction("1e-18")
+    assert Fraction(repr(probe)) <= lead
+    assert Fraction(repr(math.nextafter(probe, math.inf))) > lead
+
+
+def test_a_not_returned_ref_of_a_failed_call_is_not_determined() -> None:
+    cause = {"code": "not-returned", "refs": ["t:x"]}
+    rerun = [{"item": "entry", "ref": "t:x", "marker": {"kind": "Unavailable", "cause": cause}}]
+
+    def log(outcome: object) -> list[dict[str, Any]]:
+        return [
+            {"item": "design"},
+            {"item": "call", "outcome": outcome},
+            {"item": "entry", "ref": "t:x", "call": 1},
+        ]
+
+    assert _switching._unreturned(log({"failed": {"code": "raised", "refs": []}}), rerun)
+    assert not _switching._unreturned(log("returned"), rerun)
+    other = [{**rerun[0], "marker": {"kind": "Unavailable", "cause": {**cause, "code": "raised"}}}]
+    assert not _switching._unreturned(log({"failed": {}}), other)
+    unsure = [{**rerun[0], "marker": {"kind": "Unsure", "cause": cause}}]
+    assert not _switching._unreturned(log({"failed": {}}), unsure)
+
+
+def test_a_marker_a_candidate_read_and_a_missing_field_give_no_value() -> None:
+    marker: dict[str, Any] = {"item": "entry", "ref": "t:x", "marker": {"kind": "Unsure"}}
+    held = {"item": "entry", "ref": "t:y", "value": {"f": 2}}
+    assert _switching._read_values("t:x", [marker]) == []
+    assert _switching._read_values("candidate", [held]) == []
+    assert _switching._read_values("t:y.g", [held]) == []
+    assert _switching._read_values("t:y.f", [held]) == [2]

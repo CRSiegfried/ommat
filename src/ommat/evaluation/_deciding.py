@@ -29,7 +29,8 @@ the entry; joint effects are not explored.
 
 The record is checked as the edits check it, then ``ref`` refused ``not-found`` unless it names
 an entry of the record a rule provides; then the record is replayed unedited under ``loaded``
-and refused ``baseline-differs`` on any finding, the kinds in the message, before any trial.
+and refused ``baseline-differs`` on any finding but ``helpers-mismatch``, the kinds in the
+message, before any trial.
 The output is plain data.
 """
 
@@ -77,7 +78,7 @@ async def deciding_inputs(
     to ``deciding``, ``not-deciding``, ``markers-only`` or ``not-determined``."""
     read, log = _checked(record, loaded)
     rule = _rule_of(ref, log, loaded)
-    found = await _replayed(log, loaded, log)
+    found = [f for f in await _replayed(log, loaded, log) if f["kind"] is not _K.helpers_mismatch]
     if found:
         kinds = ", ".join(dict.fromkeys(str(f["kind"]) for f in found))
         raise EvaluationRefusal(

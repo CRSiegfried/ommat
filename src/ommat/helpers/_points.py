@@ -43,13 +43,13 @@ from ommat._markers import Cause, CauseCode, Unavailable
 from ommat._refs import code_point_sorted, parse_ref
 from ommat._typed import typed
 from ommat._types import (
-    Interval,
     Label,
     Nullable,
     RecordOf,
     Scalar,
     Type,
     TypeFailure,
+    _numeric,
     read_type,
 )
 from ommat._values import (
@@ -146,6 +146,28 @@ def axis(
         hi = Fraction(min(math.floor(last) + 1, MAX_INTEGER)) if integer else last + 1
     points |= {lo, hi}
     return sorted(points)
+
+
+def numeric_axis(bounds: Sequence[Fraction], t: Type) -> list[int | float]:
+    """A numeric type's axis over ``bounds``, each point rounded once to the type's form: an
+    ``integer`` or integer interval's an ``int``, a ``number``'s a ``float``, its ends past an
+    unbounded ``number``'s boundaries by ``_end``. Given no boundary, the interval's two bounds,
+    or on an unbounded type ``-(2^53 - 1)`` and ``2^53 - 1``. Repeats are the caller's."""
+    numeric = _numeric(t)
+    assert numeric is not None  # the caller's type is numeric
+    integer, interval = numeric[0] == "integer", numeric[1]
+    lo: Fraction | None = None
+    hi: Fraction | None = None
+    if interval is not None:
+        lo, hi = exact(interval[0]), exact(interval[1])
+    if not bounds:
+        ends = (lo, hi) if lo is not None and hi is not None else (-MAX_INTEGER, MAX_INTEGER)
+        points: Sequence[Fraction | int] = ends
+    else:
+        if not integer and lo is None:
+            lo, hi = _end(min(bounds), -1), _end(max(bounds), 1)
+        points = axis(bounds, lo, hi, integer=integer)
+    return [int(x) if integer else float(x) for x in points]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -358,18 +380,9 @@ class _Filler:
         load's check 9 made its type numeric."""
         if isinstance(t, Nullable):
             return [*self.numeric(path, t.inner), Point(None, None)]
-        integer = (isinstance(t, Scalar) and t.name == "integer") or (
-            isinstance(t, Interval) and t.base == "integer"
-        )
-        lo = hi = None
-        if isinstance(t, Interval):
-            lo, hi = exact(t.lo), exact(t.hi)
         bounds = [self.bound(p) for p in cast("Sequence[str | int]", self.loaded._grid[path])]
-        if not integer and lo is None:
-            lo, hi = _end(min(bounds), -1), _end(max(bounds), 1)
         points: list[Point] = []
-        for x in axis(bounds, lo, hi, integer=integer):
-            value: int | float = int(x) if integer else float(x)
+        for value in numeric_axis(bounds, t):
             forms = typed(value, t)
             assert forms is not None
             points.append(Point(*forms))

@@ -7,7 +7,7 @@ own work. Its tests and sums are exact over the decimals RFC 8785 writes: a numb
 as ``Fraction(repr(x))``.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from fractions import Fraction
 from typing import cast
 
@@ -74,14 +74,19 @@ def _lacked(helper: str, answer: Answer, labels: tuple[str, ...] | list[str]) ->
             raise ValueError(f"{helper} was given the label {label!r}, which the answer lacks")
 
 
+def _lead(probs: Mapping[str, Fraction], label: str) -> Fraction:
+    """How far ``label`` leads the second-highest of every other label, 0 for a one-label
+    answer's runner-up; negative when it trails."""
+    return probs[label] - max((p for k, p in probs.items() if k != label), default=Fraction(0))
+
+
 def _by_margin(answer: Answer, bar: Fraction, margin: Fraction) -> str | None:
     """The top label, when it is at or above ``bar`` and leads the second-highest, 0 for a
     one-label answer, by at least ``margin``; else ``None``. A tie at the top is ``None``."""
     probs = {label: exact(p) for label, p in answer.probabilities.items()}
     top_label = max(probs, key=probs.__getitem__)
-    top = probs[top_label]
-    second = max((p for label, p in probs.items() if label != top_label), default=Fraction(0))
-    if top >= bar and top > second and top - second >= margin:
+    lead = _lead(probs, top_label)
+    if probs[top_label] >= bar and lead > 0 and lead >= margin:
         return top_label
     return None
 
@@ -94,9 +99,8 @@ def _by_thresholds(answer: Answer, bars: dict[str, Fraction], margin: Fraction) 
     if not qualifying:
         return None
     best_label = max(qualifying, key=probs.__getitem__)
-    best = probs[best_label]
-    second = max((p for label, p in probs.items() if label != best_label), default=Fraction(0))
-    if best > second and best - second >= margin:
+    lead = _lead(probs, best_label)
+    if lead > 0 and lead >= margin:
         return best_label
     return None
 

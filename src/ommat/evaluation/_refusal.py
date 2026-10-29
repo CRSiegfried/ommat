@@ -35,6 +35,7 @@ class RefusalReason(enum.StrEnum):
     unknown_path = "unknown-path"
     unsupported_leaf = "unsupported-leaf"
     baseline_differs = "baseline-differs"
+    unrepresentable_slack = "unrepresentable-slack"
 
 
 class EvaluationRefusal(Exception):
