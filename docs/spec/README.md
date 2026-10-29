@@ -367,10 +367,10 @@ A `loaded` that is not exactly a `LoadedDesign` is an `EntryRefusal`, before the
 
 `deciding_inputs(record, loaded, ref, *, functions=None)`, `async` with a `_sync` twin, takes `record` as `use_answers` does and returns a `dict` from each declared read of the rule providing the entry at `ref`, in declared order, each read once, to one of four strings:
 
-- `deciding`: some intervention on the read that reaches changes the entry at `ref`, that is, replay gives an `entry` finding at `ref`;
+- `deciding`: some intervention on the read that reaches changes the entry at `ref`: replay gives an `entry` finding at `ref` whose value, or marker kind and cause code, differ, so a change of `rows`, `derivation`, `round` or a cause's refs alone is none;
 - `not-determined`: none of its interventions reaches, or it has none;
 - `markers-only`: neither, and some target is not of a finite type, so it was tried at markers only;
-- `not-deciding`: none of these, every value of every target tried. Each intervention is a single edit, so no single edit changes the entry; joint effects are not explored.
+- `not-deciding`: none of these: no reached intervention changed the entry. Each intervention is a single edit, so joint effects are not explored.
 
 A finite type is `boolean` or a label, either nullable, whose values are its labels in order, `false` before `true`, then null. Each intervention is one edit job's single edit, run through the same checks, copy and replay:
 

@@ -495,7 +495,7 @@ def _alone(at: _EntryAt, loaded: LoadedDesign) -> dict[str, object] | None:
     written = _t_value(ref, value, loaded)
     if written is None:
         _nonconforming(ref)
-    return {"value": written}
+    return {"value": written[0]}
 
 
 def _nonconforming(ref: str) -> NoReturn:
@@ -572,15 +572,16 @@ def _text_length(ref: str, log: _Log, loaded: LoadedDesign) -> int:
     return len(value) if type(value) is str else sys.maxsize
 
 
-def _t_value(ref: str, value: object, loaded: LoadedDesign) -> object | None:
-    """``value``'s record form under the ref's declared type, a candidate set's members
-    distinct; ``None`` when it does not conform."""
+def _t_value(ref: str, value: object, loaded: LoadedDesign) -> tuple[object] | None:
+    """``value``'s record form under the ref's declared type, alone in a tuple, so a null value
+    is told from a refusal; a candidate set's members distinct; ``None`` when it does not
+    conform."""
     forms = typed(value, loaded._types[declared_ref(ref)])
     if forms is None:
         return None
     if ref in loaded._candidate_sets and not _distinct(forms[0], loaded._candidate_sets[ref]):
         return None
-    return forms[0]
+    return (forms[0],)
 
 
 # ---------------------------------------------------------------------------------------------

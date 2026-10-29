@@ -15,7 +15,8 @@ its target, ``null-call``, ``failed-call``, ``not-found`` or ``candidate-rule``,
 nothing, and so does one whose replay asks outside the record, ``not-in-record``,
 ``ref-not-in-record`` or ``question-changed``, whatever else it finds; any other refusal
 propagates. A reached trial changes the entry when replay gives an ``entry`` finding at its
-ref.
+ref whose value, or marker kind and cause code, differ; ``rows``, ``derivation``, ``round`` or
+a cause's refs alone are no change.
 
 A read is ``deciding`` when a reached trial changes the entry; else ``not-determined`` when no
 trial reached, as for a ``candidate`` read, which no form reaches; else ``markers-only`` when
@@ -29,9 +30,10 @@ an entry of the record a rule provides, before any replay. The output is plain d
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
+from ommat._canonical import encode
 from ommat._design import LoadedDesign
 from ommat._interpret import _BINDING_MARKERS, _STRUCTURAL
-from ommat._ledger import Record, held_marker_code
+from ommat._ledger import _ITEM_DEPTH, Record, held_marker_code
 from ommat._markers import Cause, Unavailable, Unsure
 from ommat._read_view import is_candidate_read
 from ommat._refs import parse_ref
@@ -117,7 +119,7 @@ async def _classed(
         if any(f["kind"] in _OUTSIDE for f in found):
             continue  # answered outside the record: no finding of it counts
         reached = True
-        if any(f["kind"] is _K.entry and f["ref"] == ref for f in found):
+        if any(f["kind"] is _K.entry and f["ref"] == ref and _changed(f) for f in found):
             return "deciding"
     if not reached:
         return "not-determined"
@@ -149,12 +151,28 @@ def _trials(r: str, log: _Log, loaded: LoadedDesign) -> tuple[list[_Trial], bool
         if entry["item"] != "entry" or _declared(entry["ref"]) != declared:
             continue
         trials.extend(([_SetEntry(entry["ref"], v)], None) for v in [*markers, *(values or ())])
-        if entry["call"] is not None and _sole_writer(entry["call"], declared, log):
-            calls[entry["call"]] = None
+        call = entry["call"]
+        if call is not None and call not in calls and _sole_writer(call, declared, log):
+            calls[call] = None
     for call in calls:
         source = cast(str, log[call]["sources"][0])
         trials.extend(([_FailCall(source, c.value)], None) for c in sorted(_STRUCTURAL))
     return trials, values is not None
+
+
+def _changed(finding: dict[str, Any]) -> bool:
+    """Whether an ``entry`` finding's two sides differ in value, or in marker kind and code: a
+    change of ``rows``, ``derivation``, ``round`` or a cause's refs alone is none."""
+    recorded, replayed = finding["recorded"], finding["replayed"]
+    return recorded is None or replayed is None or _outcome(recorded) != _outcome(replayed)
+
+
+def _outcome(entry: dict[str, Any]) -> bytes:
+    """An entry's value, or its marker's kind and cause code, as canonical bytes."""
+    if "marker" in entry:
+        marker = entry["marker"]
+        return encode(["marker", marker["kind"], marker["cause"]["code"]])
+    return encode(["value", entry["value"]], _ITEM_DEPTH)
 
 
 def _sole_writer(call: int, declared: str, log: _Log) -> bool:
@@ -177,13 +195,11 @@ def _values(t: Type | None) -> list[object] | None:
     return None
 
 
-def _field_type(t: Type, fields: tuple[str, ...]) -> Type | None:
+def _field_type(t: Type, fields: tuple[str, ...]) -> Type:
     """The declared type of a state field through ``fields``, its definitions resolved; a null
     record on the path holds no field, which ``set_state_field`` refuses ``not-found``."""
     for name in fields:
         if isinstance(t, Nullable):
             t = t.inner
-        if not isinstance(t, RecordOf):
-            return None
-        t = dict(t.fields)[name]
+        t = dict(cast(RecordOf, t).fields)[name]  # load checked the path
     return t

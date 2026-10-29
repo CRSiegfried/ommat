@@ -15,6 +15,7 @@ import pytest
 
 import extraction
 import test_context as context
+import test_deciding_inputs as deciding
 import test_grounded_rules as grounded
 import test_label_sets as label_sets
 from designs import minimal
@@ -132,6 +133,13 @@ def test_an_entry_set_to_a_binding_marker_names_its_ref_alone(code: str) -> None
         "cause": {"code": code, "refs": ["q:spam"]},
     }
     assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
+
+
+def test_a_nullable_t_entry_is_set_to_null() -> None:
+    record = deciding.nullable_record()
+    result = set_entry_sync(record, deciding.NULLABLE, "t:bb", None)
+    assert result["entry"]["value"] is None
+    assert kinds(result["findings"]) == [(K.entry, "d:m")]
 
 
 def test_a_t_entry_set_to_a_marker_gives_the_findings_downstream_of_it() -> None:

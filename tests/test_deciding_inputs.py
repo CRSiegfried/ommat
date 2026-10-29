@@ -23,6 +23,7 @@ from ommat import (
     Policy,
     Rule,
     Source,
+    Table,
     Unsure,
     When,
     decide_sync,
@@ -38,8 +39,9 @@ from ommat.evaluation import (
     _edit,
     deciding_inputs,
     deciding_inputs_sync,
+    set_state_field_sync,
 )
-from scripted import returns
+from scripted import Scripted, returns
 from test_decide import ASK, BODY, LOADED, RULES, ok_policy, slice_design
 from test_do_and_diff import records_in
 from test_use_answers import broken, live, unfinished
@@ -267,6 +269,57 @@ def test_a_field_under_a_nullable_record_is_tried_at_its_own_values() -> None:
     assert deciding_inputs_sync(record, NESTED, "d:m") == {"t:state.s.flag": "deciding"}
     record = decide_sync(NESTED, {"s": None}, {}).record
     assert deciding_inputs_sync(record, NESTED, "d:m") == {"t:state.s.flag": "not-determined"}
+
+
+def maybe(r: Any) -> object:
+    return r.read("t:bb")
+
+
+NULLABLE = load(
+    minimal(
+        policy=Policy(ok_policy, version="1"),
+        state=t.record(k=t.label("a", "b", "c")),
+        sources={"src": Source({"t:bb": t.nullable(t.boolean)}, needs=["t:state"])},
+        rules={
+            "m": Rule("d:m", t.nullable(t.boolean), maybe, version="1", reads=["t:bb"]),
+            "tab": Table(
+                "d:tab", t.label("x", "y"), "F", ["t:state.k"], [["a", "x"], ["b", "x"], ["c", "x"]]
+            ),
+        },
+    )
+)
+
+
+def nullable_record() -> Any:
+    binds = {"default": Scripted({"src": returns({"t:bb": True})})}
+    return decide_sync(NULLABLE, {"k": "a"}, binds).record
+
+
+def test_a_nullable_finite_t_entry_is_tried_at_null_too(tried: list[Any]) -> None:
+    assert deciding_inputs_sync(nullable_record(), NULLABLE, "d:m") == {"t:bb": "deciding"}
+    trials, exhaustive = _deciding._trials("t:bb", nullable_record().log, NULLABLE)
+    assert exhaustive
+    values = [x.value for x in flat(trials) if type(x) is _edit._SetEntry]
+    assert values[-3:] == [False, True, None]
+
+
+def test_a_change_of_rows_alone_is_no_change_of_the_entry() -> None:
+    record = nullable_record()
+    found = set_state_field_sync(record, NULLABLE, "t:state.k", "b")["findings"]
+    assert [(f["ref"], f["replayed"]["rows"]) for f in found] == [("d:tab", [2])]
+    assert deciding_inputs_sync(record, NULLABLE, "d:tab") == {"t:state.k": "not-deciding"}
+
+
+def marked(code: str, *refs: str) -> dict[str, Any]:
+    return {"ref": "d:x", "marker": {"kind": "Unavailable", "cause": {"code": code, "refs": refs}}}
+
+
+def test_a_change_of_a_markers_refs_alone_is_no_change() -> None:
+    entry = marked("refused", "a")
+    assert not _deciding._changed({"recorded": entry, "replayed": marked("refused", "b")})
+    assert _deciding._changed({"recorded": entry, "replayed": marked("raised", "a")})
+    assert _deciding._changed({"recorded": entry, "replayed": {"ref": "d:x", "value": None}})
+    assert _deciding._changed({"recorded": entry, "replayed": None})
 
 
 def test_a_d_read_is_tried_at_unsure_then_each_value() -> None:
