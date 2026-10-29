@@ -6,8 +6,10 @@ one file per hash, at ``sha256/<hex>`` under the design store's root and
 Each file is written whole by exclusive create: the bytes go to a temporary file beside it,
 synced and made readable to all, which is then hard-linked under the file's name, so a reader
 never sees part of a file and two writers cannot both claim one name. A store therefore needs a
-filesystem with hard links. Neither store replaces a file it holds. An I/O failure other than a
-missing file propagates as ``OSError``: an unreadable store is not a refusal.
+filesystem with hard links. Neither store replaces a file it holds. A process killed mid-write
+can leave a temporary ``.``-prefixed file beside the others, which no read looks at. An I/O
+failure other than a missing file propagates as ``OSError``: an unreadable store is not a
+refusal.
 """
 
 import contextlib
@@ -48,6 +50,11 @@ def _create(path: Path, data: bytes) -> bool:
         return False
     finally:
         os.unlink(tmp)
+    dir_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)  # the name survives a crash, so a write-once entry is never lost
+    finally:
+        os.close(dir_fd)
     return True
 
 
