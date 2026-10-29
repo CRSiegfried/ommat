@@ -12,7 +12,7 @@ The spec covers what record format 7 and design format 9 hold and the engine doe
 - the context block a design declares, rendered into the record, and the record views: the escalation view, the handoff view, the transcript view and the redacted view;
 - the conversation renderers, which render a handoff as text and a transcript as Chat Completions or Pydantic AI messages;
 - the record lens, which renders stored records and designs as an HTML page a person reads;
-- replay of a recorded turn with no model call, the do-and-diff evaluation jobs `set_entry`, `fail_call`, `set_state_field`, `constant_rule`, `intervene` and `use_answers`, and the design store and the evaluation store;
+- replay of a recorded turn with no model call, the do-and-diff evaluation jobs `set_entry`, `fail_call`, `set_state_field`, `constant_rule`, `intervene` and `use_answers` and the deciding inputs, and the design store and the evaluation store;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;
 - the answer kinds: `noul`, `choice` and `score`, which give a probability to each label, and `extraction`, a typed value read from a text, with the probability that the text holds none, the model's reading whatever it answered, its confidence and the span it read;
 - the candidate-valued label set: a `choice` whose labels are a fixed part and the members of a `list<string>` candidate set, rendered each time it is asked;
@@ -21,7 +21,7 @@ The spec covers what record format 7 and design format 9 hold and the engine doe
 - the live frontier, the answer grid and the `boundaries` fields, and the design lints that read them;
 - decision tables: rule tables under every hit policy, data rules among them, and the policy table with its plan declarations and their declared text.
 
-Outside it, and refused by load in a design that declares one: a grounded declaration that is itself a candidate set; a per-candidate extraction question and a per-candidate question whose labels are a candidate-valued set; and a need on a grounded declared ref. Also outside it: the run-time stopping certificate, multi-turn continuation, and every evaluation job but do-and-diff's six, whose deciding inputs are outside it too.
+Outside it, and refused by load in a design that declares one: a grounded declaration that is itself a candidate set; a per-candidate extraction question and a per-candidate question whose labels are a candidate-valued set; and a need on a grounded declared ref. Also outside it: the run-time stopping certificate, multi-turn continuation, and every evaluation job but do-and-diff's six and the deciding inputs.
 
 The sections below are written; the rest is not yet.
 
@@ -362,6 +362,24 @@ A `loaded` that is not exactly a `LoadedDesign` is an `EntryRefusal`, before the
 | `fail_call` | `not-found`, no call lists the source; `failed-call`; `fault-code`, any other code | `source` |
 | `set_state_field` | `not-found`, a path that is no `t:state` field ref or names a field the recorded state does not hold; `marker`, a marker or a marker class; `nonconforming` | `path` |
 | `constant_rule` | `not-found`, no rule provides the ref; `candidate-rule`, a rule that provides a candidate set, is grounded over one or reads a grounded declared ref, which no table but one grounded over its set may read; `marker`, an output that is a marker or a marker class other than `Unsure`; `invalid-design`, carrying the `InvalidDesign` load raised as `error` | `ref` |
+
+### The deciding inputs
+
+`deciding_inputs(record, loaded, ref, *, functions=None)`, `async` with a `_sync` twin, takes `record` as `use_answers` does and returns a `dict` from each declared read of the rule providing the entry at `ref`, in declared order, a table's input reads each once, to one of four strings:
+
+- `deciding`: some intervention on the read changes the entry at `ref`, that is, replay gives an `entry` finding at `ref`;
+- `not-determined`: the read has no intervention, or one of its interventions reaches nothing;
+- `markers-only`: neither, and some target is not of a finite type, so it was tried at markers only;
+- `not-deciding`: none of these, every value of every target tried.
+
+A finite type is `boolean` or a label, either nullable, whose values are its labels in order, `false` before `true`, then null. Each intervention is one edit job's single edit, run through the same checks, copy and replay:
+
+- A `q:` or `t:` read, other than `t:state`, is tried through its entry, field path dropped; a grounded declared ref through each of its entries, in log order. Each entry is set as `set_entry` sets it to `Unavailable` with each code a binding may return that the record's format holds, in code-point order, a `q:` answer to `refused` only; a `t:` entry of a finite type then to each value; and when the entry's call wrote no other entry, the call is failed as `fail_call` fails it with each structural code, in code-point order.
+- A `t:state` field is set as `set_state_field` sets it to each value of a finite type; a field of another type, or `t:state` whole, has no intervention.
+- A `d:` read's rule is replaced as `constant_rule` replaces it, outputting `Unsure`, then each value of a finite type.
+- A `candidate` read has no intervention.
+
+An intervention reaches nothing when its job would refuse it `null-call`, `failed-call`, `not-found`, `candidate-rule` or `invalid-design`, so an entry not asked, an entry of a call recorded `Failed`, a field under a null record and a rule `constant_rule` refuses are `not-determined`; and when its replay gives `not-in-record`, `ref-not-in-record` or `question-changed`. Interventions run in order and stop at the first that changes the entry. After the record checks of the edit jobs, the job refuses `not-found`, naming `ref`, when `ref` is not a string or names no entry of the record a rule provides, before any replay.
 
 ### The stores
 

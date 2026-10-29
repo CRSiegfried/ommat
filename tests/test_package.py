@@ -198,6 +198,8 @@ EVALUATION = {
     "RefusalReason",
     "constant_rule",
     "constant_rule_sync",
+    "deciding_inputs",
+    "deciding_inputs_sync",
     "fail_call",
     "fail_call_sync",
     "intervene",
