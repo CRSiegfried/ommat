@@ -785,7 +785,7 @@ def test_a_three_way_table_gives_classes_whatever_the_own_value(
         "entries"
     ]["d:cmp"]
     assert [value_of(c["result"]) for c in summary["classes"]] == ["gt", "eq", "lt"]
-    assert summary["switching"] == [7.0, 7.0]
+    assert summary["switching"] == [7.0]  # once, though it bounds both sides of eq
     assert summary["slacks"] == slacks
 
 
@@ -1157,7 +1157,7 @@ def test_between_two_compared_values_the_upper_is_the_switching_value(tmp_path: 
         "entries"
     ]["d:count"]
     # Between 7.0 and its next float no point lies: both are compared, so the upper is taken.
-    assert summary["switching"] == [1.0, state["c"], state["c"], 10.0]
+    assert summary["switching"] == [1.0, state["c"], 10.0]
 
 
 def test_only_a_number_is_a_compared_value() -> None:
@@ -1283,3 +1283,44 @@ def test_a_round_1_value_already_compared_leaves_nothing_unseen(
     # Round 0 over 3 and 7 finds 9 past 7; round 1 over 3, 7 and 9 recomputes 3 and 9 alone.
     assert seen[0] > 5
     assert value["unseen"] == []
+
+
+# ---------------------------------------------------------------------------------------------
+# Round 4: carrying read from every run, an aggregate alone with its Param row
+
+
+def test_a_param_row_giving_the_recorded_value_still_carries(tmp_path: Path) -> None:
+    table = Table(
+        "d:tab",
+        "number",
+        "F",
+        ["t:state.n"],
+        [["[lim/x, lim/y]", 2.0], ["> lim/z", Param("lim/y")], ["-", 1.0]],
+    )
+    leaves = {
+        "lim/x": Parameter(t.number(), -2.0),
+        "lim/y": Parameter(t.number(), 7.5),
+        "lim/z": Parameter(t.number(), 2.5),
+    }
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"tab": table},
+            parameters=leaves,
+            policy=Policy(constant, version="1", reads=["d:tab"]),
+        )
+    )
+    record = decide_sync(loaded, {**STATE, "n": 3.0}, {}).record
+    # Below n the Param row gives d:tab the leaf; no value tried there need differ from 2.0.
+    value = run(record, loaded, "lim/y", tmp_path)["value"]
+    assert value["entries"]["d:tab"] == "carries"
+
+
+@pytest.mark.parametrize("hit", ["F", "C+", "C<", "C>"])
+def test_an_aggregate_whose_one_row_is_param_is_not_unseen(hit: str, tmp_path: Path) -> None:
+    loaded, record = one_table(
+        Table("d:tab", "number", hit, [], [[Param("lim/n")]]), **{"lim/n": PARAMETERS["lim/n"]}
+    )
+    value = run(record, loaded, "lim/n", tmp_path)["value"]
+    assert value["entries"]["d:tab"] == "carries"
+    assert value["unseen"] == ["policy"]  # the policy reads d:tab, which holds the leaf
