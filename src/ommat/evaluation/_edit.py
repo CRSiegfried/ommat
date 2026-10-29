@@ -9,14 +9,17 @@ binding may return and the record's format holds; ``fail_call`` sets a returned 
 ``set_state_field`` sets a ``t:state`` field to a value; ``constant_rule`` replaces a rule's
 declaration by a one-row table of ``-`` cells over its reads, outputting the set value or
 ``Unsure``, and loads the edited document. ``intervene`` takes the first three as a list of
-edits and ``constant_rule``'s as ``rule``; each edit is checked against the log with the
-edits before it in the list applied.
+edits and ``constant_rule``'s as ``rule``; their targets are disjoint, so the list's order
+changes neither the copy nor the findings.
 
 The record is read and refused ``unfinished``, ``nothing-to-replay`` and ``wrong-design``
 first, as ``use_answers`` refuses it; ``intervene`` then refuses ``invalid-edit``, ``no-edit``,
-``duplicate-target`` and ``conflicting-edits``; then each edit's own refusals in list order,
-then the rule's. A record edit is made on a copy: its log edited, its ``hash`` set from format
-3 to the edited log's record hash, and read back through ``read_record``
+``duplicate-target`` and ``conflicting-edits``. Then each edit's target is checked against the
+record as read, in list order, then the rule's; then each value against its declared type
+alone, in list order; then every edit is applied to one copy and each answer checked against
+it, its labels from a candidate set and its spans against its text as edited; then the
+modified design is loaded. A record edit is made on a copy: its log edited, its ``hash`` set
+from format 3 to the edited log's record hash, and read back through ``read_record``
 (§record-hash-member); ``constant_rule`` alone edits only the document and makes no copy.
 Replay reruns the copy, its state entry, calls and cut, under the record's design or the
 modified one, so the findings are what the edits changed downstream; the edited entry itself,
@@ -240,17 +243,58 @@ async def _applied(
     constant: _Constant | None,
     functions: _Functions,
 ) -> tuple[_Log, dict[str, Any] | None, list[dict[str, Any]]]:
-    """The changed items in log order, the modified document or ``None``, and the findings."""
+    """The changed items in log order, the modified document or ``None``, and the findings.
+
+    Duplicate and conflicting targets refused, the targets are disjoint, so every edit is
+    checked and applied with no order among them: first each edit's target against the record
+    as read, in list order, then the rule's; then each value against its declared type alone,
+    in list order; then every edit applied to one copy, and each answer checked against that
+    copy, its labels from a candidate set and its spans against its text as edited, in list
+    order; then the modified design loaded. Nothing replays before every check passes."""
     _refuse_targets(edits, log)
+    located = [_target(edit, log) for edit in edits]
+    rule = None if constant is None else _rule_target(constant, log, loaded)
     edited = list(log)
     changed: set[int] = set()
-    for edit in edits:
-        for index, item in _change(edit, edited, loaded).items():
-            edited[index] = item
+    answers: list[tuple[_SetEntry, int, dict[str, Any]]] = []
+    fields: list[tuple[tuple[str, ...], object]] = []
+    for edit, at in zip(edits, located, strict=True):
+        if type(edit) is _SetEntry:
+            index, entry, call = cast("tuple[int, dict[str, Any], dict[str, Any]]", at)
+            written = _alone(edit, call, loaded)
+            if written is _ANSWER:
+                answers.append((edit, index, call))
+                continue
+            edited[index] = _rewritten(entry, **cast("dict[str, object]", written))
             changed.add(index)
+        elif type(edit) is _FailCall:
+            for index, item in _failed(edit, *cast("tuple[int, dict[str, Any]]", at), log):
+                edited[index] = item
+                changed.add(index)
+        else:
+            names = cast("tuple[str, ...]", at)
+            _field_alone(cast(_SetField, edit), names, log, loaded)
+            fields.append((names, cast(_SetField, edit).value))
+    if fields:
+        index, state = cast("tuple[int, dict[str, Any]]", _entry(_STATE, log))
+        t = loaded._types[_STATE]
+        value = decoded(state["value"], t)
+        for names, given in fields:
+            _put(value, names, given)
+        forms = typed(value, t)
+        assert forms is not None  # each field conformed alone, and none lies within another
+        edited[index] = _rewritten(state, value=forms[0])
+        changed.add(index)
+    for edit, index, call in answers:
+        ref = cast(str, edit.ref)
+        written = _q_value(ref, edit.value, call, edited, loaded)
+        if written is None:
+            _nonconforming(ref)
+        edited[index] = _rewritten(edited[index], value=written)
+        changed.add(index)
     design, document = loaded, None
-    if constant is not None:
-        design, document = _constant(constant, log, loaded, functions)
+    if rule is not None:
+        design, document = _rule_loaded(*rule, functions)
     if not changed:
         return [], document, await _replayed(log, design, log)
     copied = _record_copy(edited, read.unhashed).log
@@ -258,13 +302,14 @@ async def _applied(
     return items, document, await _replayed(copied, design, copied)
 
 
-def _change(edit: _Edit, log: _Log, loaded: LoadedDesign) -> dict[int, dict[str, Any]]:
-    """The items one edit changes, by index, checked against ``log``."""
+def _target(edit: _Edit, log: _Log) -> object:
+    """An edit's target located in the record as read, after its target refusals: an entry's
+    index, entry and call item, a call's index and item, or a field path's names."""
     if type(edit) is _SetEntry:
-        return _set_entry(edit, log, loaded)
+        return _entry_target(edit, log)
     if type(edit) is _FailCall:
-        return _fail_call(edit, log)
-    return _set_field(cast(_SetField, edit), log, loaded)
+        return _call_target(edit, log)
+    return _field_target(cast(_SetField, edit), log)
 
 
 def _shaped(edits: object, rule: object) -> tuple[list[_Edit], _Constant | None]:
@@ -372,7 +417,14 @@ def _not_found(what: str, given: object, member: Literal["ref", "source", "path"
 # set_entry
 
 
-def _set_entry(edit: _SetEntry, log: _Log, loaded: LoadedDesign) -> dict[int, dict[str, Any]]:
+_ANSWER = object()
+"""What ``_alone`` gives for an answer, written once every other edit is applied."""
+
+
+def _entry_target(edit: _SetEntry, log: _Log) -> tuple[int, dict[str, Any], dict[str, Any]]:
+    """The entry and its call item; refused ``not-found``, ``null-call``, ``failed-call``,
+    then ``marker`` for a marker no binding may return or the record's format does not hold
+    under a returned call."""
     ref = edit.ref
     found = _entry(ref, log) if type(ref) is str else None
     if found is None:
@@ -396,17 +448,34 @@ def _set_entry(edit: _SetEntry, log: _Log, loaded: LoadedDesign) -> dict[int, di
                 "hold under a returned call",
                 ref,
             )
-        marker = _marker_document(Unavailable(Cause(cast(str, code), [ref])))
-        return {index: _rewritten(entry, marker=marker)}
+    return index, entry, call
+
+
+def _alone(edit: _SetEntry, call: dict[str, Any], loaded: LoadedDesign) -> object:
+    """The entry's new ``marker`` or ``value`` member, its value checked against its declared
+    type alone, ``nonconforming`` otherwise; ``_ANSWER`` for a ``q:`` value, whose answer is
+    written on the copy."""
+    ref, value = cast(str, edit.ref), edit.value
+    if _is_marker(value):
+        code = cast(str, getattr(getattr(value, "cause", None), "code", None))
+        return {"marker": _marker_document(Unavailable(Cause(code, [ref])))}
     if ref.startswith("q:"):
-        written = _q_value(ref, value, call, log, loaded)
-    else:
-        written = _t_value(ref, value, loaded)
+        question = call["questions"][declared_ref(ref)]
+        # Labels from a candidate set wait for the copy; an extraction answer is checked here
+        # with no span bound, and against its text on the copy.
+        if type(question["labels"]) is not dict and _q_value(ref, value, call, [], None) is None:
+            _nonconforming(ref)
+        return _ANSWER
+    written = _t_value(ref, value, loaded)
     if written is None:
-        raise EvaluationRefusal(
-            f"the value for entry {ref} does not conform", reason=_R.nonconforming, ref=ref
-        )
-    return {index: _rewritten(entry, value=written)}
+        _nonconforming(ref)
+    return {"value": written}
+
+
+def _nonconforming(ref: str) -> NoReturn:
+    raise EvaluationRefusal(
+        f"the value for entry {ref} does not conform", reason=_R.nonconforming, ref=ref
+    )
 
 
 def _refuse_marker(message: str, ref: str) -> NoReturn:
@@ -414,12 +483,13 @@ def _refuse_marker(message: str, ref: str) -> NoReturn:
 
 
 def _q_value(
-    ref: str, value: object, call: dict[str, Any], log: _Log, loaded: LoadedDesign
+    ref: str, value: object, call: dict[str, Any], log: _Log, loaded: LoadedDesign | None
 ) -> object | None:
     """An answer's document built from ``value`` in the binding's form, by the call item's
     question: its kind, its labels as asked, a candidate-valued set's rendered from the set's
-    entry, or its value type and list flag, an extraction answer's spans within its text as the
-    log holds it; ``None`` when the answer's check refuses it."""
+    entry in ``log``, or its value type and list flag, an extraction answer's spans within its
+    text as ``log`` holds it, unbounded with no ``loaded``; ``None`` when the answer's check
+    refuses it."""
     question = call["questions"][declared_ref(ref)]
     kind = AnswerKind(question["kind"])
     labels = _labels(question, log)
@@ -429,7 +499,8 @@ def _q_value(
     bound = sys.maxsize
     if kind is AnswerKind.extraction:
         value_type = ValueType(question["value_type"])
-        bound = _text_length(ref, log, loaded)
+        if loaded is not None:
+            bound = _text_length(ref, log, loaded)
     is_list = question.get("is_list", False)
     written = answer_written(ref, value, kind, labels, value_type, is_list, bound)
     return None if isinstance(written, Undetermined) else written[0]
@@ -490,14 +561,15 @@ def _t_value(ref: str, value: object, loaded: LoadedDesign) -> object | None:
 # fail_call
 
 
-def _fail_call(edit: _FailCall, log: _Log) -> dict[int, dict[str, Any]]:
+def _call_target(edit: _FailCall, log: _Log) -> tuple[int, dict[str, Any]]:
+    """The call item listing the source; refused ``not-found``, ``failed-call``, then
+    ``fault-code`` for a code that is not exactly a structural one's string."""
     source = edit.source
     found = _call_of(source, log) if type(source) is str else None
     if found is None:
         _not_found("the record has no call of source", source, "source")
     source = cast(str, source)
-    index, call = found
-    if call["outcome"] != "returned":
+    if found[1]["outcome"] != "returned":
         raise EvaluationRefusal(
             f"source {source}'s call is Failed already", reason=_R.failed_call, source=source
         )
@@ -509,6 +581,14 @@ def _fail_call(edit: _FailCall, log: _Log) -> dict[int, dict[str, Any]]:
             reason=_R.fault_code,
             source=source,
         )
+    return found
+
+
+def _failed(
+    edit: _FailCall, index: int, call: dict[str, Any], log: _Log
+) -> list[tuple[int, dict[str, Any]]]:
+    """The call item set to ``Failed`` and each entry it wrote ``Unavailable``, by index."""
+    code = cast(str, edit.code)
     wrote = [(i, e) for i, e in enumerate(log) if e["item"] == "entry" and e["call"] == index]
     failed = Unavailable(Cause(code, code_point_sorted(e["ref"] for _, e in wrote)))
     # Each place gets its own copy: the read refuses a container at two places.
@@ -516,38 +596,41 @@ def _fail_call(edit: _FailCall, log: _Log) -> dict[int, dict[str, Any]]:
     # The hashed provenance members its format holds become null, claimed empty; before
     # format 5 they include snapshot.
     provenance = {k: v for k, v in {**no_provenance(), "snapshot": None}.items() if k in call}
-    changed = {index: {**call, "outcome": outcome, **provenance}}
-    for i, entry in wrote:
-        changed[i] = _rewritten(entry, marker=_marker_document(failed))
-    return changed
+    changed = [(index, {**call, "outcome": outcome, **provenance})]
+    return changed + [(i, _rewritten(e, marker=_marker_document(failed))) for i, e in wrote]
 
 
 # ---------------------------------------------------------------------------------------------
 # set_state_field
 
 
-def _set_field(edit: _SetField, log: _Log, loaded: LoadedDesign) -> dict[int, dict[str, Any]]:
-    """The state entry with the field set: the path names a field the state holds, and the
-    state with it set conforms."""
+def _field_target(edit: _SetField, log: _Log) -> tuple[str, ...]:
+    """The field path's names; refused ``not-found`` unless the path names a field the
+    recorded state holds, then ``marker``."""
     path = edit.path
     names = _field_names(path)
-    index, state = cast("tuple[int, dict[str, Any]]", _entry(_STATE, log))
-    t = loaded._types[_STATE]
-    value = decoded(state["value"], t)
-    if names is None or not _holds(value, names):
+    state = cast("tuple[int, dict[str, Any]]", _entry(_STATE, log))[1]
+    if names is None or not _holds(state["value"], names):
         _not_found("the state holds no field", path, "path")
-    path = cast(str, path)
     if _is_marker(edit.value):
         raise EvaluationRefusal(
-            f"state field {path} may be set to a value only", reason=_R.marker, path=path
+            f"state field {path} may be set to a value only", reason=_R.marker, path=cast(str, path)
         )
+    return names
+
+
+def _field_alone(edit: _SetField, names: tuple[str, ...], log: _Log, loaded: LoadedDesign) -> None:
+    """Refuse ``nonconforming`` when the recorded state with this field set does not conform;
+    fields within one another refused, each conforms alone as all do together."""
+    state = cast("tuple[int, dict[str, Any]]", _entry(_STATE, log))[1]
+    t = loaded._types[_STATE]
+    value = decoded(state["value"], t)
     _put(value, names, edit.value)
-    forms = typed(value, t)
-    if forms is None:
+    if typed(value, t) is None:
+        path = cast(str, edit.path)
         raise EvaluationRefusal(
             f"the state with {path} set does not conform", reason=_R.nonconforming, path=path
         )
-    return {index: _rewritten(state, value=forms[0])}
 
 
 def _field_names(path: object) -> tuple[str, ...] | None:
@@ -581,12 +664,13 @@ def _put(value: object, names: tuple[str, ...], given: object) -> None:
 # constant_rule
 
 
-def _constant(
-    constant: _Constant, log: _Log, loaded: LoadedDesign, functions: _Functions
-) -> tuple[LoadedDesign, dict[str, Any]]:
-    """The design loaded from ``loaded``'s document with the rule replaced, and that document,
-    parsed. A rule reading a grounded declared ref, which the record's ``settings`` item names
-    under ``grounded``, is refused: no table but one grounded over its set may read it."""
+def _rule_target(
+    constant: _Constant, log: _Log, loaded: LoadedDesign
+) -> tuple[dict[str, Any], str, str]:
+    """The loaded design's document with the rule replaced, the rule's name and its ref;
+    refused ``not-found``, ``candidate-rule``, then ``marker``. A rule reading a grounded
+    declared ref, which the record's ``settings`` item names under ``grounded``, is a candidate
+    rule: no table but one grounded over its set may read it."""
     ref = constant.rule
     document = cast("dict[str, Any]", decode(loaded.document))
     rules = cast("dict[str, dict[str, Any]]", document["rules"])
@@ -636,6 +720,14 @@ def _constant(
         ],
     )
     rules[name] = table
+    return document, name, ref
+
+
+def _rule_loaded(
+    document: dict[str, Any], name: str, ref: str, functions: _Functions
+) -> tuple[LoadedDesign, dict[str, Any]]:
+    """The modified design loaded, and its document parsed; ``invalid-design`` carrying the
+    ``InvalidDesign`` load raised."""
     try:
         modified = load(document, functions=functions)
     except InvalidDesign as exc:

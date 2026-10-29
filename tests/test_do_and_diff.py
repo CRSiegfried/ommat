@@ -600,29 +600,49 @@ def test_two_disjoint_state_fields_are_both_set() -> None:
     assert (state["value"]["subject"], state["value"]["sender"]) == ("bye", {"address": "b@x"})
 
 
-def test_each_edit_is_checked_with_the_edits_before_it_applied() -> None:
+def test_an_answer_over_a_set_another_edit_sets_takes_its_labels_in_either_order() -> None:
     loaded = load(label_sets.design())
     record = label_sets.run(["ann", "bo"])
     over_cy = {"none": 0.1, "several": 0.1, "ann": 0.7, "cy": 0.1}
     edits = [{"ref": label_sets.SET, "value": ["ann", "cy"]}, {"ref": "q:sender", "value": over_cy}]
     result = intervene_sync(record, loaded, edits)
+    assert intervene_sync(record, loaded, edits[::-1]) == result
     assert result["items"][1]["value"]["labels"] == ["none", "several", "ann", "cy"]
     assert result["findings"] == []
-    exc = refusal(intervene_sync, record, loaded, edits[::-1])
-    assert (exc.reason, exc.ref) == (R.nonconforming, "q:sender")
-    gone = [{"ref": label_sets.SET, "value": Unavailable(Cause("raised", []))}, edits[1]]
-    assert refusal(intervene_sync, record, loaded, gone).reason is R.nonconforming
+    over_bo = {"none": 0.1, "several": 0.1, "ann": 0.7, "bo": 0.1}
+    gone = Unavailable(Cause("raised", []))
+    for candidates, answer in ((["ann", "cy"], over_bo), (gone, over_cy)):
+        pair = [
+            {"ref": label_sets.SET, "value": candidates},
+            {"ref": "q:sender", "value": answer},
+        ]
+        for given in (pair, pair[::-1]):
+            exc = refusal(intervene_sync, record, loaded, given)
+            assert (exc.reason, exc.ref) == (R.nonconforming, "q:sender")
 
 
-def test_a_span_is_bounded_by_the_text_an_earlier_edit_set() -> None:
+@pytest.mark.usefixtures("no_replay")
+def test_an_invalid_set_is_blamed_on_its_own_edit_in_either_order() -> None:
+    loaded = load(label_sets.design())
+    record = label_sets.run(["ann", "bo"])
+    over_cy = {"none": 0.1, "several": 0.1, "ann": 0.7, "cy": 0.1}
+    edits = [{"ref": label_sets.SET, "value": ["cy", "cy"]}, {"ref": "q:sender", "value": over_cy}]
+    for given in (edits, edits[::-1]):
+        exc = refusal(intervene_sync, record, loaded, given)
+        assert (exc.reason, exc.ref) == (R.nonconforming, label_sets.SET)
+
+
+def test_a_span_is_bounded_by_the_text_another_edit_sets_in_either_order() -> None:
     record, loaded = extraction_ran(), extraction.loaded()
     owe = {"path": "t:state.body", "value": "Owe"}
     within = {"ref": "q:amount", "value": {**extraction.AMOUNT, "span": [0, 3]}}
     past = {"ref": "q:amount", "value": extraction.AMOUNT}  # its span [4, 7]
-    intervene_sync(record, loaded, [owe, within])
-    intervene_sync(record, loaded, [past, owe])
-    exc = refusal(intervene_sync, record, loaded, [owe, past])
-    assert (exc.reason, exc.ref) == (R.nonconforming, "q:amount")
+    assert intervene_sync(record, loaded, [owe, within]) == intervene_sync(
+        record, loaded, [within, owe]
+    )
+    for given in ([owe, past], [past, owe]):
+        exc = refusal(intervene_sync, record, loaded, given)
+        assert (exc.reason, exc.ref) == (R.nonconforming, "q:amount")
 
 
 @pytest.mark.parametrize(
