@@ -1,0 +1,789 @@
+# pyright: reportPrivateUsage=false
+"""Do-and-diff's first four forms and ``intervene``: each form's edit gives exactly the findings
+downstream of it, its refusals come in their order before any replay, the copy carries its own
+hash and is read back, neither input changes, and no job's output reaches a ``Record``."""
+
+import asyncio
+import copy
+import json
+import pathlib
+from collections.abc import Callable
+from typing import Any, cast
+
+import pytest
+
+import test_grounded_rules as grounded
+import test_label_sets as label_sets
+from format_8_design import DESIGN
+from ommat import (
+    Cause,
+    EntryRefusal,
+    Failed,
+    FindingKind,
+    InvalidDesign,
+    InvalidRecord,
+    Record,
+    Unasked,
+    Unavailable,
+    Unsure,
+    decide_sync,
+    load,
+    read_record,
+)
+from ommat._canonical import decode
+from ommat.evaluation import (
+    EvaluationRefusal,
+    RefusalReason,
+    _diff,
+    _edit,
+    constant_rule,
+    constant_rule_sync,
+    fail_call,
+    fail_call_sync,
+    intervene,
+    intervene_sync,
+    set_entry,
+    set_entry_sync,
+    set_state_field,
+    set_state_field_sync,
+    use_answers_sync,
+)
+from scripted import returns
+from test_decide import LOADED, STATE, echo, go, route, slice_design
+from test_replay import entry
+from test_use_answers import HAM, REFUSING, broken, diff, live, unfinished
+
+K = FindingKind
+R = RefusalReason
+NO = {"yes": 0.1, "no": 0.9}
+YES = {"yes": 0.9, "no": 0.1}
+TESTS = pathlib.Path(__file__).parent
+
+
+@pytest.fixture
+def no_replay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any replay fails the test: the refusal came before it."""
+
+    async def replayed(*args: object, **kwargs: object) -> object:
+        raise AssertionError("replayed")
+
+    monkeypatch.setattr(_diff, "_replay_with", replayed)
+
+
+def refusal(job: Callable[..., Any], *args: Any, **kwargs: Any) -> EvaluationRefusal:
+    with pytest.raises(EvaluationRefusal) as raised:
+        job(*args, **kwargs)
+    return raised.value
+
+
+def kinds(found: list[dict[str, Any]]) -> list[tuple[str, str | None]]:
+    return [(f["kind"], f.get("ref")) for f in found]
+
+
+def downstream(record: Record, other: Record, *edited: str) -> list[Any]:
+    """The findings a rerun reproducing ``other``'s turn gives against ``record``, less the
+    edited entries themselves, which the copy holds as set."""
+    return [f for f in diff(record, other, REFUSING) if f.get("ref") not in edited]
+
+
+# ---------------------------------------------------------------------------------------------
+# Form 1: an entry
+
+
+def test_setting_an_entry_to_its_recorded_value_gives_no_finding() -> None:
+    record = live(REFUSING)
+    result = set_entry_sync(record, REFUSING, "q:spam", YES)
+    assert result == {"entry": entry(record.log, "q:spam"), "findings": []}
+    assert set_entry_sync(record, REFUSING, "t:body", "text of the mail")["findings"] == []
+
+
+def test_setting_an_answer_gives_exactly_the_findings_downstream_of_it() -> None:
+    record, other = live(REFUSING), live(REFUSING, ask=returns(HAM))
+    result = set_entry_sync(record, REFUSING, "q:spam", NO)
+    assert result["entry"] == entry(other.log, "q:spam")
+    assert result["findings"] == downstream(record, other, "q:spam")
+    assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
+
+
+def test_a_t_entry_is_set_to_a_value_of_its_type() -> None:
+    result = set_entry_sync(go().record, LOADED, "t:size", 9)
+    assert result["entry"]["value"] == 9
+    assert result["findings"] == []  # nothing reads t:size
+
+
+@pytest.mark.parametrize("code", ["refused", "unsupported", "invalid-answer", "timed-out"])
+def test_an_entry_set_to_a_binding_marker_names_its_ref_alone(code: str) -> None:
+    record = live(REFUSING)
+    result = set_entry_sync(record, REFUSING, "q:spam", Unavailable(Cause(code, ["x", "y"])))
+    assert result["entry"]["marker"] == {
+        "kind": "Unavailable",
+        "cause": {"code": code, "refs": ["q:spam"]},
+    }
+    assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
+
+
+def test_a_candidate_valued_answer_takes_the_labels_as_asked() -> None:
+    loaded = load(label_sets.design())
+    record = label_sets.run(["ann", "bo"])
+    asked = entry(record.log, "q:sender")["value"]["labels"]
+    assert asked == ["none", "several", "ann", "bo"]
+    given = {"none": 0.1, "several": 0.1, "ann": 0.1, "bo": 0.7}
+    result = set_entry_sync(record, loaded, "q:sender", given)
+    assert result["entry"]["value"] == {"kind": "choice", "labels": asked, "probabilities": given}
+    assert result["findings"] == []
+    exc = refusal(set_entry_sync, record, loaded, "q:sender", {"none": 1.0})
+    assert (exc.reason, exc.ref) == (R.nonconforming, "q:sender")
+
+
+def test_a_candidate_set_whose_members_repeat_is_nonconforming() -> None:
+    loaded = load(label_sets.design())
+    record = label_sets.run(["ann", "bo"])
+    ref = label_sets.SET
+    assert set_entry_sync(record, loaded, ref, ["bo", "ann"])["entry"]["value"] == ["bo", "ann"]
+    exc = refusal(set_entry_sync, record, loaded, ref, ["ann", "ann"])
+    assert (exc.reason, exc.ref) == (R.nonconforming, ref)
+
+
+@pytest.mark.parametrize(
+    ("ref", "value", "reason"),
+    [
+        ("q:nope", YES, R.not_found),
+        (5, YES, R.not_found),
+        ("d:route", "no", R.null_call),
+        ("t:state", STATE, R.null_call),
+        ("d:route", Unasked(Cause("when-false")), R.null_call),
+        ("q:spam", Unasked(Cause("when-false")), R.marker),
+        ("q:spam", Unavailable(Cause("not-returned")), R.marker),
+        ("q:spam", Unsure(Cause("abstained")), R.marker),
+        ("q:spam", {"yes": 0.9}, R.nonconforming),
+        ("q:spam", "yes", R.nonconforming),
+        ("t:size", "nine", R.nonconforming),
+    ],
+    ids=[
+        "no entry",
+        "a ref not a string",
+        "a rule's entry",
+        "the state entry",
+        "null call before marker",
+        "Unasked",
+        "an engine code",
+        "Unsure",
+        "an answer missing a label",
+        "not an answer",
+        "not of the type",
+    ],
+)
+@pytest.mark.usefixtures("no_replay")
+def test_form_1_refusals(ref: Any, value: object, reason: RefusalReason) -> None:
+    exc = refusal(set_entry_sync, go().record, LOADED, ref, value)
+    assert exc.reason is reason
+    assert exc.ref == (ref if type(ref) is str else None)
+    assert (exc.source, exc.path, exc.turn) == (None, None, None)
+
+
+def failed_record() -> Record:
+    return live(ask=Failed(Cause("raised", ["q:spam"])))
+
+
+@pytest.mark.usefixtures("no_replay")
+def test_an_entry_of_a_failed_call_is_failed_call_before_marker() -> None:
+    for value in (YES, Unasked(Cause("when-false"))):
+        exc = refusal(set_entry_sync, failed_record(), LOADED, "q:spam", value)
+        assert (exc.reason, exc.ref) == (R.failed_call, "q:spam")
+
+
+# ---------------------------------------------------------------------------------------------
+# Form 2: a call
+
+
+def test_failing_a_call_gives_exactly_the_findings_downstream_of_it() -> None:
+    record = live(REFUSING)
+    other = live(REFUSING, ask=Failed(Cause("raised", ["q:spam"])))
+    result = fail_call_sync(record, REFUSING, "body", "raised")
+    assert result["findings"] == downstream(record, other, "q:spam", "t:body")
+    assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
+    call = result["call"]
+    recorded = next(i for i in other.log if i["item"] == "call" and "ask" in i["sources"])
+    assert call == recorded
+    assert call["outcome"] == {"failed": {"code": "raised", "refs": ["q:spam", "t:body"]}}
+    assert call["claimed"] == []
+    assert call["provider"] is None
+
+
+def test_failing_a_call_nothing_reads_gives_no_finding() -> None:
+    result = fail_call_sync(go().record, LOADED, "look", "timed-out")
+    assert result["findings"] == []
+    assert result["call"]["outcome"]["failed"] == {"code": "timed-out", "refs": ["t:size"]}
+
+
+@pytest.mark.parametrize(
+    ("source", "code", "reason"),
+    [
+        ("nope", "raised", R.not_found),
+        (["ask"], "raised", R.not_found),
+        ("nope", "refused", R.not_found),
+        ("ask", "refused", R.fault_code),
+        ("ask", "not-returned", R.fault_code),
+        ("ask", 5, R.fault_code),
+    ],
+    ids=["no call", "a source not a string", "not-found first", "a ref's code", "engine", "int"],
+)
+@pytest.mark.usefixtures("no_replay")
+def test_form_2_refusals(source: Any, code: Any, reason: RefusalReason) -> None:
+    exc = refusal(fail_call_sync, go().record, LOADED, source, code)
+    assert exc.reason is reason
+    assert exc.source == (source if type(source) is str else None)
+    assert (exc.ref, exc.path) == (None, None)
+
+
+@pytest.mark.usefixtures("no_replay")
+def test_a_failed_call_is_failed_call_before_fault_code() -> None:
+    for code in ("raised", "refused"):
+        exc = refusal(fail_call_sync, failed_record(), LOADED, "body", code)
+        assert (exc.reason, exc.source) == (R.failed_call, "body")
+
+
+# ---------------------------------------------------------------------------------------------
+# Form 3: a state field
+
+
+def test_setting_a_state_field_to_its_value_gives_no_finding() -> None:
+    record = go().record
+    result = set_state_field_sync(record, LOADED, "t:state.sender.address", "a@example.com")
+    assert result == {"entry": entry(record.log, "t:state"), "findings": []}
+
+
+def test_setting_a_state_field_gives_exactly_the_findings_downstream_of_it() -> None:
+    record, other = live(REFUSING), live(REFUSING, state={**STATE, "subject": "bye"})
+    result = set_state_field_sync(record, REFUSING, "t:state.subject", "bye")
+    assert result["entry"] == entry(other.log, "t:state")
+    assert result["findings"] == downstream(record, other, "t:state")
+    assert kinds(result["findings"]) == [(K.entry, "d:echo")]
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "reason"),
+    [
+        ("t:state.nope", "x", R.not_found),
+        ("t:state.subject.inner", "x", R.not_found),
+        ("subject", "x", R.not_found),
+        ("t:state", STATE, R.not_found),
+        ("t:body.x", "x", R.not_found),
+        (None, "x", R.not_found),
+        ("t:state.nope", Unasked(Cause("when-false")), R.not_found),
+        ("t:state.subject", Unavailable(Cause("refused")), R.marker),
+        ("t:state.subject", 5, R.nonconforming),
+        ("t:state.sender", {"address": 1}, R.nonconforming),
+    ],
+    ids=[
+        "no field",
+        "below a string",
+        "no prefix",
+        "the whole state",
+        "another ref",
+        "not a string",
+        "not-found before marker",
+        "a marker",
+        "a number for a string",
+        "a nested misfit",
+    ],
+)
+@pytest.mark.usefixtures("no_replay")
+def test_form_3_refusals(path: Any, value: object, reason: RefusalReason) -> None:
+    exc = refusal(set_state_field_sync, go().record, LOADED, path, value)
+    assert exc.reason is reason
+    assert exc.path == (path if type(path) is str else None)
+    assert (exc.ref, exc.source) == (None, None)
+
+
+# ---------------------------------------------------------------------------------------------
+# Form 4: a constant rule
+
+
+def test_a_constant_rule_gives_exactly_the_findings_downstream_of_it() -> None:
+    record, other = live(REFUSING), live(REFUSING, ask=returns(HAM))
+    result = constant_rule_sync(record, REFUSING, "d:route", "no")
+    found = result["findings"]
+    assert kinds(found) == [
+        (K.design_mismatch, None),
+        (K.entry, "d:route"),
+        (K.plan, None),
+        (K.verdict, None),
+    ]
+    modified = load(result["document"])
+    assert found[0] == {
+        "kind": K.design_mismatch,
+        "recorded": REFUSING.design_hash,
+        "replayed": modified.design_hash,
+    }
+    route = found[1]["replayed"]
+    assert (route["value"], route["rows"]) == ("no", [1])
+    assert found[1]["rule"] is None  # a table now provides it
+    assert found[2:] == downstream(record, other, "q:spam", "d:route")
+
+
+def test_the_modified_document_replaces_the_declaration_under_its_name() -> None:
+    document = constant_rule_sync(go().record, LOADED, "d:route", Unsure)["document"]
+    rules = decode(LOADED.document)["rules"]  # type: ignore[index]
+    assert document["rules"]["echo"] == rules["echo"]
+    assert document["rules"]["route"] == {
+        "form": "table",
+        "provides": "d:route",
+        "outputs": rules["route"]["outputs"],
+        "candidates": False,
+        "grounded": None,
+        "target": None,
+        "hit": "U",
+        "order": None,
+        "inputs": [{"read": "q:spam", "helper": None, "params": {}}],
+        "rows": [{"cells": ["-"], "output": {"marker": "Unsure"}}],
+    }
+    assert json.loads(json.dumps(document)) == document
+
+
+def test_a_constant_rule_at_its_recorded_value_changes_only_how_the_entry_was_derived() -> None:
+    found = constant_rule_sync(go().record, LOADED, "d:route", "yes")["findings"]
+    assert kinds(found) == [(K.design_mismatch, None), (K.entry, "d:route")]
+    assert found[1]["recorded"]["value"] == found[1]["replayed"]["value"] == "yes"
+
+
+def test_a_constant_unsure_rule_writes_unsure() -> None:
+    found = constant_rule_sync(go().record, LOADED, "d:route", Unsure)["findings"]
+    assert found[1]["replayed"]["marker"]["kind"] == "Unsure"
+
+
+def test_a_table_rule_is_replaced_over_its_inputs_reads() -> None:
+    loaded = load(DESIGN)
+    record = decide_sync(loaded, {"score": 0.9, "name": "n"}, {}).record
+    result = constant_rule_sync(record, loaded, "d:level", "low")
+    assert result["document"]["rules"]["level"]["inputs"] == [
+        {"read": "t:state.score", "helper": None, "params": {}}
+    ]
+    assert kinds(result["findings"]) == [
+        (K.design_mismatch, None),
+        (K.entry, "d:level"),
+        (K.plan, None),
+        (K.verdict, None),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rule", "output", "reason"),
+    [
+        ("d:nope", "no", R.not_found),
+        ("route", "no", R.not_found),
+        (None, "no", R.not_found),
+        ("d:route", Unavailable(Cause("refused")), R.marker),
+        ("d:route", Unasked, R.marker),
+        ("d:route", Unsure(Cause("abstained")), R.marker),
+        ("d:route", "maybe", R.invalid_design),
+    ],
+    ids=[
+        "no rule",
+        "the rule's name",
+        "not a string",
+        "Unavailable",
+        "Unasked",
+        "an instance",
+        "x",
+    ],
+)
+@pytest.mark.usefixtures("no_replay")
+def test_form_4_refusals(rule: Any, output: object, reason: RefusalReason) -> None:
+    exc = refusal(constant_rule_sync, go().record, LOADED, rule, output)
+    assert exc.reason is reason
+    assert exc.ref == (rule if type(rule) is str else None)
+    if reason is R.invalid_design:
+        assert type(exc.error) is InvalidDesign
+        assert exc.__cause__ is exc.error
+    else:
+        assert exc.error is None
+
+
+@pytest.mark.parametrize("rule", [grounded.SET, grounded.FIT, grounded.LEVEL])
+@pytest.mark.usefixtures("no_replay")
+def test_a_candidate_set_or_grounded_rule_is_candidate_rule_before_marker(rule: str) -> None:
+    record = grounded.decided()
+    for output in ("x", Unasked):
+        exc = refusal(constant_rule_sync, record, grounded.LOADED, rule, output)
+        assert (exc.reason, exc.ref) == (R.candidate_rule, rule)
+
+
+def test_a_constant_rule_loads_with_the_callers_functions() -> None:
+    record = go().record
+    same = constant_rule_sync(record, LOADED, "d:route", "no", functions={"echo": echo})
+    assert same == constant_rule_sync(record, LOADED, "d:route", "no")
+    exc = refusal(constant_rule_sync, record, LOADED, "d:route", "no", functions={"echo": route})
+    assert exc.reason is R.invalid_design
+    assert "echo" in str(exc.error)
+
+
+# ---------------------------------------------------------------------------------------------
+# intervene
+
+
+def test_several_edits_replay_once_on_one_copy_in_any_order() -> None:
+    record = live(REFUSING)
+    edits = [
+        {"path": "t:state.subject", "value": "bye"},
+        {"ref": "q:spam", "value": NO},
+        {"source": "look", "code": "raised"},
+    ]
+    result = intervene_sync(record, REFUSING, edits)
+    assert intervene_sync(record, REFUSING, edits[::-1]) == result
+    assert result["document"] is None
+    assert [(i["item"], i.get("ref"), i.get("sources")) for i in result["items"]] == [
+        ("entry", "t:state", None),
+        ("call", None, ["look"]),
+        ("entry", "q:spam", None),
+        ("entry", "t:size", None),
+    ]
+    other = live(
+        REFUSING,
+        state={**STATE, "subject": "bye"},
+        ask=returns(HAM),
+        look=Failed(Cause("raised", [])),
+    )
+    assert result["findings"] == downstream(record, other, "t:state", "q:spam", "t:size")
+    assert kinds(result["findings"]) == [
+        (K.entry, "d:echo"),
+        (K.entry, "d:route"),
+        (K.plan, None),
+        (K.verdict, None),
+    ]
+
+
+def test_intervene_matches_each_form_alone() -> None:
+    record = live(REFUSING)
+    alone = set_entry_sync(record, REFUSING, "q:spam", NO)
+    both = intervene_sync(record, REFUSING, [{"ref": "q:spam", "value": NO}])
+    assert both == {"items": [alone["entry"]], "document": None, "findings": alone["findings"]}
+    alone = constant_rule_sync(record, REFUSING, "d:route", "no")
+    both = intervene_sync(record, REFUSING, [], rule={"rule": "d:route", "output": "no"})
+    assert both == {"items": [], **alone}
+
+
+def test_edits_and_a_rule_replay_together_under_the_modified_design() -> None:
+    record = go().record
+    result = intervene_sync(
+        record,
+        LOADED,
+        [{"path": "t:state.subject", "value": "bye"}],
+        rule={"rule": "d:route", "output": "no"},
+    )
+    assert result["document"]["rules"]["route"]["form"] == "table"
+    assert kinds(result["findings"]) == [
+        (K.design_mismatch, None),
+        (K.entry, "d:echo"),
+        (K.entry, "d:route"),
+        (K.plan, None),
+    ]
+
+
+def test_two_disjoint_state_fields_are_both_set() -> None:
+    edits = [
+        {"path": "t:state.subject", "value": "bye"},
+        {"path": "t:state.sender.address", "value": "b@x"},
+    ]
+    (state,) = intervene_sync(go().record, LOADED, edits)["items"]
+    assert (state["value"]["subject"], state["value"]["sender"]) == ("bye", {"address": "b@x"})
+
+
+@pytest.mark.parametrize(
+    ("edits", "rule", "reason", "named"),
+    [
+        ({"ref": "q:spam", "value": NO}, None, R.invalid_edit, None),
+        ([{"ref": "q:spam"}], None, R.invalid_edit, "edit 0"),
+        ([{"ref": "q:spam", "value": NO}, ["q:spam", NO]], None, R.invalid_edit, "edit 1"),
+        ([{"ref": "q:spam", "value": NO, "path": "x"}], None, R.invalid_edit, "edit 0"),
+        ([{"source": "ask", "value": "raised"}], None, R.invalid_edit, "edit 0"),
+        ([], {"rule": "d:route"}, R.invalid_edit, "rule"),
+        ([], "d:route", R.invalid_edit, "rule"),
+        ([], None, R.no_edit, None),
+        ([{"ref": "q:nope"}], None, R.invalid_edit, "edit 0"),
+    ],
+    ids=[
+        "not a list",
+        "a member missing",
+        "a list item",
+        "an extra member",
+        "mixed members",
+        "a rule missing output",
+        "a rule not an object",
+        "nothing to do",
+        "invalid-edit before not-found",
+    ],
+)
+@pytest.mark.usefixtures("no_replay")
+def test_intervene_refuses_a_misshapen_or_empty_request(
+    edits: Any, rule: Any, reason: RefusalReason, named: str | None
+) -> None:
+    exc = refusal(intervene_sync, go().record, LOADED, edits, rule=rule)
+    assert exc.reason is reason
+    if named is not None:
+        assert named in str(exc)
+
+
+@pytest.mark.parametrize(
+    ("edits", "named"),
+    [
+        ([{"ref": "q:spam", "value": NO}, {"ref": "q:spam", "value": YES}], {"ref": "q:spam"}),
+        (
+            [{"source": "ask", "code": "raised"}, {"source": "body", "code": "timed-out"}],
+            {"source": "body"},
+        ),
+        (
+            [{"path": "t:state.subject", "value": "a"}, {"path": "t:state.subject", "value": "b"}],
+            {"path": "t:state.subject"},
+        ),
+        (
+            [
+                {"path": "t:state.sender.address", "value": "a"},
+                {"path": "t:state.sender", "value": {"address": "b"}},
+            ],
+            {"path": "t:state.sender"},
+        ),
+        (
+            [
+                {"path": "t:state.sender", "value": {"address": "b"}},
+                {"path": "t:state.sender.address", "value": "a"},
+            ],
+            {"path": "t:state.sender.address"},
+        ),
+    ],
+    ids=["one ref", "one call", "one path", "a path above", "a path below"],
+)
+@pytest.mark.usefixtures("no_replay")
+def test_two_edits_of_one_target_are_duplicate_target(
+    edits: list[Any], named: dict[str, str]
+) -> None:
+    exc = refusal(intervene_sync, go().record, LOADED, edits)
+    assert exc.reason is R.duplicate_target
+    assert {k: getattr(exc, k) for k in ("ref", "source", "path") if getattr(exc, k)} == named
+
+
+@pytest.mark.usefixtures("no_replay")
+def test_an_entry_of_a_failed_edits_call_is_conflicting_edits_in_either_order() -> None:
+    edits = [{"ref": "t:body", "value": "x"}, {"source": "ask", "code": "raised"}]
+    for given in (edits, edits[::-1]):
+        exc = refusal(intervene_sync, go().record, LOADED, given)
+        assert (exc.reason, exc.ref, exc.source) == (R.conflicting_edits, "t:body", "ask")
+
+
+@pytest.mark.usefixtures("no_replay")
+def test_intervenes_refusals_come_in_their_order() -> None:
+    record = go().record
+    bad = {"ref": "q:spam"}
+    dup = [{"ref": "t:body", "value": "x"}, {"ref": "t:body", "value": "y"}]
+    conflict = [{"ref": "q:spam", "value": NO}, {"source": "body", "code": "raised"}]
+    own = [{"ref": "d:route", "value": "no"}, {"path": "t:state.nope", "value": 1}]
+    rule = {"rule": "d:nope", "output": "x"}
+
+    def reason(edits: Any, rule: Any = None, given: object = record) -> RefusalReason:
+        return refusal(intervene_sync, given, LOADED, edits, rule=rule).reason
+
+    assert reason([bad], given=unfinished()) is R.unfinished
+    assert reason([*dup, bad]) is R.invalid_edit
+    assert reason([*conflict, *dup]) is R.duplicate_target
+    assert reason([*own, *conflict]) is R.conflicting_edits
+    assert reason(own, rule) is R.null_call
+    assert reason(own[::-1], rule) is R.not_found
+    assert refusal(intervene_sync, record, LOADED, own[::-1], rule=rule).path == "t:state.nope"
+    assert reason([{"ref": "t:body", "value": "x"}], rule) is R.not_found
+    assert reason([{"ref": "t:body", "value": "x"}], {"rule": "d:route", "output": 1}) is (
+        R.invalid_design
+    )
+
+
+# ---------------------------------------------------------------------------------------------
+# Every job: the record checks, the copy, the inputs and the output
+
+
+def job_calls() -> list[tuple[str, Callable[[object], Any]]]:
+    return [
+        ("set_entry", lambda r: set_entry_sync(r, LOADED, "q:spam", NO)),
+        ("fail_call", lambda r: fail_call_sync(r, LOADED, "ask", "raised")),
+        ("set_state_field", lambda r: set_state_field_sync(r, LOADED, "t:state.subject", "b")),
+        ("constant_rule", lambda r: constant_rule_sync(r, LOADED, "d:route", "no")),
+        (
+            "intervene",
+            lambda r: intervene_sync(
+                r,
+                LOADED,
+                [{"ref": "q:spam", "value": NO}, {"path": "t:state.subject", "value": "b"}],
+                rule={"rule": "d:route", "output": "no"},
+            ),
+        ),
+    ]
+
+
+JOBS = job_calls()
+IDS = [name for name, _ in JOBS]
+
+
+@pytest.mark.parametrize("job", [j for _, j in JOBS], ids=IDS)
+@pytest.mark.usefixtures("no_replay")
+def test_every_job_refuses_the_record_in_order_before_any_edit(
+    job: Callable[[object], Any],
+) -> None:
+    other_design = live(slice_design(tools=["archive", "send"]))
+    for given, reason in (
+        (b"not json", R.invalid_record),
+        (unfinished(), R.unfinished),
+        (broken(), R.nothing_to_replay),
+        (other_design, R.wrong_design),
+    ):
+        with pytest.raises(EvaluationRefusal) as raised:
+            job(given)
+        exc = raised.value
+        assert exc.reason is reason
+        if reason is R.invalid_record:
+            assert type(exc.error) is InvalidRecord
+        else:
+            assert exc.turn == given.record_hash  # type: ignore[union-attr]
+            assert str(exc).startswith("record")
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        lambda: set_entry_sync(b"x", object(), "q:spam", NO),  # type: ignore[arg-type]
+        lambda: fail_call_sync(b"x", object(), "ask", "raised"),  # type: ignore[arg-type]
+        lambda: set_state_field_sync(b"x", object(), "t:state.a", 1),  # type: ignore[arg-type]
+        lambda: constant_rule_sync(b"x", object(), "d:route", "no"),  # type: ignore[arg-type]
+        lambda: intervene_sync(b"x", object(), []),  # type: ignore[arg-type]
+    ],
+    ids=IDS,
+)
+def test_a_loaded_not_exactly_a_loaded_design_is_refused_first(job: Callable[[], Any]) -> None:
+    with pytest.raises(EntryRefusal, match="exactly a LoadedDesign"):
+        job()
+
+
+@pytest.mark.parametrize(
+    "job", [j for name, j in JOBS if name != "constant_rule"], ids=IDS[:3] + IDS[4:]
+)
+def test_the_copy_carries_its_own_hash_and_is_read_back(
+    job: Callable[[object], Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copies: list[tuple[Any, Record]] = []
+    real = _edit._read
+
+    def spy(document: object, name: str) -> Record:
+        read = real(document, name)
+        if name == "the copy":
+            copies.append((document, read))
+        return read
+
+    monkeypatch.setattr(_edit, "_read", spy)
+    record = go().record
+    job(record)
+    ((document, read),) = copies
+    assert type(document) is dict
+    assert document["hash"] == read.record_hash != record.record_hash
+    assert read_record(read.document).record_hash == read.record_hash
+
+
+def test_a_constant_rule_alone_makes_no_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_edit, "_copy", None)
+    constant_rule_sync(go().record, LOADED, "d:route", "no")
+
+
+@pytest.mark.parametrize("job", [j for _, j in JOBS], ids=IDS)
+def test_neither_input_changes(job: Callable[[object], Any]) -> None:
+    record = go().record
+    before = (record.document, LOADED.document)
+    parsed = json.loads(record.document)
+    kept = copy.deepcopy(parsed)
+    job(record)
+    job(parsed)
+    assert (record.document, LOADED.document) == before
+    assert parsed == kept
+
+
+def records_in(value: object) -> list[object]:
+    """Every ``Record`` reachable from a plain return, through dicts, lists and tuples."""
+    if type(value) is Record:
+        return [value]
+    if type(value) is dict:
+        value = list(cast("dict[object, object]", value).values())
+    if type(value) in (list, tuple):
+        return [r for v in cast("list[object]", value) for r in records_in(v)]
+    return []
+
+
+ALL_JOBS: list[tuple[str, Callable[[object], Any]]] = [
+    *JOBS,
+    ("use_answers", lambda r: use_answers_sync(r, LOADED, live(ask=returns(HAM)))),
+]
+
+
+@pytest.mark.parametrize("job", [j for _, j in ALL_JOBS], ids=[n for n, _ in ALL_JOBS])
+def test_no_record_is_reachable_from_a_jobs_output(job: Callable[[object], Any]) -> None:
+    result = job(go().record)
+    assert records_in(result) == []
+    assert json.loads(json.dumps(result)) == result
+    assert copy.deepcopy(result) == result
+
+
+# ---------------------------------------------------------------------------------------------
+# Records of earlier formats
+
+
+@pytest.mark.parametrize("fmt", [2, 3, 4, 5, 6, 7])
+def test_a_record_of_an_earlier_format_is_copied_and_read_back(fmt: int) -> None:
+    folder = TESTS / f"format_{fmt}"
+    loaded = load((folder / "design.json").read_bytes())
+    record = read_record((folder / "record.json").read_bytes())
+    asked = next(i for i in record.log if i["item"] == "entry" and i["ref"].startswith("q:"))
+    probabilities = asked["value"]["probabilities"]
+    same = set_entry_sync(record, loaded, asked["ref"], probabilities)
+    assert same["entry"] == asked
+    assert [f for f in same["findings"] if f["kind"] is not K.helpers_mismatch] == []
+    source = next(i for i in record.log if i["item"] == "call")["sources"][0]
+    assert fail_call_sync(record, loaded, source, "raised")["call"]["outcome"] != "returned"
+
+
+# ---------------------------------------------------------------------------------------------
+# The sync twins
+
+
+def test_each_job_is_awaitable_and_equals_its_sync_twin() -> None:
+    record = go().record
+
+    async def main() -> list[Any]:
+        return [
+            await set_entry(record, LOADED, "q:spam", NO),
+            await fail_call(record, LOADED, "ask", "raised"),
+            await set_state_field(record, LOADED, "t:state.subject", "b"),
+            await constant_rule(record, LOADED, "d:route", "no"),
+            await intervene(record, LOADED, [{"ref": "q:spam", "value": NO}]),
+        ]
+
+    assert asyncio.run(main()) == [
+        set_entry_sync(record, LOADED, "q:spam", NO),
+        fail_call_sync(record, LOADED, "ask", "raised"),
+        set_state_field_sync(record, LOADED, "t:state.subject", "b"),
+        constant_rule_sync(record, LOADED, "d:route", "no"),
+        intervene_sync(record, LOADED, [{"ref": "q:spam", "value": NO}]),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "job"),
+    [
+        ("set_entry", lambda: set_entry_sync(object(), object(), "", 0)),  # type: ignore[arg-type]
+        ("fail_call", lambda: fail_call_sync(object(), object(), "", "")),  # type: ignore[arg-type]
+        ("set_state_field", lambda: set_state_field_sync(object(), object(), "", 0)),  # type: ignore[arg-type]
+        ("constant_rule", lambda: constant_rule_sync(object(), object(), "", 0)),  # type: ignore[arg-type]
+        ("intervene", lambda: intervene_sync(object(), object(), [])),  # type: ignore[arg-type]
+    ],
+)
+def test_a_sync_twin_inside_a_running_loop_raises_before_doing_anything(
+    name: str, job: Callable[[], Any]
+) -> None:
+    async def main() -> None:
+        with pytest.raises(RuntimeError, match=f"{name}_sync was called inside a running event"):
+            job()
+
+    asyncio.run(main())

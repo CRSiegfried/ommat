@@ -1,18 +1,34 @@
 """The evaluation subpackage: jobs that measure a design against past turns through replay,
 and the two stores they keep their inputs and results in. The names ``__all__`` lists are
-public, under the same deprecation rule as ``ommat.__all__``. ``use_answers`` is the one job
-shipped.
+public, under the same deprecation rule as ``ommat.__all__``. Do-and-diff's six jobs are
+shipped, each async with a ``_sync`` twin.
 
-``use_answers`` answers a turn with another record's answers: it reruns one record's
-turn with another record's calls answering, and returns replay's findings. ``DesignStore``
-keeps a loaded design's document under its design hash and fetches it back through ``load``;
-``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses with
-``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
+``set_entry``, ``fail_call``, ``set_state_field`` and ``constant_rule`` each change one input
+of a recorded turn, an entry a call wrote, a whole call, a ``t:state`` field or a rule made
+constant, and ``intervene`` several at once; each replays the change once and returns what it
+edited beside replay's findings, the changes downstream. ``use_answers`` reruns one record's
+turn with another record's calls answering. ``DesignStore`` keeps a loaded design's document
+under its design hash and fetches it back through ``load``; ``EvaluationStore`` keeps
+write-once entries by kind and key. A job or a store refuses with ``EvaluationRefusal``, its
+``reason`` a ``RefusalReason``.
 
-The job is in ``_diff``, the stores in ``_store`` and the refusal in ``_refusal``.
+The edits are in ``_edit``, ``use_answers`` and the record checks and replay they share in
+``_diff``, the stores in ``_store`` and the refusal in ``_refusal``.
 """
 
 from ommat.evaluation._diff import use_answers, use_answers_sync
+from ommat.evaluation._edit import (
+    constant_rule,
+    constant_rule_sync,
+    fail_call,
+    fail_call_sync,
+    intervene,
+    intervene_sync,
+    set_entry,
+    set_entry_sync,
+    set_state_field,
+    set_state_field_sync,
+)
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import DesignStore, EvaluationStore
 
@@ -21,6 +37,16 @@ __all__ = [
     "EvaluationRefusal",
     "EvaluationStore",
     "RefusalReason",
+    "constant_rule",
+    "constant_rule_sync",
+    "fail_call",
+    "fail_call_sync",
+    "intervene",
+    "intervene_sync",
+    "set_entry",
+    "set_entry_sync",
+    "set_state_field",
+    "set_state_field_sync",
     "use_answers",
     "use_answers_sync",
 ]

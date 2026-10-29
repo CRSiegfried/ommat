@@ -10,10 +10,14 @@ The findings are replay's: the entries, plan and verdict against ``record``,
 ``ref-not-in-record`` meaning not in ``other``. A plan is compared without its ``context``, so
 a change of context text alone is no plan change. Neither record is edited, and nothing is read
 from either's ``unhashed``.
+
+The record read, its checks, the replay less context-alone plan findings and the sync runner
+are shared with the edits of ``_edit``.
 """
 
 import asyncio
-from typing import Any
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 from ommat._canonical import encode
 from ommat._decide import EntryRefusal
@@ -31,6 +35,7 @@ from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 
 _R = RefusalReason
 _NAMES = ("record", "other")
+_T = TypeVar("_T")
 
 
 async def use_answers(record: object, loaded: LoadedDesign, other: object) -> dict[str, Any]:
@@ -40,28 +45,11 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     records = (_read(record, "record"), _read(other, "other"))
     logs = tuple(r.log for r in records)  # read once: every read decodes afresh
-    for name, r, log in zip(_NAMES, records, logs, strict=True):
-        if not any(item["item"] == "verdict" for item in log):
-            raise EvaluationRefusal(
-                f"{name} has no verdict item", reason=_R.unfinished, turn=r.record_hash
-            )
-    states = tuple(_state(log) for log in logs)
-    for name, r, state in zip(_NAMES, records, states, strict=True):
-        if state is None:
-            raise EvaluationRefusal(
-                f"{name} has no state entry", reason=_R.nothing_to_replay, turn=r.record_hash
-            )
-    for name, r in zip(_NAMES, records, strict=True):
-        if r.design_hash != loaded.design_hash:
-            raise EvaluationRefusal(
-                f"{name}'s design hash is {r.design_hash}, not the loaded design's "
-                f"{loaded.design_hash}",
-                reason=_R.wrong_design,
-                turn=r.record_hash,
-            )
+    _refuse_unfit(_NAMES, records, logs, loaded)
     mine, theirs = logs
     # Compared as replay compares items: an item of a record before format 6, holding no
     # order, is compared without the other's.
+    states = (_state(mine), _state(theirs))
     for what, a, b in (("state entry", *states), ("settings item", mine[1], theirs[1])):
         if _differ(a, b):
             raise EvaluationRefusal(
@@ -69,9 +57,44 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
                 reason=_R.different_turn,
                 turn=records[1].record_hash,
             )
-    _, found = await _replay_with(mine, loaded, theirs, observer=None)
-    found = [f for f in found if not _context_alone(f)]
-    return {"other": records[1].record_hash, "findings": found}
+    return {"other": records[1].record_hash, "findings": await _replayed(mine, loaded, theirs)}
+
+
+def _refuse_unfit(
+    names: tuple[str, ...],
+    records: tuple[Record, ...],
+    logs: tuple[list[dict[str, Any]], ...],
+    loaded: LoadedDesign,
+) -> None:
+    """Refuse, in order, ``unfinished``, ``nothing-to-replay`` and ``wrong-design``, each
+    checked on every record in turn, its ``turn`` the record's hash (§do-and-diff)."""
+    for name, r, log in zip(names, records, logs, strict=True):
+        if not any(item["item"] == "verdict" for item in log):
+            raise EvaluationRefusal(
+                f"{name} has no verdict item", reason=_R.unfinished, turn=r.record_hash
+            )
+    for name, r, log in zip(names, records, logs, strict=True):
+        if _state(log) is None:
+            raise EvaluationRefusal(
+                f"{name} has no state entry", reason=_R.nothing_to_replay, turn=r.record_hash
+            )
+    for name, r in zip(names, records, strict=True):
+        if r.design_hash != loaded.design_hash:
+            raise EvaluationRefusal(
+                f"{name}'s design hash is {r.design_hash}, not the loaded design's "
+                f"{loaded.design_hash}",
+                reason=_R.wrong_design,
+                turn=r.record_hash,
+            )
+
+
+async def _replayed(
+    log: list[dict[str, Any]], loaded: LoadedDesign, answers: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Replay's findings for ``log`` rerun under ``loaded``, answered by ``answers``' calls,
+    less a ``plan`` finding of context alone; the replay record is dropped (§store-integrity)."""
+    _, found = await _replay_with(log, loaded, answers, observer=None)
+    return [f for f in found if not _context_alone(f)]
 
 
 def _context_alone(finding: dict[str, Any]) -> bool:
@@ -96,15 +119,19 @@ def _context_alone(finding: dict[str, Any]) -> bool:
 def use_answers_sync(record: object, loaded: LoadedDesign, other: object) -> dict[str, Any]:
     """``use_answers`` run to completion; ``RuntimeError`` inside a running event loop, raised
     before the coroutine is built."""
+    return run_sync("use_answers", lambda: use_answers(record, loaded, other))
+
+
+def run_sync(name: str, job: Callable[[], Coroutine[Any, Any, _T]]) -> _T:
+    """The coroutine ``job`` builds, run to completion; ``RuntimeError`` naming the job inside a
+    running event loop, raised before the coroutine is built."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         pass
     else:
-        raise RuntimeError(
-            "use_answers_sync was called inside a running event loop; await use_answers"
-        )
-    return asyncio.run(use_answers(record, loaded, other))
+        raise RuntimeError(f"{name}_sync was called inside a running event loop; await {name}")
+    return asyncio.run(job())
 
 
 def _read(document: object, name: str) -> Record:

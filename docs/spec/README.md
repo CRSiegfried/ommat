@@ -12,7 +12,7 @@ The spec covers what record format 7 and design format 9 hold and the engine doe
 - the context block a design declares, rendered into the record, and the record views: the escalation view, the handoff view, the transcript view and the redacted view;
 - the conversation renderers, which render a handoff as text and a transcript as Chat Completions or Pydantic AI messages;
 - the record lens, which renders stored records and designs as an HTML page a person reads;
-- replay of a recorded turn with no model call, the evaluation job `use_answers`, and the design store and the evaluation store;
+- replay of a recorded turn with no model call, the do-and-diff evaluation jobs `set_entry`, `fail_call`, `set_state_field`, `constant_rule`, `intervene` and `use_answers`, and the design store and the evaluation store;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;
 - the answer kinds: `noul`, `choice` and `score`, which give a probability to each label, and `extraction`, a typed value read from a text, with the probability that the text holds none, the model's reading whatever it answered, its confidence and the span it read;
 - the candidate-valued label set: a `choice` whose labels are a fixed part and the members of a `list<string>` candidate set, rendered each time it is asked;
@@ -21,7 +21,7 @@ The spec covers what record format 7 and design format 9 hold and the engine doe
 - the live frontier, the answer grid and the `boundaries` fields, and the design lints that read them;
 - decision tables: rule tables under every hit policy, data rules among them, and the policy table with its plan declarations and their declared text.
 
-Outside it, and refused by load in a design that declares one: a grounded declaration that is itself a candidate set; a per-candidate extraction question and a per-candidate question whose labels are a candidate-valued set; and a need on a grounded declared ref. Also outside it: the run-time stopping certificate, multi-turn continuation, and every evaluation job but `use_answers`.
+Outside it, and refused by load in a design that declares one: a grounded declaration that is itself a candidate set; a per-candidate extraction question and a per-candidate question whose labels are a candidate-valued set; and a need on a grounded declared ref. Also outside it: the run-time stopping certificate, multi-turn continuation, and every evaluation job but do-and-diff's six, whose deciding inputs are outside it too.
 
 The sections below are written; the rest is not yet.
 
@@ -341,6 +341,27 @@ An `entry`, `plan` or `verdict` finding compares the two items by canonical byte
 After both records are read and before any replay it raises `EvaluationRefusal`, `reason` in this order: `invalid-record` when a document does not read, carrying the `InvalidRecord` as `error`; `unfinished` for a record with no `verdict` item, then `nothing-to-replay` for one with no state entry, then `wrong-design` for one whose design hash is not `loaded.design_hash`, each for `record` then `other`; and `different-turn` when the two state entries or `settings` items differ as replay compares items, `order` included, an item of a record before format 6 compared without `order` and `grounded`. `turn` is the refused record's hash, `other`'s for `different-turn`, and `None` for `invalid-record`, which carries `error` instead; every other attribute is `None`. A `loaded` that is not exactly a `LoadedDesign` is an `EntryRefusal`, before either record is read.
 
 A replay record, the `Record` that `replay` returns, is a valid `record` or `other`. To compare two models decided under different parameter sets, replay the second's record under the first's loaded design and pass the replay record as `other`; a threshold that makes the rerun ask a source the second never called shows as `not-in-record` in the replay's findings, and its entries come back `not-returned` in `use_answers`'s.
+
+### Edits
+
+Four jobs change one input of a recorded turn and replay it; `intervene` changes several at once. Each is `async` with a `_sync` twin, takes `record` as `use_answers` does, and returns plain data that holds no `Record`:
+
+- `set_entry(record, loaded, ref, value)` sets the `q:` or `t:` entry at `ref`, which a call recorded `returned` wrote, to `value`: for a `q:` ref the binding's form of an answer, the probabilities by label or an extraction answer's five members, built against the call item's question, its labels as asked, a candidate-valued set's from the set's entry; for a `t:` ref a value of its declared type, a candidate set's members distinct; or `Unavailable` with one of the six codes a binding may return, written naming `ref` alone. It returns `{"entry", "findings"}`.
+- `fail_call(record, loaded, source, code)` sets the call item listing `source` to `Failed` with `code`, one of `raised`, `timed-out`, `invalid-return` and `unexpected-ref`, its cause naming the refs of every entry the call wrote in code-point order, its hashed provenance members null and `claimed` empty where its format holds them, and each of those entries `Unavailable` with that cause. It returns `{"call", "findings"}`.
+- `set_state_field(record, loaded, path, value)` sets the state entry's field at `path`, a ref such as `t:state.sender.address` naming a field the recorded state holds, to a value; the state with it set must conform to the state declaration. It returns `{"entry", "findings"}`, the edited state entry.
+- `constant_rule(record, loaded, rule, output, *, functions=None)` replaces the declaration of the rule providing the `d:` ref `rule`, under its name, by a `U` table over the rule's reads, a table's its inputs' reads, with one row of `-` cells whose output is `output` or, for the class `Unsure`, `Unsure`, keeping `outputs` and `target`, and loads the edited document with `functions`. It returns `{"document", "findings"}`, the modified document parsed. Replay runs under the modified design, so `design-mismatch` is always a finding, and the rule's entry is one too, since it now holds `rows`.
+- `intervene(record, loaded, edits, *, rule=None, functions=None)` takes a list of edits, each `{"ref", "value"}`, `{"source", "code"}` or `{"path", "value"}`, and `rule`, `{"rule", "output"}` or `None`. Each edit is checked against the record as read, so their order changes nothing, and replay runs once. It returns `{"items", "document", "findings"}`, `items` each log item the edits changed, once, in log order, and `document` the modified document or `None`.
+
+An edit is made on a copy of the record: its log edited, each edited item's `order` derived afresh, its `hash` set to the edited log's record hash from format 3 and the copy read back through `read_record`. Replay reruns the copy, its state entry, calls and cut, so a finding is a change downstream of the edit; the edited entry itself, answered as set, is none. As with `use_answers`, a plan is compared without its `context`. Neither `record` nor `loaded` changes.
+
+Each job reads the record and refuses `invalid-record`, `unfinished`, `nothing-to-replay` and `wrong-design` as `use_answers` does for `record`, before any edit, load or replay. `intervene` then refuses, in order, `invalid-edit` when `edits` is not a list or an item or `rule` has another shape, the item's index in the message; `no-edit` when `edits` is empty and `rule` is `None`; `duplicate-target` when two edits name one ref, one call, by any of its sources, or one path, or a path within another, naming the later edit's; and `conflicting-edits` when a `set_entry` edit names an entry a `fail_call` edit's call wrote, naming `ref` and `source`. Then each edit's own refusals come in list order, then `rule`'s:
+
+| Job | Refusals, in order | Names |
+|---|---|---|
+| `set_entry` | `not-found`, no such entry; `null-call`, an entry whose `call` is null, every `d:` entry and the state entry among them; `failed-call`, an entry of a call recorded `Failed`; `marker`, any other marker; `nonconforming` | `ref` |
+| `fail_call` | `not-found`, no call lists the source; `failed-call`; `fault-code`, any other code | `source` |
+| `set_state_field` | `not-found`, a path that is no `t:state` field ref or names a field the recorded state does not hold; `marker`; `nonconforming` | `path` |
+| `constant_rule` | `not-found`, no rule provides the ref; `candidate-rule`, a rule that provides a candidate set or is grounded; `marker`, an output that is a marker or a marker class other than `Unsure`; `invalid-design`, carrying the `InvalidDesign` load raised as `error` | `ref` |
 
 ### The stores
 
