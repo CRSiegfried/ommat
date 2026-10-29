@@ -8,16 +8,15 @@ of a recorded turn, an entry a call wrote, a whole call, a ``t:state`` field or 
 constant, and ``intervene`` several at once; each replays the change once and returns what it
 edited beside replay's findings, the changes downstream. ``use_answers`` reruns one record's
 turn with another record's calls answering. ``deciding_inputs`` classes each declared read of
-the rule providing an entry by whether some intervention of the first four forms on it changes
-that entry: ``deciding``, ``not-deciding``, ``markers-only`` or ``not-determined``.
-``DesignStore`` keeps a loaded design's document
-under its design hash and fetches it back through ``load``; ``EvaluationStore`` keeps
-write-once entries by kind and key. A job or a store refuses with ``EvaluationRefusal``, its
-``reason`` a ``RefusalReason``.
+the rule providing an entry by whether some single edit on it, as the four single-edit jobs make
+one, changes that entry: ``deciding``, ``not-deciding``, ``markers-only`` or
+``not-determined``. ``DesignStore`` keeps a loaded design's document under its design hash and
+fetches it back through ``load``; ``EvaluationStore`` keeps write-once entries by kind and key.
+A job or a store refuses with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
 
 The edits are in ``_edit``, the deciding inputs, tried through them, in ``_deciding``,
-``use_answers`` and the record checks and replay they share in
-``_diff``, the stores in ``_store`` and the refusal in ``_refusal``.
+``use_answers`` and the record checks and replay they share in ``_diff``, the stores in
+``_store`` and the refusal in ``_refusal``.
 """
 
 from ommat.evaluation._deciding import deciding_inputs, deciding_inputs_sync

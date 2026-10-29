@@ -361,25 +361,25 @@ A `loaded` that is not exactly a `LoadedDesign` is an `EntryRefusal`, before the
 | `set_entry` | `not-found`, no such entry; `null-call`, an entry whose `call` is null, every `d:` entry and the state entry among them; `failed-call`, an entry of a call recorded `Failed`; `marker`, a marker class or any other marker, or one the record's format does not hold under a returned call (`unsupported` before format 3, `timed-out` and `raised` before format 4); `nonconforming`, a span past the text among them | `ref` |
 | `fail_call` | `not-found`, no call lists the source; `failed-call`; `fault-code`, any other code | `source` |
 | `set_state_field` | `not-found`, a path that is no `t:state` field ref or names a field the recorded state does not hold; `marker`, a marker or a marker class; `nonconforming` | `path` |
-| `constant_rule` | `not-found`, no rule provides the ref; `candidate-rule`, a rule that provides a candidate set, is grounded over one or reads a grounded declared ref, which no table but one grounded over its set may read; `marker`, an output that is a marker or a marker class other than `Unsure`; `invalid-design`, carrying the `InvalidDesign` load raised as `error` | `ref` |
+| `constant_rule` | `not-found`, no rule provides the ref; `candidate-rule`, a rule that provides a candidate set, is grounded over one or reads a grounded declared ref, which no table but one grounded over its set may read; `marker`, an output that is a marker or a marker class other than `Unsure`; `invalid-design`, carrying the `InvalidDesign` load raised as `error`, its message saying a table has no bytes literal when the output holds bytes | `ref` |
 
 ### The deciding inputs
 
-`deciding_inputs(record, loaded, ref, *, functions=None)`, `async` with a `_sync` twin, takes `record` as `use_answers` does and returns a `dict` from each declared read of the rule providing the entry at `ref`, in declared order, a table's input reads each once, to one of four strings:
+`deciding_inputs(record, loaded, ref, *, functions=None)`, `async` with a `_sync` twin, takes `record` as `use_answers` does and returns a `dict` from each declared read of the rule providing the entry at `ref`, in declared order, each read once, to one of four strings:
 
-- `deciding`: some intervention on the read changes the entry at `ref`, that is, replay gives an `entry` finding at `ref`;
-- `not-determined`: the read has no intervention, or one of its interventions reaches nothing;
+- `deciding`: some intervention on the read that reaches changes the entry at `ref`, that is, replay gives an `entry` finding at `ref`;
+- `not-determined`: none of its interventions reaches, or it has none;
 - `markers-only`: neither, and some target is not of a finite type, so it was tried at markers only;
-- `not-deciding`: none of these, every value of every target tried.
+- `not-deciding`: none of these, every value of every target tried. Each intervention is a single edit, so no single edit changes the entry; joint effects are not explored.
 
 A finite type is `boolean` or a label, either nullable, whose values are its labels in order, `false` before `true`, then null. Each intervention is one edit job's single edit, run through the same checks, copy and replay:
 
-- A `q:` or `t:` read, other than `t:state`, is tried through its entry, field path dropped; a grounded declared ref through each of its entries, in log order. Each entry is set as `set_entry` sets it to `Unavailable` with each code a binding may return that the record's format holds, in code-point order, a `q:` answer to `refused` only; a `t:` entry of a finite type then to each value; and when the entry's call wrote no other entry, the call is failed as `fail_call` fails it with each structural code, in code-point order.
+- A `q:` or `t:` read, other than `t:state`, is tried through its entry, field path dropped; a grounded declared ref through each of its entries, in log order. Each entry is set as `set_entry` sets it to `Unavailable` with each code a binding may return that the record's format holds, in code-point order, a `q:` answer to `refused` only; a `t:` entry of a finite type then to each value; and after every entry's, each call whose entries are all of the read's declared ref, once, in log order, as a grounded batch's are, is failed as `fail_call` fails it with each structural code, in code-point order.
 - A `t:state` field is set as `set_state_field` sets it to each value of a finite type; a field of another type, or `t:state` whole, has no intervention.
 - A `d:` read's rule is replaced as `constant_rule` replaces it, outputting `Unsure`, then each value of a finite type.
 - A `candidate` read has no intervention.
 
-An intervention reaches nothing when its job would refuse it `null-call`, `failed-call`, `not-found`, `candidate-rule` or `invalid-design`, so an entry not asked, an entry of a call recorded `Failed`, a field under a null record and a rule `constant_rule` refuses are `not-determined`; and when its replay gives `not-in-record`, `ref-not-in-record` or `question-changed`. Interventions run in order and stop at the first that changes the entry. After the record checks of the edit jobs, the job refuses `not-found`, naming `ref`, when `ref` is not a string or names no entry of the record a rule provides, before any replay.
+An intervention reaches nothing when its job would refuse it `null-call`, `failed-call`, `not-found` or `candidate-rule`, as for an entry not asked, an entry of a call recorded `Failed`, a field under a null record and a rule `constant_rule` refuses; and when its replay gives `not-in-record`, `ref-not-in-record` or `question-changed`, whatever else it finds. Any other refusal propagates, `invalid-design` among them, as when a function the modified design names needs `functions`. Interventions run in order and stop at the first that changes the entry. After the record checks of the edit jobs, the job refuses `not-found`, naming `ref`, when `ref` is not a string or names no entry of the record a rule provides, before any replay.
 
 ### The stores
 

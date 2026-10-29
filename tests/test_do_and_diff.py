@@ -134,6 +134,15 @@ def test_an_entry_set_to_a_binding_marker_names_its_ref_alone(code: str) -> None
     assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
 
 
+def test_a_t_entry_set_to_a_marker_gives_the_findings_downstream_of_it() -> None:
+    result = set_entry_sync(go().record, LOADED, "t:body", Unavailable(Cause("refused")))
+    assert result["entry"]["marker"] == {
+        "kind": "Unavailable",
+        "cause": {"code": "refused", "refs": ["t:body"]},
+    }
+    assert result["findings"] == []  # echo declares t:body but never reads it
+
+
 def test_a_candidate_valued_answer_takes_the_labels_as_asked() -> None:
     loaded = load(label_sets.design())
     record = label_sets.run(["ann", "bo"])
@@ -325,10 +334,11 @@ def test_failing_a_call_gives_exactly_the_findings_downstream_of_it() -> None:
     assert call["provider"] is None
 
 
-def test_failing_a_call_nothing_reads_gives_no_finding() -> None:
-    result = fail_call_sync(go().record, LOADED, "look", "timed-out")
+@pytest.mark.parametrize("code", ["raised", "timed-out", "invalid-return", "unexpected-ref"])
+def test_failing_a_call_nothing_reads_gives_no_finding(code: str) -> None:
+    result = fail_call_sync(go().record, LOADED, "look", code)
     assert result["findings"] == []
-    assert result["call"]["outcome"]["failed"] == {"code": "timed-out", "refs": ["t:size"]}
+    assert result["call"]["outcome"]["failed"] == {"code": code, "refs": ["t:size"]}
 
 
 def test_a_failed_calls_cause_names_its_refs_in_code_point_order() -> None:
@@ -569,6 +579,13 @@ def test_an_output_outside_the_value_domain_is_invalid_design() -> None:
         assert (exc.reason, type(exc.error)) == (R.invalid_design, InvalidDesign)
         exc = refusal(intervene_sync, record, LOADED, [], rule={"rule": "d:route", "output": given})
         assert exc.reason is R.invalid_design
+
+
+def test_an_output_holding_bytes_is_invalid_design_saying_why() -> None:
+    for given in (b"x", {"a": [b"x"]}):
+        exc = refusal(constant_rule_sync, go().record, LOADED, "d:route", given)
+        assert (exc.reason, type(exc.error)) == (R.invalid_design, InvalidDesign)
+        assert str(exc).endswith("a table has no bytes literal")
 
 
 @pytest.mark.usefixtures("no_replay")

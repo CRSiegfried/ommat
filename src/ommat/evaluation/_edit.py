@@ -752,17 +752,37 @@ def _rule_loaded(
     document: dict[str, Any], name: str, ref: str, functions: _Functions
 ) -> tuple[LoadedDesign, dict[str, Any]]:
     """The modified design loaded, and its document parsed; ``invalid-design`` carrying the
-    ``InvalidDesign`` load raised."""
+    ``InvalidDesign`` load raised, said plainly for an output holding bytes."""
     try:
         modified = load(document, functions=functions)
     except InvalidDesign as exc:
+        output = document["rules"][name]["rows"][0]["output"]
+        why = "a table has no bytes literal" if _holds_bytes(output) else exc
         raise EvaluationRefusal(
-            f"the design with rule {name} constant does not load: {exc}",
+            f"the design with rule {name} constant does not load: {why}",
             reason=_R.invalid_design,
             ref=ref,
             error=exc,
         ) from exc
     return modified, cast("dict[str, Any]", decode(modified.document))
+
+
+def _holds_bytes(value: object) -> bool:
+    """Whether ``bytes`` stands anywhere in ``value``, through dicts, lists and tuples; walked
+    without recursion and each container once, so any depth or cycle is read."""
+    stack, seen = [value], set[int]()
+    while stack:
+        item = stack.pop()
+        if type(item) is bytes:
+            return True
+        if id(item) in seen:
+            continue
+        seen.add(id(item))
+        if type(item) is dict:
+            stack += cast("dict[object, object]", item).values()
+        elif type(item) in (list, tuple):
+            stack += cast("list[object]", item)
+    return False
 
 
 def _literal(output: object) -> dict[str, object]:

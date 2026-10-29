@@ -12,8 +12,24 @@ from typing import Any
 import pytest
 
 import test_grounded_rules as grounded
-from ommat import Cause, EntryRefusal, Failed, FindingKind, InvalidRecord, Rule, Source, When
+from designs import minimal
+from ommat import (
+    Cause,
+    EntryRefusal,
+    Failed,
+    FindingKind,
+    InvalidDesign,
+    InvalidRecord,
+    Policy,
+    Rule,
+    Source,
+    Unsure,
+    When,
+    decide_sync,
+    load,
+)
 from ommat import types as t
+from ommat._interpret import _BINDING_MARKERS, _STRUCTURAL
 from ommat.evaluation import (
     EvaluationRefusal,
     RefusalReason,
@@ -24,7 +40,7 @@ from ommat.evaluation import (
     deciding_inputs_sync,
 )
 from scripted import returns
-from test_decide import ASK, BODY, LOADED, RULES, slice_design
+from test_decide import ASK, BODY, LOADED, RULES, ok_policy, slice_design
 from test_do_and_diff import records_in
 from test_use_answers import broken, live, unfinished
 
@@ -39,6 +55,10 @@ def never(r: Any) -> bool:
 
 def pick(r: Any) -> str:
     return "x" if r.read("t:kind") == "a" and r.read("t:state.mood") != "wild" else "y"
+
+
+def still(r: Any) -> str:
+    return "x"
 
 
 def after(r: Any) -> object:
@@ -61,6 +81,7 @@ DESIGN = slice_design(
     rules={
         "route": RULES["route"],
         "pick": Rule("d:pick", t.label("x", "y"), pick, version="1", reads=PICK_READS),
+        "still": Rule("d:still", t.label("x", "y"), still, version="1", reads=["t:kind"]),
         "note": Rule("d:note", t.string, note, version="1", reads=["t:state.subject"]),
         "after": Rule(
             "d:after", t.string, after, version="1", reads=["d:pick", "d:route", "d:note"]
@@ -144,7 +165,7 @@ def test_a_grounded_ref_is_intervened_on_through_any_of_its_entries(tried: list[
         "q:ask/out": "deciding",
     }
     # Ana's entry first, which leaves Bo's unchanged, then Bo's; one call wrote both
-    assert [(e.ref, e.value.cause.code) for edits, _ in tried for e in edits] == [
+    assert [(e.ref, e.value.cause.code) for e in flat(tried)] == [
         ('q:ask/out["Ana"]', "refused"),
         ('q:ask/out["Bo"]', "refused"),
     ]
@@ -159,51 +180,160 @@ def test_a_read_of_a_grounded_rule_is_not_determined() -> None:
 # The interventions tried
 
 
+def flat(trials: list[Any]) -> list[Any]:
+    """Each trial's one edit, or its rule."""
+    return [edits[0] if edits else rule for edits, rule in trials]
+
+
 def test_a_finite_entry_is_tried_at_every_marker_and_value_and_its_lone_call_failed() -> None:
-    trials, finite = _deciding._trials("t:kind", decided().log, DESIGN)
-    assert finite
-    set_to: list[Any] = [x.value for x in trials if type(x) is _edit._SetEntry]
-    assert [m.cause.code for m in set_to[:-2]] == sorted(_deciding._BINDING_MARKERS)
+    trials, exhaustive = _deciding._trials("t:kind", decided().log, DESIGN)
+    assert exhaustive
+    tried = flat(trials)
+    set_to: list[Any] = [x.value for x in tried if type(x) is _edit._SetEntry]
+    assert [m.cause.code for m in set_to[:-2]] == sorted(_BINDING_MARKERS)
     assert set_to[-2:] == ["a", "b"]
-    failed = [(x.source, x.code) for x in trials if type(x) is _edit._FailCall]
-    assert failed == [("look", code) for code in sorted(_deciding._STRUCTURAL)]
+    failed = [(x.source, x.code) for x in tried if type(x) is _edit._FailCall]
+    assert failed == [("look", str(code)) for code in sorted(_STRUCTURAL)]
+    assert all(type(code) is str for _, code in failed)
+
+
+def test_a_read_no_intervention_changes_runs_every_trial_through_the_job(
+    tried: list[Any],
+) -> None:
+    assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-deciding"}
+    trials, _ = _deciding._trials("t:kind", decided().log, DESIGN)
+    assert tried == trials
+    assert any(type(e) is _edit._FailCall for edits, _ in tried for e in edits)
+
+
+@pytest.mark.parametrize(
+    ("fmt", "left_out"), [(2, {"unsupported", "timed-out", "raised"}), (3, {"timed-out", "raised"})]
+)
+def test_a_marker_the_records_format_does_not_hold_is_not_tried(
+    fmt: int, left_out: set[str]
+) -> None:
+    log = decided().log
+    log[0] = {**log[0], "format": fmt}
+    tried = flat(_deciding._trials("t:kind", log, DESIGN)[0])
+    markers: list[Any] = [x.value for x in tried if type(x) is _edit._SetEntry]
+    codes = {m.cause.code for m in markers if m not in ("a", "b")}
+    assert codes == set(_BINDING_MARKERS) - left_out
 
 
 def test_a_q_answer_is_tried_at_refused_only_and_a_shared_call_never_failed() -> None:
-    trials, finite = _deciding._trials("q:spam", decided().log, DESIGN)
-    assert not finite
-    assert [(type(x), x.value.cause.code) for x in trials] == [(_edit._SetEntry, "refused")]  # type: ignore[union-attr]
+    trials, exhaustive = _deciding._trials("q:spam", decided().log, DESIGN)
+    assert not exhaustive
+    assert [(type(x), x.value.cause.code) for x in flat(trials)] == [(_edit._SetEntry, "refused")]
+
+
+def test_a_grounded_batch_is_failed_once_for_its_declared_ref() -> None:
+    log = grounded.decided().log
+    tried = flat(_deciding._trials("q:ask/out", log, grounded.LOADED)[0])
+    assert [(type(x), getattr(x, "ref", None)) for x in tried if type(x) is _edit._SetEntry] == [
+        (_edit._SetEntry, 'q:ask/out["Ana"]'),
+        (_edit._SetEntry, 'q:ask/out["Bo"]'),
+    ]
+    failed = [(x.source, x.code) for x in tried if type(x) is _edit._FailCall]
+    assert failed == [("ask", str(code)) for code in sorted(_STRUCTURAL)]
 
 
 def test_a_nullable_state_field_is_tried_at_each_value_and_null() -> None:
-    trials, finite = _deciding._trials("t:state.mood", decided().log, DESIGN)
-    assert finite
-    assert [(x.path, x.value) for x in trials] == [  # type: ignore[union-attr]
+    trials, exhaustive = _deciding._trials("t:state.mood", decided().log, DESIGN)
+    assert exhaustive
+    assert [(x.path, x.value) for x in flat(trials)] == [
         ("t:state.mood", "calm"),
         ("t:state.mood", "wild"),
         ("t:state.mood", None),
     ]
 
 
+def flag(r: Any) -> object:
+    return r.read("t:state.s.flag")
+
+
+NESTED = load(
+    minimal(
+        policy=Policy(ok_policy, version="1"),
+        state=t.record(s=t.nullable(t.record(flag=t.boolean, name=t.string))),
+        rules={"m": Rule("d:m", t.boolean, flag, version="1", reads=["t:state.s.flag"])},
+    )
+)
+
+
+def test_a_field_under_a_nullable_record_is_tried_at_its_own_values() -> None:
+    record = decide_sync(NESTED, {"s": {"flag": True, "name": "x"}}, {}).record
+    trials, _ = _deciding._trials("t:state.s.flag", record.log, NESTED)
+    assert [x.value for x in flat(trials)] == [False, True]
+    assert deciding_inputs_sync(record, NESTED, "d:m") == {"t:state.s.flag": "deciding"}
+    record = decide_sync(NESTED, {"s": None}, {}).record
+    assert deciding_inputs_sync(record, NESTED, "d:m") == {"t:state.s.flag": "not-determined"}
+
+
 def test_a_d_read_is_tried_at_unsure_then_each_value() -> None:
-    trials, finite = _deciding._trials("d:pick", decided().log, DESIGN)
-    assert finite
-    assert [(x.rule, x.output) for x in trials] == [  # type: ignore[union-attr]
-        ("d:pick", _deciding.Unsure),
+    trials, exhaustive = _deciding._trials("d:pick", decided().log, DESIGN)
+    assert exhaustive
+    assert [(x.rule, x.output) for x in flat(trials)] == [
+        ("d:pick", Unsure),
         ("d:pick", "x"),
         ("d:pick", "y"),
     ]
 
 
-def test_a_trial_whose_replay_leaves_the_record_reaches_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def outside(*args: object) -> object:
-        found: list[dict[str, Any]] = [{"kind": FindingKind.not_in_record, "sources": []}]
-        return list[Any](), None, found
+def stubbed(monkeypatch: pytest.MonkeyPatch, *outcomes: object) -> None:
+    """``_applied`` giving each outcome in turn, a refusal raised, then no finding."""
+    given = list(outcomes)
 
-    monkeypatch.setattr(_deciding, "_applied", outside)
+    async def applied(*args: object) -> object:
+        outcome: object = given.pop(0) if given else list[Any]()
+        if isinstance(outcome, EvaluationRefusal):
+            raise outcome
+        return list[Any](), None, outcome
+
+    monkeypatch.setattr(_deciding, "_applied", applied)
+
+
+@pytest.mark.parametrize(
+    "kind", [FindingKind.not_in_record, FindingKind.ref_not_in_record, FindingKind.question_changed]
+)
+def test_a_trial_whose_replay_leaves_the_record_reaches_nothing_even_if_it_changes(
+    kind: FindingKind, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    changed = {"kind": FindingKind.entry, "ref": "d:route"}
+    stubbed(monkeypatch, [{"kind": kind}, changed])
     assert deciding_inputs_sync(decided(), DESIGN, "d:route") == {"q:spam": "not-determined"}
+
+
+def test_a_read_some_trials_reach_is_classed_by_those(monkeypatch: pytest.MonkeyPatch) -> None:
+    stubbed(monkeypatch, EvaluationRefusal("x", reason=R.null_call))
+    assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-deciding"}
+    stubbed(monkeypatch, EvaluationRefusal("x", reason=R.null_call))
+    assert deciding_inputs_sync(decided(), DESIGN, "d:route") == {"q:spam": "not-determined"}
+
+
+def test_an_unexpected_refusal_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    stubbed(monkeypatch, EvaluationRefusal("x", reason=R.marker))
+    assert refusal(decided(), DESIGN, "d:route").reason is R.marker
+
+
+def test_a_rule_that_does_not_reload_without_functions_propagates() -> None:
+    def local(r: Any) -> object:
+        return str(r.read("d:a"))
+
+    loaded = load(
+        minimal(
+            policy=Policy(ok_policy, version="1"),
+            rules={
+                "a": Rule("d:a", t.boolean, never, version="1"),
+                "b": Rule("d:b", t.string, local, version="1", reads=["d:a"]),
+            },
+        )
+    )
+    record = decide_sync(loaded, {}, {}).record
+    exc = refusal(record, loaded, "d:b")
+    assert exc.reason is R.invalid_design
+    assert type(exc.error) is InvalidDesign
+    functions = dict(loaded._callables)
+    assert deciding_inputs_sync(record, loaded, "d:b", functions=functions) == {"d:a": "deciding"}
 
 
 # ---------------------------------------------------------------------------------------------
