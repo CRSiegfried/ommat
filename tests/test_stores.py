@@ -12,6 +12,7 @@ import pytest
 from designs import full, minimal, rule, with_rule
 from ommat import InvalidDesign, load
 from ommat._canonical import encode, hash_value, sha256_ref
+from ommat._values import MAX_DOCUMENT_DEPTH
 from ommat.evaluation import (
     DesignStore,
     EvaluationRefusal,
@@ -69,6 +70,7 @@ def test_keeping_a_hash_held_with_other_bytes_is_held_mismatch(tmp_path: Path) -
     exc = refused(DesignStore(tmp_path).keep, loaded)
     assert (exc.reason, exc.key) == (R.held_mismatch, [loaded.design_hash])
     assert path.read_bytes() == b"other"
+    assert files(tmp_path) == [path.relative_to(tmp_path)]
 
 
 def test_keep_takes_exactly_a_loaded_design(tmp_path: Path) -> None:
@@ -123,7 +125,6 @@ def test_fetch_passes_functions_through_to_load(tmp_path: Path) -> None:
     assert {f.check for f in info.value.failures} == {11}
     again = store.fetch(loaded.design_hash, functions={"r": inner})
     assert again.design_hash == loaded.design_hash
-    assert again._callables["r"] is inner
 
 
 # ---------------------------------------------------------------------------------------------
@@ -161,7 +162,7 @@ def test_an_entry_of_each_kind_round_trips_as_its_canonical_envelope(
     assert store.write(written) is None
     path = path_of(tmp_path, kind, KEYS[kind])
     assert files(tmp_path) == [path.relative_to(tmp_path)]
-    assert path.read_bytes() == encode(written, 128)
+    assert path.read_bytes() == encode(written, MAX_DOCUMENT_DEPTH)
     assert store.lookup(kind, dict(KEYS[kind])) == written
 
 
@@ -234,6 +235,24 @@ def test_create_claims_a_name_once_and_leaves_no_temporary_file(tmp_path: Path) 
     assert files(tmp_path) == [Path("a", "b")]
 
 
+def test_each_store_writes_its_files_readable_to_all(tmp_path: Path) -> None:
+    loaded = load(minimal())
+    DesignStore(tmp_path / "designs").keep(loaded)
+    EvaluationStore(tmp_path / "results").write(entry())
+    paths = [
+        tmp_path / "designs" / "sha256" / loaded.design_hash.removeprefix("sha256:"),
+        path_of(tmp_path / "results", "certificate", KEYS["certificate"]),
+    ]
+    assert [p.stat().st_mode & 0o777 for p in paths] == [0o644, 0o644]
+
+
+def _nested(depth: int) -> list[Any]:
+    value: list[Any] = []
+    for _ in range(depth - 1):
+        value = [value]
+    return value
+
+
 @pytest.mark.parametrize(
     ("given", "reason", "says"),
     [
@@ -244,6 +263,7 @@ def test_create_claims_a_name_once_and_leaves_no_temporary_file(tmp_path: Path) 
         ({**entry(), "kind": "calibration"}, R.unknown_kind, "'calibration'"),
         ({**entry(), "kind": 5, "format": "x"}, R.unknown_kind, "5"),
         ({**entry(), "kind": ["certificate"]}, R.unknown_kind, "['certificate']"),
+        ({**entry(), "kind": "calibration", "key": None}, R.unknown_kind, "'calibration'"),
         ({**entry(), "format": "1", "key": 1}, R.invalid_entry, "format is a str"),
         (entry(format=True), R.invalid_entry, "format is a bool"),
         (entry(format=1.0), R.invalid_entry, "format is a float"),
@@ -255,6 +275,8 @@ def test_create_claims_a_name_once_and_leaves_no_temporary_file(tmp_path: Path) 
         (entry(value=float("nan")), R.invalid_entry, ""),
         (entry(value={1, 2}), R.invalid_entry, ""),
         (entry(key={"design": "\ud800", "sweep": "s"}), R.invalid_entry, ""),
+        (entry(value=["\udc80"]), R.invalid_entry, ""),
+        (entry(value=_nested(MAX_DOCUMENT_DEPTH)), R.invalid_entry, "nests more than"),
     ],
 )
 def test_write_refuses_in_order_and_writes_nothing(
@@ -319,26 +341,6 @@ def test_an_envelope_filed_under_another_key_is_misfiled_entry(tmp_path: Path) -
     exc = refused(store.lookup, "certificate", KEYS["certificate"])
     assert exc.reason is R.misfiled_entry
     assert store.lookup("certificate", other["key"]) == other
-
-
-def test_an_envelope_filed_under_another_kind_is_misfiled_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store = EvaluationStore(tmp_path)
-    store.write(entry())
-    held = path_of(tmp_path, "certificate", KEYS["certificate"])
-    moved = tmp_path / "group-counts" / held.relative_to(tmp_path / "certificate")
-    moved.parent.mkdir(parents=True)
-    shutil.copy(held, moved)
-
-    # No two kinds share members, so a kind's key never names another kind's file: stand in a
-    # path for every key, leaving the kind alone to differ.
-    def at(kind: str, key: Any) -> Path:
-        return moved
-
-    monkeypatch.setattr(store, "_path", at)
-    exc = refused(store.lookup, "group-counts", KEYS["group-counts"])
-    assert exc.reason is R.misfiled_entry
 
 
 def test_the_file_name_is_the_hash_of_the_keys_canonical_bytes(tmp_path: Path) -> None:

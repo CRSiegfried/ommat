@@ -4,10 +4,13 @@ one file per hash, at ``sha256/<hex>`` under the design store's root and
 ``<kind>/sha256/<hex>`` under the evaluation store's (§one-hash-function).
 
 Each file is written whole by exclusive create: the bytes go to a temporary file beside it,
-which is then linked under the file's name, so a reader never sees part of a file and two
-writers cannot both claim one name. Neither store replaces a file it holds.
+synced and made readable to all, which is then hard-linked under the file's name, so a reader
+never sees part of a file and two writers cannot both claim one name. A store therefore needs a
+filesystem with hard links. Neither store replaces a file it holds. An I/O failure other than a
+missing file propagates as ``OSError``: an unreadable store is not a refusal.
 """
 
+import contextlib
 import os
 import tempfile
 from collections.abc import Callable, Mapping
@@ -37,6 +40,9 @@ def _create(path: Path, data: bytes) -> bool:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+            os.fchmod(f.fileno(), 0o644)  # mkstemp's 0600 would shut a shared store
         os.link(tmp, path)  # fails on a held name, where open(path, "xb") would too
     except FileExistsError:
         return False
@@ -47,7 +53,10 @@ def _create(path: Path, data: bytes) -> bool:
 
 class DesignStore:
     """The design store (§store-integrity): each loaded design's ``document`` kept under the
-    design hash it carries, at ``<root>/sha256/<hex>``, and given back through ``load``."""
+    design hash it carries, at ``<root>/sha256/<hex>``, and given back through ``load``.
+
+    Its root needs a filesystem with hard links; an I/O failure other than a missing file is an
+    ``OSError``, not a refusal."""
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self._root = Path(root)
@@ -106,6 +115,11 @@ _ENVELOPE = ("kind", "format", "key", "value")
 _Fault = tuple[RefusalReason, str]
 
 
+def _refuse(fault: _Fault | None) -> None:
+    if fault is not None:
+        raise EvaluationRefusal(fault[1], reason=fault[0])
+
+
 def _kind_fault(kind: object) -> _Fault | None:
     if isinstance(kind, str) and kind in _KEYS:
         return None
@@ -130,9 +144,12 @@ def _key_fault(kind: str, key: object) -> _Fault | None:
 
 def _entry_fault(entry: object) -> _Fault | None:
     """The first fault of an envelope, in §evaluation-store's order."""
+    shape = "an entry is an object of exactly kind, format, key and value"
+    if not isinstance(entry, dict):
+        return _R.invalid_entry, shape
     fields = cast("dict[Any, Any]", entry)
-    if not isinstance(entry, dict) or set(fields) != set(_ENVELOPE):
-        return _R.invalid_entry, "an entry is an object of exactly kind, format, key and value"
+    if set(fields) != set(_ENVELOPE):
+        return _R.invalid_entry, shape
     kind, fmt = fields["kind"], fields["format"]
     if (fault := _kind_fault(kind)) is not None:
         return fault
@@ -152,7 +169,10 @@ def _encoded(value: object, max_depth: int | None = None) -> bytes:
 class EvaluationStore:
     """The evaluation store (§evaluation-store): write-once entries, each the canonical
     encoding of ``{"kind", "format", "key", "value"}``, at ``<root>/<kind>/sha256/<hex>``,
-    ``<hex>`` the hash of the key's canonical bytes. It reads no entry's ``value``."""
+    ``<hex>`` the hash of the key's canonical bytes. It reads no entry's ``value``.
+
+    Its root needs a filesystem with hard links; an I/O failure other than a missing file is an
+    ``OSError``, not a refusal."""
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self._root = Path(root)
@@ -163,42 +183,30 @@ class EvaluationStore:
     def write(self, entry: dict[str, Any]) -> None:
         """Keep ``entry``; refused with ``invalid-entry``, ``unknown-kind`` and ``held-key``,
         each before anything is written."""
-        if (fault := _entry_fault(entry)) is not None:
-            raise EvaluationRefusal(fault[1], reason=fault[0])
+        _refuse(_entry_fault(entry))
         kind, key = entry["kind"], entry["key"]
         path = self._path(kind, key)
         if not _create(path, _encoded(entry, MAX_DOCUMENT_DEPTH)):
             raise EvaluationRefusal(
-                f"the store holds a {kind} entry under this key", reason=_R.held_key, key=[key]
+                f"the store holds a {kind} entry under {key!r}", reason=_R.held_key, key=[key]
             )
 
     def lookup(self, kind: str, key: dict[str, str]) -> dict[str, Any] | None:
         """The entry held under ``kind`` and ``key``, or ``None``; ``kind`` and ``key`` refused
         as ``write`` refuses them, and a held file that is not this entry with
         ``misfiled-entry``."""
-        fault = _kind_fault(kind) or _key_fault(kind, key)
-        if fault is not None:
-            raise EvaluationRefusal(fault[1], reason=fault[0])
+        _refuse(_kind_fault(kind) or _key_fault(kind, key))
         path = self._path(kind, key)
         try:
             data = path.read_bytes()
         except FileNotFoundError:
             return None
-        try:
+        entry: Any = None
+        with contextlib.suppress(_DecodeError):
             entry = decode(data)
-        except _DecodeError:
-            entry = None
-        if not self._filed(entry, kind, path):
+        # A valid envelope holding this key is of this kind, since no two kinds share members.
+        if _entry_fault(entry) is not None or entry["key"] != key:
             raise EvaluationRefusal(
                 f"{path} does not hold a {kind} entry under its key", reason=_R.misfiled_entry
             )
         return entry
-
-    def _filed(self, entry: Any, kind: str, path: Path) -> bool:
-        """Whether a parsed file is an envelope of ``kind`` whose key's hash names ``path``."""
-        if _entry_fault(entry) is not None or entry["kind"] != kind:
-            return False
-        try:
-            return self._path(kind, entry["key"]) == path
-        except EvaluationRefusal:  # a key the encoder refuses, a lone surrogate
-            return False
