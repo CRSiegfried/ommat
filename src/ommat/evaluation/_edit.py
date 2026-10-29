@@ -22,7 +22,8 @@ copy and each answer checked against it, its labels from a candidate set and its
 its text as edited; then the modified design is loaded. A record edit is made on a copy: its
 log edited, its ``hash`` set from format 3 to the edited log's record hash, and read back
 through ``read_record`` (§record-hash-member); ``constant_rule`` alone edits only the document
-and makes no copy. Replay reruns the copy, its state entry, calls and cut, under the record's
+and makes no copy, loading it with ``functions``, or when ``None`` with ``loaded``'s own
+callables. Replay reruns the copy, its state entry, calls and cut, under the record's
 design or the modified one, so the findings are what the edits changed downstream; the edited
 entry itself, answered as set, is none. A plan is compared without its ``context``. Neither the
 record nor the loaded design is changed, and nothing returned holds a ``Record``.
@@ -66,7 +67,7 @@ from ommat._refs import (
 )
 from ommat._typed import decoded, is_a, typed
 from ommat._values import HASH_FORMAT, KEY_ORDER_FORMAT, in_domain, type_name
-from ommat.evaluation._diff import _read, _refuse_unfit, _replayed, _run_sync
+from ommat.evaluation._diff import _read, _refuse_unfit, _replayed, _run_sync, own_functions
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 
 _R = RefusalReason
@@ -322,7 +323,7 @@ async def _applied(
         changed.add(at.index)
     design, document = loaded, None
     if rule is not None:
-        design, document = _rule_loaded(*rule, functions)
+        design, document = _rule_loaded(*rule, own_functions(loaded, functions))
     copied = _record_copy(edited, read.unhashed).log if changed else log
     items = [copied[i] for i in sorted(changed)]
     return items, document, await _replayed(copied, design, copied)

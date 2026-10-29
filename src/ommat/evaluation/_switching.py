@@ -3,14 +3,14 @@
 plan with the verdict, change, found by replaying the turn under each value's design
 (§switching-value).
 
-A value's design is the loaded design's document with the leaf, or one key of a numeric
-mapping leaf, replaced, loaded with the caller's ``functions``; it is kept nowhere. Replay
-under it reports ``design-mismatch``, expected and dropped, as is ``helpers-mismatch``, a note
-on the helper version. A run that asks outside the record, ``not-in-record``,
-``ref-not-in-record`` or ``question-changed``, or writes ``Unavailable`` with
-``not-returned`` for a ref whose recorded entry names a ``Failed`` call, is ``not-determined``;
-a value whose design fails load is ``not-loading``, each failure as plain data; the job goes
-on past both.
+A value's design is the loaded design's document with the leaf, or one key of a numeric mapping
+leaf, replaced, loaded with the caller's ``functions``, or ``loaded``'s own callables when ``None``;
+it is kept nowhere. Replay under it reports ``design-mismatch``, expected and dropped, as is
+``helpers-mismatch``, a note on the helper version. A run that asks outside the record,
+``not-in-record``, ``ref-not-in-record`` or ``question-changed``, or writes ``Unavailable`` with
+``not-returned`` for a ref whose recorded entry names a ``Failed`` call, is ``not-determined``; a
+value whose design fails load is ``not-loading``, each failure as plain data; the job goes on past
+both.
 
 A numeric leaf is tried at its own value, whose result is the record's, and in two rounds at
 the points of §lint-points' axis within the leaf's type: round 0 over the compared values the
@@ -70,7 +70,15 @@ from ommat._refs import _RefError, code_point_sorted, parse_ref
 from ommat._replay import FindingKind, _differ, _replay_with
 from ommat._types import Label, MappingOf, Scalar, Type, _numeric, render
 from ommat._values import MAX_INTEGER
-from ommat.evaluation._diff import OUTSIDE, _context_alone, _run_sync, baseline, changed, outcome
+from ommat.evaluation._diff import (
+    OUTSIDE,
+    _context_alone,
+    _run_sync,
+    baseline,
+    changed,
+    outcome,
+    own_functions,
+)
 from ommat.evaluation._edit import _checked, _declared
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
@@ -96,13 +104,14 @@ async def switching_values(
     loaded: LoadedDesign,
     path: str,
     *,
-    functions: _Functions,
+    functions: _Functions = None,
     results: EvaluationStore,
 ) -> dict[str, Any]:
     """The switching values of the leaf at ``path`` for ``record``, per entry and for the plan,
     written to ``results`` under the record hash, the design hash and ``path``; the entry
     written."""
     read, log = _checked(record, loaded)
+    functions = own_functions(loaded, functions)
     t = _leaf_type(path, loaded)
     try:
         load(loaded.document, functions=functions)
@@ -137,7 +146,7 @@ def switching_values_sync(
     loaded: LoadedDesign,
     path: str,
     *,
-    functions: _Functions,
+    functions: _Functions = None,
     results: EvaluationStore,
 ) -> dict[str, Any]:
     """``switching_values`` run to completion; ``RuntimeError`` inside a running event loop."""

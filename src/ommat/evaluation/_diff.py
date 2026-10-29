@@ -11,12 +11,13 @@ The findings are replay's: the entries, plan and verdict against ``record``,
 a change of context text alone is no plan change. Neither record is edited, and nothing is read
 from either's ``unhashed``.
 
-The record read, its checks, the replay less context-alone plan findings and the sync runner
-are shared with the edits of ``_edit``.
+The record read, its checks, the replay less context-alone plan findings, the sync runner and
+``own_functions``, the ``functions`` a job given ``loaded`` loads an edited design with, are
+shared with the edits of ``_edit``.
 """
 
 import asyncio
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from typing import Any, TypeVar
 
 from ommat._canonical import encode
@@ -153,6 +154,15 @@ def use_answers_sync(record: object, loaded: LoadedDesign, other: object) -> dic
     """``use_answers`` run to completion; ``RuntimeError`` inside a running event loop, raised
     before the coroutine is built."""
     return _run_sync("use_answers", lambda: use_answers(record, loaded, other))
+
+
+def own_functions(
+    loaded: LoadedDesign, functions: Mapping[str, Callable[..., Any]] | None
+) -> Mapping[str, Callable[..., Any]]:
+    """``functions``, or when ``None`` ``loaded``'s own callables, keyed as load's ``functions``
+    are, by declared name, ``<source>.when`` and ``policy``: an edited copy of ``loaded``'s
+    document names the same code."""
+    return loaded._callables if functions is None else functions
 
 
 def _run_sync(name: str, job: Callable[[], Coroutine[Any, Any, _T]]) -> _T:

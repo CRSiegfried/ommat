@@ -460,7 +460,7 @@ def test_an_unexpected_refusal_propagates(monkeypatch: pytest.MonkeyPatch) -> No
     assert refusal(decided(), DESIGN, "d:route").reason is R.marker
 
 
-def test_a_rule_that_does_not_reload_without_functions_propagates() -> None:
+def test_a_rule_that_does_not_reload_with_the_functions_given_propagates() -> None:
     def local(r: Any) -> object:
         return str(r.read("d:a"))
 
@@ -474,11 +474,10 @@ def test_a_rule_that_does_not_reload_without_functions_propagates() -> None:
         )
     )
     record = decide_sync(loaded, {}, {}).record
-    exc = refusal(record, loaded, "d:b")
+    exc = refusal(record, loaded, "d:b", functions={})
     assert exc.reason is R.invalid_design
     assert type(exc.error) is InvalidDesign
-    functions = dict(loaded._callables)
-    assert deciding_inputs_sync(record, loaded, "d:b", functions=functions) == {"d:a": "deciding"}
+    assert deciding_inputs_sync(record, loaded, "d:b") == {"d:a": "deciding"}  # loaded's own
 
 
 # ---------------------------------------------------------------------------------------------

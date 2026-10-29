@@ -580,12 +580,13 @@ def test_invalid_design_when_the_document_does_not_load_with_functions(
         )
     )
     record = decide_sync(loaded, STATE, {}).record
-    exc = refusal(record, loaded, "lim/k", tmp_path)
+    exc = refusal(record, loaded, "lim/k", tmp_path, functions={})
     assert exc.reason is R.invalid_design
     assert isinstance(exc.error, InvalidDesign)
     assert exc.__cause__ is exc.error
-    monkeypatch.undo()  # replay again: with the function given, the document loads
+    monkeypatch.undo()  # replay again: with the function given, or none, the document loads
     assert run(record, loaded, "lim/k", tmp_path, functions={"policy": local})["value"]["entries"]
+    assert run(record, loaded, "lim/k", tmp_path / "own")["value"]["entries"]
 
 
 def test_a_held_key_is_refused_before_any_replay(
