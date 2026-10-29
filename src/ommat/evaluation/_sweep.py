@@ -35,14 +35,14 @@ iterable is a ``TypeError`` before anything else. Refused in §sweep's order: th
 ``unknown-format``, ``invalid-sweep``), then ``wrong-split``, ``repeated-sweep``, the design
 store's fetch of the starting design (``invalid-design`` for its ``InvalidDesign``),
 ``unknown-path`` over every point's paths, then ``invalid-design`` for each point's load,
-``invalid-record`` over both splits, then ``split-id`` for each, ``shared-record``,
-``unknown-entry``, ``no-gold-plan`` (every turn's gold copy first, ``point`` ``None``, then
-every gold copy replayed under every point), ``not-determined`` (every record replayed under
-every point), then the store's ``held-mismatch`` at the chosen point's keep and ``held-key`` at
-the write. A split's records are counted once each by record hash, in the order given. Every
-replay runs before the dev split's counts are read; the certification split's counts are read
-only by the test. An ``EntryRefusal`` from replay passes through. The entry written is returned,
-plain data reaching no ``Record``.
+``invalid-record`` over both splits, then ``split-id`` for each, ``empty-split`` for each,
+``shared-record``, ``unknown-entry``, ``no-gold-plan`` (every turn's gold copy first, ``point``
+``None``, then every gold copy replayed under every point), ``not-determined`` (every record
+replayed under every point), then the store's ``held-mismatch`` at the chosen point's keep and
+``held-key`` at the write. A split's records are counted once each by record hash, in the order
+given. Every replay runs before the dev split's counts are read; the certification split's
+counts are read only by the test. An ``EntryRefusal`` from replay passes through. The entry
+written is returned, plain data reaching no ``Record``.
 """
 
 import copy
@@ -96,10 +96,10 @@ def _gold_answers(
 def known(entry: dict[str, Any] | None, key: dict[str, str]) -> dict[str, Any] | None:
     """``entry``, a gold answer looked up under ``key`` or ``None``; ``unknown-entry`` for an
     entry of a kind or format the job does not read."""
-    if entry is not None and (entry["kind"] != KIND or entry["format"] not in _READ):
+    # The store's lookup by kind, and its envelope check, make the entry's kind KIND.
+    if entry is not None and entry["format"] not in _READ:
         raise EvaluationRefusal(
-            f"the entry under {key!r} is {entry['kind']} format {entry['format']}, not "
-            f"{KIND} format 1 or 2",
+            f"the {KIND} entry under {key!r} is format {entry['format']}, not 1 or 2",
             reason=_R.unknown_entry,
             key=[key],
         )
@@ -214,7 +214,8 @@ def _action(log: _Log) -> bytes | None:
         arguments: dict[str, Any] = {}
         for name, origin in cast("dict[str, dict[str, Any]]", step["arguments"]).items():
             ref = origin.get("ref")
-            # A literal or a binding stays as written.
+            # A literal or a binding stays as written; a passed plan's step reads no marker
+            # (plan rule 4), so the ref reads a value.
             arguments[name] = origin if ref is None else {"value": board_value(values, ref)}
         steps.append({**step, "arguments": arguments})
     return encode({"kind": plan["kind"], "steps": steps}, _ITEM_DEPTH)
@@ -231,17 +232,15 @@ def _counted(rerun: Record, gold: bytes | None) -> str:
         return str(plan["kind"])
     if plan["kind"] == PlanKind.broken:
         return "broken"
-    return "matched" if gold is not None and _action(log) == gold else "escaped"
+    return "matched" if _action(log) == gold else "escaped"
 
 
 def _tail_parts(n: int, alpha: Fraction, k: int) -> tuple[int, int]:
     """P(Bin(``n``, ``alpha``) <= ``k``) as an integer numerator over ``q**n``, ``q``
     ``alpha``'s denominator: with ``p`` its numerator and ``r = q - p``, the sum of
     C(n, i) p^i r^(n-i) for i up to ``k``, by Horner's rule in ``r`` over the running binomial
-    coefficient and power of ``p``, so O(k) big-integer products."""
-    p, q = alpha.numerator, alpha.denominator
-    if k >= n:
-        return q**n, q**n
+    coefficient and power of ``p``, so O(k) exact big-integer steps."""
+    p, q = alpha.numerator, alpha.denominator  # escaped, ``k``, never exceeds ``n``
     r = q - p
     total, c, pw = 0, 1, 1  # c = C(n, i), pw = p**i
     for i in range(k + 1):
@@ -333,6 +332,13 @@ async def sweep(
     turns = [_split(name, given[i][1]) for i, name in enumerate(_SPLITS)]
     for i, name in enumerate(_SPLITS):
         _refuse_split_id(name, given[i][0], turns[i])
+    for i, name in enumerate(_SPLITS):
+        if not turns[i]:
+            raise EvaluationRefusal(
+                f"the {name} split holds no record",
+                reason=_R.empty_split,
+                split=(given[i][0], given[i][0]),
+            )
     shared = code_point_sorted(set(turns[0]) & set(turns[1]))
     if shared:
         raise EvaluationRefusal(

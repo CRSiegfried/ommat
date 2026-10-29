@@ -48,6 +48,7 @@ class RefusalReason(enum.StrEnum):
     shared_record = "shared-record"
     no_gold_plan = "no-gold-plan"
     not_determined = "not-determined"
+    empty_split = "empty-split"
     unknown_group = "unknown-group"
     too_few_refs = "too-few-refs"
     missing_gold = "missing-gold"

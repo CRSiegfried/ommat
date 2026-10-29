@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import scipy.stats  # pyright: ignore[reportMissingTypeStubs]
 
 import extraction as x
 import test_label_sets as label_sets
@@ -290,8 +291,8 @@ def direct(n: int, alpha: Fraction, k: int) -> Fraction:
 @pytest.mark.parametrize("alpha", [Fraction(1, 10), Fraction(1, 2), Fraction(0.05), Fraction(0.3)])
 def test_the_tail_is_exact(alpha: Fraction) -> None:
     for n in [0, 1, 2, 7, 10, 50, 97]:
-        for k in [0, 1, 3, n // 2, n - 1, n, n + 2]:
-            if k >= 0:
+        for k in {0, 1, 3, n // 2, n - 1, n} - {-1}:
+            if k <= n:  # escaped never exceeds the turns
                 assert tail(n, alpha, k) == direct(n, alpha, k), (n, k)
     assert tail(2, Fraction(1, 2), 0) == Fraction(1, 4)
 
@@ -300,14 +301,22 @@ def test_the_tail_is_exact(alpha: Fraction) -> None:
     ("n", "k", "alpha"), [(50, 1, 0.1), (400, 12, 0.05), (1000, 0, 0.003), (5000, 40, 0.01)]
 )
 def test_the_tail_agrees_with_scipy(n: int, k: int, alpha: float) -> None:
-    stats = pytest.importorskip("scipy.stats")
-    assert float(tail(n, Fraction(alpha), k)) == pytest.approx(stats.binom.cdf(k, n, alpha))
+    expected = float(scipy.stats.binom.cdf(k, n, alpha))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert float(tail(n, Fraction(alpha), k)) == pytest.approx(expected, rel=1e-9, abs=0)
 
 
 def test_a_tail_equal_to_the_level_certifies() -> None:
     assert _certifies(1, 0, 0.5, Fraction(1, 2))  # P(Bin(1, 0.5) <= 0) is exactly 0.5
     assert not _certifies(1, 0, 0.5, Fraction(1, 2) - Fraction(1, 10**30))
     assert _choose(_FIXED_SEQUENCE, 1, [0], 0.5, 0.5) == (0, 1)
+
+
+def test_alpha_is_read_as_its_binary_value() -> None:
+    # 0.6 as a double is just below 0.6, so (1 - alpha)**2 is just above 0.16, and above the
+    # double 0.16 too: at the decimal values the tail would equal delta and certify.
+    assert direct(2, Fraction(3, 5), 0) == Fraction(4, 25)
+    assert not _certifies(2, 0, 0.6, Fraction(0.16))
+    assert _choose(_FIXED_SEQUENCE, 2, [0], 0.6, 0.16) == (None, 1)
 
 
 def test_a_large_tail_is_quick() -> None:
@@ -659,6 +668,23 @@ def test_a_split_whose_id_differs_from_its_records_is_refused(tmp_path: Path) ->
     assert exc.reason is R.invalid_record  # every record is read before any id is checked
 
 
+def test_the_dev_splits_id_is_checked_first(tmp_path: Path) -> None:
+    dev_id, cert_id = split_id(DEV[:3]), split_id(CERT[:3])
+    doc = sweep_doc(dev=dev_id, certification=cert_id)
+    exc = Stores(tmp_path).refused(doc, splits=((dev_id, DEV), (cert_id, CERT)))
+    assert (exc.reason, exc.split) == (R.split_id, (dev_id, split_id(DEV)))
+
+
+@pytest.mark.parametrize("empty", [0, 1])
+def test_an_empty_split_is_refused(tmp_path: Path, empty: int) -> None:
+    records = [DEV, CERT]
+    records[empty] = []
+    ids = [split_id(r) for r in records]
+    doc = sweep_doc(dev=ids[0], certification=ids[1])
+    exc = Stores(tmp_path).refused(doc, splits=tuple(zip(ids, records, strict=True)))
+    assert (exc.reason, exc.split) == (R.empty_split, (ids[empty], ids[empty]))
+
+
 def test_a_record_in_both_splits_is_refused(tmp_path: Path) -> None:
     shared = [CERT[1], CERT[0]]
     dev = [*DEV, *shared]
@@ -768,18 +794,24 @@ def sweep_of(
     points: list[dict[str, Any]],
     design: LoadedDesign = SPAM_DESIGN,
     functions: dict[str, Any] = FUNCTIONS,
+    gold_set: str = "g",
 ) -> dict[str, Any]:
-    """The sweep's entry over two splits, each record with its gold label."""
+    """The sweep's entry over two splits, each record with its gold label under
+    ``gold_set``."""
     designs, results = DesignStore(root / "designs"), EvaluationStore(root / "results")
     designs.keep(design)
     splits: list[tuple[str, list[Record]]] = []
     for turns in (dev, cert):
         records = [r for r, _ in turns]
         labels = {r.record_hash: {"q:spam": g} for r, g in turns}
-        write_gold_answers("g", records, labels, results=results)
+        write_gold_answers(gold_set, records, labels, results=results)
         splits.append((split_id(records), records))
     doc = sweep_doc(
-        design=design.design_hash, points=points, dev=splits[0][0], certification=splits[1][0]
+        design=design.design_hash,
+        points=points,
+        dev=splits[0][0],
+        certification=splits[1][0],
+        gold_set=gold_set,
     )
     return sweep_sync(doc, splits, functions=functions, designs=designs, results=results)
 
@@ -915,5 +947,49 @@ def test_the_scope_lists_each_call_items_profile() -> None:
         "providers": ["p"],
         "models": ["m1", "m2"],  # the reported one, else the requested
         "revisions": ["r1", "s1"],
+        "elicitations": ["e0", "e1"],
+    }
+
+
+def test_the_named_gold_set_is_read(tmp_path: Path) -> None:
+    dev = [(r, g) for r, (_, _, g) in zip(DEV, DEV_TURNS, strict=True)]
+    cert = [(r, g) for r, (_, _, g) in zip(CERT, CERT_TURNS, strict=True)]
+    flipped = {"yes": "no", "no": "yes"}
+    results = EvaluationStore(tmp_path / "results")
+    for turns in (dev, cert):  # the other set says the opposite of every label
+        labels = {r.record_hash: {"q:spam": flipped[g]} for r, g in turns}
+        write_gold_answers("g", [r for r, _ in turns], labels, results=results)
+    value = sweep_of(tmp_path, dev, cert, POINTS, gold_set="v2")["value"]
+    assert value["sweep"]["gold_set"] == "v2"
+    # As under the true labels; the flipped ones would give 2 escapes at the third point.
+    assert value["counts"]["dev"]["points"][2] == counts(matched=2, escaped=1, inform=1)
+    assert value["chosen"] == 1
+
+
+def test_the_scope_gathers_every_turns_call_profile_through_the_sweep(tmp_path: Path) -> None:
+    def profiled(record: Record, **members: object) -> Record:
+        def edit(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            for item in log:
+                if item["item"] == "call":
+                    item.update(members)
+            return log
+
+        return edited(record, edit)
+
+    dev = [
+        (profiled(DEV[0], provider="p1", model_requested="m1", elicitation="e1"), "yes"),
+        (DEV[2], "no"),
+    ]
+    cert = [
+        (profiled(CERT[0], provider="p2", model_requested="m0", model_reported="m2"), "yes"),
+        (profiled(CERT[1], revision="r1", elicitation="e0"), "no"),
+    ]
+    value = sweep_of(tmp_path, dev, cert, [{"spam/bar": 0.65}])["value"]
+    call = next(i for i in DEV[0].log if i["item"] == "call")
+    assert value["scope"] == {
+        "questions": [call["questions"]["q:spam"]["identity"]],
+        "providers": ["p1", "p2"],
+        "models": ["m1", "m2"],
+        "revisions": ["r1"],
         "elicitations": ["e0", "e1"],
     }

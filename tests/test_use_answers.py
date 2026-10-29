@@ -455,6 +455,7 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "shared-record",
         "no-gold-plan",
         "not-determined",
+        "empty-split",
         "unknown-group",
         "too-few-refs",
         "missing-gold",
