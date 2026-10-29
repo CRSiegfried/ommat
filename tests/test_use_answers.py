@@ -439,6 +439,7 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "unknown-kind",
         "held-key",
         "misfiled-entry",
+        "baseline-differs",
     }
 
 

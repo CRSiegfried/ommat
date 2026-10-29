@@ -39,6 +39,7 @@ from ommat.evaluation import (
     _edit,
     deciding_inputs,
     deciding_inputs_sync,
+    set_entry_sync,
     set_state_field_sync,
 )
 from scripted import Scripted, returns
@@ -348,19 +349,110 @@ def stubbed(monkeypatch: pytest.MonkeyPatch, *outcomes: object) -> None:
 @pytest.mark.parametrize(
     "kind", [FindingKind.not_in_record, FindingKind.ref_not_in_record, FindingKind.question_changed]
 )
-def test_a_trial_whose_replay_leaves_the_record_reaches_nothing_even_if_it_changes(
+def test_a_trial_whose_replay_leaves_the_record_is_undetermined_even_if_it_changes(
     kind: FindingKind, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    changed = {"kind": FindingKind.entry, "ref": "d:route"}
+    changed = {"kind": FindingKind.entry, "ref": "d:still", "recorded": None, "replayed": None}
     stubbed(monkeypatch, [{"kind": kind}, changed])
-    assert deciding_inputs_sync(decided(), DESIGN, "d:route") == {"q:spam": "not-determined"}
+    assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-determined"}
+    stubbed(monkeypatch, [{"kind": kind}], [changed])
+    assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "deciding"}
 
 
-def test_a_read_some_trials_reach_is_classed_by_those(monkeypatch: pytest.MonkeyPatch) -> None:
+def gate(r: Any) -> bool:
+    return r.read("t:lab") == "p"
+
+
+def lab(r: Any) -> str:
+    return "y" if r.read("t:lab") == "p" else "n"
+
+
+GATED = load(
+    minimal(
+        policy=Policy(ok_policy, version="1"),
+        sources={
+            "src": Source({"t:lab": t.label("p", "q")}),
+            "gated": Source({"t:other": t.boolean}, needs=["t:lab"], when=When(gate, version="1")),
+        },
+        rules={"r": Rule("d:r", t.label("y", "n"), lab, version="1", reads=["t:lab"])},
+    )
+)
+
+
+def test_a_value_whose_replay_asks_outside_the_record_leaves_the_read_not_determined() -> None:
+    replies = Scripted({"src": returns({"t:lab": "q"}), "gated": returns({"t:other": True})})
+    record = decide_sync(GATED, {}, {"default": replies}).record
+    found = set_entry_sync(record, GATED, "t:lab", "p")["findings"]
+    assert FindingKind.not_in_record in [f["kind"] for f in found]
+    assert deciding_inputs_sync(record, GATED, "d:r") == {"t:lab": "not-determined"}
+
+
+def test_one_undetermined_trial_among_unchanged_ones_is_not_determined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stubbed(monkeypatch, [], [{"kind": FindingKind.question_changed}])
+    assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-determined"}
+
+
+def test_a_trial_refused_at_its_target_is_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """As for a carried or unasked entry beside an asked one: the asked one's trials class it."""
     stubbed(monkeypatch, EvaluationRefusal("x", reason=R.null_call))
     assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-deciding"}
     stubbed(monkeypatch, EvaluationRefusal("x", reason=R.null_call))
     assert deciding_inputs_sync(decided(), DESIGN, "d:route") == {"q:spam": "not-determined"}
+
+
+DRIFT = {"to": "x"}
+
+
+def drifting(r: Any) -> str:
+    r.read("t:bb")
+    return DRIFT["to"]
+
+
+def test_a_record_its_design_no_longer_replays_is_baseline_differs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rules = {"d": Rule("d:d", t.label("x", "y"), drifting, version="1", reads=["t:bb"])}
+    loaded = load(
+        minimal(
+            policy=Policy(ok_policy, version="1"),
+            sources={"src": Source({"t:bb": t.nullable(t.boolean)})},
+            rules=rules,
+        )
+    )
+    binds = {"default": Scripted({"src": returns({"t:bb": True})})}
+    record = decide_sync(loaded, {}, binds).record
+    assert deciding_inputs_sync(record, loaded, "d:d") == {"t:bb": "not-deciding"}
+    monkeypatch.setitem(DRIFT, "to", "y")
+    exc = refusal(record, loaded, "d:d")
+    assert exc.reason is R.baseline_differs
+    assert str(exc).endswith(": entry")
+    monkeypatch.setattr(_deciding, "_applied", None)  # refused before any trial
+    assert refusal(record, loaded, "d:d").reason is R.baseline_differs
+
+
+def flagged(r: Any) -> object:
+    return r.read("t:rec.f")
+
+
+def test_a_field_path_read_of_an_entry_is_tried_through_the_whole_entry(
+    tried: list[Any],
+) -> None:
+    loaded = load(
+        minimal(
+            policy=Policy(ok_policy, version="1"),
+            sources={"src": Source({"t:rec": t.record(f=t.boolean, g=t.string)})},
+            rules={"m": Rule("d:m", t.boolean, flagged, version="1", reads=["t:rec.f"])},
+        )
+    )
+    binds = {"default": Scripted({"src": returns({"t:rec": {"f": True, "g": "z"}})})}
+    record = decide_sync(loaded, {}, binds).record
+    assert deciding_inputs_sync(record, loaded, "d:m") == {"t:rec.f": "deciding"}
+    trials, exhaustive = _deciding._trials("t:rec.f", record.log, loaded)
+    assert not exhaustive  # a record type: the entry is tried at markers only
+    assert {x.ref for x in flat(trials) if type(x) is _edit._SetEntry} == {"t:rec"}
+    assert all(type(e) is not _edit._SetField for edits, _ in tried for e in edits)
 
 
 def test_an_unexpected_refusal_propagates(monkeypatch: pytest.MonkeyPatch) -> None:

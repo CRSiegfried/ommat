@@ -32,6 +32,7 @@ class RefusalReason(enum.StrEnum):
     unknown_kind = "unknown-kind"
     held_key = "held-key"
     misfiled_entry = "misfiled-entry"
+    baseline_differs = "baseline-differs"
 
 
 class EvaluationRefusal(Exception):

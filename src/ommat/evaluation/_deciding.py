@@ -8,23 +8,29 @@ its copy and its replay are those of ``set_entry``, ``fail_call``, ``set_state_f
 ref's through each of its entries: form 1 at each marker a binding may return and the record's
 format holds, a ``q:`` answer at ``Unavailable`` with ``refused`` only, and a ``t:`` entry at
 each value of a finite type; then form 2 at each structural code, once per call, when every
-entry the call wrote is of the read's declared ref. A ``t:state`` field is tried by form 3 at each
-value of a finite type, and a ``d:`` read by form 4 at ``Unsure`` and each value of a finite
-type. A finite type is ``boolean``, a label, or either nullable. A trial the form refuses for
-its target, ``null-call``, ``failed-call``, ``not-found`` or ``candidate-rule``, reaches
-nothing, and so does one whose replay asks outside the record, ``not-in-record``,
-``ref-not-in-record`` or ``question-changed``, whatever else it finds; any other refusal
-propagates. A reached trial changes the entry when replay gives an ``entry`` finding at its
-ref whose value, or marker kind and cause code, differ; ``rows``, ``derivation``, ``round`` or
-a cause's refs alone are no change.
+entry the call wrote is of the read's declared ref. A ``t:state`` field is tried by form 3 at
+each value of a finite type, and a ``d:`` read by form 4 at ``Unsure`` and each value of a
+finite type. A field-path read of a ``t:`` or ``d:`` entry is tried through the whole entry or
+rule, at its declared type's values, since forms 1 and 4 set it whole; a ``t:state`` field is
+set alone. A finite type is ``boolean``, a label, or either nullable.
 
-A read is ``deciding`` when a reached trial changes the entry; else ``not-determined`` when no
-trial reached, as for a ``candidate`` read, which no form reaches; else ``markers-only`` when
-some target is not of a finite type; else ``not-deciding``. Each trial is one intervention, so
-``not-deciding`` says no single one changes the entry; joint effects are not explored.
+A trial the form refuses at its target, ``null-call``, ``failed-call``, ``not-found`` or
+``candidate-rule``, is not run; any other refusal propagates. A run trial whose replay gives
+``not-in-record``, ``ref-not-in-record`` or ``question-changed`` is undetermined, whatever else
+it finds. A run trial changes the entry when replay gives an ``entry`` finding at its ref whose
+value, or marker kind and cause code, differ; ``rows``, ``derivation``, ``round`` or a cause's
+refs alone are no change.
+
+A read is ``deciding`` when a run trial, not undetermined, changes the entry; else
+``not-determined`` when no trial ran, as for a ``candidate`` read, which no form reaches, or one
+was undetermined; else ``markers-only`` when some target is not of a finite type; else
+``not-deciding``. Each trial is one intervention, so ``not-deciding`` says no single one changes
+the entry; joint effects are not explored.
 
 The record is checked as the edits check it, then ``ref`` refused ``not-found`` unless it names
-an entry of the record a rule provides, before any replay. The output is plain data.
+an entry of the record a rule provides; then the record is replayed unedited under ``loaded``
+and refused ``baseline-differs`` on any finding, the kinds in the message, before any trial.
+The output is plain data.
 """
 
 from collections.abc import Callable, Mapping
@@ -39,7 +45,7 @@ from ommat._read_view import is_candidate_read
 from ommat._refs import parse_ref
 from ommat._replay import FindingKind
 from ommat._types import Label, Nullable, RecordOf, Scalar, Type
-from ommat.evaluation._diff import _run_sync
+from ommat.evaluation._diff import _replayed, _run_sync
 from ommat.evaluation._edit import (
     _STATE,
     _applied,
@@ -71,6 +77,13 @@ async def deciding_inputs(
     to ``deciding``, ``not-deciding``, ``markers-only`` or ``not-determined``."""
     read, log = _checked(record, loaded)
     rule = _rule_of(ref, log, loaded)
+    found = await _replayed(log, loaded, log)
+    if found:
+        kinds = ", ".join(dict.fromkeys(str(f["kind"]) for f in found))
+        raise EvaluationRefusal(
+            f"the record does not replay cleanly under loaded: {kinds}",
+            reason=_R.baseline_differs,
+        )
     out: dict[str, str] = {}
     for r in dict.fromkeys(loaded._reads[rule]):
         trials, exhaustive = _trials(r, log, loaded)
@@ -106,9 +119,10 @@ async def _classed(
     loaded: LoadedDesign,
     functions: _Functions,
 ) -> str:
-    """``deciding`` when a reached trial changes the entry at ``ref``; ``not-determined`` when
-    no trial reached; else by whether the trials were exhaustive."""
-    reached = False
+    """``deciding`` when a trial run, not undetermined, changes the entry at ``ref``;
+    ``not-determined`` when no trial ran or one was undetermined; else by whether the trials
+    were exhaustive. A trial refused at its target is not run."""
+    ran = undetermined = False
     for edits, constant in trials:
         try:
             _, _, found = await _applied(read, log, loaded, edits, constant, functions)
@@ -116,12 +130,12 @@ async def _classed(
             if exc.reason not in _UNREACHED:
                 raise
             continue
+        ran = True
         if any(f["kind"] in _OUTSIDE for f in found):
-            continue  # answered outside the record: no finding of it counts
-        reached = True
-        if any(f["kind"] is _K.entry and f["ref"] == ref and _changed(f) for f in found):
+            undetermined = True  # answered outside the record: no finding of it counts
+        elif any(f["kind"] is _K.entry and f["ref"] == ref and _changed(f) for f in found):
             return "deciding"
-    if not reached:
+    if not ran or undetermined:
         return "not-determined"
     return "not-deciding" if exhaustive else "markers-only"
 
