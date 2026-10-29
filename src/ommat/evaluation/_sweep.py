@@ -431,21 +431,26 @@ def _given_splits(splits: object) -> list[tuple[str, Iterable[object]]]:
         raise TypeError(
             f"splits is a {type_name(cast(object, splits))}, not a pair of (id, records) splits"
         )
-    given: list[tuple[str, Iterable[object]]] = []
-    for name, pair in zip(_SPLITS, cast("tuple[object, ...]", splits), strict=True):
-        if not isinstance(pair, list | tuple) or len(cast("tuple[object, ...]", pair)) != 2:
-            raise TypeError(
-                f"the {name} split is a {type_name(cast(object, pair))}, not an (id, records) pair"
-            )
-        split_id, records = cast("tuple[object, object]", tuple(cast("tuple[object, ...]", pair)))
-        if type(split_id) is not str:
-            raise TypeError(f"the {name} split's id is a {type_name(split_id)}, not a string")
-        if not isinstance(records, Iterable) or isinstance(records, str | bytes | Mapping):
-            raise TypeError(
-                f"the {name} split's records are a {type_name(cast(object, records))}, not records"
-            )
-        given.append((split_id, cast("Iterable[object]", records)))
-    return given
+    pairs = cast("tuple[object, ...]", splits)
+    return [given_split(name, pair) for name, pair in zip(_SPLITS, pairs, strict=True)]
+
+
+def given_split(name: str, pair: object) -> tuple[str, Iterable[object]]:
+    """The split ``pair`` as ``(id, records)``; ``TypeError`` for any other shape, a split id
+    that is not a string, or records that are not an iterable other than a string, bytes or a
+    mapping."""
+    if not isinstance(pair, list | tuple) or len(cast("tuple[object, ...]", pair)) != 2:
+        raise TypeError(
+            f"the {name} split is a {type_name(cast(object, pair))}, not an (id, records) pair"
+        )
+    split_id, records = cast("tuple[object, object]", tuple(cast("tuple[object, ...]", pair)))
+    if type(split_id) is not str:
+        raise TypeError(f"the {name} split's id is a {type_name(split_id)}, not a string")
+    if not isinstance(records, Iterable) or isinstance(records, str | bytes | Mapping):
+        raise TypeError(
+            f"the {name} split's records are a {type_name(cast(object, records))}, not records"
+        )
+    return split_id, cast("Iterable[object]", records)
 
 
 def _sweep_document(document: object) -> dict[str, Any]:

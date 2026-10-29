@@ -16,15 +16,15 @@ a label string, and of its question's form, as the gold-answers job checks a lab
 tie for most probable an error; an extraction answer when ``{"value": v}``, ``v`` its value,
 differs from the gold answer by canonical bytes, null a value like any other.
 
-**The job.** Refused in order: ``unknown-group`` and ``too-few-refs``, naming the group, before
-any record is read; ``invalid-record`` for each record in turn; ``split-id``; ``wrong-design``,
-each record in the order given; ``missing-gold``, naming the turn and the entry's ref, each
-answer in turn and log order; ``unknown-entry``, naming the key, after every ``missing-gold``,
-for a gold entry of a kind or format the job does not read or a value not of its question's
-form, in the same order; ``held-key`` when the store holds the key, before any count; and the
-store's ``held-key`` at the write. A
-record is counted once by its record hash. The entry written is returned, plain data reaching
-no ``Record``.
+**The job.** A ``split`` not an ``(id, records)`` pair, as the sweep checks one, is a
+``TypeError`` before anything else. Refused in order: ``unknown-group`` and ``too-few-refs``,
+naming the group, before any record is read; ``invalid-record`` for each record in turn;
+``split-id``; ``wrong-design``, each record in the order given; ``missing-gold``, naming the
+turn and the entry's ref, each answer in turn and log order; ``unknown-entry``, naming the key,
+after every ``missing-gold``, for a gold entry of a kind or format the job does not read or a
+value not of its question's form, in the same order; ``held-key`` when the store holds the key,
+before any count; and the store's ``held-key`` at the write. A record is counted once by its
+record hash. The entry written is returned, plain data reaching no ``Record``.
 """
 
 import itertools
@@ -39,7 +39,7 @@ from ommat.evaluation._gold import KIND as GOLD
 from ommat.evaluation._gold import _asked, _keys
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
-from ommat.evaluation._sweep import _refuse_split_id, _split, conforming, known
+from ommat.evaluation._sweep import _refuse_split_id, _split, conforming, given_split, known
 
 _R = RefusalReason
 _Unit = tuple[str, str]  # a turn and a candidate
@@ -65,13 +65,14 @@ def confirm_group(
     loaded: LoadedDesign,
     group: str,
     gold_set: str,
-    split: tuple[str, Any],
+    split: object,
     *,
     results: EvaluationStore,
 ) -> dict[str, Any]:
     """Count, for each pair of ``group``'s ``q:`` refs in ``loaded``, the units of ``split``,
     ``(id, records)``, in which both hold an answer, those in which each erred against its gold
     answer under ``gold_set`` and those in which both did; the ``group-counts`` entry written."""
+    split_id, records = given_split("given", split)
     refs = loaded._groups.get(group) if type(group) is str else None
     if refs is None:
         raise EvaluationRefusal(
@@ -86,10 +87,9 @@ def confirm_group(
             reason=_R.too_few_refs,
             group=group,
         )
-    split_id, records = split
-    turns = _split("given", records)
-    _refuse_split_id("given", split_id, turns)
-    for turn, read in turns.items():
+    reads = _split("given", records)
+    _refuse_split_id("given", split_id, reads)
+    for turn, read in reads.items():
         if read.design_hash != loaded.design_hash:
             raise EvaluationRefusal(
                 f"turn {turn}'s design hash is {read.design_hash}, not the loaded design's "
@@ -98,10 +98,10 @@ def confirm_group(
                 turn=turn,
             )
     answered: list[_Answered] = []
-    for turn, read in turns.items():
+    for turn, read in reads.items():
         log = read.log
         asked = _asked(log)
-        keyed = {ref: gold for _, gold, of in _keys(gold_set, turn, asked) for ref in of}
+        keyed = {ref: k for _, k, of in _keys(gold_set, turn, asked) for ref in of}
         values = {e["ref"]: e for e in log if e["item"] == "entry" and "value" in e}
         for ref in asked:
             declared = declared_ref(ref)
@@ -157,6 +157,6 @@ def _erred(answer: Any, gold: object) -> bool:
     if answer["kind"] == AnswerKind.extraction:
         return encode({"value": answer["value"]}) != encode(gold)
     probabilities = cast("dict[str, float]", answer["probabilities"])
-    top = max(probabilities.values(), default=None)
+    top = max(probabilities.values())
     most = [label for label, p in probabilities.items() if p == top]
     return most != [gold]

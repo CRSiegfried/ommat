@@ -106,12 +106,21 @@ def test_a_plain_pair_counts_its_turns_errors_and_joint_errors(tmp_path: Path) -
     assert json.loads(json.dumps(entry)) == copy.deepcopy(entry) == entry  # no Record reachable
 
 
-def test_records_are_read_as_bytes_and_counted_once(tmp_path: Path) -> None:
+def test_records_are_read_as_bytes_or_parsed_documents_and_counted_once(tmp_path: Path) -> None:
     store = labelled(tmp_path, GOLDS)
-    records: list[Any] = [T1.document, T2, T3, T4, T1]
+    records: list[Any] = [T1.document, json.loads(T2.document), T3, T4, T1]
     given = (split([T1, T2, T3, T4])[0], records)
     entry = confirm_group(LOADED, "pair", "g", given, results=store)
     assert entry["value"] == {"pairs": [PAIR]}
+
+
+def test_an_answer_outside_the_group_needs_no_gold(tmp_path: Path) -> None:
+    record = turn("outside", {"q:a": p(0.9), "q:b": p(0.9), "q:c": p(0.9), "q:n1": amount(1)})
+    store = labelled(tmp_path, [(record, {"q:a": "yes", "q:b": "no"})])
+    entry = confirm_group(LOADED, "pair", "g", split([record]), results=store)
+    assert entry["value"]["pairs"] == [
+        {"refs": ["q:a", "q:b"], "turns": 1, "erred": [0, 1], "both": 0}
+    ]
 
 
 def test_three_refs_give_three_pairs_in_code_point_order_and_no_t_ref(tmp_path: Path) -> None:
@@ -189,29 +198,43 @@ LAMPS = Source(
 GROUNDED = load(pc.design(LAMPS, groups={"lamps": Group([pc.OUT, OUT2])}))
 
 
+STREETS = ["Elm", "Oak", "Ash"]
+
+
+async def lamps(batch: Any, *, seconds: float) -> CallResult:
+    values: dict[str, object] = {
+        grounded_ref(pc.OUT, "Elm"): p(0.9),
+        grounded_ref(pc.OUT, "Oak"): p(0.2),
+        grounded_ref(pc.OUT, "Ash"): p(0.9),
+        grounded_ref(OUT2, "Elm"): p(0.1),
+        grounded_ref(OUT2, "Oak"): p(0.9),
+    }  # OUT2 for Ash a marker: that unit holds one answer
+    return CallResult(values)
+
+
+LAMPS_TURN = decide_sync(
+    GROUNDED, {"text": "Lamps are out", "streets": STREETS}, {"default": lamps}
+).record
+LAMPS_GOLDS: dict[str, object] = {
+    **{grounded_ref(pc.OUT, s): "yes" for s in STREETS},
+    grounded_ref(OUT2, "Elm"): "yes",
+    grounded_ref(OUT2, "Oak"): "no",
+}
+
+
 def test_a_grounded_groups_units_are_a_turn_and_a_candidate(tmp_path: Path) -> None:
-    streets = ["Elm", "Oak", "Ash"]
-
-    async def binding(batch: Any, *, seconds: float) -> CallResult:
-        values: dict[str, object] = {
-            grounded_ref(pc.OUT, "Elm"): p(0.9),
-            grounded_ref(pc.OUT, "Oak"): p(0.2),
-            grounded_ref(pc.OUT, "Ash"): p(0.9),
-            grounded_ref(OUT2, "Elm"): p(0.1),
-            grounded_ref(OUT2, "Oak"): p(0.9),
-        }  # OUT2 for Ash a marker: that unit holds one answer
-        return CallResult(values)
-
-    state = {"text": "Lamps are out", "streets": streets}
-    record = decide_sync(GROUNDED, state, {"default": binding}).record
-    labels = {grounded_ref(pc.OUT, s): "yes" for s in streets}
-    labels.update({grounded_ref(OUT2, "Elm"): "yes", grounded_ref(OUT2, "Oak"): "no"})
-    store = EvaluationStore(tmp_path)
-    write_gold_answers("g", [record], {record.record_hash: labels}, results=store)
-    entry = confirm_group(GROUNDED, "lamps", "g", split([record]), results=store)
+    store = labelled(tmp_path, [(LAMPS_TURN, LAMPS_GOLDS)])
+    entry = confirm_group(GROUNDED, "lamps", "g", split([LAMPS_TURN]), results=store)
     assert entry["value"]["pairs"] == [
         {"refs": sorted([pc.OUT, OUT2]), "turns": 2, "erred": [2, 1], "both": 1}
     ]
+
+
+def test_missing_gold_in_a_grounded_group_names_the_per_candidate_ref(tmp_path: Path) -> None:
+    oak = grounded_ref(OUT2, "Oak")
+    store = labelled(tmp_path, [(LAMPS_TURN, {k: v for k, v in LAMPS_GOLDS.items() if k != oak})])
+    exc = refused(store, "lamps", "g", split([LAMPS_TURN]), loaded=GROUNDED)
+    assert (exc.reason, exc.turn, exc.ref) == (R.missing_gold, LAMPS_TURN.record_hash, oak)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -243,10 +266,25 @@ def test_a_wrong_split_id_is_refused_before_the_held_key(tmp_path: Path) -> None
     assert refused(store, "pair", "g", given).reason is R.held_key
 
 
-def test_a_record_of_another_design_is_wrong_design(tmp_path: Path) -> None:
-    other = pc.decided()
-    exc = refused(EvaluationStore(tmp_path), "pair", "g", split([T1, other]))
-    assert (exc.reason, exc.turn) == (R.wrong_design, other.record_hash)
+def test_records_of_another_design_are_wrong_design_naming_the_first_given(
+    tmp_path: Path,
+) -> None:
+    first, second = pc.decided(["Elm"]), pc.decided(["Oak"])
+    exc = refused(EvaluationStore(tmp_path), "pair", "g", split([T1, first, second]))
+    assert (exc.reason, exc.turn) == (R.wrong_design, first.record_hash)
+    exc = refused(EvaluationStore(tmp_path), "pair", "g", split([T1, second, first]))
+    assert (exc.reason, exc.turn) == (R.wrong_design, second.record_hash)
+
+
+@pytest.mark.parametrize(
+    "given",
+    ["id", ("id",), ["id", [], []], (3, []), ("id", b"x"), ("id", "x"), ("id", {}), ("id", 3)],
+)
+def test_a_split_not_an_id_and_records_is_a_type_error_before_anything(
+    tmp_path: Path, given: object
+) -> None:
+    with pytest.raises(TypeError, match="the given split"):
+        confirm_group(LOADED, "nope", "g", given, results=EvaluationStore(tmp_path))
 
 
 def test_an_answer_with_no_gold_is_missing_and_a_marker_needs_none(tmp_path: Path) -> None:
