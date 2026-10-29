@@ -25,6 +25,7 @@ from ommat import (
     ContextEntry,
     Failed,
     Helper,
+    Input,
     InvalidDesign,
     InvalidRecord,
     LoadedDesign,
@@ -114,8 +115,6 @@ RULES: dict[str, Any] = {
     "part": Table(
         "d:part", "number", "F", ["t:state.n"], [[">= lim/n", Param("lim/n")], ["-", 0.0]]
     ),
-    "le": Table("d:le", BIG_SMALL, "F", ["t:state.n"], [["<= lim/lt", "big"], ["-", "small"]]),
-    "lt": Table("d:lt", BIG_SMALL, "F", ["t:state.n"], [["< lim/lt", "big"], ["-", "small"]]),
     "sz": Table(
         "d:sz",
         BIG_SMALL,
@@ -156,7 +155,6 @@ PARAMETERS: dict[str, Any] = {
     "lim/n": Parameter(t.number(), 5.0),
     "lim/k": Parameter(t.integer(0, 10), 2),
     "lim/f": Parameter(t.number(), 1.0),
-    "lim/lt": Parameter(t.number(), 9.0),
     "lim/s": Parameter(t.integer(), 1),
     "sw/on": Parameter(t.boolean, False),
     "sw/mode": Parameter(t.label("a", "b", "c"), "a"),
@@ -751,7 +749,9 @@ def test_a_function_computing_from_the_leaf_ends_and_is_unseen(tmp_path: Path) -
         )
     )
     value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/f", tmp_path)["value"]
-    assert value["unseen"] == ["over", "y"]  # y has no boundaries; over's round-1 values
+    # y has no boundaries; over reads d:y, which holds the leaf, as the policy reads d:over,
+    # whose function declares it.
+    assert value["unseen"] == ["over", "policy", "y"]
 
 
 def three_way(own: float) -> LoadedDesign:
@@ -821,21 +821,27 @@ def test_the_slacks_are_the_switching_values_bounding_the_own_class(
     assert summary["slacks"] == slacks
 
 
-def test_le_and_lt_cells_switch_at_their_input(tmp_path: Path) -> None:
-    entries = run(tables_record(), TABLES, "lim/lt", tmp_path)["value"]["entries"]
-    assert shape(entries["d:le"])["classes"][0] == {
-        "least": 6.0,
-        "greatest": 6.0,
-        "result": "small",
-    }
-    assert entries["d:le"]["switching"] == [7.0]
-    assert shape(entries["d:lt"])["classes"][0] == {
-        "least": 6.0,
-        "greatest": 7.0,
-        "result": "small",
-    }
-    assert entries["d:lt"]["switching"] == [7.0]
-    assert entries["d:le"]["slacks"] == entries["d:lt"]["slacks"] == [-2.0, None]
+def one_table(table: Table, **parameters: Parameter) -> tuple[LoadedDesign, Record]:
+    """A design of ``table`` alone over ``STATE``, its leaves ``parameters``, and its record."""
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={table.provides.removeprefix("d:"): table},
+            parameters=parameters,
+            policy=Policy(constant, version="1", reads=[table.provides]),
+        )
+    )
+    return loaded, decide_sync(loaded, STATE, {}).record
+
+
+@pytest.mark.parametrize(("cell", "least_big"), [("<= lim/lt", 7.0), ("< lim/lt", 8.0)])
+def test_le_and_lt_cells_switch_at_their_input(cell: str, least_big: float, tmp_path: Path) -> None:
+    table = Table("d:tab", BIG_SMALL, "F", ["t:state.n"], [[cell, "big"], ["-", "small"]])
+    loaded, record = one_table(table, **{"lim/lt": Parameter(t.number(), 9.0)})
+    summary = run(record, loaded, "lim/lt", tmp_path)["value"]["entries"]["d:tab"]
+    assert summary["classes"][1]["least"] == least_big  # 7 is big under <=, small under <
+    assert summary["switching"] == [7.0]  # the compared value, on either side
+    assert summary["slacks"] == [-2.0, None]
 
 
 def test_a_size_input_is_probed_on_a_plain_integer_leaf(tmp_path: Path) -> None:
@@ -1169,3 +1175,94 @@ def test_the_input_and_role_measures_guard_their_values() -> None:
     assert _switching._measure("null", over, ()) == []  # no p_null in a probability answer
     assert _switching._measure("null", {"p_null": 0.2, "value": 3}, ()) == [0.2]
     assert _switching._measure("bar", 0.5, ()) == []
+
+
+# ---------------------------------------------------------------------------------------------
+# Round 3: what unseen lists
+
+
+def test_a_reader_of_an_entry_holding_the_leaf_is_unseen(tmp_path: Path) -> None:
+    cap = Table("d:cap", "number", "F", [], [[Param("lim/x")]])
+    leaves = {"lim/x": Parameter(t.number(), 1.0), "lim/y": Parameter(t.number(), 4.0)}
+    for reader in (
+        Table("d:chk", BIG_SMALL, "F", ["d:cap"], [[">= lim/y", "big"], ["-", "small"]]),
+        Table("d:chk", "number", "F", ["d:cap"], [["-", Input("d:cap")]]),
+    ):
+        loaded = load(
+            minimal(
+                state=STATE_T,
+                rules={"cap": cap, "chk": reader},
+                parameters=leaves,
+                policy=Policy(constant, version="1", reads=["d:chk"]),
+            )
+        )
+        record = decide_sync(loaded, STATE, {}).record
+        value = run(record, loaded, "lim/x", tmp_path / reader.hit / str(len(reader.rows)))
+        assert value["value"]["unseen"] == ["chk"]  # it compares d:cap against another leaf
+
+
+@pytest.mark.parametrize("hit", ["C+", "C>"])
+def test_an_aggregate_mixing_the_leaf_with_other_values_is_unseen(hit: str, tmp_path: Path) -> None:
+    table = Table("d:tab", "number", hit, ["t:state.n"], [[">= lim/n", Param("lim/n")], ["-", 1.0]])
+    loaded, record = one_table(table, **{"lim/n": PARAMETERS["lim/n"]})
+    assert run(record, loaded, "lim/n", tmp_path)["value"]["unseen"] == ["policy", "tab"]
+
+
+def test_the_components_a_load_failure_names_are_unseen(tmp_path: Path) -> None:
+    table = Table(
+        "d:tab", BIG_SMALL, "F", ["t:state.k"], [["[lim/y, lim/x]", "big"], ["-", "small"]]
+    )
+    leaves = {"lim/x": Parameter(t.integer(), 7), "lim/y": Parameter(t.integer(), 5)}
+    loaded, record = one_table(table, **leaves)
+    value = run(record, loaded, "lim/x", tmp_path)["value"]
+    assert value["unseen"] == ["tab"]  # below lim/y the band does not load
+
+
+def test_a_candidate_table_not_reading_the_leaf_is_never_unseen(tmp_path: Path) -> None:
+    rules = {
+        **grounded.design().rules,
+        "other": Table(
+            "d:other", BIG_SMALL, "F", ["t:state.n"], [[">= lim/n", "big"], ["-", "small"]]
+        ),
+    }
+    state_t = t.record(people=t.list_(grounded.PERSON), n=t.number())
+    loaded = load(
+        grounded.design(state=state_t, rules=rules, parameters={"lim/n": PARAMETERS["lim/n"]})
+    )
+    for n, people in enumerate(([grounded.BO, grounded.ANA], [{"name": "raise", "age": 1}])):
+        record = decide_sync(
+            loaded, {"people": people, "n": 7.0}, {"default": grounded.answer}
+        ).record
+        assert run(record, loaded, "lim/n", tmp_path / str(n))["value"]["unseen"] == []
+
+
+def test_an_integer_side_past_the_interval_is_clipped_to_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded, record = one_table(RULES["many"], **{"lim/k": PARAMETERS["lim/k"]})
+    record = decide_sync(loaded, {**STATE, "k": 10}, {}).record
+    seen = counting_replays(monkeypatch)
+    plan = run(record, loaded, "lim/k", tmp_path)["value"]["plan"]
+    # 10 and 11 beside k: 11 clipped to 10, so no value outside the interval fails load.
+    assert [(c["least"], c["greatest"]) for c in plan["classes"]] == [(0, 10)]
+    assert seen[0] == 2  # 0 and 10 beside the own 2; 11 is never tried
+
+
+def test_a_round_1_value_already_compared_leaves_nothing_unseen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    step = Table("d:v", "number", "F", ["t:state.n"], [[">= lim/n", 3.0], ["-", 9.0]])
+    check = Table("d:chk", BIG_SMALL, "F", ["d:v"], [[">= lim/n", "big"], ["-", "small"]])
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"v": step, "chk": check},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Policy(constant, version="1", reads=["d:chk"]),
+        )
+    )
+    seen = counting_replays(monkeypatch)
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
+    # Round 0 over 3 and 7 finds 9 past 7; round 1 over 3, 7 and 9 recomputes 3 and 9 alone.
+    assert seen[0] > 5
+    assert value["unseen"] == []

@@ -41,10 +41,15 @@ The slacks are the switching values bounding the leaf's own class, each minus th
 value, null on a side with none; one no ``float`` holds, or for an integer leaf past
 2^53 - 1 in magnitude, is refused ``unrepresentable-slack`` before the write.
 
-``unseen`` names, in code-point order, each function component declaring the leaf whose
-``boundaries`` field does not name it, each component of a value round 1 found, and each table
-whose ``candidate`` read finds its set holding no value; it is empty for a ``boolean`` or
-``label`` leaf, every value of which was tried.
+``unseen`` is empty only when every way the leaf reaches a component is a comparison against a
+probed value; it names, in code-point order, each component the leaf reaches otherwise: a
+function component declaring it whose ``boundaries`` field does not name it; a ``C+``, ``C<``
+or ``C>`` table with a ``Param`` row of it; each component reading an entry that holds the
+leaf, one a table's row outputs ``Param`` of or a function component declaring it provides,
+one level deep; each component of a value round 1 found; each table comparing a ``candidate``
+read against the leaf whose set holds no value; and each component a failure names when a
+value tried does not load. It is empty for a ``boolean`` or ``label`` leaf, every value of
+which was tried.
 
 Refused in §switching-value's order; the record checks are ``_edit``'s, the baseline replay
 and the change of an entry ``_diff``'s, shared with the deciding inputs. The entry written is
@@ -84,7 +89,6 @@ _Compared = dict[Fraction, set[str]]  # each compared value to the components co
 
 KIND = "switching-value"
 _NOT_DETERMINED = "not-determined"
-_NOTES = frozenset({_K.design_mismatch, _K.helpers_mismatch})
 
 
 async def switching_values(
@@ -215,12 +219,7 @@ class _Job:
     def unseen(self, t: Type) -> list[str]:
         if _finite(t) is not None:
             return []
-        hidden = {
-            name
-            for name, c in _functions(self.document).items()
-            if self.path in c["params"] and not _contains(c["boundaries"], self.path)
-        }
-        return code_point_sorted(hidden | self.late)
+        return code_point_sorted(_hidden(self.document, self.loaded, self.path) | self.late)
 
     async def summary(self, t: Type, own: Any, key: str | None) -> dict[str, Any]:
         """``{"entries", "plan"}`` over the values tried for the leaf, or its key ``key``."""
@@ -244,6 +243,8 @@ class _Job:
                 for v in _points(bounds, t, integer):
                     if v not in tried:
                         tried[v], rerun = await self.run(v, key)
+                        if not isinstance(tried[v], _Run):
+                            continue  # not loading: no log to read
                         for x, names in self.compared(rerun).items():
                             found.setdefault(x, set()).update(names)
                 if last:
@@ -279,10 +280,11 @@ class _Job:
                 {"check": f.check, "names": list(f.names), "message": f.message}
                 for f in exc.failures
             ]
+            components = _components(self.document)
+            self.late |= {n for f in exc.failures for n in f.names if n in components}
             return {"not-loading": failures}, []
         rerun, found = await _replay_with(self.log, design, self.log, observer=None)
         rerun_log = rerun.log
-        found = [f for f in found if f["kind"] not in _NOTES]
         outside = any(f["kind"] in OUTSIDE for f in found)
         return _Run(
             self.log, found, outside or _unreturned(self.mine, self.log, rerun_log)
@@ -433,13 +435,32 @@ _ROLES: dict[tuple[str | None, str], str] = {
 }
 
 
+def _hidden(document: _Doc, loaded: LoadedDesign, path: str) -> set[str]:
+    """The components the leaf reaches other than by a comparison the probes see: a function
+    component declaring it whose ``boundaries`` field does not name it; a table aggregating
+    it under ``C+``, ``C<`` or ``C>`` beside other values; and each component reading an entry
+    that holds the leaf, one a table row outputs ``Param`` of, or a function component
+    declaring the leaf provides."""
+    out: set[str] = set()
+    valued: set[str] = set()
+    for name, c in _components(document).items():
+        if c["form"] == "function":
+            if path in c["params"]:
+                valued.add(c.get("provides", ""))
+                if not _contains(c["boundaries"], path):
+                    out.add(name)
+        elif any(_contains(row.get("output"), {"param": path}) for row in c["rows"]):
+            valued.add(c.get("provides", ""))
+            if c.get("hit") in ("C+", "C<", "C>"):
+                out.add(name)
+    readers = loaded._reads
+    out |= {n for n, reads in readers.items() if any(_declared(r) in valued for r in reads)}
+    return out
+
+
 def _components(document: _Doc) -> dict[str, dict[str, Any]]:
     """Each rule by id, then the policy as ``policy``."""
     return {**document["rules"], "policy": document["policy"]}
-
-
-def _functions(document: _Doc) -> dict[str, dict[str, Any]]:
-    return {n: c for n, c in _components(document).items() if c["form"] == "function"}
 
 
 def _compared(document: _Doc, path: str, log: _Log) -> tuple[_Compared, set[str]]:
@@ -458,15 +479,17 @@ def _compared(document: _Doc, path: str, log: _Log) -> tuple[_Compared, set[str]
     for name, c in _components(document).items():
         if c["form"] == "table":
             for n, i in enumerate(cast("list[dict[str, Any]]", c["inputs"])):
+                roles = [_ROLES.get((i["helper"], r)) for r, b in i["params"].items() if b == path]
+                cells = any(_compares(row["cells"][n], path) for row in c["rows"])
+                if not roles and not cells:
+                    continue  # the leaf does not reach this input
                 held = _read_values(i["read"], entries, c.get("grounded"))
                 if held is None:
                     blind.add(name)
                     continue
-                for role, bound in cast("dict[str, Any]", i["params"]).items():
-                    if bound == path:
-                        role = _ROLES.get((i["helper"], role))
-                        add(name, (x for v in held for x in _measure(role, v, ())))
-                if any(_compares(row["cells"][n], path) for row in c["rows"]):
+                for role in roles:
+                    add(name, (x for v in held for x in _measure(role, v, ())))
+                if cells:
                     add(name, (x for v in held for x in _input(document, i, v)))
         elif c["boundaries"] is not None:
             for read, entry in cast("dict[str, Any]", c["boundaries"]).items():
