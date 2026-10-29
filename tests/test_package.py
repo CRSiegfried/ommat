@@ -209,6 +209,7 @@ EVALUATION = {
     "set_entry_sync",
     "set_state_field",
     "set_state_field_sync",
+    "split_id",
     "sweep",
     "sweep_sync",
     "switching_values",

@@ -28,6 +28,9 @@ already written, and the store being write-once, a rerun refuses ``held-key`` na
 held key at a write is another run's, refused with the held key first, then those this run
 wrote, in write order; any other refusal passes through. The entries written are returned, in
 write order, plain data.
+
+``known`` and ``conforming`` read a stored gold answer as the sweep job and the correlated-group
+job read one: format 1 or 2, and of its question's form, else ``unknown-entry``.
 """
 
 from collections.abc import Iterable, Mapping
@@ -236,11 +239,36 @@ def _copied(
     job does not read; ``None`` with no entry."""
     if entry is None:
         return None
-    if entry["format"] not in _READ:
-        raise EvaluationRefusal(
-            f"the {KIND} entry under {entry['key']!r} is format {entry['format']}, not one of "
-            f"{', '.join(map(str, _READ))}",
-            reason=_R.unknown_entry,
-            key=[entry["key"]],
-        )
+    known(entry, entry["key"])
     return _checked(entry["value"], key["turn"], ref, asked, logs)
+
+
+def known(entry: dict[str, Any] | None, key: dict[str, str]) -> dict[str, Any] | None:
+    """``entry``, a gold answer looked up under ``key`` or ``None``; ``unknown-entry`` for an
+    entry of a kind or format the job does not read."""
+    # The store's lookup by kind, and its envelope check, make the entry's kind KIND.
+    if entry is not None and entry["format"] not in _READ:
+        raise EvaluationRefusal(
+            f"the {KIND} entry under {key!r} is format {entry['format']}, not 1 or 2",
+            reason=_R.unknown_entry,
+            key=[key],
+        )
+    return entry
+
+
+def conforming(
+    entry: dict[str, Any], key: dict[str, str], question: dict[str, Any], log: _Log
+) -> object:
+    """A known gold ``entry``'s value as the gold-answers job writes a label for ``question``,
+    asked in ``log``; ``unknown-entry``, naming ``key``, for a value not of the question's form:
+    a name not among its labels, a format-1 label string for an extraction question, or an
+    extraction value that does not conform."""
+    form = _form(entry["value"], question, log)
+    if form is None:
+        raise EvaluationRefusal(
+            f"the entry under {key!r} holds {guarded_repr(entry['value'])}, not a gold answer "
+            "of its question's form",
+            reason=_R.unknown_entry,
+            key=[key],
+        )
+    return form

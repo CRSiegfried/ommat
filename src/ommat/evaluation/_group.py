@@ -9,22 +9,23 @@ for an ungrounded one, the gold key's ``candidate``; a group's refs are declared
 grounded group's entries are its refs' per-candidate entries. A ref holds an answer at a unit
 when a call wrote its entry there with a value; a marker, or no entry, holds none. A pair's
 ``turns`` counts units. Each gold answer is found as the gold-answers job derives its key,
-``_gold``'s, and read as the sweep job reads one, ``_sweep``'s: format 1 or 2, a format-1 value
-a label string, and of its question's form, as the gold-answers job checks a label.
+``_gold``'s, and read as the sweep job reads one, by ``_gold``'s ``known`` and ``conforming``:
+format 1 or 2, a format-1 value a label string, and of its question's form, as the gold-answers
+job checks a label.
 
 **Erring.** A probability answer errs when its most probable label is not the gold label, a
 tie for most probable an error; an extraction answer when ``{"value": v}``, ``v`` its value,
 differs from the gold answer by canonical bytes, null a value like any other.
 
-**The job.** A ``split`` not an ``(id, records)`` pair, as the sweep checks one, is a
-``TypeError`` before anything else. Refused in order: ``unknown-group`` and ``too-few-refs``,
+**The job.** A ``split`` not an ``(id, records)`` pair, checked by ``_splits`` as the sweep's are,
+is a ``TypeError`` before anything else. Refused in order: ``unknown-group`` and ``too-few-refs``,
 naming the group, before any record is read; ``invalid-record`` for each record in turn;
-``split-id``; ``wrong-design``, each record in the order given; ``missing-gold``, naming the
-turn and the entry's ref, each answer in turn and log order; ``unknown-entry``, naming the key,
-after every ``missing-gold``, for a gold entry of a kind or format the job does not read or a
-value not of its question's form, in the same order; ``held-key`` when the store holds the key,
-before any count; and the store's ``held-key`` at the write. A record is counted once by its
-record hash. The entry written is returned, plain data reaching no ``Record``.
+``split-id``; ``wrong-design``, each record in the order given; ``missing-gold``, naming the turn
+and the entry's ref, each answer in turn and log order; ``unknown-entry``, naming the key, after
+every ``missing-gold``, for a gold entry of a kind or format the job does not read or a value not of
+its question's form, in the same order; ``held-key`` when the store holds the key, before any count;
+and the store's ``held-key`` at the write. A record is counted once by its record hash. The entry
+written is returned, plain data reaching no ``Record``.
 """
 
 import itertools
@@ -36,10 +37,10 @@ from ommat._design import LoadedDesign
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import guarded_repr
 from ommat.evaluation._gold import KIND as GOLD
-from ommat.evaluation._gold import _asked, _keys
+from ommat.evaluation._gold import _asked, _keys, conforming, known
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
+from ommat.evaluation._splits import given_split, read_split, refuse_split_id
 from ommat.evaluation._store import EvaluationStore
-from ommat.evaluation._sweep import _refuse_split_id, _split, conforming, given_split, known
 
 _R = RefusalReason
 _Unit = tuple[str, str]  # a turn and a candidate
@@ -87,8 +88,8 @@ def confirm_group(
             reason=_R.too_few_refs,
             group=group,
         )
-    reads = _split("given", records)
-    _refuse_split_id("given", split_id, reads)
+    reads = read_split("given", records)
+    refuse_split_id("given", split_id, reads)
     for turn, read in reads.items():
         if read.design_hash != loaded.design_hash:
             raise EvaluationRefusal(

@@ -50,6 +50,7 @@ from ommat.evaluation import (
     EvaluationStore,
     RefusalReason,
     _sweep,
+    split_id,
     write_gold_answers,
 )
 from ommat.evaluation._sweep import (
@@ -398,8 +399,31 @@ def spam_turn(n: int, p_yes: float, design: LoadedDesign = SPAM_DESIGN) -> Recor
     return decide_sync(design, {"n": n}, {"default": answer}).record
 
 
-def split_id(records: list[Record]) -> str:
+def by_hand(records: list[Record]) -> str:
     return hash_value(sorted({r.record_hash for r in records}))
+
+
+def test_split_id_is_the_hash_of_its_records_hashes_each_once_in_code_point_order() -> None:
+    records = [spam_turn(n, p) for n, p in [(40, 0.9), (41, 0.2), (42, 0.55)]]
+    expected = by_hand(records)
+    assert split_id(records) == expected
+    assert split_id([records[2], records[0], records[1], records[0]]) == expected
+    assert split_id(r.document for r in records) == expected  # stored documents
+    assert split_id([records[0].document, records[1], records[2]]) == expected
+    assert split_id([]) == hash_value([])
+
+
+def test_split_id_refuses_a_record_that_fails_the_read() -> None:
+    with pytest.raises(EvaluationRefusal) as raised:
+        split_id([DEV[0], b"{}"])
+    assert raised.value.reason is R.invalid_record
+    assert raised.value.error is not None
+
+
+@pytest.mark.parametrize("records", ["records", b"records", {"a": 1}, 5])
+def test_split_id_takes_an_iterable_of_records(records: Any) -> None:
+    with pytest.raises(TypeError, match="records"):
+        split_id(records)
 
 
 # Each turn: its state, the model's probability of spam, and its gold label.

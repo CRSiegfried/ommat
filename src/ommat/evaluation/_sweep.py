@@ -3,21 +3,21 @@
 replaced, scored against every turn's gold plan on a dev and a certification split, and a point
 chosen by the exact binomial test, written as a ``certificate`` entry (§sweep).
 
-**The gold copy** (§gold-copy). The gold answers are looked up as the gold-answers job derives
-their keys, ``_gold``'s: the turn id the record's hash, the question identity from its call item
-and the candidate part of its ref. An entry of a kind or format other than ``gold-answer`` 1 and
-2, or whose value is not of its question's form as the gold-answers job reads it, is refused
-``unknown-entry`` by ``known`` and ``conforming``, which the group job shares. A label becomes
-an answer whose ``probabilities`` give 1 to the gold label and 0 to every other, over the
-question's labels as asked, a candidate-valued set's from its set's entry, its fixed part alone
-when that entry holds a marker; an extraction gold answer ``{"value": v}`` becomes ``value``
-``v``, ``p_null`` 0 and ``confidence`` 1, or for ``v`` ``None`` ``value`` ``None``, ``p_null`` 1
-and ``confidence`` ``None``, ``guess`` and ``span`` ``None`` in both. Each answer is written as
-interpret writes one, on one copy whose ``hash`` is set and which is read back through
-``read_record``, by ``_edit``'s machinery; a ``t:`` entry keeps its value or marker. A turn has
-no gold copy when its record has no ``verdict`` item or no state entry, a ``q:`` entry a call
-wrote has no gold answer, or a call that wrote one is ``Failed``. It has no gold plan at a point
-when the gold copy's replay there does not determine the turn or its plan is ``broken``.
+**The gold copy** (§gold-copy). The gold answers are looked up as the gold-answers job derives their
+keys, ``_gold``'s: the turn id the record's hash, the question identity from its call item and the
+candidate part of its ref. An entry of a kind or format other than ``gold-answer`` 1 and 2, or whose
+value is not of its question's form as the gold-answers job reads it, is refused ``unknown-entry``
+by ``_gold``'s ``known`` and ``conforming``, which the group job shares. A label becomes an answer
+whose ``probabilities`` give 1 to the gold label and 0 to every other, over the question's labels as
+asked, a candidate-valued set's from its set's entry, its fixed part alone when that entry holds a
+marker; an extraction gold answer ``{"value": v}`` becomes ``value`` ``v``, ``p_null`` 0 and
+``confidence`` 1, or for ``v`` ``None`` ``value`` ``None``, ``p_null`` 1 and ``confidence``
+``None``, ``guess`` and ``span`` ``None`` in both. Each answer is written as interpret writes one,
+on one copy whose ``hash`` is set and which is read back through ``read_record``, by ``_edit``'s
+machinery; a ``t:`` entry keeps its value or marker. A turn has no gold copy when its record has no
+``verdict`` item or no state entry, a ``q:`` entry a call wrote has no gold answer, or a call that
+wrote one is ``Failed``. It has no gold plan at a point when the gold copy's replay there does not
+determine the turn or its plan is ``broken``.
 
 **Scoring** (§sweep-scoring). A replay determines its turn as the switching-value job reads a
 probe's. A turn is counted at a point from its record's replay alone, against its gold copy's:
@@ -53,7 +53,7 @@ from fractions import Fraction
 from typing import Any, cast
 
 from ommat._answer import AnswerKind, ValueType
-from ommat._canonical import _DecodeError, decode, encode, hash_value
+from ommat._canonical import _DecodeError, decode, encode
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._interpret import answer_written
 from ommat._ledger import _ITEM_DEPTH, Record
@@ -64,10 +64,11 @@ from ommat._replay import _first, _replay_with
 from ommat._resolve import board_entries, board_value
 from ommat._values import MAX_DOCUMENT_DEPTH, domain_error, guarded_repr, type_name
 from ommat._views import escalation
-from ommat.evaluation._diff import OUTSIDE, _read, _run_sync, _state
+from ommat.evaluation._diff import OUTSIDE, _run_sync, _state
 from ommat.evaluation._edit import _labels, _name, _record_copy, _rewritten
-from ommat.evaluation._gold import _READ, KIND, _asked, _form, _keys
+from ommat.evaluation._gold import KIND, _asked, _keys, conforming, known
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
+from ommat.evaluation._splits import given_split, read_split, refuse_split_id
 from ommat.evaluation._store import DesignStore, EvaluationStore
 from ommat.evaluation._switching import _unreturned
 from ommat.helpers import HELPERS
@@ -91,37 +92,6 @@ def _gold_answers(
         for ref in refs:
             golds[ref] = None if entry is None else conforming(entry, key, asked[ref], log)
     return {ref: golds[ref] for ref in asked}
-
-
-def known(entry: dict[str, Any] | None, key: dict[str, str]) -> dict[str, Any] | None:
-    """``entry``, a gold answer looked up under ``key`` or ``None``; ``unknown-entry`` for an
-    entry of a kind or format the job does not read."""
-    # The store's lookup by kind, and its envelope check, make the entry's kind KIND.
-    if entry is not None and entry["format"] not in _READ:
-        raise EvaluationRefusal(
-            f"the {KIND} entry under {key!r} is format {entry['format']}, not 1 or 2",
-            reason=_R.unknown_entry,
-            key=[key],
-        )
-    return entry
-
-
-def conforming(
-    entry: dict[str, Any], key: dict[str, str], question: dict[str, Any], log: _Log
-) -> object:
-    """A known gold ``entry``'s value as the gold-answers job writes a label for ``question``,
-    asked in ``log``; ``unknown-entry``, naming ``key``, for a value not of the question's form:
-    a name not among its labels, a format-1 label string for an extraction question, or an
-    extraction value that does not conform."""
-    form = _form(entry["value"], question, log)
-    if form is None:
-        raise EvaluationRefusal(
-            f"the entry under {key!r} holds {guarded_repr(entry['value'])}, not a gold answer "
-            "of its question's form",
-            reason=_R.unknown_entry,
-            key=[key],
-        )
-    return form
 
 
 def _gold_copy(read: Record, log: _Log, golds: dict[str, object | None]) -> Record | str:
@@ -329,9 +299,9 @@ async def sweep(
             f"the starting design does not load: {exc}", reason=_R.invalid_design, error=exc
         ) from exc
     points = _point_designs(doc["points"], start, functions)
-    turns = [_split(name, given[i][1]) for i, name in enumerate(_SPLITS)]
+    turns = [read_split(name, given[i][1]) for i, name in enumerate(_SPLITS)]
     for i, name in enumerate(_SPLITS):
-        _refuse_split_id(name, given[i][0], turns[i])
+        refuse_split_id(name, given[i][0], turns[i])
     for i, name in enumerate(_SPLITS):
         if not turns[i]:
             raise EvaluationRefusal(
@@ -441,24 +411,6 @@ def _given_splits(splits: object) -> list[tuple[str, Iterable[object]]]:
     return [given_split(name, pair) for name, pair in zip(_SPLITS, pairs, strict=True)]
 
 
-def given_split(name: str, pair: object) -> tuple[str, Iterable[object]]:
-    """The split ``pair`` as ``(id, records)``; ``TypeError`` for any other shape, a split id
-    that is not a string, or records that are not an iterable other than a string, bytes or a
-    mapping."""
-    if not isinstance(pair, list | tuple) or len(cast("tuple[object, ...]", pair)) != 2:
-        raise TypeError(
-            f"the {name} split is a {type_name(cast(object, pair))}, not an (id, records) pair"
-        )
-    split_id, records = cast("tuple[object, object]", tuple(cast("tuple[object, ...]", pair)))
-    if type(split_id) is not str:
-        raise TypeError(f"the {name} split's id is a {type_name(split_id)}, not a string")
-    if not isinstance(records, Iterable) or isinstance(records, str | bytes | Mapping):
-        raise TypeError(
-            f"the {name} split's records are a {type_name(cast(object, records))}, not records"
-        )
-    return split_id, cast("Iterable[object]", records)
-
-
 def _sweep_document(document: object) -> dict[str, Any]:
     """The sweep document parsed and checked: ``invalid-sweep`` for bytes that do not parse,
     then ``unknown-format``, then ``invalid-sweep`` for anything else outside its shape."""
@@ -531,27 +483,6 @@ def _point_designs(
                 error=exc,
             ) from exc
     return loaded
-
-
-def _split(name: str, records: Any) -> dict[str, Record]:
-    """A split's records by record hash, each once, in the order given; ``invalid-record`` for
-    a record that fails the read."""
-    read: dict[str, Record] = {}
-    for i, document in enumerate(records):
-        record = _read(document, f"the {name} split's record {i}")
-        read.setdefault(record.record_hash, record)
-    return read
-
-
-def _refuse_split_id(name: str, split_id: str, read: dict[str, Record]) -> None:
-    """``split-id`` when the id recomputed from a split's records is not the one given."""
-    found = hash_value(code_point_sorted(read))
-    if found != split_id:
-        raise EvaluationRefusal(
-            f"the {name} split's id is {split_id}, but its records' is {found}",
-            reason=_R.split_id,
-            split=(split_id, found),
-        )
 
 
 def _no_gold_plan(turn: str, point: int | None, why: str) -> EvaluationRefusal:
