@@ -447,6 +447,14 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "conflicting-labels",
         "unknown-entry",
         "empty-copy",
+        "unknown-format",
+        "invalid-sweep",
+        "wrong-split",
+        "repeated-sweep",
+        "split-id",
+        "shared-record",
+        "no-gold-plan",
+        "not-determined",
     }
 
 

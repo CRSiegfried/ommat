@@ -40,6 +40,14 @@ class RefusalReason(enum.StrEnum):
     conflicting_labels = "conflicting-labels"
     unknown_entry = "unknown-entry"
     empty_copy = "empty-copy"
+    unknown_format = "unknown-format"
+    invalid_sweep = "invalid-sweep"
+    wrong_split = "wrong-split"
+    repeated_sweep = "repeated-sweep"
+    split_id = "split-id"
+    shared_record = "shared-record"
+    no_gold_plan = "no-gold-plan"
+    not_determined = "not-determined"
 
 
 class EvaluationRefusal(Exception):

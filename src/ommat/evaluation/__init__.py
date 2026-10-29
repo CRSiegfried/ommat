@@ -1,8 +1,8 @@
 """The evaluation subpackage: jobs that measure a design against past turns through replay,
 and the two stores they keep their inputs and results in. The names ``__all__`` lists are
 public, under the same deprecation rule as ``ommat.__all__``. Do-and-diff's six jobs, the
-deciding inputs and the switching-value job are shipped, each async with a ``_sync`` twin, and
-the gold-answers job, sync.
+deciding inputs, the switching-value job and the sweep job are shipped, each async with a
+``_sync`` twin, and the gold-answers job, sync.
 
 ``set_entry``, ``fail_call``, ``set_state_field`` and ``constant_rule`` each change one input
 of a recorded turn, an entry a call wrote, a whole call, a ``t:state`` field or a rule made
@@ -16,7 +16,13 @@ leaf, probed at the values the turn compares it against and the gap and end valu
 beyond them, and writes, per entry and for the plan, the switching values, slacks and classes,
 or a ``boolean`` or ``label`` leaf's partition, to the evaluation store.
 ``write_gold_answers``, sync, writes a labeller's labels for the questions finished turns asked
-under a named gold set, copying an old set's for the questions given none. ``DesignStore`` keeps
+under a named gold set, copying an old set's for the questions given none. ``sweep`` replays
+every turn of a dev and a certification split under each point of a sweep document, the
+starting design with some parameter leaves replaced, scores each against the plan its gold
+answers give at that point, and chooses the last point the exact binomial test certifies on the
+certification split, by fixed-sequence testing when the dev split's escaped counts never fall
+along the points, else Bonferroni; it keeps the chosen design in the design store and writes the
+counts and the choice as a ``certificate`` entry. ``DesignStore`` keeps
 a loaded design's document under its design hash and fetches it back through ``load``;
 ``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses with
 ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
@@ -44,6 +50,7 @@ from ommat.evaluation._edit import (
 from ommat.evaluation._gold import write_gold_answers
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import DesignStore, EvaluationStore
+from ommat.evaluation._sweep import sweep, sweep_sync
 from ommat.evaluation._switching import switching_values, switching_values_sync
 
 __all__ = [
@@ -63,6 +70,8 @@ __all__ = [
     "set_entry_sync",
     "set_state_field",
     "set_state_field_sync",
+    "sweep",
+    "sweep_sync",
     "switching_values",
     "switching_values_sync",
     "use_answers",
