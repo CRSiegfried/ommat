@@ -320,6 +320,14 @@ def test_alpha_is_read_as_its_binary_value() -> None:
     assert _choose(_FIXED_SEQUENCE, 2, [0], 0.6, 0.16) == (None, 1)
 
 
+def test_delta_is_read_as_its_binary_value() -> None:
+    # 1 - 0.6 as doubles is exactly the double 0.4, just above 2/5: at delta's binary value the
+    # tail equals the level and certifies; at its decimal value it would not.
+    assert 1 - Fraction(0.6) == Fraction(0.4) > Fraction(2, 5)
+    assert _choose(_FIXED_SEQUENCE, 1, [0], 0.6, 0.4) == (0, 1)
+    assert _choose(_BONFERRONI, 1, [0, 0], 0.6, 0.8) == (1, 2)  # 0.8 / 2 is the double 0.4
+
+
 def test_a_large_tail_is_quick() -> None:
     assert _certifies(20000, 150, 0.01, Fraction(1, 2))
 
@@ -632,6 +640,13 @@ def test_a_repeated_sweep_is_refused_before_anything_is_read(tmp_path: Path) -> 
     assert (exc.reason, exc.key) == (R.repeated_sweep, [entry["key"]])
 
 
+def test_a_wrong_split_is_refused_before_a_repeated_sweep(tmp_path: Path) -> None:
+    stores = Stores(tmp_path)
+    stores.run()
+    exc = stores.refused(splits=((split_id(CERT), CERT), (split_id(DEV), DEV)))
+    assert exc.reason is R.wrong_split
+
+
 def test_a_write_refused_at_the_store_is_held_key(tmp_path: Path) -> None:
     stores = Stores(tmp_path)
     entry = stores.run()
@@ -641,8 +656,12 @@ def test_a_write_refused_at_the_store_is_held_key(tmp_path: Path) -> None:
             return None if kind == "certificate" else super().lookup(kind, key)
 
     stores.results = Blind(tmp_path / "results")
+    stores.designs = DesignStore(tmp_path / "again")
+    stores.designs.keep(SPAM_DESIGN)
     exc = stores.refused()
     assert (exc.reason, exc.key) == (R.held_key, [entry["key"]])
+    kept = stores.designs.fetch(entry["value"]["chosen_design"], functions=FUNCTIONS)
+    assert kept._leaf_value("spam/bar") == 0.65  # kept before the write was refused
 
 
 def test_the_design_stores_refusal_passes_through(tmp_path: Path) -> None:
@@ -667,6 +686,12 @@ def test_every_points_paths_are_checked_before_any_point_loads(tmp_path: Path) -
     assert (exc.reason, exc.point, exc.path) == (R.unknown_path, 1, "spam/nope")
     exc = Stores(tmp_path / "node").refused(sweep_doc(points=[{"spam": 1}]))
     assert (exc.reason, exc.point, exc.path) == (R.unknown_path, 0, "spam")  # a node
+
+
+def test_an_unknown_path_is_refused_before_any_record_is_read(tmp_path: Path) -> None:
+    splits = ((split_id(DEV), [*DEV, b"{}"]), (split_id(CERT), CERT))
+    exc = Stores(tmp_path).refused(sweep_doc(points=[{"spam/nope": 1}]), splits=splits)
+    assert (exc.reason, exc.path) == (R.unknown_path, "spam/nope")
 
 
 def test_a_point_that_does_not_load_is_invalid_design_naming_it(tmp_path: Path) -> None:
@@ -709,13 +734,38 @@ def test_an_empty_split_is_refused(tmp_path: Path, empty: int) -> None:
     assert (exc.reason, exc.split) == (R.empty_split, (ids[empty], ids[empty]))
 
 
-def test_a_record_in_both_splits_is_refused(tmp_path: Path) -> None:
-    shared = [CERT[1], CERT[0]]
-    dev = [*DEV, *shared]
+def test_an_empty_split_is_refused_after_every_record_is_read(tmp_path: Path) -> None:
+    doc = sweep_doc(dev=split_id([]))
+    splits: Any = ((split_id([]), []), (split_id(CERT), [*CERT, b"{}"]))
+    assert Stores(tmp_path).refused(doc, splits=splits).reason is R.invalid_record
+
+
+def test_an_empty_split_is_refused_after_its_id_is_checked(tmp_path: Path) -> None:
+    exc = Stores(tmp_path).refused(splits=((split_id(DEV), []), (split_id(CERT), CERT)))
+    assert (exc.reason, exc.split) == (R.split_id, (split_id(DEV), hash_value([])))
+
+
+def test_a_record_in_both_splits_is_refused_the_first_in_code_point_order(
+    tmp_path: Path,
+) -> None:
+    low, mid, high = sorted(CERT[:3], key=lambda r: r.record_hash)
+    dev = [*DEV, high, low, mid]  # the first in code-point order neither first nor last given
+    cert = [CERT[3], mid, low, high]
     doc = sweep_doc(dev=split_id(dev))
-    exc = Stores(tmp_path).refused(doc, splits=((split_id(dev), dev), (split_id(CERT), CERT)))
-    first = min(r.record_hash for r in shared)
-    assert (exc.reason, exc.turn) == (R.shared_record, first)
+    exc = Stores(tmp_path).refused(doc, splits=((split_id(dev), dev), (split_id(cert), cert)))
+    assert (exc.reason, exc.turn) == (R.shared_record, low.record_hash)
+
+
+def test_a_shared_record_is_refused_before_an_unknown_entry(tmp_path: Path) -> None:
+    stores = Stores(tmp_path, labelled=False)
+    stores.results.write(
+        {"kind": "gold-answer", "format": 3, "key": key("g", DEV[0], "q:spam"), "value": "yes"}
+    )
+    dev = [*DEV, CERT[0]]
+    exc = stores.refused(
+        sweep_doc(dev=split_id(dev)), splits=((split_id(dev), dev), (split_id(CERT), CERT))
+    )
+    assert (exc.reason, exc.turn) == (R.shared_record, CERT[0].record_hash)
 
 
 def test_a_gold_entry_of_an_unknown_format_is_refused(tmp_path: Path) -> None:
@@ -972,6 +1022,27 @@ def test_the_scope_lists_each_call_items_profile() -> None:
         "models": ["m1", "m2"],  # the reported one, else the requested
         "revisions": ["r1", "s1"],
         "elicitations": ["e0", "e1"],
+    }
+
+
+def test_the_scope_is_in_code_point_order_not_the_order_found() -> None:
+    found = ["b", "C", "a"]  # code-point order C, a, b: neither as found nor reversed
+    logs = [
+        [
+            {
+                "item": "call",
+                "questions": {"q:x": {"identity": f"q{v}"}},
+                "provider": f"p{v}",
+                "model_requested": f"m{v}",
+                "revision": f"r{v}",
+                "elicitation": f"e{v}",
+            }
+        ]
+        for v in found
+    ]
+    assert _scope(logs) == {
+        k: [f"{k[0]}{v}" for v in ("C", "a", "b")]
+        for k in ("questions", "providers", "models", "revisions", "elicitations")
     }
 
 
