@@ -14,6 +14,7 @@ from typing import Any, cast
 import pytest
 
 import extraction
+import test_context as context
 import test_grounded_rules as grounded
 import test_label_sets as label_sets
 from designs import minimal
@@ -146,6 +147,24 @@ def test_a_candidate_valued_answer_takes_the_labels_as_asked() -> None:
     assert (exc.reason, exc.ref) == (R.nonconforming, "q:sender")
 
 
+def test_candidate_labels_go_at_at_and_by_a_record_sets_candidate_field() -> None:
+    members = [{"name": "ann", "age": 3}, {"name": "bo", "age": 4}]
+    people = t.list_(t.record(name=t.string, age=t.integer()))
+    finder = Source(
+        {label_sets.SET: {"type": people, "candidates": "name"}}, needs=["t:state"], oracle="tools"
+    )
+    labels = {"fixed": label_sets.FIXED, "candidates": label_sets.SET, "at": 1}
+    design = dataclasses.replace(
+        label_sets.design(), sources={"finder": finder, "pick": label_sets.asks(labels)}
+    )
+    tools = Scripted({"finder": returns({label_sets.SET: members})})
+    record = label_sets.run([], d=design, tools=tools)
+    assert record.log[1]["sets"] == {label_sets.SET: "name"}
+    given = {"none": 0.1, "ann": 0.1, "bo": 0.7, "several": 0.1}
+    result = set_entry_sync(record, load(design), "q:sender", given)
+    assert result["entry"]["value"]["labels"] == ["none", "ann", "bo", "several"]
+
+
 def test_a_candidate_set_whose_members_repeat_is_nonconforming() -> None:
     loaded = load(label_sets.design())
     record = label_sets.run(["ann", "bo"])
@@ -202,6 +221,34 @@ def test_a_score_answer_is_set_over_its_levels() -> None:
     assert exc.reason is R.nonconforming
 
 
+@pytest.mark.usefixtures("no_replay")
+def test_values_alone_are_checked_in_list_order() -> None:
+    bad_q, bad_t = {"ref": "q:spam", "value": {"yes": 0.9}}, {"ref": "t:size", "value": "nine"}
+    for edits, ref in (([bad_q, bad_t], "q:spam"), ([bad_t, bad_q], "t:size")):
+        exc = refusal(intervene_sync, go().record, LOADED, edits)
+        assert (exc.reason, exc.ref) == (R.nonconforming, ref)
+
+
+def text_design() -> LoadedDesign:
+    """The extraction design with its amount read from ``t:doc``, a source's entry."""
+    amount = extraction.question(text={"ref": "t:doc"})
+    fetch = Source({"t:doc": t.string}, needs=["t:state"])
+    sources = {"read": extraction.reader(**{"q:amount": amount}), "fetch": fetch}
+    return load(extraction.design(sources=sources))
+
+
+def test_a_span_has_no_bound_where_its_text_holds_a_marker() -> None:
+    loaded = text_design()
+    answers = {"q:amount": extraction.AMOUNT, "q:dates": extraction.DATES}
+    binding = Scripted({"fetch": returns({"t:doc": "Owe 120"}), "read": returns(answers)})
+    record = decide_sync(loaded, extraction.STATE, {"default": binding}).record
+    far = {"ref": "q:amount", "value": {**extraction.AMOUNT, "span": [4, 99]}}
+    exc = refusal(intervene_sync, record, loaded, [far])
+    assert (exc.reason, exc.ref) == (R.nonconforming, "q:amount")
+    result = intervene_sync(record, loaded, [far, {"source": "fetch", "code": "raised"}])
+    assert result["items"][-1]["value"]["span"] == [4, 99]
+
+
 @pytest.mark.parametrize(
     ("ref", "value", "reason"),
     [
@@ -214,6 +261,8 @@ def test_a_score_answer_is_set_over_its_levels() -> None:
         ("q:spam", Unavailable(Cause("not-returned")), R.marker),
         ("q:spam", Unsure(Cause("abstained")), R.marker),
         ("q:spam", Unavailable, R.marker),
+        ("q:spam", Unsure(Cause("refused")), R.marker),
+        ("q:spam", Unasked(Cause("refused")), R.marker),
         ("q:spam", {"yes": 0.9}, R.nonconforming),
         ("q:spam", "yes", R.nonconforming),
         ("t:size", "nine", R.nonconforming),
@@ -228,6 +277,8 @@ def test_a_score_answer_is_set_over_its_levels() -> None:
         "an engine code",
         "Unsure",
         "a marker class",
+        "Unsure with a binding code",
+        "Unasked with a binding code",
         "an answer missing a label",
         "not an answer",
         "not of the type",
@@ -340,6 +391,7 @@ def test_setting_a_state_field_gives_exactly_the_findings_downstream_of_it() -> 
     [
         ("t:state.nope", "x", R.not_found),
         ("t:state.subject.inner", "x", R.not_found),
+        ("t:state.subject.ell", "x", R.not_found),
         ("subject", "x", R.not_found),
         ("t:state", STATE, R.not_found),
         ("t:body.x", "x", R.not_found),
@@ -353,6 +405,7 @@ def test_setting_a_state_field_gives_exactly_the_findings_downstream_of_it() -> 
     ids=[
         "no field",
         "below a string",
+        "below a string holding the name",
         "no prefix",
         "the whole state",
         "another ref",
@@ -494,6 +547,30 @@ def test_a_constant_rule_loads_with_the_callers_functions() -> None:
     assert "echo" in str(exc.error)
 
 
+def never(finding: object) -> bool:
+    return False
+
+
+def test_a_plan_change_of_context_alone_is_no_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    record = context.run().record
+    loaded = context.loaded()
+    path, value = "t:state.order.status", "shipped"
+    found = set_state_field_sync(record, loaded, path, value)["findings"]
+    assert kinds(found) == [(K.entry, "d:status")]
+    monkeypatch.setattr(_diff, "_context_alone", never)
+    found = set_state_field_sync(record, loaded, path, value)["findings"]
+    assert kinds(found) == [(K.entry, "d:status"), (K.plan, None)]
+
+
+def test_an_output_outside_the_value_domain_is_invalid_design() -> None:
+    record = go().record
+    for given in ({1: "x"}, {"a": {2: "x"}}):
+        exc = refusal(constant_rule_sync, record, LOADED, "d:route", given)
+        assert (exc.reason, type(exc.error)) == (R.invalid_design, InvalidDesign)
+        exc = refusal(intervene_sync, record, LOADED, [], rule={"rule": "d:route", "output": given})
+        assert exc.reason is R.invalid_design
+
+
 @pytest.mark.usefixtures("no_replay")
 def test_a_rule_reading_a_grounded_ref_is_candidate_rule() -> None:
     exc = refusal(constant_rule_sync, grounded.decided(), grounded.LOADED, "d:summary", "x")
@@ -600,6 +677,14 @@ def test_two_disjoint_state_fields_are_both_set() -> None:
     assert (state["value"]["subject"], state["value"]["sender"]) == ("bye", {"address": "b@x"})
 
 
+def test_sibling_fields_sharing_a_prefix_are_not_one_target() -> None:
+    loaded = slice_design(state=t.record(sub=t.string, subject=t.string))
+    record = go(loaded, {"sub": "a", "subject": "b"}).record
+    edits = [{"path": "t:state.sub", "value": "x"}, {"path": "t:state.subject", "value": "y"}]
+    (state,) = intervene_sync(record, loaded, edits)["items"]
+    assert state["value"] == {"sub": "x", "subject": "y"}
+
+
 def test_an_answer_over_a_set_another_edit_sets_takes_its_labels_in_either_order() -> None:
     loaded = load(label_sets.design())
     record = label_sets.run(["ann", "bo"])
@@ -655,6 +740,9 @@ def test_a_span_is_bounded_by_the_text_another_edit_sets_in_either_order() -> No
         ([{"source": "ask", "value": "raised"}], None, R.invalid_edit, "edit 0"),
         ([], {"rule": "d:route"}, R.invalid_edit, "rule"),
         ([], "d:route", R.invalid_edit, "rule"),
+        ([], {}, R.invalid_edit, "rule"),
+        ([], [], R.invalid_edit, "rule"),
+        ([], "", R.invalid_edit, "rule"),
         ([], None, R.no_edit, None),
         ([{"ref": "q:nope"}], None, R.invalid_edit, "edit 0"),
     ],
@@ -666,6 +754,9 @@ def test_a_span_is_bounded_by_the_text_another_edit_sets_in_either_order() -> No
         "mixed members",
         "a rule missing output",
         "a rule not an object",
+        "an empty rule",
+        "a rule an empty list",
+        "a rule an empty string",
         "nothing to do",
         "invalid-edit before not-found",
     ],

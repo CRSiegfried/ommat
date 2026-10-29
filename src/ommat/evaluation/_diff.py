@@ -22,7 +22,7 @@ from typing import Any, TypeVar
 from ommat._canonical import encode
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
-from ommat._ledger import (  # pyright: ignore[reportPrivateUsage]
+from ommat._ledger import (
     _ITEM_DEPTH,
     InvalidRecord,
     Record,
