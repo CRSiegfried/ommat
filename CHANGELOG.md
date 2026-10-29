@@ -46,6 +46,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ### Changed
 
+- `switching_values` compares the plan without its `rows` as well as its `context`, so a value at which only the winning policy row changes, the plan the same, is no switching value.
+
 - `constant_rule`, `intervene`, `deciding_inputs` and `switching_values` load an edited design with `loaded`'s own callables when `functions` is `None`, so a design whose rules or policy are lambdas or closures needs no `functions` passed; given `functions` still override them.
 
 - `dead_questions` also compares two runs that agree on every other read and hold each grounded entry at its first point, whatever entries each grounds, so a question whose answer changes a candidate set, such as a gate a finder rule reads, can be `live`.

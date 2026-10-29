@@ -27,19 +27,19 @@ top label's lead; for a function component's ``boundaries`` entry naming the lea
 value, or the same role measure of its answer. Only an ``int`` or ``float`` is one. A
 ``boolean`` or ``label`` leaf is tried at every value.
 
-``entries`` lists each ref whose entry some run changed in value, or in marker kind and cause
-code, a run outside the record included; a result compares those alone, so a change of
-``rows``, ``derivation`` or ``round`` is none. A plan result is compared without its
-``context``. A result is ``"carries"`` when at some value tried a table row giving its output,
-under ``F`` the first matched, outputs ``Param`` of the leaf, or for the plan the policy
-table's row names a plan declaration holding the leaf; else it gets its classes, and for a
-numeric leaf the switching values between adjacent classes and the slacks. Between two classes
-the switching value is, on an integer axis, the upper class's least; on a number axis the
-lower class's greatest when it alone of the two facing values is a compared value, else the
-upper class's least. A ``not-loading`` class's edges are so located only to the values tried.
-The slacks are the switching values bounding the leaf's own class, each minus the leaf's
-value, null on a side with none; one no ``float`` holds, or for an integer leaf past
-2^53 - 1 in magnitude, is refused ``unrepresentable-slack`` before the write.
+``entries`` lists each ref whose entry some run changed in value, or in marker kind and cause code,
+a run outside the record included; a result compares those alone, so a change of ``rows``,
+``derivation`` or ``round`` is none. A plan result is compared without its ``context`` and its
+``rows``. A result is ``"carries"`` when at some value tried a table row giving its output, under
+``F`` the first matched, outputs ``Param`` of the leaf, or for the plan the policy table's row names
+a plan declaration holding the leaf; else it gets its classes, and for a numeric leaf the switching
+values between adjacent classes and the slacks. Between two classes the switching value is, on an
+integer axis, the upper class's least; on a number axis the lower class's greatest when it alone of
+the two facing values is a compared value, else the upper class's least. A ``not-loading`` class's
+edges are so located only to the values tried. The slacks are the switching values bounding the
+leaf's own class, each minus the leaf's value, null on a side with none; one no ``float`` holds, or
+for an integer leaf past 2^53 - 1 in magnitude, is refused ``unrepresentable-slack`` before the
+write.
 
 ``unseen`` is empty only when every way the leaf reaches a component is a comparison against a
 probed value; it names, in code-point order, each component the leaf reaches otherwise: a
@@ -360,10 +360,11 @@ def _result(run: _Run | _Result, ref: str | None, mine: Mapping[str, Any]) -> _R
 
 
 def _same(a: _Result, b: _Result) -> bool:
-    """Whether two results are one: items by canonical bytes, a plan without its
-    ``context``."""
+    """Whether two results are one: items by canonical bytes, a plan without its ``context``
+    and its ``rows``, which name the winning rows and not what the plan does."""
     if isinstance(a, dict) and isinstance(b, dict) and "plan" in a and "plan" in b:
-        plan = {"kind": _K.plan, "recorded": a["plan"], "replayed": b["plan"]}
+        mine, theirs = (_rowless(r["plan"]) for r in (a, b))
+        plan = {"kind": _K.plan, "recorded": mine, "replayed": theirs}
         return not _differ(a["verdict"], b["verdict"]) and (
             not _differ(a["plan"], b["plan"]) or _context_alone(plan)
         )
@@ -371,6 +372,11 @@ def _same(a: _Result, b: _Result) -> bool:
         x, y = a["entry"], b["entry"]  # by value, or marker kind and code, alone
         return x is y is None or (x is not None and y is not None and outcome(x) == outcome(y))
     return encode(a) == encode(b)
+
+
+def _rowless(plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A plan item without its ``rows``, or ``None`` for none."""
+    return None if plan is None else {k: v for k, v in plan.items() if k != "rows"}
 
 
 def _partition(values: list[_Value], results: list[_Result]) -> list[dict[str, Any]]:

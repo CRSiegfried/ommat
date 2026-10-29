@@ -1111,6 +1111,22 @@ def test_the_plan_carries_when_its_policy_row_names_a_plan_holding_the_leaf(
     assert value["plan"] == "carries"
 
 
+def test_a_plan_change_of_rows_alone_is_no_switch(tmp_path: Path) -> None:
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=PolicyTable(["d:big"], [["big", "quiet"], ["-", "quiet"]]),
+            plans={"quiet": PlanDeclaration("inform", reply=Text("Quiet."))},
+        )
+    )
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
+    assert value["entries"]["d:big"]["switching"] == [7.0]  # the winning row moves there
+    plan = value["plan"]
+    assert (plan["switching"], plan["slacks"], len(plan["classes"])) == ([], [None, None], 1)
+
+
 def integer_leaf(own: int, k: int) -> tuple[LoadedDesign, Record]:
     loaded = load(
         minimal(
