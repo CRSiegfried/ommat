@@ -37,16 +37,15 @@ The output is plain data.
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
-from ommat._canonical import encode
 from ommat._design import LoadedDesign
 from ommat._interpret import _BINDING_MARKERS, _STRUCTURAL
-from ommat._ledger import _ITEM_DEPTH, Record, held_marker_code
+from ommat._ledger import Record, held_marker_code
 from ommat._markers import Cause, Unavailable, Unsure
 from ommat._read_view import is_candidate_read
 from ommat._refs import parse_ref
 from ommat._replay import FindingKind
 from ommat._types import Label, Nullable, RecordOf, Scalar, Type
-from ommat.evaluation._diff import _replayed, _run_sync
+from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, changed
 from ommat.evaluation._edit import (
     _STATE,
     _applied,
@@ -68,7 +67,6 @@ _Functions = Mapping[str, Callable[..., Any]] | None
 _Trial = tuple[list[_Edit], _Constant | None]
 
 _UNREACHED = frozenset({_R.null_call, _R.failed_call, _R.not_found, _R.candidate_rule})
-_OUTSIDE = frozenset({_K.not_in_record, _K.ref_not_in_record, _K.question_changed})
 
 
 async def deciding_inputs(
@@ -78,13 +76,7 @@ async def deciding_inputs(
     to ``deciding``, ``not-deciding``, ``markers-only`` or ``not-determined``."""
     read, log = _checked(record, loaded)
     rule = _rule_of(ref, log, loaded)
-    found = [f for f in await _replayed(log, loaded, log) if f["kind"] is not _K.helpers_mismatch]
-    if found:
-        kinds = ", ".join(dict.fromkeys(str(f["kind"]) for f in found))
-        raise EvaluationRefusal(
-            f"the record does not replay cleanly under loaded: {kinds}",
-            reason=_R.baseline_differs,
-        )
+    await baseline(log, loaded)
     out: dict[str, str] = {}
     for r in dict.fromkeys(loaded._reads[rule]):
         trials, exhaustive = _trials(r, log, loaded)
@@ -132,9 +124,9 @@ async def _classed(
                 raise
             continue
         ran = True
-        if any(f["kind"] in _OUTSIDE for f in found):
+        if any(f["kind"] in OUTSIDE for f in found):
             undetermined = True  # answered outside the record: no finding of it counts
-        elif any(f["kind"] is _K.entry and f["ref"] == ref and _changed(f) for f in found):
+        elif any(f["kind"] is _K.entry and f["ref"] == ref and changed(f) for f in found):
             return "deciding"
     if not ran or undetermined:
         return "not-determined"
@@ -173,21 +165,6 @@ def _trials(r: str, log: _Log, loaded: LoadedDesign) -> tuple[list[_Trial], bool
         source = cast(str, log[call]["sources"][0])
         trials.extend(([_FailCall(source, c.value)], None) for c in sorted(_STRUCTURAL))
     return trials, values is not None
-
-
-def _changed(finding: dict[str, Any]) -> bool:
-    """Whether an ``entry`` finding's two sides differ in value, or in marker kind and code: a
-    change of ``rows``, ``derivation``, ``round`` or a cause's refs alone is none."""
-    recorded, replayed = finding["recorded"], finding["replayed"]
-    return recorded is None or replayed is None or _outcome(recorded) != _outcome(replayed)
-
-
-def _outcome(entry: dict[str, Any]) -> bytes:
-    """An entry's value, or its marker's kind and cause code, as canonical bytes."""
-    if "marker" in entry:
-        marker = entry["marker"]
-        return encode(["marker", marker["kind"], marker["cause"]["code"]])
-    return encode(["value", entry["value"]], _ITEM_DEPTH)
 
 
 def _sole_writer(call: int, declared: str, log: _Log) -> bool:

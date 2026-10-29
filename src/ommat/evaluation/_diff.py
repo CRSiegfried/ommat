@@ -97,6 +97,39 @@ async def _replayed(
     return [f for f in found if not _context_alone(f)]
 
 
+OUTSIDE = frozenset(
+    {FindingKind.not_in_record, FindingKind.ref_not_in_record, FindingKind.question_changed}
+)
+"""The findings of a run that asked outside the record, which therefore says nothing of it."""
+
+
+async def baseline(log: list[dict[str, Any]], loaded: LoadedDesign) -> None:
+    """Replay ``log`` unedited under ``loaded``; ``baseline-differs`` on any finding but
+    ``helpers-mismatch``, a note on the helper version alone, the kinds in the message."""
+    found = await _replayed(log, loaded, log)
+    kinds = [str(f["kind"]) for f in found if f["kind"] is not FindingKind.helpers_mismatch]
+    if kinds:
+        raise EvaluationRefusal(
+            f"the record does not replay cleanly under loaded: {', '.join(dict.fromkeys(kinds))}",
+            reason=_R.baseline_differs,
+        )
+
+
+def changed(finding: dict[str, Any]) -> bool:
+    """Whether an ``entry`` finding's two sides differ in value, or in marker kind and code."""
+    recorded, replayed = finding["recorded"], finding["replayed"]
+    return recorded is None or replayed is None or outcome(recorded) != outcome(replayed)
+
+
+def outcome(entry: dict[str, Any]) -> bytes:
+    """An entry's value, or its marker's kind and cause code, as canonical bytes: a change of
+    ``rows``, ``derivation``, ``round`` or a cause's refs alone is none."""
+    if "marker" in entry:
+        marker = entry["marker"]
+        return encode(["marker", marker["kind"], marker["cause"]["code"]])
+    return encode(["value", entry["value"]], _ITEM_DEPTH)
+
+
 def _context_alone(finding: dict[str, Any]) -> bool:
     """Whether a ``plan`` finding's two items differ only in their ``context``. The rest of each
     is compared with an ``order`` derived afresh over the rest alone; when either item holds no

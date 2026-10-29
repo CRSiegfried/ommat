@@ -14,34 +14,41 @@ on past both.
 
 A numeric leaf is tried at its own value, whose result is the record's, and in two rounds at
 the points of §lint-points' axis within the leaf's type: round 0 over the compared values the
-record holds, round 1 over those and the new ones round 0's replays recompute. A compared
-value first recomputed in round 1 is not probed, and the component comparing it joins
+record holds, round 1 over those and the new ones round 0's replays recompute. On an integer
+axis each compared value also adds the integers either side of it, clipped to the interval. A
+compared value first recomputed in round 1 is not probed, and the component comparing it joins
 ``unseen``. With no compared value the axis is the interval's two bounds, else +-(2^53 - 1).
 A compared value is: for a table cell comparing an input against the leaf, that input's value,
-a bare read's entry through its field path, or ``mass``, ``size`` or ``extract`` over its read;
-for a pick helper's ``bar`` or ``thresholds`` binding, each label's probability; for
-``extract``'s ``null_bar``, ``p_null`` when not ``None``; for a ``margin``, the greatest
-``float`` whose decimal does not exceed the top label's lead; for a function component's
-``boundaries`` entry naming the leaf, the read's value, or the same role measure of its answer.
-A ``boolean`` or ``label`` leaf is tried at every value.
+a bare read's entry through its field path, a ``candidate`` read's each member of its set's
+entry, or ``mass``, ``size`` or ``extract`` over its read; for a pick helper's ``bar`` or
+``thresholds`` binding, each label's probability; for ``extract``'s ``null_bar``, ``p_null``
+when not ``None``; for a ``margin``, the greatest ``float`` whose decimal does not exceed the
+top label's lead; for a function component's ``boundaries`` entry naming the leaf, the read's
+value, or the same role measure of its answer. Only an ``int`` or ``float`` is one. A
+``boolean`` or ``label`` leaf is tried at every value.
 
-Each entry some determined run changed, and the plan with the verdict, is ``"carries"`` when at
-some value tried a table row it matched outputs ``Param`` of the leaf, or for the plan the
-policy table's row names a plan declaration holding the leaf; else it gets its classes, and
-for a numeric leaf the switching values between adjacent classes and the slacks. Between two
-classes the switching value is, on an integer axis, the upper class's least; on a number axis
-the lower class's greatest when it alone of the two facing values is a compared value, else
-the upper class's least. The slacks are the switching values bounding the leaf's own class,
-each minus the leaf's value, null on a side with none; one no ``float`` holds, or for an
-integer leaf past 2^53 - 1 in magnitude, is refused ``unrepresentable-slack`` before the write.
-A plan result is compared without its ``context``, as ``_diff`` compares one.
+``entries`` lists each ref whose entry some run changed in value, or in marker kind and cause
+code, a run outside the record included; a result compares those alone, so a change of
+``rows``, ``derivation`` or ``round`` is none. A plan result is compared without its
+``context``. A result is ``"carries"`` when at some value tried a table row giving its output,
+under ``F`` the first matched, outputs ``Param`` of the leaf, or for the plan the policy
+table's row names a plan declaration holding the leaf; else it gets its classes, and for a
+numeric leaf the switching values between adjacent classes and the slacks. Between two classes
+the switching value is, on an integer axis, the upper class's least; on a number axis the
+lower class's greatest when it alone of the two facing values is a compared value, else the
+upper class's least. A ``not-loading`` class's edges are so located only to the values tried.
+The slacks are the switching values bounding the leaf's own class, each minus the leaf's
+value, null on a side with none; one no ``float`` holds, or for an integer leaf past
+2^53 - 1 in magnitude, is refused ``unrepresentable-slack`` before the write.
 
 ``unseen`` names, in code-point order, each function component declaring the leaf whose
-``boundaries`` field does not name it, and each component of a value round 1 found; it is empty
-for a ``boolean`` or ``label`` leaf, every value of which was tried.
+``boundaries`` field does not name it, each component of a value round 1 found, and each table
+whose ``candidate`` read finds its set holding no value; it is empty for a ``boolean`` or
+``label`` leaf, every value of which was tried.
 
 Refused in §switching-value's order; the record checks are ``_edit``'s, the baseline replay
-``_diff``'s. The entry written is returned, plain data reaching no ``Record``.
+and the change of an entry ``_diff``'s, shared with the deciding inputs. The entry written is
+returned, plain data reaching no ``Record``.
 """
 
 import itertools
@@ -58,7 +65,7 @@ from ommat._refs import _RefError, code_point_sorted, parse_ref
 from ommat._replay import FindingKind, _differ, _replay_with
 from ommat._types import Label, MappingOf, Scalar, Type, _numeric, render
 from ommat._values import MAX_INTEGER
-from ommat.evaluation._diff import _context_alone, _replayed, _run_sync
+from ommat.evaluation._diff import OUTSIDE, _context_alone, _run_sync, baseline, changed, outcome
 from ommat.evaluation._edit import _checked, _declared
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
@@ -77,7 +84,6 @@ _Compared = dict[Fraction, set[str]]  # each compared value to the components co
 
 KIND = "switching-value"
 _NOT_DETERMINED = "not-determined"
-_OUTSIDE = frozenset({_K.not_in_record, _K.ref_not_in_record, _K.question_changed})
 _NOTES = frozenset({_K.design_mismatch, _K.helpers_mismatch})
 
 
@@ -107,13 +113,7 @@ async def switching_values(
         raise EvaluationRefusal(
             f"the store holds a {KIND} entry under {key!r}", reason=_R.held_key, key=[key]
         )
-    found = [f for f in await _replayed(log, loaded, log) if f["kind"] is not _K.helpers_mismatch]
-    if found:
-        kinds = ", ".join(dict.fromkeys(str(f["kind"]) for f in found))
-        raise EvaluationRefusal(
-            f"replay under the loaded design differs from the record: {kinds}",
-            reason=_R.baseline_differs,
-        )
+    await baseline(log, loaded)
     job = _Job(log, loaded, path, functions)
     value: dict[str, Any]
     if isinstance(t, MappingOf):
@@ -174,13 +174,28 @@ def _finite(t: Type) -> list[_Value] | None:
 
 
 class _Run:
-    """One determined run: each changed entry's item by ref, and the plan and verdict."""
+    """One run: each changed entry's item by ref, the plan and verdict, and whether it asked
+    outside the record, so that it determines nothing."""
 
-    def __init__(self, log: _Log, found: list[dict[str, Any]]) -> None:
+    def __init__(self, log: _Log, found: list[dict[str, Any]], outside: bool = False) -> None:
+        self.outside = outside
         self.entries = {f["ref"]: f["replayed"] for f in found if f["kind"] is _K.entry}
-        changed = {f["kind"]: f["replayed"] for f in found if f["kind"] in (_K.plan, _K.verdict)}
-        self.plan = changed.get(_K.plan, _first(log, "plan"))
-        self.verdict = changed.get(_K.verdict, _first(log, "verdict"))
+        self.changed = {f["ref"] for f in found if f["kind"] is _K.entry and changed(f)}
+        items = {f["kind"]: f["replayed"] for f in found if f["kind"] in (_K.plan, _K.verdict)}
+        self.plan = items.get(_K.plan, _first(log, "plan"))
+        self.verdict = items.get(_K.verdict, _first(log, "verdict"))
+
+
+def _points(bounds: set[Fraction], t: Type, integer: bool) -> list[_Value]:
+    """§lint-points' axis over ``bounds`` within ``t``, ascending; on an integer axis each
+    boundary also adds the integers either side of it, clipped to the interval, so the least
+    integer above every boundary is tried."""
+    points: set[_Value] = set(numeric_axis(sorted(bounds), t))
+    if integer:
+        numeric = cast("tuple[str, tuple[int, int] | None]", _numeric(t))
+        lo, hi = numeric[1] or (-MAX_INTEGER, MAX_INTEGER)
+        points |= {max(lo, min(n, hi)) for b in bounds for n in (math.floor(b), math.floor(b) + 1)}
+    return sorted(points, key=lambda v: exact(cast(float, v)))
 
 
 def _first(log: _Log, kind: str) -> dict[str, Any] | None:
@@ -195,7 +210,7 @@ class _Job:
         self.log, self.loaded, self.path, self.functions = log, loaded, path, functions
         self.document = cast("_Doc", decode(loaded.document))
         self.mine = {i["ref"]: i for i in log if i["item"] == "entry"}
-        self.late: set[str] = set()
+        self.late: set[str] = set()  # components comparing values only round 1 found, or unread
 
     def unseen(self, t: Type) -> list[str]:
         if _finite(t) is not None:
@@ -203,7 +218,7 @@ class _Job:
         hidden = {
             name
             for name, c in _functions(self.document).items()
-            if self.path in c["params"] and not _holds(c["boundaries"], self.path)
+            if self.path in c["params"] and not _contains(c["boundaries"], self.path)
         }
         return code_point_sorted(hidden | self.late)
 
@@ -222,21 +237,21 @@ class _Job:
                     tried[v] = (await self.run(v, key))[0]
             ordered = values
         else:
-            found: _Compared = _compared(self.document, self.path, self.log)
+            found: _Compared = self.compared(self.log)
             for last in (False, True):  # round 0, then round 1
                 bounds |= set(found)
                 found = {}
-                for v in dict.fromkeys(numeric_axis(sorted(bounds), t)):
+                for v in _points(bounds, t, integer):
                     if v not in tried:
                         tried[v], rerun = await self.run(v, key)
-                        for x, names in _compared(self.document, self.path, rerun).items():
+                        for x, names in self.compared(rerun).items():
                             found.setdefault(x, set()).update(names)
                 if last:
                     self.late |= {n for x, names in found.items() if x not in bounds for n in names}
             ordered = sorted(tried, key=lambda v: exact(cast(float, v)))
         out: dict[str, Any] = {"entries": {}, "plan": None}
         refs = code_point_sorted(
-            {r for run in tried.values() if isinstance(run, _Run) for r in run.entries}
+            {r for run in tried.values() if isinstance(run, _Run) for r in run.changed}
         )
         for ref in [*refs, None]:
             results = [_result(tried[v], ref, self.mine) for v in ordered]
@@ -267,17 +282,25 @@ class _Job:
             return {"not-loading": failures}, []
         rerun, found = await _replay_with(self.log, design, self.log, observer=None)
         rerun_log = rerun.log
-        found = [f for f in found if f["kind"] not in _NOTES and not _context_alone(f)]
-        if any(f["kind"] in _OUTSIDE for f in found) or _unreturned(self.log, rerun_log):
-            return _NOT_DETERMINED, rerun_log
-        return _Run(self.log, found), rerun_log
+        found = [f for f in found if f["kind"] not in _NOTES]
+        outside = any(f["kind"] in OUTSIDE for f in found)
+        return _Run(
+            self.log, found, outside or _unreturned(self.mine, self.log, rerun_log)
+        ), rerun_log
+
+    def compared(self, log: _Log) -> _Compared:
+        """``_compared`` over ``log``, a table whose ``candidate`` read finds no set noted
+        unseen."""
+        found, blind = _compared(self.document, self.path, log)
+        self.late |= blind
+        return found
 
     def carries(self, ref: str | None, result: _Result) -> bool:
         """Whether a result's item passes the leaf through: a table row it matched outputs
         ``Param`` of the leaf, or for the plan, the policy table's row names a plan declaration
         holding the leaf. Under ``F`` only the first matched row gives the output."""
         if not isinstance(result, dict) or "not-loading" in result:
-            return False
+            return False  # not determined, or not loading
         item = result["entry"] if ref is not None else result["plan"]
         table = (
             next(
@@ -287,28 +310,28 @@ class _Job:
             if ref is not None
             else self.document["policy"]
         )
-        if item is None or table is None or table["form"] != "table" or not item.get("rows"):
+        if item is None or table is None or not item.get("rows"):  # a function's has none
             return False
         rows = cast("list[int]", item["rows"])
-        for n in rows[:1] if table["hit"] == "F" else rows:
+        for n in rows[:1] if table.get("hit", "F") == "F" else rows:
             row = table["rows"][n - 1]
             held = row["output"] if ref is not None else self.document["plans"][row["plan"]]
-            if _holds(held, {"param": self.path}):
+            if _contains(held, {"param": self.path}):
                 return True
         return False
 
 
-def _unreturned(log: _Log, rerun: _Log) -> bool:
+def _unreturned(mine: Mapping[str, Any], log: _Log, rerun: _Log) -> bool:
     """Whether ``rerun`` writes ``Unavailable`` with ``not-returned`` for a ref whose entry in
-    ``log`` names a call item recorded ``Failed``."""
-    mine = {i["ref"]: i for i in log if i["item"] == "entry"}
+    ``log``, ``mine`` by ref, names a call item recorded ``Failed``."""
     for item in rerun:
         marker = item.get("marker") if item["item"] == "entry" else None
         if marker is None or marker["kind"] != "Unavailable":
             continue
         if marker["cause"]["code"] != "not-returned":
             continue
-        call = (mine.get(item["ref"]) or {}).get("call")
+        at = cast("dict[str, Any] | None", mine.get(item["ref"]))
+        call = None if at is None else at["call"]
         if call is not None and log[call]["outcome"] != "returned":  # recorded Failed
             return True
     return False
@@ -318,6 +341,8 @@ def _result(run: _Run | _Result, ref: str | None, mine: Mapping[str, Any]) -> _R
     """A run's result for the entry at ``ref``, or for the plan at ``None``."""
     if not isinstance(run, _Run):
         return run
+    if run.outside:
+        return _NOT_DETERMINED
     if ref is None:
         return {"plan": run.plan, "verdict": run.verdict}
     return {"entry": run.entries[ref] if ref in run.entries else mine.get(ref)}
@@ -332,7 +357,8 @@ def _same(a: _Result, b: _Result) -> bool:
             not _differ(a["plan"], b["plan"]) or _context_alone(plan)
         )
     if isinstance(a, dict) and isinstance(b, dict) and "entry" in a and "entry" in b:
-        return not _differ(a["entry"], b["entry"])
+        x, y = a["entry"], b["entry"]  # by value, or marker kind and code, alone
+        return x is y is None or (x is not None and y is not None and outcome(x) == outcome(y))
     return encode(a) == encode(b)
 
 
@@ -416,11 +442,13 @@ def _functions(document: _Doc) -> dict[str, dict[str, Any]]:
     return {n: c for n, c in _components(document).items() if c["form"] == "function"}
 
 
-def _compared(document: _Doc, path: str, log: _Log) -> _Compared:
+def _compared(document: _Doc, path: str, log: _Log) -> tuple[_Compared, set[str]]:
     """The values ``log``'s turn compares the leaf at ``path`` against, exactly, each to the
-    components comparing it."""
+    components comparing it; and each table comparing a ``candidate`` read whose set ``log``
+    holds no value of."""
     entries = [i for i in log if i["item"] == "entry"]
     out: _Compared = {}
+    blind: set[str] = set()
 
     def add(name: str, values: Iterable[object]) -> None:
         for x in values:
@@ -430,22 +458,19 @@ def _compared(document: _Doc, path: str, log: _Log) -> _Compared:
     for name, c in _components(document).items():
         if c["form"] == "table":
             for n, i in enumerate(cast("list[dict[str, Any]]", c["inputs"])):
-                read, helper = i["read"], i["helper"]
+                held = _read_values(i["read"], entries, c.get("grounded"))
+                if held is None:
+                    blind.add(name)
+                    continue
                 for role, bound in cast("dict[str, Any]", i["params"]).items():
                     if bound == path:
-                        role = _ROLES.get((helper, role))
-                        add(
-                            name,
-                            (x for v in _read_values(read, entries) for x in _measure(role, v, ())),
-                        )
+                        role = _ROLES.get((i["helper"], role))
+                        add(name, (x for v in held for x in _measure(role, v, ())))
                 if any(_compares(row["cells"][n], path) for row in c["rows"]):
-                    add(
-                        name,
-                        (x for v in _read_values(read, entries) for x in _input(document, i, v)),
-                    )
+                    add(name, (x for v in held for x in _input(document, i, v)))
         elif c["boundaries"] is not None:
             for read, entry in cast("dict[str, Any]", c["boundaries"]).items():
-                values = _read_values(read, entries)
+                values = _read_values(read, entries, None) or []
                 if isinstance(entry, list):
                     if path in entry:
                         add(name, values)
@@ -456,11 +481,11 @@ def _compared(document: _Doc, path: str, log: _Log) -> _Compared:
                             if path in m["bounds"]:
                                 add(
                                     name,
-                                    (x for v in values for x in _measure("mass", v, m["labels"])),
+                                    (x for v in values for x in _measure(role, v, m["labels"])),
                                 )
                     elif path in members:
                         add(name, (x for v in values for x in _measure(role, v, ())))
-    return out
+    return out, blind
 
 
 def _input(document: _Doc, i: dict[str, Any], v: object) -> list[object]:
@@ -477,22 +502,28 @@ def _input(document: _Doc, i: dict[str, Any], v: object) -> list[object]:
     return []
 
 
-def _read_values(read: str, entries: _Log) -> list[object]:
+def _read_values(read: str, entries: _Log, grounded: str | None) -> list[object] | None:
     """The values of the entries a read names, a grounded declared ref's each, through its
-    field path; a marker, a ``candidate`` read and a path the entry does not hold give none."""
+    field path, a marker and a path the entry does not hold giving none. A ``candidate`` read
+    of a table grounded over ``grounded`` takes each member of that set's entry through its
+    field path, the input as recorded; ``None`` when the entry holds no value."""
     if is_candidate_read(read):
-        return []
-    try:
-        parsed = parse_ref(read)
-    except _RefError:
-        return []
-    declared = f"{parsed.level}:{parsed.name}"
-    out: list[object] = []
-    for e in entries:
-        if "value" not in e or _declared(e["ref"]) != declared:
-            continue
+        held = next((e for e in entries if e["ref"] == grounded), None)
+        if held is None or "value" not in held:
+            return None
+        members, fields = cast("list[object]", held["value"]), tuple(read.split(".")[1:])
+    else:
         try:
-            out.append(walk(e["value"], parsed.fields, read))
+            parsed = parse_ref(read)
+        except _RefError:
+            return []
+        declared = f"{parsed.level}:{parsed.name}"
+        members = [e["value"] for e in entries if "value" in e and _declared(e["ref"]) == declared]
+        fields = parsed.fields
+    out: list[object] = []
+    for m in members:
+        try:
+            out.append(walk(m, fields, read))
         except _ViewError:
             continue
     return out
@@ -540,7 +571,7 @@ def _compares(cell: object, path: str) -> bool:
     return tag in (">=", ">", "<=", "<") and member == {"param": path}
 
 
-def _holds(value: object, target: object) -> bool:
+def _contains(value: object, target: object) -> bool:
     """Whether ``target`` is ``value`` or stands anywhere within it, through dicts and lists."""
     stack = [value]
     while stack:

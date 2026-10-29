@@ -317,10 +317,10 @@ def marked(code: str, *refs: str) -> dict[str, Any]:
 
 def test_a_change_of_a_markers_refs_alone_is_no_change() -> None:
     entry = marked("refused", "a")
-    assert not _deciding._changed({"recorded": entry, "replayed": marked("refused", "b")})
-    assert _deciding._changed({"recorded": entry, "replayed": marked("raised", "a")})
-    assert _deciding._changed({"recorded": entry, "replayed": {"ref": "d:x", "value": None}})
-    assert _deciding._changed({"recorded": entry, "replayed": None})
+    assert not _diff.changed({"recorded": entry, "replayed": marked("refused", "b")})
+    assert _diff.changed({"recorded": entry, "replayed": marked("raised", "a")})
+    assert _diff.changed({"recorded": entry, "replayed": {"ref": "d:x", "value": None}})
+    assert _diff.changed({"recorded": entry, "replayed": None})
 
 
 def test_a_d_read_is_tried_at_unsure_then_each_value() -> None:

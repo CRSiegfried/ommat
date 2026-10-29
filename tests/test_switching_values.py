@@ -10,16 +10,20 @@ import json
 import math
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
 import extraction as x
+import test_grounded_rules as grounded
 from designs import minimal, slot
 from ommat import (
     CallResult,
+    Cause,
     Context,
     ContextEntry,
+    Failed,
     Helper,
     InvalidDesign,
     InvalidRecord,
@@ -28,7 +32,9 @@ from ommat import (
     Param,
     Parameter,
     Plan,
+    PlanDeclaration,
     Policy,
+    PolicyTable,
     Question,
     Record,
     Requirement,
@@ -53,6 +59,7 @@ from ommat.evaluation import (
     switching_values,
     switching_values_sync,
 )
+from scripted import Scripted
 from test_decide import LOADED
 from test_use_answers import broken, unfinished
 
@@ -245,11 +252,11 @@ def test_an_integer_leaf_takes_integer_points_within_its_interval(tmp_path: Path
     summary = value["entries"]["d:many"]
     assert type(summary["slacks"][1]) is int
     assert shape(summary) == {
-        "switching": [10],  # on an integer axis, the upper class's least
-        "slacks": [None, 8],
+        "switching": [5],  # 4 and 5 are tried either side of k: the upper class's least
+        "slacks": [None, 3],
         "classes": [
             {"least": 0, "greatest": 4, "result": "big"},
-            {"least": 10, "greatest": 10, "result": "small"},
+            {"least": 5, "greatest": 10, "result": "small"},
         ],
     }
 
@@ -427,7 +434,12 @@ def test_a_question_reading_the_leaf_leaves_other_values_not_determined(tmp_path
     wording = Text("Mood over {bar}?", [slot("bar", param="mood/bar")])
     loaded = mood_design(wording)
     value = run(mood_record(loaded), loaded, "mood/bar", tmp_path)["value"]
-    assert value["entries"] == {}
+    bar = value["entries"]["d:bar"]  # it changes in a run outside the record, so it is listed
+    assert [value_of(c["result"]) for c in bar["classes"]] == [
+        "not-determined",
+        "yes",
+        "not-determined",
+    ]
     classes = value["plan"]["classes"]
     assert [value_of(c["result"]) for c in classes] == ["not-determined", "yes", "not-determined"]
     assert classes[1]["least"] == classes[1]["greatest"] == 0.5
@@ -948,18 +960,212 @@ def test_a_not_returned_ref_of_a_failed_call_is_not_determined() -> None:
             {"item": "entry", "ref": "t:x", "call": 1},
         ]
 
-    assert _switching._unreturned(log({"failed": {"code": "raised", "refs": []}}), rerun)
-    assert not _switching._unreturned(log("returned"), rerun)
+    def unreturned(outcome: object, rerun: list[dict[str, Any]]) -> bool:
+        held = log(outcome)
+        mine = {i["ref"]: i for i in held if i["item"] == "entry"}
+        return _switching._unreturned(mine, held, rerun)
+
+    assert unreturned({"failed": {"code": "raised", "refs": []}}, rerun)
+    assert not unreturned("returned", rerun)
     other = [{**rerun[0], "marker": {"kind": "Unavailable", "cause": {**cause, "code": "raised"}}}]
-    assert not _switching._unreturned(log({"failed": {}}), other)
+    assert not unreturned({"failed": {}}, other)
     unsure = [{**rerun[0], "marker": {"kind": "Unsure", "cause": cause}}]
-    assert not _switching._unreturned(log({"failed": {}}), unsure)
+    assert not unreturned({"failed": {}}, unsure)
+    assert not unreturned({"failed": {}}, [{**rerun[0], "ref": "t:other"}])
 
 
 def test_a_marker_a_candidate_read_and_a_missing_field_give_no_value() -> None:
     marker: dict[str, Any] = {"item": "entry", "ref": "t:x", "marker": {"kind": "Unsure"}}
     held = {"item": "entry", "ref": "t:y", "value": {"f": 2}}
-    assert _switching._read_values("t:x", [marker]) == []
-    assert _switching._read_values("candidate", [held]) == []
-    assert _switching._read_values("t:y.g", [held]) == []
-    assert _switching._read_values("t:y.f", [held]) == [2]
+    other = {"item": "entry", "ref": "t:z", "value": {"f": 3}}
+    assert _switching._read_values("t:x", [marker], None) == []
+    assert _switching._read_values("t:y.g", [held], None) == []
+    assert _switching._read_values("t:y.f", [held, other], None) == [2]  # t:z is not read
+    # A candidate read takes the members of its table's set, or nothing for a marked set.
+    members = {"item": "entry", "ref": "d:set", "value": [{"f": 4}, {"f": 5}, {"g": 6}]}
+    assert _switching._read_values("candidate.f", [held, members], "d:set") == [4, 5]
+    assert _switching._read_values("candidate.f", [{**marker, "ref": "d:set"}], "d:set") is None
+    assert _switching._read_values("candidate.f", [held], "d:set") is None
+
+
+# ---------------------------------------------------------------------------------------------
+# Round 2: candidate reads, integer sides, what counts as a change, carrying
+
+
+def test_a_candidate_read_is_probed_at_each_members_field(tmp_path: Path) -> None:
+    rules = dict(grounded.design().rules)
+    rules["level"] = Table(
+        grounded.LEVEL,
+        t.label("adult", "minor"),
+        "F",
+        ["candidate.age"],
+        [[">= lim/age", "adult"], ["-", "minor"]],
+        grounded=grounded.SET,
+    )
+    loaded = load(grounded.design(rules=rules, parameters={"lim/age": Parameter(t.integer(), 18)}))
+    state = {"people": [grounded.BO, grounded.ANA]}
+    record = decide_sync(loaded, state, {"default": grounded.answer}).record
+    value = run(record, loaded, "lim/age", tmp_path)["value"]
+    assert value["unseen"] == []
+    assert list(value["entries"]) == ['d:level["Ana"]', 'd:level["Bo"]']  # code-point order
+    assert value["entries"]['d:level["Ana"]']["switching"] == [31]
+    assert value["entries"]['d:level["Ana"]']["slacks"] == [None, 13]
+    assert value["entries"]['d:level["Bo"]']["switching"] == [42]
+    people = {"people": [{"name": "raise", "age": 1}]}  # the set's rule raises
+    marked = decide_sync(loaded, people, {"default": grounded.answer}).record
+    assert run(marked, loaded, "lim/age", tmp_path / "m")["value"]["unseen"] == ["level"]
+
+
+def test_a_change_of_rows_alone_is_no_change(tmp_path: Path) -> None:
+    rows = Table("d:same", BIG_SMALL, "F", ["t:state.n"], [[">= lim/n", "big"], ["-", "big"]])
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"same": rows, "big": RULES["big"]},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Policy(told, version="1", reads=["d:big"]),
+        )
+    )
+    entries = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"][
+        "entries"
+    ]
+    assert list(entries) == ["d:big"]  # d:same's rows change past 7, its value never
+
+
+def test_a_run_writing_not_returned_for_a_failed_call_is_not_determined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            sources={"a": Source({"t:a": t.string}, oracle="o")},
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Policy(constant, version="1", reads=["d:big"]),
+        )
+    )
+    binding = Scripted({"a": Failed(Cause("raised", ["t:a"]))})
+    record = decide_sync(loaded, STATE, {"o": binding, "default": binding}).record
+    real = _switching._replay_with
+
+    async def unreturned(*args: Any, **kwargs: Any) -> Any:
+        rerun, found = await real(*args, **kwargs)
+
+        marker = {"kind": "Unavailable", "cause": {"code": "not-returned"}}
+        log = [
+            {**i, "marker": marker} if i["item"] == "entry" and i["ref"] == "t:a" else i
+            for i in rerun.log
+        ]
+        return SimpleNamespace(log=log), found
+
+    monkeypatch.setattr(_switching, "_replay_with", unreturned)
+    plan = run(record, loaded, "lim/n", tmp_path)["value"]["plan"]
+    assert [value_of(c["result"]) for c in plan["classes"]] == ["ok", "not-determined"]
+
+
+def test_under_f_a_later_param_row_matched_but_not_first_does_not_carry(tmp_path: Path) -> None:
+    table = Table(
+        "d:f",
+        "number",
+        "F",
+        ["t:state.n"],
+        [[">= lim/n", 1.0], [">= lim/n", Param("lim/n")], ["-", 2.0]],
+    )
+    literal = Table("d:lit", "string", "F", ["t:state.n"], [[">= lim/n", "lim/n"], ["-", "x"]])
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"f": table, "lit": literal},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Policy(constant, version="1", reads=["d:f"]),
+        )
+    )
+    entries = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"][
+        "entries"
+    ]
+    assert entries["d:f"]["switching"] == [7.0]
+    assert entries["d:lit"]["switching"] == [7.0]  # a literal equal to the path is no Param
+
+
+def test_the_plan_carries_when_its_policy_row_names_a_plan_holding_the_leaf(
+    tmp_path: Path,
+) -> None:
+    loud = PlanDeclaration("inform", reply=Text("At {p}.", [slot("p", param="lim/n")]))
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=PolicyTable(["d:big"], [["big", "loud"], ["-", "quiet"]]),
+            plans={"loud": loud, "quiet": PlanDeclaration("inform", reply=Text("Quiet."))},
+        )
+    )
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
+    assert value["plan"] == "carries"
+
+
+def integer_leaf(own: int, k: int) -> tuple[LoadedDesign, Record]:
+    loaded = load(
+        minimal(
+            state=STATE_T,
+            rules={"many": RULES["many"]},
+            parameters={"lim/k": Parameter(t.integer(), own)},
+            policy=Policy(constant, version="1", reads=["d:many"]),
+        )
+    )
+    return loaded, decide_sync(loaded, {**STATE, "k": k}, {}).record
+
+
+def test_an_integer_slack_at_the_bound_is_kept_and_past_it_refused(tmp_path: Path) -> None:
+    top = 2**53 - 1
+    loaded, record = integer_leaf(0, top - 1)
+    summary = run(record, loaded, "lim/k", tmp_path)["value"]["entries"]["d:many"]
+    assert summary["switching"] == [top]
+    assert summary["slacks"] == [None, top]
+    loaded, record = integer_leaf(-1, top - 1)
+    exc = refusal(record, loaded, "lim/k", tmp_path / "past")
+    assert exc.reason is R.unrepresentable_slack
+
+
+def test_between_two_compared_values_the_upper_is_the_switching_value(tmp_path: Path) -> None:
+    loaded = counted(5.5)
+    state = {"a": 1.0, "b": 7.0, "c": math.nextafter(7.0, math.inf), "d": 10.0}
+    summary = run(decide_sync(loaded, state, {}).record, loaded, "lim/c", tmp_path)["value"][
+        "entries"
+    ]["d:count"]
+    # Between 7.0 and its next float no point lies: both are compared, so the upper is taken.
+    assert summary["switching"] == [1.0, state["c"], state["c"], 10.0]
+
+
+def test_only_a_number_is_a_compared_value() -> None:
+    document = decode(TABLES.document)
+    values = [True, "x", None, 3]
+    log = [{"item": "entry", "ref": "t:state", "value": {"n": v}} for v in values]
+    found, blind = _switching._compared(document, "lim/n", log)
+    assert found == {Fraction(3): {"big", "part"}}
+    assert blind == set()
+
+
+def test_a_boundaries_member_not_naming_the_leaf_compares_nothing() -> None:
+    roles = {"bar": ["other"], "thresholds": [], "margin": ["other"]}
+    mass = [{"labels": ["calm"], "bounds": ["other"]}]
+    rule: dict[str, Any] = {"form": "function", "boundaries": {"q:mood": {**roles, "mass": mass}}}
+    document = {"rules": {"r": rule}, "policy": {"form": "function", "boundaries": None}}
+    answer = {"kind": "choice", "labels": ["calm"], "probabilities": {"calm": 0.7}}
+    log = [{"item": "entry", "ref": "q:mood", "value": answer}]
+    assert _switching._compared(document, "lim", log) == ({}, set())
+    rule["boundaries"]["q:mood"]["mass"][0]["bounds"] = ["lim"]
+    assert _switching._compared(document, "lim", log) == ({Fraction("0.7"): {"r"}}, set())
+
+
+def test_the_input_and_role_measures_guard_their_values() -> None:
+    document = {"parameters": {"labels": {"value": ["a", "b"]}}}
+    assert _switching._input(document, {"helper": "size", "params": {}}, "abc") == []
+    assert _switching._input(document, {"helper": "size", "params": {}}, [1, 2]) == [2]
+    over = {"probabilities": {"a": 0.7, "b": 0.6}}
+    assert _switching._input(
+        document, {"helper": "mass", "params": {"labels": "labels"}}, over
+    ) == [1.0]
+    assert _switching._measure("null", over, ()) == []  # no p_null in a probability answer
+    assert _switching._measure("null", {"p_null": 0.2, "value": 3}, ()) == [0.2]
+    assert _switching._measure("bar", 0.5, ()) == []
