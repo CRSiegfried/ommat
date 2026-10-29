@@ -61,7 +61,7 @@ from ommat._values import MAX_DOCUMENT_DEPTH, domain_error, guarded_repr, type_n
 from ommat._views import escalation
 from ommat.evaluation._diff import OUTSIDE, _read, _run_sync, _state
 from ommat.evaluation._edit import _labels, _q_value, _record_copy, _rewritten
-from ommat.evaluation._gold import _READ, KIND, _asked, _keys
+from ommat.evaluation._gold import _READ, KIND, _asked, _form, _keys
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import DesignStore, EvaluationStore
 from ommat.evaluation._switching import _unreturned
@@ -98,6 +98,24 @@ def known(entry: dict[str, Any] | None, key: dict[str, str]) -> dict[str, Any] |
             key=[key],
         )
     return entry
+
+
+def conforming(
+    entry: dict[str, Any], key: dict[str, str], question: dict[str, Any], log: _Log
+) -> object:
+    """A known gold ``entry``'s value as the gold-answers job writes a label for ``question``,
+    asked in ``log``; ``unknown-entry``, naming ``key``, for a value not of the question's form:
+    a name not among its labels, a format-1 label string for an extraction question, or an
+    extraction value that does not conform."""
+    form = _form(entry["value"], question, log)
+    if form is None:
+        raise EvaluationRefusal(
+            f"the entry under {key!r} holds {guarded_repr(entry['value'])}, not a gold answer "
+            "of its question's form",
+            reason=_R.unknown_entry,
+            key=[key],
+        )
+    return form
 
 
 def gold_copy(read: Record, log: _Log, golds: dict[str, object | None]) -> Record | str:

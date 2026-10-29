@@ -31,12 +31,14 @@ GROUPS = {
     "three": Group(["q:c", "q:a", "t:state", "q:b"]),
     "lone": Group(["q:a", "t:state"]),
     "amounts": Group(["q:n1", "q:n2"]),
+    "twins": Group(["q:a", "q:twin"]),
 }
 SOURCE = Source(
     {
         "q:a": Question("noul", Text("Is it spam?")),
         "q:b": Question("noul", Text("Is it junk mail?")),
         "q:c": Question("noul", Text("Would you bin it?")),
+        "q:twin": Question("noul", Text("Is it spam?")),  # q:a's question: one gold key
         "q:n1": x.question("number"),
         "q:n2": x.question("number", wording=Text("How much is due?")),
     },
@@ -166,6 +168,15 @@ def test_a_format_1_gold_entry_is_read_as_its_label(tmp_path: Path) -> None:
     ]
 
 
+def test_two_refs_of_one_question_share_its_gold_answer(tmp_path: Path) -> None:
+    record = turn("twins", {"q:a": p(0.9), "q:twin": p(0.2)})
+    store = labelled(tmp_path, [(record, {"q:a": "yes"})])  # one key, both refs
+    entry = confirm_group(LOADED, "twins", "g", split([record]), results=store)
+    assert entry["value"]["pairs"] == [
+        {"refs": ["q:a", "q:twin"], "turns": 1, "erred": [0, 1], "both": 0}
+    ]
+
+
 # ---------------------------------------------------------------------------------------------
 # A grounded group
 
@@ -286,3 +297,28 @@ def test_a_held_key_is_refused_before_the_counts_and_at_the_write(tmp_path: Path
     exc = refused(Forgetful(tmp_path), "pair", "g", given)
     assert (exc.reason, exc.key) == (R.held_key, [first["key"]])
     assert store.lookup("group-counts", first["key"]) == first  # the first entry stands
+
+
+@pytest.mark.parametrize(
+    ("group", "answers", "golds"),
+    [
+        (
+            "amounts",
+            {"q:n1": amount(120), "q:n2": amount(5)},
+            {"q:n1": (1, "120"), "q:n2": (2, {"value": 5})},
+        ),
+        ("pair", {"q:a": p(0.9)}, {"q:a": (2, "maybe")}),
+    ],
+)
+def test_a_gold_answer_not_of_its_questions_form_is_an_unknown_entry(
+    tmp_path: Path, group: str, answers: dict[str, object], golds: dict[str, Any]
+) -> None:
+    record = turn("form", answers)
+    store = EvaluationStore(tmp_path)
+    for ref, (fmt, value) in golds.items():
+        store.write(
+            {"kind": "gold-answer", "format": fmt, "key": gold_key(record, ref), "value": value}
+        )
+    ref = next(iter(golds))
+    exc = refused(store, group, "g", split([record]))
+    assert (exc.reason, exc.key) == (R.unknown_entry, [gold_key(record, ref)])

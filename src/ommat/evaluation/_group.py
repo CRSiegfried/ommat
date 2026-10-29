@@ -7,26 +7,28 @@ erred against its gold answer and those in which both did, written as a ``group-
 **Units and answers.** A unit is a turn and the candidate part of a ``q:`` entry's ref, ``""``
 for an ungrounded one, the gold key's ``candidate``; a group's refs are declared refs, so a
 grounded group's entries are its refs' per-candidate entries. A ref holds an answer at a unit
-when a call wrote its entry there with a value; a marker, or no entry, holds none. Each gold
-answer is found as the gold-answers job derives its key, ``_gold``'s, and read as the sweep job
-reads one, ``_sweep``'s: format 1 or 2, a format-1 value a label string.
+when a call wrote its entry there with a value; a marker, or no entry, holds none. A pair's
+``turns`` counts units. Each gold answer is found as the gold-answers job derives its key,
+``_gold``'s, and read as the sweep job reads one, ``_sweep``'s: format 1 or 2, a format-1 value
+a label string, and of its question's form, as the gold-answers job checks a label.
 
 **Erring.** A probability answer errs when its most probable label is not the gold label, a
 tie for most probable an error; an extraction answer when ``{"value": v}``, ``v`` its value,
-differs from the gold answer by canonical bytes, null a value like any other, so a format-1
-label string for an extraction question is erred against.
+differs from the gold answer by canonical bytes, null a value like any other.
 
 **The job.** Refused in order: ``unknown-group`` and ``too-few-refs``, naming the group, before
 any record is read; ``invalid-record`` for each record in turn; ``split-id``; ``wrong-design``,
 each record in the order given; ``missing-gold``, naming the turn and the entry's ref, each
-answer in turn and log order; ``unknown-entry``, naming the key, in the same order; ``held-key``
-when the store holds the key, before any count; and the store's ``held-key`` at the write. A
+answer in turn and log order; ``unknown-entry``, naming the key, after every ``missing-gold``,
+for a gold entry of a kind or format the job does not read or a value not of its question's
+form, in the same order; ``held-key`` when the store holds the key, before any count; and the
+store's ``held-key`` at the write. A
 record is counted once by its record hash. The entry written is returned, plain data reaching
 no ``Record``.
 """
 
 import itertools
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from ommat._answer import AnswerKind
 from ommat._canonical import encode
@@ -37,10 +39,24 @@ from ommat.evaluation._gold import KIND as GOLD
 from ommat.evaluation._gold import _asked, _keys
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
-from ommat.evaluation._sweep import _refuse_split_id, _split, known
+from ommat.evaluation._sweep import _refuse_split_id, _split, conforming, known
 
 _R = RefusalReason
 _Unit = tuple[str, str]  # a turn and a candidate
+
+
+class _Answered(NamedTuple):
+    """A group ref's answer at a unit, with what its gold answer is found and checked by."""
+
+    unit: _Unit
+    declared: str  # the group's ref
+    ref: str  # the entry's ref
+    answer: Any  # the entry's value, an answer's document
+    key: dict[str, str]  # its gold key
+    gold: dict[str, Any] | None  # the entry held under it
+    question: dict[str, Any]  # its call item's question
+    log: list[dict[str, Any]]
+
 
 KIND = "group-counts"
 
@@ -81,29 +97,40 @@ def confirm_group(
                 reason=_R.wrong_design,
                 turn=turn,
             )
-    answered: list[tuple[_Unit, str, str, object, dict[str, str]]] = []  # ref, entry ref
+    answered: list[_Answered] = []
     for turn, read in turns.items():
         log = read.log
         asked = _asked(log)
-        keyed = {ref: key for _, key, refs in _keys(gold_set, turn, asked) for ref in refs}
+        keyed = {ref: gold for _, gold, of in _keys(gold_set, turn, asked) for ref in of}
         values = {e["ref"]: e for e in log if e["item"] == "entry" and "value" in e}
         for ref in asked:
-            if ref in values and declared_ref(ref) in questions:
-                unit = (turn, parse_ref(ref).candidate or "")
-                answered.append((unit, declared_ref(ref), ref, values[ref]["value"], keyed[ref]))
-    golds = [results.lookup(GOLD, key) for *_, key in answered]
-    for ((turn, _), _, ref, _, _), gold in zip(answered, golds, strict=True):
-        if gold is None:
+            declared = declared_ref(ref)
+            if ref in values and declared in questions:
+                answered.append(
+                    _Answered(
+                        unit=(turn, parse_ref(ref).candidate or ""),
+                        declared=declared,
+                        ref=ref,
+                        answer=values[ref]["value"],
+                        key=keyed[ref],
+                        gold=results.lookup(GOLD, keyed[ref]),
+                        question=asked[ref],
+                        log=log,
+                    )
+                )
+    for one in answered:
+        if one.gold is None:
             raise EvaluationRefusal(
-                f"turn {turn} answers {ref} with no gold answer under {gold_set!r}",
+                f"turn {one.unit[0]} answers {one.ref} with no gold answer under {gold_set!r}",
                 reason=_R.missing_gold,
-                turn=turn,
-                ref=ref,
+                turn=one.unit[0],
+                ref=one.ref,
             )
     erred: dict[_Unit, dict[str, bool]] = {}
-    for (unit, declared, _, value, key), gold in zip(answered, golds, strict=True):
-        held = cast("dict[str, Any]", known(gold, key))
-        erred.setdefault(unit, {})[declared] = _erred(value, held["value"])
+    for one in answered:
+        held = cast("dict[str, Any]", known(one.gold, one.key))
+        value = conforming(held, one.key, one.question, one.log)
+        erred.setdefault(one.unit, {})[one.declared] = _erred(one.answer, value)
     key = {"design": loaded.design_hash, "group": group, "split": split_id, "gold_set": gold_set}
     if results.lookup(KIND, key) is not None:
         raise EvaluationRefusal(
