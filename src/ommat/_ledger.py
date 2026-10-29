@@ -355,6 +355,14 @@ _CAUSE_CODES: dict[int, frozenset[str]] = {
     for fmt in RECORD_FORMATS
 }
 """Each format's closed cause set."""
+
+
+def held_marker_code(code: str, fmt: int) -> bool:
+    """Whether a format-``fmt`` record holds a marker of ``code`` on an entry its returned call
+    wrote: a code of its cause set, and ``timed-out`` or ``raised`` from format 4 only."""
+    return code in _CAUSE_CODES[fmt] and (fmt >= PER_REF_FORMAT or code not in _PER_REF_CODES)
+
+
 _ANSWER_KINDS = frozenset(AnswerKind)
 _PROBABILITY_KINDS = frozenset(k.value for k in PROBABILITY_KINDS)
 _VALUE_TYPES = frozenset(v.value for v in ValueType)

@@ -119,10 +119,10 @@ def _context_alone(finding: dict[str, Any]) -> bool:
 def use_answers_sync(record: object, loaded: LoadedDesign, other: object) -> dict[str, Any]:
     """``use_answers`` run to completion; ``RuntimeError`` inside a running event loop, raised
     before the coroutine is built."""
-    return run_sync("use_answers", lambda: use_answers(record, loaded, other))
+    return _run_sync("use_answers", lambda: use_answers(record, loaded, other))
 
 
-def run_sync(name: str, job: Callable[[], Coroutine[Any, Any, _T]]) -> _T:
+def _run_sync(name: str, job: Callable[[], Coroutine[Any, Any, _T]]) -> _T:
     """The coroutine ``job`` builds, run to completion; ``RuntimeError`` naming the job inside a
     running event loop, raised before the coroutine is built."""
     try:

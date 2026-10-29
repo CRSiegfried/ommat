@@ -1,30 +1,33 @@
 # pyright: reportPrivateUsage=false
-"""Do-and-diff's first four forms and ``intervene``: edit a copy of the record, or of the
-loaded design's document, and replay once.
+"""Do-and-diff's edits: ``set_entry``, ``fail_call``, ``set_state_field`` and
+``constant_rule`` each change one input of a recorded turn, and ``intervene`` several; each
+replays once.
 
-Form 1 sets a ``q:`` or ``t:`` entry a returned call wrote to a value or to one of the six
-markers a binding may return; form 2 sets a returned call to ``Failed`` with a structural code,
-every entry it wrote ``Unavailable`` with that cause; form 3 sets a ``t:state`` field to a
-value; form 4 replaces a rule's declaration by a one-row table of ``-`` cells over its reads,
-outputting the set value or ``Unsure``, and loads the edited document. ``intervene`` takes forms
-1 to 3 as a list and form 4 as ``rule``; each edit is checked against the record as read, so
-the list's order changes nothing.
+``set_entry`` sets a ``q:`` or ``t:`` entry a returned call wrote to a value or to a marker a
+binding may return and the record's format holds; ``fail_call`` sets a returned call to
+``Failed`` with a structural code, every entry it wrote ``Unavailable`` with that cause;
+``set_state_field`` sets a ``t:state`` field to a value; ``constant_rule`` replaces a rule's
+declaration by a one-row table of ``-`` cells over its reads, outputting the set value or
+``Unsure``, and loads the edited document. ``intervene`` takes the first three as a list of
+edits and ``constant_rule``'s as ``rule``; each edit is checked against the log with the
+edits before it in the list applied.
 
 The record is read and refused ``unfinished``, ``nothing-to-replay`` and ``wrong-design``
-first, as form 5 refuses it; ``intervene`` then refuses ``invalid-edit``, ``no-edit``,
+first, as ``use_answers`` refuses it; ``intervene`` then refuses ``invalid-edit``, ``no-edit``,
 ``duplicate-target`` and ``conflicting-edits``; then each edit's own refusals in list order,
-then the rule's. A record copy's log is edited, its ``hash`` set from format 3 to the edited
-log's record hash, and read back through ``read_record`` (§record-hash-member). Replay reruns
-the copy, its state entry, calls and cut, under the record's design or the modified one, so
-the findings are what the edits changed downstream; the edited entry itself, answered as set,
-is none. A plan is compared without its ``context``. Neither the record nor the loaded design
-is changed, and nothing returned holds a ``Record``.
+then the rule's. A record edit is made on a copy: its log edited, its ``hash`` set from format
+3 to the edited log's record hash, and read back through ``read_record``
+(§record-hash-member); ``constant_rule`` alone edits only the document and makes no copy.
+Replay reruns the copy, its state entry, calls and cut, under the record's design or the
+modified one, so the findings are what the edits changed downstream; the edited entry itself,
+answered as set, is none. A plan is compared without its ``context``. Neither the record nor
+the loaded design is changed, and nothing returned holds a ``Record``.
 """
 
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, NoReturn, cast
+from typing import Any, Literal, NoReturn, cast
 
 from ommat._answer import AnswerKind, ValueType
 from ommat._canonical import decode, encode, record_hash
@@ -38,13 +41,28 @@ from ommat._interpret import (
     answer_written,
     no_provenance,
 )
-from ommat._ledger import _ITEM_DEPTH, _ORDERED, Record, _with_held_order
+from ommat._ledger import (
+    _ITEM_DEPTH,
+    _ORDERED,
+    Record,
+    _copy,
+    _with_held_order,
+    held_marker_code,
+)
 from ommat._load import load
-from ommat._markers import Cause, CauseCode, Unavailable, Undetermined, Unsure
-from ommat._refs import _RefError, candidate_values, code_point_sorted, declared_ref, parse_ref
+from ommat._markers import Cause, Unavailable, Undetermined, Unsure
+from ommat._read_view import _ViewError, walk
+from ommat._refs import (
+    _RefError,
+    candidate_values,
+    code_point_sorted,
+    declared_ref,
+    entry_ref,
+    parse_ref,
+)
 from ommat._typed import decoded, is_a, typed
-from ommat._values import HASH_FORMAT, KEY_ORDER_FORMAT, string_data, type_name
-from ommat.evaluation._diff import _read, _refuse_unfit, _replayed, _state, run_sync
+from ommat._values import HASH_FORMAT, KEY_ORDER_FORMAT, type_name
+from ommat.evaluation._diff import _read, _refuse_unfit, _replayed, _run_sync
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 
 _R = RefusalReason
@@ -92,26 +110,29 @@ _SHAPES: dict[frozenset[str], type[_Edit]] = {
 async def set_entry(
     record: object, loaded: LoadedDesign, ref: str, value: object
 ) -> dict[str, Any]:
-    """Form 1: replay a copy of ``record`` with the ``q:`` or ``t:`` entry at ``ref`` set to
-    ``value``; ``{"entry", "findings"}``, ``entry`` the edited log entry."""
-    items, _, found = await _intervened(record, loaded, [_SetEntry(ref, value)], None, None)
+    """Replay a copy of ``record`` with the ``q:`` or ``t:`` entry at ``ref`` set to ``value``;
+    ``{"entry", "findings"}``, ``entry`` the edited log entry."""
+    read, log = _checked(record, loaded)
+    items, _, found = await _applied(read, log, loaded, [_SetEntry(ref, value)], None, None)
     return {"entry": items[0], "findings": found}
 
 
 async def fail_call(record: object, loaded: LoadedDesign, source: str, code: str) -> dict[str, Any]:
-    """Form 2: replay a copy of ``record`` with the call listing ``source`` set to ``Failed``
-    with ``code``; ``{"call", "findings"}``, ``call`` the edited call item."""
-    items, _, found = await _intervened(record, loaded, [_FailCall(source, code)], None, None)
+    """Replay a copy of ``record`` with the call listing ``source`` set to ``Failed`` with
+    ``code``; ``{"call", "findings"}``, ``call`` the edited call item."""
+    read, log = _checked(record, loaded)
+    items, _, found = await _applied(read, log, loaded, [_FailCall(source, code)], None, None)
     return {"call": items[0], "findings": found}  # a call item precedes the entries it wrote
 
 
 async def set_state_field(
     record: object, loaded: LoadedDesign, path: str, value: object
 ) -> dict[str, Any]:
-    """Form 3: replay a copy of ``record`` with the ``t:state`` field at ``path``, a ref such as
+    """Replay a copy of ``record`` with the ``t:state`` field at ``path``, a ref such as
     ``t:state.sender.address``, set to ``value``; ``{"entry", "findings"}``, ``entry`` the
     edited state entry."""
-    items, _, found = await _intervened(record, loaded, [_SetField(path, value)], None, None)
+    read, log = _checked(record, loaded)
+    items, _, found = await _applied(read, log, loaded, [_SetField(path, value)], None, None)
     return {"entry": items[0], "findings": found}
 
 
@@ -123,10 +144,12 @@ async def constant_rule(
     *,
     functions: _Functions = None,
 ) -> dict[str, Any]:
-    """Form 4: replay ``record`` under ``loaded`` with the rule providing the ``d:`` ref
-    ``rule`` replaced by a one-row table outputting ``output``, a value or ``Unsure``;
+    """Replay ``record`` under ``loaded`` with the rule providing the ``d:`` ref ``rule``
+    replaced by a one-row table outputting ``output``, a value or ``Unsure``;
     ``{"document", "findings"}``, ``document`` the modified document, parsed."""
-    _, document, found = await _intervened(record, loaded, [], _Constant(rule, output), functions)
+    read, log = _checked(record, loaded)
+    constant = _Constant(rule, output)
+    _, document, found = await _applied(read, log, loaded, [], constant, functions)
     return {"document": document, "findings": found}
 
 
@@ -138,29 +161,32 @@ async def intervene(
     rule: object = None,
     functions: _Functions = None,
 ) -> dict[str, Any]:
-    """Forms 1 to 3 as ``edits``, each ``{"ref", "value"}``, ``{"source", "code"}`` or
-    ``{"path", "value"}``, and form 4 as ``rule``, ``{"rule", "output"}`` or ``None``, on one
-    copy, replayed once; ``{"items", "document", "findings"}``, ``items`` each log item the
-    edits changed, once, in log order, ``document`` the modified document or ``None``."""
-    items, document, found = await _intervened(record, loaded, edits, rule, functions, shaped=True)
+    """``set_entry``, ``fail_call`` and ``set_state_field`` edits as ``edits``, each
+    ``{"ref", "value"}``, ``{"source", "code"}`` or ``{"path", "value"}``, and a
+    ``constant_rule`` as ``rule``, ``{"rule", "output"}`` or ``None``, on one copy, replayed
+    once; ``{"items", "document", "findings"}``, ``items`` each log item the edits changed,
+    once, in log order, ``document`` the modified document or ``None``."""
+    read, log = _checked(record, loaded)
+    listed, constant = _shaped(edits, rule)
+    items, document, found = await _applied(read, log, loaded, listed, constant, functions)
     return {"items": items, "document": document, "findings": found}
 
 
 def set_entry_sync(record: object, loaded: LoadedDesign, ref: str, value: object) -> dict[str, Any]:
     """``set_entry`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return run_sync("set_entry", lambda: set_entry(record, loaded, ref, value))
+    return _run_sync("set_entry", lambda: set_entry(record, loaded, ref, value))
 
 
 def fail_call_sync(record: object, loaded: LoadedDesign, source: str, code: str) -> dict[str, Any]:
     """``fail_call`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return run_sync("fail_call", lambda: fail_call(record, loaded, source, code))
+    return _run_sync("fail_call", lambda: fail_call(record, loaded, source, code))
 
 
 def set_state_field_sync(
     record: object, loaded: LoadedDesign, path: str, value: object
 ) -> dict[str, Any]:
     """``set_state_field`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return run_sync("set_state_field", lambda: set_state_field(record, loaded, path, value))
+    return _run_sync("set_state_field", lambda: set_state_field(record, loaded, path, value))
 
 
 def constant_rule_sync(
@@ -172,7 +198,7 @@ def constant_rule_sync(
     functions: _Functions = None,
 ) -> dict[str, Any]:
     """``constant_rule`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return run_sync(
+    return _run_sync(
         "constant_rule",
         lambda: constant_rule(record, loaded, rule, output, functions=functions),
     )
@@ -187,7 +213,7 @@ def intervene_sync(
     functions: _Functions = None,
 ) -> dict[str, Any]:
     """``intervene`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return run_sync(
+    return _run_sync(
         "intervene", lambda: intervene(record, loaded, edits, rule=rule, functions=functions)
     )
 
@@ -196,38 +222,49 @@ def intervene_sync(
 # The one procedure
 
 
-async def _intervened(
-    record: object,
-    loaded: LoadedDesign,
-    edits: object,
-    rule: object,
-    functions: _Functions,
-    *,
-    shaped: bool = False,
-) -> tuple[_Log, dict[str, Any] | None, list[dict[str, Any]]]:
-    """The changed items in log order, the modified document or ``None``, and the findings.
-    With ``shaped``, ``edits`` and ``rule`` are ``intervene``'s plain data, checked for shape;
-    otherwise the form's own."""
+def _checked(record: object, loaded: LoadedDesign) -> tuple[Record, _Log]:
+    """The record read, and its log, after the record checks."""
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     read = _read(record, "record")
     log = read.log  # read once: every read decodes afresh
     _refuse_unfit(("record",), (read,), (log,), loaded)
-    if shaped:
-        edits, rule = _shaped(edits, rule)
-    listed = cast("list[_Edit]", edits)
-    constant = cast("_Constant | None", rule)
-    _refuse_targets(listed, log)
-    changed = _changes(listed, log, loaded)
+    return read, log
+
+
+async def _applied(
+    read: Record,
+    log: _Log,
+    loaded: LoadedDesign,
+    edits: list[_Edit],
+    constant: _Constant | None,
+    functions: _Functions,
+) -> tuple[_Log, dict[str, Any] | None, list[dict[str, Any]]]:
+    """The changed items in log order, the modified document or ``None``, and the findings."""
+    _refuse_targets(edits, log)
+    edited = list(log)
+    changed: set[int] = set()
+    for edit in edits:
+        for index, item in _change(edit, edited, loaded).items():
+            edited[index] = item
+            changed.add(index)
     design, document = loaded, None
     if constant is not None:
-        design, document = _constant(constant, loaded, functions)
+        design, document = _constant(constant, log, loaded, functions)
     if not changed:
         return [], document, await _replayed(log, design, log)
-    copy = _copy(log, read.unhashed, changed)
-    edited = copy.log
-    items = [edited[i] for i in sorted(changed)]
-    return items, document, await _replayed(edited, design, edited)
+    copied = _record_copy(edited, read.unhashed).log
+    items = [copied[i] for i in sorted(changed)]
+    return items, document, await _replayed(copied, design, copied)
+
+
+def _change(edit: _Edit, log: _Log, loaded: LoadedDesign) -> dict[int, dict[str, Any]]:
+    """The items one edit changes, by index, checked against ``log``."""
+    if type(edit) is _SetEntry:
+        return _set_entry(edit, log, loaded)
+    if type(edit) is _FailCall:
+        return _fail_call(edit, log)
+    return _set_field(cast(_SetField, edit), log, loaded)
 
 
 def _shaped(edits: object, rule: object) -> tuple[list[_Edit], _Constant | None]:
@@ -238,7 +275,7 @@ def _shaped(edits: object, rule: object) -> tuple[list[_Edit], _Constant | None]
         )
     out: list[_Edit] = []
     for i, item in enumerate(cast("list[object]", edits)):
-        form = _SHAPES.get(_keys(cast(object, item))) if type(item) is dict else None
+        form = _SHAPES.get(_keys(item))
         if form is None:
             raise EvaluationRefusal(
                 f"edit {i} is not one of {{ref, value}}, {{source, code}} or {{path, value}}",
@@ -247,7 +284,7 @@ def _shaped(edits: object, rule: object) -> tuple[list[_Edit], _Constant | None]
         out.append(form(**cast("dict[str, Any]", item)))
     constant: _Constant | None = None
     if rule is not None:
-        if type(rule) is not dict or _keys(cast(object, rule)) != frozenset({"rule", "output"}):
+        if _keys(rule) != frozenset({"rule", "output"}):
             raise EvaluationRefusal("rule is not None or {rule, output}", reason=_R.invalid_edit)
         constant = _Constant(**cast("dict[str, Any]", rule))
     if not out and constant is None:
@@ -256,15 +293,18 @@ def _shaped(edits: object, rule: object) -> tuple[list[_Edit], _Constant | None]
 
 
 def _keys(item: object) -> frozenset[str]:
-    """An object's keys, by type alone; a key that is not exactly a ``str`` fits no shape."""
+    """An exact ``dict``'s keys, read by type alone; none for anything else or a key that is
+    not exactly a ``str``, which fit no shape."""
+    if type(item) is not dict:
+        return frozenset()
     keys = list(cast("dict[object, object]", item))
     return frozenset(cast("list[str]", keys)) if all(type(k) is str for k in keys) else frozenset()
 
 
 def _refuse_targets(edits: list[_Edit], log: _Log) -> None:
     """Refuse ``duplicate-target``, two edits naming one ref, one call or one ``t:state`` path
-    or a path within another, naming the later; then ``conflicting-edits``, a form 1 edit of an
-    entry a form 2 edit's call wrote, naming both."""
+    or a path within another, naming the later; then ``conflicting-edits``, a ``set_entry``
+    edit of an entry a ``fail_call`` edit's call wrote, naming both."""
     refs: set[str] = set()
     calls: dict[int, str] = {}
     paths: list[str] = []
@@ -310,62 +350,58 @@ def _within(outer: str, inner: str) -> bool:
     return inner == outer or inner.startswith(outer + ".")
 
 
-def _changes(edits: list[_Edit], log: _Log, loaded: LoadedDesign) -> dict[int, dict[str, Any]]:
-    """Each edit checked against the log as read, in list order, and the items it changes by
-    index; the ``t:state`` fields are set together on one state value."""
-    changed: dict[int, dict[str, Any]] = {}
-    fields: list[tuple[tuple[str, ...], object]] = []
-    for edit in edits:
-        if type(edit) is _SetEntry:
-            changed.update(_set_entry(edit, log, loaded))
-        elif type(edit) is _FailCall:
-            changed.update(_fail_call(edit, log))
-        else:
-            fields.append(_set_field(cast(_SetField, edit), log, loaded))
-    if fields:
-        index, state = cast("tuple[int, dict[str, Any]]", _entry(_STATE, log))
-        t = loaded._types[_STATE]
-        value = decoded(state["value"], t)
-        for names, given in fields:
-            _put(value, names, given)
-        forms = typed(value, t)
-        assert forms is not None  # each field conformed alone, and none lies within another
-        changed[index] = _rewritten(state, value=forms[0])
-    return changed
+def _is_marker(value: object) -> bool:
+    """A marker, or a marker class given in place of one."""
+    return is_a(value, Undetermined) or (type(value) is type and issubclass(value, Undetermined))
+
+
+def _not_found(what: str, given: object, member: Literal["ref", "source", "path"]) -> NoReturn:
+    """``not-found`` for ``given``, named under ``member`` when it is a string."""
+    named = given if type(given) is str else None
+    shown = named if named is not None else f"of type {type_name(given)}"
+    raise EvaluationRefusal(
+        f"{what} {shown}",
+        reason=_R.not_found,
+        ref=named if member == "ref" else None,
+        source=named if member == "source" else None,
+        path=named if member == "path" else None,
+    )
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 1: an entry
+# set_entry
 
 
 def _set_entry(edit: _SetEntry, log: _Log, loaded: LoadedDesign) -> dict[int, dict[str, Any]]:
     ref = edit.ref
     found = _entry(ref, log) if type(ref) is str else None
     if found is None:
-        raise EvaluationRefusal(
-            f"the record has no entry {_shown(ref)}", reason=_R.not_found, ref=_named(ref)
-        )
-    index, entry = found
+        _not_found("the record has no entry", ref, "ref")
     ref = cast(str, ref)
+    index, entry = found
     if entry["call"] is None:
         raise EvaluationRefusal(f"entry {ref}'s call is null", reason=_R.null_call, ref=ref)
     call = log[cast(int, entry["call"])]
     if call["outcome"] != "returned":
         raise EvaluationRefusal(f"entry {ref}'s call is Failed", reason=_R.failed_call, ref=ref)
     value = edit.value
-    if is_a(value, Undetermined):
+    if _is_marker(value):
         code = getattr(getattr(value, "cause", None), "code", None)
+        fmt = cast(int, log[0]["format"])
         if type(value) is not Unavailable or code not in _BINDING_MARKERS:
-            raise EvaluationRefusal(
-                f"entry {ref} may be set to a value or a marker a binding may return only",
-                reason=_R.marker,
-                ref=ref,
+            _refuse_marker(f"entry {ref} may be set to a marker a binding may return only", ref)
+        if not held_marker_code(cast(str, code), fmt):
+            _refuse_marker(
+                f"entry {ref} may not be set to {code}, which a format-{fmt} record does not "
+                "hold under a returned call",
+                ref,
             )
-        marker = _marker_document(Unavailable(Cause(cast(CauseCode, code), [ref])))
+        marker = _marker_document(Unavailable(Cause(cast(str, code), [ref])))
         return {index: _rewritten(entry, marker=marker)}
-    written = (
-        _q_value(ref, value, call, log) if ref.startswith("q:") else _t_value(ref, value, loaded)
-    )
+    if ref.startswith("q:"):
+        written = _q_value(ref, value, call, log, loaded)
+    else:
+        written = _t_value(ref, value, loaded)
     if written is None:
         raise EvaluationRefusal(
             f"the value for entry {ref} does not conform", reason=_R.nonconforming, ref=ref
@@ -373,38 +409,44 @@ def _set_entry(edit: _SetEntry, log: _Log, loaded: LoadedDesign) -> dict[int, di
     return {index: _rewritten(entry, value=written)}
 
 
-def _q_value(ref: str, value: object, call: dict[str, Any], log: _Log) -> object | None:
+def _refuse_marker(message: str, ref: str) -> NoReturn:
+    raise EvaluationRefusal(message, reason=_R.marker, ref=ref)
+
+
+def _q_value(
+    ref: str, value: object, call: dict[str, Any], log: _Log, loaded: LoadedDesign
+) -> object | None:
     """An answer's document built from ``value`` in the binding's form, by the call item's
     question: its kind, its labels as asked, a candidate-valued set's rendered from the set's
-    entry, or its value type and list flag; ``None`` when the answer's constructor refuses it.
-    The record holds no text, so no span is bounded by one."""
+    entry, or its value type and list flag, an extraction answer's spans within its text as the
+    log holds it; ``None`` when the answer's check refuses it."""
     question = call["questions"][declared_ref(ref)]
     kind = AnswerKind(question["kind"])
-    value_type = ValueType(question["value_type"]) if kind is AnswerKind.extraction else None
-    written = answer_written(
-        ref,
-        value,
-        kind,
-        _labels(question, log),
-        value_type,
-        question.get("is_list", False),
-        sys.maxsize,
-    )
+    labels = _labels(question, log)
+    if labels is None:
+        return None
+    value_type = None
+    bound = sys.maxsize
+    if kind is AnswerKind.extraction:
+        value_type = ValueType(question["value_type"])
+        bound = _text_length(ref, log, loaded)
+    is_list = question.get("is_list", False)
+    written = answer_written(ref, value, kind, labels, value_type, is_list, bound)
     return None if isinstance(written, Undetermined) else written[0]
 
 
-def _labels(question: dict[str, Any], log: _Log) -> tuple[str, ...]:
+def _labels(question: dict[str, Any], log: _Log) -> tuple[str, ...] | None:
     """A question's labels' names as asked: ``yes`` and ``no`` for an undescribed ``noul``,
     none for an extraction question, a candidate-valued set's fixed part with the set's
-    candidate values at ``at``."""
+    candidate values at ``at``; ``None`` when the set holds no value, so no answer fits."""
     labels: object = question["labels"]
     if labels is None:
         return ("yes", "no") if question["kind"] == AnswerKind.noul else ()
     if type(labels) is dict:
         declared = cast("dict[str, Any]", labels)
         found = _entry(cast(str, declared["candidates"]), log)
-        # A question is asked over a set holding a value only (§candidate-sets).
-        assert found is not None
+        if found is None or "value" not in found[1]:
+            return None
         sets = cast("dict[str, Any]", log[1].get("sets", {}))
         listed = candidate_values(found[1]["value"], sets.get(declared["candidates"]))
         at = cast(int, declared["at"])
@@ -415,6 +457,22 @@ def _labels(question: dict[str, Any], log: _Log) -> tuple[str, ...]:
 
 def _name(label: object) -> str:
     return label if type(label) is str else cast("dict[str, str]", label)["name"]
+
+
+def _text_length(ref: str, log: _Log, loaded: LoadedDesign) -> int:
+    """The length of an extraction question's text, read at its declared ref from the log's
+    entry, as interpret bounds a span by; no bound when the log holds no string there."""
+    declared = declared_ref(ref)
+    question = loaded._design.sources[loaded._providers[declared]].provides[declared]
+    text = cast("Mapping[str, str]", question.text)["ref"]
+    found = _entry(entry_ref(text), log)
+    if found is None or "value" not in found[1]:
+        return sys.maxsize
+    try:
+        value = walk(found[1]["value"], parse_ref(text).fields, text)
+    except _ViewError:
+        return sys.maxsize
+    return len(value) if type(value) is str else sys.maxsize
 
 
 def _t_value(ref: str, value: object, loaded: LoadedDesign) -> object | None:
@@ -429,18 +487,14 @@ def _t_value(ref: str, value: object, loaded: LoadedDesign) -> object | None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 2: a call
+# fail_call
 
 
 def _fail_call(edit: _FailCall, log: _Log) -> dict[int, dict[str, Any]]:
     source = edit.source
     found = _call_of(source, log) if type(source) is str else None
     if found is None:
-        raise EvaluationRefusal(
-            f"the record has no call of source {_shown(source)}",
-            reason=_R.not_found,
-            source=_named(source),
-        )
+        _not_found("the record has no call of source", source, "source")
     source = cast(str, source)
     index, call = found
     if call["outcome"] != "returned":
@@ -448,19 +502,20 @@ def _fail_call(edit: _FailCall, log: _Log) -> dict[int, dict[str, Any]]:
             f"source {source}'s call is Failed already", reason=_R.failed_call, source=source
         )
     code = edit.code
-    data = string_data(cast(str, code)) if issubclass(type(code), str) else None
-    if data not in _STRUCTURAL:
+    if type(code) is not str or code not in _STRUCTURAL:
+        shown = code if type(code) is str else f"of type {type_name(code)}"
         raise EvaluationRefusal(
-            f"code {_shown(code)} is not raised, timed-out, invalid-return or unexpected-ref",
+            f"code {shown} is not raised, timed-out, invalid-return or unexpected-ref",
             reason=_R.fault_code,
             source=source,
         )
     wrote = [(i, e) for i, e in enumerate(log) if e["item"] == "entry" and e["call"] == index]
-    failed = Unavailable(Cause(cast(str, data), code_point_sorted(e["ref"] for _, e in wrote)))
+    failed = Unavailable(Cause(code, code_point_sorted(e["ref"] for _, e in wrote)))
     # Each place gets its own copy: the read refuses a container at two places.
     outcome = {"failed": _marker_document(failed)["cause"]}
-    # The hashed provenance members its format holds become null, claimed empty.
-    provenance = {k: v for k, v in no_provenance().items() if k in call}
+    # The hashed provenance members its format holds become null, claimed empty; before
+    # format 5 they include snapshot.
+    provenance = {k: v for k, v in {**no_provenance(), "snapshot": None}.items() if k in call}
     changed = {index: {**call, "outcome": outcome, **provenance}}
     for i, entry in wrote:
         changed[i] = _rewritten(entry, marker=_marker_document(failed))
@@ -468,32 +523,31 @@ def _fail_call(edit: _FailCall, log: _Log) -> dict[int, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 3: a state field
+# set_state_field
 
 
-def _set_field(edit: _SetField, log: _Log, loaded: LoadedDesign) -> tuple[tuple[str, ...], object]:
-    """The field path's names and the value, checked: the path names a field the recorded
-    state holds, and the state with it set conforms."""
+def _set_field(edit: _SetField, log: _Log, loaded: LoadedDesign) -> dict[int, dict[str, Any]]:
+    """The state entry with the field set: the path names a field the state holds, and the
+    state with it set conforms."""
     path = edit.path
     names = _field_names(path)
-    state = cast("dict[str, Any]", _state(log))
+    index, state = cast("tuple[int, dict[str, Any]]", _entry(_STATE, log))
     t = loaded._types[_STATE]
     value = decoded(state["value"], t)
     if names is None or not _holds(value, names):
-        raise EvaluationRefusal(
-            f"the state holds no field {_shown(path)}", reason=_R.not_found, path=_named(path)
-        )
+        _not_found("the state holds no field", path, "path")
     path = cast(str, path)
-    if is_a(edit.value, Undetermined):
+    if _is_marker(edit.value):
         raise EvaluationRefusal(
             f"state field {path} may be set to a value only", reason=_R.marker, path=path
         )
     _put(value, names, edit.value)
-    if typed(value, t) is None:
+    forms = typed(value, t)
+    if forms is None:
         raise EvaluationRefusal(
             f"the state with {path} set does not conform", reason=_R.nonconforming, path=path
         )
-    return names, edit.value
+    return {index: _rewritten(state, value=forms[0])}
 
 
 def _field_names(path: object) -> tuple[str, ...] | None:
@@ -524,41 +578,45 @@ def _put(value: object, names: tuple[str, ...], given: object) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 4: a constant rule
+# constant_rule
 
 
 def _constant(
-    constant: _Constant, loaded: LoadedDesign, functions: _Functions
+    constant: _Constant, log: _Log, loaded: LoadedDesign, functions: _Functions
 ) -> tuple[LoadedDesign, dict[str, Any]]:
     """The design loaded from ``loaded``'s document with the rule replaced, and that document,
-    parsed."""
+    parsed. A rule reading a grounded declared ref, which the record's ``settings`` item names
+    under ``grounded``, is refused: no table but one grounded over its set may read it."""
     ref = constant.rule
     document = cast("dict[str, Any]", decode(loaded.document))
     rules = cast("dict[str, dict[str, Any]]", document["rules"])
     name = next((n for n, r in rules.items() if type(ref) is str and r["provides"] == ref), None)
     if name is None:
-        raise EvaluationRefusal(
-            f"no rule provides {_shown(ref)}", reason=_R.not_found, ref=_named(ref)
-        )
+        _not_found("no rule provides", ref, "ref")
     ref = cast(str, ref)
     declared = rules[name]
-    if declared.get("candidates", False) is not False or declared.get("grounded") is not None:
-        raise EvaluationRefusal(
-            f"rule {name} provides a candidate set or is grounded over one",
-            reason=_R.candidate_rule,
-            ref=ref,
-        )
-    output = constant.output
-    if output is not Unsure and (is_a(output, Undetermined) or _marker_class(output)):
-        raise EvaluationRefusal(
-            f"rule {name} may output a value or Unsure only", reason=_R.marker, ref=ref
-        )
     reads = (
         [i["read"] for i in declared["inputs"]]
         if declared["form"] == "table"
         else declared["reads"]
     )
     reads = list(dict.fromkeys(cast("list[str]", reads)))
+    grounded = cast("dict[str, str]", log[1].get("grounded", {}))
+    if (
+        declared.get("candidates", False) is not False
+        or declared.get("grounded") is not None
+        or any(_declared(r) in grounded for r in reads)
+    ):
+        raise EvaluationRefusal(
+            f"rule {name} provides a candidate set, is grounded over one or reads a grounded ref",
+            reason=_R.candidate_rule,
+            ref=ref,
+        )
+    output = constant.output
+    if output is not Unsure and _is_marker(output):
+        raise EvaluationRefusal(
+            f"rule {name} may output a value or Unsure only", reason=_R.marker, ref=ref
+        )
     table: dict[str, Any] = {
         k: declared[k]
         for k in ("provides", "outputs", "candidates", "grounded", "target")
@@ -572,7 +630,8 @@ def _constant(
         rows=[
             {
                 "cells": ["-"] * len(reads),
-                "output": {"marker": "Unsure"} if output is Unsure else {"literal": output},
+                # A copy in exact types: a container the output holds at two places is two.
+                "output": {"marker": "Unsure"} if output is Unsure else {"literal": _copy(output)},
             }
         ],
     )
@@ -589,25 +648,29 @@ def _constant(
     return modified, cast("dict[str, Any]", decode(modified.document))
 
 
-def _marker_class(value: object) -> bool:
-    return type(value) is type and issubclass(value, Undetermined)
+def _declared(read: str) -> str:
+    """A read's declared ref: its field path dropped; ``candidate`` reads as itself."""
+    try:
+        parsed = parse_ref(read)
+    except _RefError:
+        return read
+    return f"{parsed.level}:{parsed.name}"
 
 
 # ---------------------------------------------------------------------------------------------
 # The copy
 
 
-def _copy(log: _Log, unhashed: dict[str, Any], changed: dict[int, dict[str, Any]]) -> Record:
-    """The record copy: its log with the changed items, each ordered item's ``order`` derived
-    afresh, its ``unhashed`` kept, ``hash`` from format 3 the edited log's record hash, read
-    back through ``read_record``."""
-    edited = [changed.get(i, item) for i, item in enumerate(log)]
+def _record_copy(log: _Log, unhashed: dict[str, Any]) -> Record:
+    """The record copy of an edited log: each ordered item's ``order`` derived afresh, its
+    ``unhashed`` kept, ``hash`` from format 3 the log's record hash, read back through
+    ``read_record``."""
     fmt = cast(int, log[0]["format"])
     held = [
         _with_held_order({k: v for k, v in item.items() if k != "order"})
         if fmt >= KEY_ORDER_FORMAT and item["item"] in _ORDERED
         else item
-        for item in edited
+        for item in log
     ]
     copy: dict[str, Any] = {"log": held, "unhashed": unhashed}
     if fmt >= HASH_FORMAT:
@@ -636,12 +699,3 @@ def _call_of(source: str, log: _Log) -> tuple[int, dict[str, Any]] | None:
         ((i, e) for i, e in enumerate(log) if e["item"] == "call" and source in e["sources"]),
         None,
     )
-
-
-def _named(value: object) -> str | None:
-    """What a refusal names: the string given, else ``None``."""
-    return value if type(value) is str else None
-
-
-def _shown(value: object) -> str:
-    return value if type(value) is str else f"of type {type_name(value)}"

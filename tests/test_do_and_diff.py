@@ -1,10 +1,11 @@
 # pyright: reportPrivateUsage=false
-"""Do-and-diff's first four forms and ``intervene``: each form's edit gives exactly the findings
+"""Do-and-diff's edits and ``intervene``: each job's edit gives exactly the findings
 downstream of it, its refusals come in their order before any replay, the copy carries its own
 hash and is read back, neither input changes, and no job's output reaches a ``Record``."""
 
 import asyncio
 import copy
+import dataclasses
 import json
 import pathlib
 from collections.abc import Callable
@@ -12,8 +13,10 @@ from typing import Any, cast
 
 import pytest
 
+import extraction
 import test_grounded_rules as grounded
 import test_label_sets as label_sets
+from designs import minimal
 from format_8_design import DESIGN
 from ommat import (
     Cause,
@@ -22,7 +25,13 @@ from ommat import (
     FindingKind,
     InvalidDesign,
     InvalidRecord,
+    LoadedDesign,
+    Question,
     Record,
+    Rule,
+    Source,
+    Table,
+    Text,
     Unasked,
     Unavailable,
     Unsure,
@@ -30,6 +39,7 @@ from ommat import (
     load,
     read_record,
 )
+from ommat import types as t
 from ommat._canonical import decode
 from ommat.evaluation import (
     EvaluationRefusal,
@@ -48,8 +58,9 @@ from ommat.evaluation import (
     set_state_field_sync,
     use_answers_sync,
 )
-from scripted import returns
-from test_decide import LOADED, STATE, echo, go, route, slice_design
+from scripted import Scripted, returns
+from test_decide import ASK, BODY, LOADED, LOOK, RULES, SPAM, STATE, echo, go, route, slice_design
+from test_extraction_turn import ran as extraction_ran
 from test_replay import entry
 from test_use_answers import HAM, REFUSING, broken, diff, live, unfinished
 
@@ -87,7 +98,7 @@ def downstream(record: Record, other: Record, *edited: str) -> list[Any]:
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 1: an entry
+# set_entry
 
 
 def test_setting_an_entry_to_its_recorded_value_gives_no_finding() -> None:
@@ -144,6 +155,53 @@ def test_a_candidate_set_whose_members_repeat_is_nonconforming() -> None:
     assert (exc.reason, exc.ref) == (R.nonconforming, ref)
 
 
+def test_an_extraction_answer_is_set_its_spans_bounded_by_the_text_as_logged() -> None:
+    record = extraction_ran()
+    loaded = extraction.loaded()
+    amount = {**extraction.AMOUNT, "value": 7, "guess": 7}
+    result = set_entry_sync(record, loaded, "q:amount", amount)
+    assert result["entry"]["value"] == {
+        "kind": "extraction",
+        "value_type": "number",
+        "is_list": False,
+        **amount,
+    }
+    assert kinds(result["findings"]) == [(K.entry, "d:amount"), (K.plan, None)]
+    dates = {**extraction.DATES, "value": ["2024-03-01"], "guess": ["2024-03-01"]}
+    listed = set_entry_sync(record, loaded, "q:dates", dates)["entry"]["value"]
+    assert (listed["is_list"], listed["value"], listed["span"]) == (
+        True,
+        ["2024-03-01"],
+        [[11, 21]],
+    )
+    past = len(extraction.BODY) + 1
+    for ref, value in (
+        ("q:amount", {**amount, "span": [4, past]}),
+        ("q:dates", {**dates, "span": [[11, past]]}),
+        ("q:dates", {**dates, "value": "2024-03-01"}),
+    ):
+        exc = refusal(set_entry_sync, record, loaded, ref, value)
+        assert (exc.reason, exc.ref) == (R.nonconforming, ref)
+
+
+def test_a_score_answer_is_set_over_its_levels() -> None:
+    levels = ("low", "mid", "high")
+    loaded = load(
+        minimal(sources={"s": Source({"q:urgency": Question("score", Text("How?"), levels)})})
+    )
+    given = {"low": 0.25, "mid": 0.25, "high": 0.5}
+    record = decide_sync(loaded, {}, {"default": Scripted({"s": returns({"q:urgency": given})})})
+    changed = {"low": 0.7, "mid": 0.2, "high": 0.1}
+    result = set_entry_sync(record.record, loaded, "q:urgency", changed)
+    assert result["entry"]["value"] == {
+        "kind": "score",
+        "labels": list(levels),
+        "probabilities": changed,
+    }
+    exc = refusal(set_entry_sync, record.record, loaded, "q:urgency", YES)
+    assert exc.reason is R.nonconforming
+
+
 @pytest.mark.parametrize(
     ("ref", "value", "reason"),
     [
@@ -155,6 +213,7 @@ def test_a_candidate_set_whose_members_repeat_is_nonconforming() -> None:
         ("q:spam", Unasked(Cause("when-false")), R.marker),
         ("q:spam", Unavailable(Cause("not-returned")), R.marker),
         ("q:spam", Unsure(Cause("abstained")), R.marker),
+        ("q:spam", Unavailable, R.marker),
         ("q:spam", {"yes": 0.9}, R.nonconforming),
         ("q:spam", "yes", R.nonconforming),
         ("t:size", "nine", R.nonconforming),
@@ -168,17 +227,22 @@ def test_a_candidate_set_whose_members_repeat_is_nonconforming() -> None:
         "Unasked",
         "an engine code",
         "Unsure",
+        "a marker class",
         "an answer missing a label",
         "not an answer",
         "not of the type",
     ],
 )
 @pytest.mark.usefixtures("no_replay")
-def test_form_1_refusals(ref: Any, value: object, reason: RefusalReason) -> None:
+def test_set_entry_refusals(ref: Any, value: object, reason: RefusalReason) -> None:
     exc = refusal(set_entry_sync, go().record, LOADED, ref, value)
     assert exc.reason is reason
     assert exc.ref == (ref if type(ref) is str else None)
     assert (exc.source, exc.path, exc.turn) == (None, None, None)
+
+
+class Code(str):
+    """A ``str`` subclass, which no job takes for a string."""
 
 
 def failed_record() -> Record:
@@ -193,7 +257,7 @@ def test_an_entry_of_a_failed_call_is_failed_call_before_marker() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 2: a call
+# fail_call
 
 
 def test_failing_a_call_gives_exactly_the_findings_downstream_of_it() -> None:
@@ -216,6 +280,15 @@ def test_failing_a_call_nothing_reads_gives_no_finding() -> None:
     assert result["call"]["outcome"]["failed"] == {"code": "timed-out", "refs": ["t:size"]}
 
 
+def test_a_failed_calls_cause_names_its_refs_in_code_point_order() -> None:
+    loaded = slice_design(sources={"body": BODY, "zz": ASK, "look": LOOK})
+    record = live(loaded, body=returns(SPAM))
+    written = [i["ref"] for i in record.log if i["item"] == "entry" and i["call"] == 3]
+    assert written == ["t:body", "q:spam"]
+    call = fail_call_sync(record, loaded, "zz", "raised")["call"]
+    assert call["outcome"]["failed"]["refs"] == ["q:spam", "t:body"]
+
+
 @pytest.mark.parametrize(
     ("source", "code", "reason"),
     [
@@ -225,11 +298,12 @@ def test_failing_a_call_nothing_reads_gives_no_finding() -> None:
         ("ask", "refused", R.fault_code),
         ("ask", "not-returned", R.fault_code),
         ("ask", 5, R.fault_code),
+        ("ask", Code("raised"), R.fault_code),
     ],
-    ids=["no call", "a source not a string", "not-found first", "a ref's code", "engine", "int"],
+    ids=["no call", "not a string", "not-found first", "a ref's code", "engine", "int", "subclass"],
 )
 @pytest.mark.usefixtures("no_replay")
-def test_form_2_refusals(source: Any, code: Any, reason: RefusalReason) -> None:
+def test_fail_call_refusals(source: Any, code: Any, reason: RefusalReason) -> None:
     exc = refusal(fail_call_sync, go().record, LOADED, source, code)
     assert exc.reason is reason
     assert exc.source == (source if type(source) is str else None)
@@ -244,7 +318,7 @@ def test_a_failed_call_is_failed_call_before_fault_code() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 3: a state field
+# set_state_field
 
 
 def test_setting_a_state_field_to_its_value_gives_no_finding() -> None:
@@ -272,6 +346,7 @@ def test_setting_a_state_field_gives_exactly_the_findings_downstream_of_it() -> 
         (None, "x", R.not_found),
         ("t:state.nope", Unasked(Cause("when-false")), R.not_found),
         ("t:state.subject", Unavailable(Cause("refused")), R.marker),
+        ("t:state.subject", Unsure, R.marker),
         ("t:state.subject", 5, R.nonconforming),
         ("t:state.sender", {"address": 1}, R.nonconforming),
     ],
@@ -284,12 +359,13 @@ def test_setting_a_state_field_gives_exactly_the_findings_downstream_of_it() -> 
         "not a string",
         "not-found before marker",
         "a marker",
+        "a marker class",
         "a number for a string",
         "a nested misfit",
     ],
 )
 @pytest.mark.usefixtures("no_replay")
-def test_form_3_refusals(path: Any, value: object, reason: RefusalReason) -> None:
+def test_set_state_field_refusals(path: Any, value: object, reason: RefusalReason) -> None:
     exc = refusal(set_state_field_sync, go().record, LOADED, path, value)
     assert exc.reason is reason
     assert exc.path == (path if type(path) is str else None)
@@ -297,7 +373,7 @@ def test_form_3_refusals(path: Any, value: object, reason: RefusalReason) -> Non
 
 
 # ---------------------------------------------------------------------------------------------
-# Form 4: a constant rule
+# constant_rule
 
 
 def test_a_constant_rule_gives_exactly_the_findings_downstream_of_it() -> None:
@@ -389,7 +465,7 @@ def test_a_table_rule_is_replaced_over_its_inputs_reads() -> None:
     ],
 )
 @pytest.mark.usefixtures("no_replay")
-def test_form_4_refusals(rule: Any, output: object, reason: RefusalReason) -> None:
+def test_constant_rule_refusals(rule: Any, output: object, reason: RefusalReason) -> None:
     exc = refusal(constant_rule_sync, go().record, LOADED, rule, output)
     assert exc.reason is reason
     assert exc.ref == (rule if type(rule) is str else None)
@@ -416,6 +492,41 @@ def test_a_constant_rule_loads_with_the_callers_functions() -> None:
     exc = refusal(constant_rule_sync, record, LOADED, "d:route", "no", functions={"echo": route})
     assert exc.reason is R.invalid_design
     assert "echo" in str(exc.error)
+
+
+@pytest.mark.usefixtures("no_replay")
+def test_a_rule_reading_a_grounded_ref_is_candidate_rule() -> None:
+    exc = refusal(constant_rule_sync, grounded.decided(), grounded.LOADED, "d:summary", "x")
+    assert (exc.reason, exc.ref) == (R.candidate_rule, "d:summary")
+
+
+def nested(r: Any) -> Any:
+    return [["a"], ["b"]]
+
+
+def test_an_output_holding_one_list_at_two_places_is_copied() -> None:
+    nest = Rule("d:nest", t.list_(t.list_(t.string)), nested, version="1", reads=["t:body"])
+    loaded = slice_design(rules={**RULES, "nest": nest})
+    shared = ["x"]
+    result = constant_rule_sync(go(loaded).record, loaded, "d:nest", [shared, shared])
+    output = result["document"]["rules"]["nest"]["rows"][0]["output"]
+    assert output == {"literal": [["x"], ["x"]]}
+    assert kinds(result["findings"]) == [(K.design_mismatch, None), (K.entry, "d:nest")]
+
+
+def test_a_table_reading_one_ref_twice_is_replaced_over_it_once() -> None:
+    twice = Table(
+        "d:level",
+        t.label("high", "low"),
+        "F",
+        ["t:state.score", "t:state.score"],
+        [[">= bar", "-", "high"], ["-", "-", "low"]],
+    )
+    loaded = load(dataclasses.replace(DESIGN, rules={"level": twice}))
+    record = decide_sync(loaded, {"score": 0.9, "name": "n"}, {}).record
+    table = constant_rule_sync(record, loaded, "d:level", "low")["document"]["rules"]["level"]
+    assert table["inputs"] == [{"read": "t:state.score", "helper": None, "params": {}}]
+    assert table["rows"] == [{"cells": ["-"], "output": {"literal": "low"}}]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -487,6 +598,31 @@ def test_two_disjoint_state_fields_are_both_set() -> None:
     ]
     (state,) = intervene_sync(go().record, LOADED, edits)["items"]
     assert (state["value"]["subject"], state["value"]["sender"]) == ("bye", {"address": "b@x"})
+
+
+def test_each_edit_is_checked_with_the_edits_before_it_applied() -> None:
+    loaded = load(label_sets.design())
+    record = label_sets.run(["ann", "bo"])
+    over_cy = {"none": 0.1, "several": 0.1, "ann": 0.7, "cy": 0.1}
+    edits = [{"ref": label_sets.SET, "value": ["ann", "cy"]}, {"ref": "q:sender", "value": over_cy}]
+    result = intervene_sync(record, loaded, edits)
+    assert result["items"][1]["value"]["labels"] == ["none", "several", "ann", "cy"]
+    assert result["findings"] == []
+    exc = refusal(intervene_sync, record, loaded, edits[::-1])
+    assert (exc.reason, exc.ref) == (R.nonconforming, "q:sender")
+    gone = [{"ref": label_sets.SET, "value": Unavailable(Cause("raised", []))}, edits[1]]
+    assert refusal(intervene_sync, record, loaded, gone).reason is R.nonconforming
+
+
+def test_a_span_is_bounded_by_the_text_an_earlier_edit_set() -> None:
+    record, loaded = extraction_ran(), extraction.loaded()
+    owe = {"path": "t:state.body", "value": "Owe"}
+    within = {"ref": "q:amount", "value": {**extraction.AMOUNT, "span": [0, 3]}}
+    past = {"ref": "q:amount", "value": extraction.AMOUNT}  # its span [4, 7]
+    intervene_sync(record, loaded, [owe, within])
+    intervene_sync(record, loaded, [past, owe])
+    exc = refusal(intervene_sync, record, loaded, [owe, past])
+    assert (exc.reason, exc.ref) == (R.nonconforming, "q:amount")
 
 
 @pytest.mark.parametrize(
@@ -685,7 +821,7 @@ def test_the_copy_carries_its_own_hash_and_is_read_back(
 
 
 def test_a_constant_rule_alone_makes_no_copy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_edit, "_copy", None)
+    monkeypatch.setattr(_edit, "_record_copy", None)
     constant_rule_sync(go().record, LOADED, "d:route", "no")
 
 
@@ -730,18 +866,68 @@ def test_no_record_is_reachable_from_a_jobs_output(job: Callable[[object], Any])
 # Records of earlier formats
 
 
-@pytest.mark.parametrize("fmt", [2, 3, 4, 5, 6, 7])
-def test_a_record_of_an_earlier_format_is_copied_and_read_back(fmt: int) -> None:
+PROFILE = ["elicitation", "model_reported", "model_requested", "precision", "prompt", "provider"]
+NULLED: dict[int, list[str]] = {
+    2: ["elicitation", "prompt", "snapshot"],
+    3: ["elicitation", "precision", "prompt", "snapshot"],
+    4: ["elicitation", "precision", "prompt", "snapshot"],
+    5: [*PROFILE, "revision", "runtime"],
+    6: [*PROFILE, "revision", "runtime"],
+    7: [*PROFILE, "revision", "runtime"],
+}
+"""The hashed provenance members each stored record's call item holds, which fail_call nulls."""
+
+
+def stored(fmt: int) -> tuple[LoadedDesign, Record]:
     folder = TESTS / f"format_{fmt}"
     loaded = load((folder / "design.json").read_bytes())
-    record = read_record((folder / "record.json").read_bytes())
+    return loaded, read_record((folder / "record.json").read_bytes())
+
+
+@pytest.mark.parametrize("fmt", sorted(NULLED))
+def test_a_record_of_an_earlier_format_is_copied_and_read_back(fmt: int) -> None:
+    loaded, record = stored(fmt)
     asked = next(i for i in record.log if i["item"] == "entry" and i["ref"].startswith("q:"))
     probabilities = asked["value"]["probabilities"]
     same = set_entry_sync(record, loaded, asked["ref"], probabilities)
     assert same["entry"] == asked
     assert [f for f in same["findings"] if f["kind"] is not K.helpers_mismatch] == []
-    source = next(i for i in record.log if i["item"] == "call")["sources"][0]
-    assert fail_call_sync(record, loaded, source, "raised")["call"]["outcome"] != "returned"
+    index, call = next((n, i) for n, i in enumerate(record.log) if i["item"] == "call")
+    refs = sorted(i["ref"] for i in record.log if i["item"] == "entry" and i["call"] == index)
+    failed = fail_call_sync(record, loaded, call["sources"][0], "raised")["call"]
+    nulled = dict[str, object].fromkeys(NULLED[fmt])
+    if fmt >= 5:
+        nulled["claimed"] = []
+    assert failed == {**call, "outcome": {"failed": {"code": "raised", "refs": refs}}, **nulled}
+    held = set(call) - {"item", "outcome", "questions", "round", "sources"}
+    assert held == set(nulled)
+
+
+@pytest.mark.parametrize(
+    ("fmt", "code", "held"),
+    [
+        (2, "unsupported", False),
+        (3, "unsupported", True),
+        (3, "timed-out", False),
+        (3, "raised", False),
+        (4, "timed-out", True),
+        (4, "raised", True),
+    ],
+)
+def test_a_marker_the_records_format_does_not_hold_is_refused_marker(
+    fmt: int, code: str, held: bool
+) -> None:
+    loaded, record = stored(fmt)
+    ref = next(i["ref"] for i in record.log if i["item"] == "entry" and i["ref"].startswith("q:"))
+    marker = Unavailable(Cause(code, [ref]))
+    if held:
+        assert set_entry_sync(record, loaded, ref, marker)["entry"]["marker"]["cause"]["code"] == (
+            code
+        )
+    else:
+        exc = refusal(set_entry_sync, record, loaded, ref, marker)
+        assert (exc.reason, exc.ref) == (R.marker, ref)
+        assert f"format-{fmt}" in str(exc)
 
 
 # ---------------------------------------------------------------------------------------------
