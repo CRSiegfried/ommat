@@ -14,7 +14,18 @@ import extraction as x
 import test_label_sets as label_sets
 import test_per_candidate as pc
 from designs import minimal
-from ommat import CallResult, InvalidRecord, Question, Record, Source, Text, decide_sync, load
+from ledger_logs import rehashed
+from ommat import (
+    CallResult,
+    InvalidRecord,
+    Question,
+    Record,
+    Source,
+    Text,
+    decide_sync,
+    load,
+    read_record,
+)
 from ommat.evaluation import EvaluationRefusal, EvaluationStore, RefusalReason, write_gold_answers
 
 R = RefusalReason
@@ -376,6 +387,10 @@ def test_the_refusals_come_in_their_order(tmp_path: Path) -> None:
     old_set(tmp_path)
     one, two = ONE.record_hash, TWO.record_hash
     bad, conflict = {"q:tone": "hot"}, {"q:spam": "yes", "q:junk": "no"}
+    exc = refused(tmp_path, "v1", [unfinished(), b"not json"], {"sha256:nope": {"q:a": 1}})
+    assert exc.reason is R.invalid_record
+    exc = refused(tmp_path, "v1", [ONE, unfinished()], {one: {"q:nope": "yes"}})
+    assert exc.reason is R.unfinished
     order = [
         ({one: bad, two: {"q:nope": "yes"}}, "v0", R.not_found),
         ({one: conflict, two: bad}, "v0", R.invalid_label),
@@ -394,3 +409,123 @@ def test_labels_not_mappings_are_type_errors(tmp_path: Path) -> None:
         write_gold_answers("v1", [ONE], [], results=store)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="not a mapping of refs"):
         write_gold_answers("v1", [ONE], {ONE.record_hash: "yes"}, results=store)  # type: ignore[dict-item]
+
+
+# ---------------------------------------------------------------------------------------------
+# Unfinished turns, failed calls and marker sets
+
+
+def edited(record: Record, edit: Any) -> Record:
+    """``record`` with its log edited by ``edit`` and its hash recomputed, read back."""
+    doc = json.loads(record.document)
+    doc["log"] = edit(doc["log"])
+    return read_record(rehashed(doc))
+
+
+def unfinished() -> Record:
+    def cut(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [i for i in log if i["item"] != "verdict"]
+
+    return edited(ONE, cut)
+
+
+def test_an_unfinished_record_is_refused_naming_its_turn(tmp_path: Path) -> None:
+    record = unfinished()
+    exc = refused(tmp_path, "v1", [ONE, record], {ONE.record_hash: {"q:spam": "yes"}})
+    assert (exc.reason, exc.turn, exc.ref) == (R.unfinished, record.record_hash, None)
+
+
+def test_an_entry_of_a_failed_call_takes_a_label(tmp_path: Path) -> None:
+    async def boom(batch: Any, *, seconds: float) -> CallResult:
+        raise RuntimeError("down")
+
+    record = decide_sync(LOADED, x.STATE, {"default": boom}).record
+    assert "failed" in next(i for i in record.log if i["item"] == "call")["outcome"]
+    labels = {record.record_hash: {"q:urgency": "low"}}
+    written = write_gold_answers("v1", [record], labels, results=EvaluationStore(tmp_path))
+    assert written == [gold("v1", record, "q:urgency", "low")]
+
+
+def test_a_candidate_set_holding_a_marker_leaves_its_fixed_labels(tmp_path: Path) -> None:
+    def marked(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for item in log:
+            if item.get("ref") == label_sets.SET:
+                del item["value"]
+                cause = {"code": "raised", "refs": [label_sets.SET]}
+                item["marker"] = {"kind": "Unavailable", "cause": cause}
+        return log
+
+    record = edited(label_sets.run(["ann", "bo"]), marked)
+    turn_id = record.record_hash
+    store = EvaluationStore(tmp_path)
+    written = write_gold_answers("v1", [record], {turn_id: {"q:sender": "none"}}, results=store)
+    assert [e["value"] for e in written] == ["none"]
+    exc = refused(tmp_path, "v2", [record], {turn_id: {"q:sender": "ann"}})
+    assert (exc.reason, exc.ref) == (R.invalid_label, "q:sender")
+
+
+# ---------------------------------------------------------------------------------------------
+# More of a copy
+
+
+def test_a_copy_over_a_grounded_question_takes_each_candidates_old_label(tmp_path: Path) -> None:
+    record = pc.decided()
+    store = EvaluationStore(tmp_path)
+    labels = {record.record_hash: {pc.REFS[0]: "yes", pc.REFS[1]: "no"}}
+    write_gold_answers("v1", [record], labels, results=store)
+    written = write_gold_answers("v2", [record], {}, results=store, copy_from="v1")
+    assert [(e["key"]["candidate"], e["value"]) for e in written] == [
+        (pc.STREETS[0], "yes"),
+        (pc.STREETS[1], "no"),
+    ]
+
+
+def test_a_copied_value_not_a_label_of_its_question_is_invalid(tmp_path: Path) -> None:
+    store = EvaluationStore(tmp_path)
+    held = key("v1", ONE, "q:spam")
+    store.write({"kind": "gold-answer", "format": 2, "key": held, "value": "maybe"})
+    store.write(
+        {
+            "kind": "gold-answer",
+            "format": 2,
+            "key": key("v1", ONE, "q:number"),
+            "value": {"value": "many"},
+        }
+    )
+    exc = refused(tmp_path, "v2", [ONE], {ONE.record_hash: {"q:number": None}}, copy_from="v1")
+    assert (exc.reason, exc.turn, exc.ref) == (R.invalid_label, ONE.record_hash, "q:junk")
+    labels = {ONE.record_hash: {"q:spam": "no"}}
+    exc = refused(tmp_path, "v2", [ONE], labels, copy_from="v1")
+    assert (exc.reason, exc.ref) == (R.invalid_label, "q:number")
+    labels = {ONE.record_hash: {"q:spam": "no", "q:number": {"value": 2}}}
+    written = write_gold_answers("v2", [ONE], labels, results=store, copy_from="v1")
+    assert [e["value"] for e in written] == ["no", {"value": 2}]
+
+
+def test_an_old_entry_of_an_unknown_format_given_a_label_is_held_and_not_read(
+    tmp_path: Path,
+) -> None:
+    store = EvaluationStore(tmp_path)
+    held = key("v1", ONE, "q:spam")
+    store.write({"kind": "gold-answer", "format": 3, "key": held, "value": ["?"]})
+    labels = {ONE.record_hash: {"q:spam": "yes"}}
+    written = write_gold_answers("v2", [ONE], labels, results=store, copy_from="v1")
+    assert written == [gold("v2", ONE, "q:junk", "yes")]
+
+
+class Refusing(EvaluationStore):
+    """A store whose writes refuse with another reason than ``held-key``."""
+
+    def write(self, entry: dict[str, Any]) -> None:
+        raise EvaluationRefusal("no", reason=R.invalid_entry)
+
+
+def test_a_store_refusal_other_than_held_key_at_a_write_passes_through(tmp_path: Path) -> None:
+    labels = {ONE.record_hash: {"q:spam": "yes"}}
+    with pytest.raises(EvaluationRefusal) as raised:
+        write_gold_answers("v1", [ONE], labels, results=Refusing(tmp_path))
+    assert (raised.value.reason, str(raised.value), raised.value.key) == (
+        R.invalid_entry,
+        "no",
+        None,
+    )

@@ -13,14 +13,21 @@ conforming to the question's value type and list flag or ``None``; a label of ``
 withdraws. The refs of one gold key are the turn's refs asking one question for one candidate.
 
 Refused in order, each before any write: ``invalid-record``, each record read in turn;
-``not-found``, then ``invalid-label``, each label in ``labels``' order; ``conflicting-labels``,
-each key in record and log order; ``unknown-entry`` for an old entry of a format other than 1
-and 2, then ``empty-copy``, every key looked up under ``copy_from``; ``held-key`` naming every
-key to be written that the store already holds. A key is written with its given label, or with
-none given its old one, its value as the old entry holds it; the job writes nothing for a
-key given ``None`` or left with no label. A held key at a write is another run's, refused with
-the held key first, then those this run wrote, in write order. The entries written are
-returned, in write order, plain data.
+``unfinished``, a record with no ``verdict`` item; ``not-found``, then ``invalid-label``, each
+label in ``labels``' order; ``conflicting-labels``, each key in record and log order;
+``empty-copy`` when ``copy_from`` holds none of the keys, whatever its entries' formats; for each
+key given no label, in the same order, ``unknown-entry`` for its old entry of a format other
+than 1 and 2, then ``invalid-label`` for an old value that is not a label of the question,
+checked as a given one; ``held-key`` naming every key to be written that the store already
+holds. A key is written with its given label, or with none given its old one; the job writes
+nothing for a key given ``None`` or left with no label. A candidate-valued set whose entry
+holds a marker leaves its fixed part's names as the labels.
+
+The writes are not atomic across keys: an ``OSError`` or a racing run mid-write leaves the keys
+already written, and the store being write-once, a rerun refuses ``held-key`` naming them. A
+held key at a write is another run's, refused with the held key first, then those this run
+wrote, in write order; any other refusal passes through. The entries written are returned, in
+write order, plain data.
 """
 
 from collections.abc import Iterable, Mapping
@@ -31,13 +38,14 @@ from ommat._canonical import encode
 from ommat._refs import declared_ref, parse_ref
 from ommat._values import guarded_repr, type_name
 from ommat.evaluation._diff import _read
-from ommat.evaluation._edit import _labels
+from ommat.evaluation._edit import _labels, _name
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
 
 _R = RefusalReason
 _Log = list[dict[str, Any]]
 _Key = dict[str, str]
+_Id = tuple[str, str, str]  # a key's turn, question and candidate
 
 KIND = "gold-answer"
 FORMAT = 2
@@ -59,28 +67,18 @@ def write_gold_answers(
     for i, document in enumerate(records):
         read = _read(document, f"records[{i}]")
         logs.setdefault(read.record_hash, read.log)  # read once: every read decodes afresh
-    asked = {turn: _asked(log) for turn, log in logs.items()}
-    given = _given(labels, asked)
-    formed: dict[tuple[str, str], object] = {}  # each given label as written, None withdrawing
-    for turn, ref, label in given:
-        question = asked[turn][ref]
-        form = None if label is None else _form(label, question, logs[turn])
-        if label is not None and form is None:
-            fits = (
-                '{"value": v}, v conforming to its value type or null'
-                if question["kind"] == AnswerKind.extraction
-                else "the name of one of its question's labels"
-            )
+    for turn, log in logs.items():
+        if not any(item["item"] == "verdict" for item in log):
             raise EvaluationRefusal(
-                f"label {guarded_repr(label)} for {ref} in turn {turn} is not {fits}",
-                reason=_R.invalid_label,
-                turn=turn,
-                ref=ref,
+                f"turn {turn} has no verdict item", reason=_R.unfinished, turn=turn
             )
-        formed[turn, ref] = form
-    keys: list[tuple[_Key, list[object]]] = []  # each key and its refs' given labels
+    asked = {turn: _asked(log) for turn, log in logs.items()}
+    formed: dict[tuple[str, str], object] = {}  # each given label as written, None withdrawing
+    for turn, ref, label in _given(labels, asked):
+        formed[turn, ref] = None if label is None else _checked(label, turn, ref, asked, logs)
+    keys: list[tuple[_Id, _Key, list[str], list[object]]] = []  # its refs and their labels
     for turn in asked:
-        for key, refs in _keys(gold_set, turn, asked[turn]):
+        for ident, key, refs in _keys(gold_set, turn, asked[turn]):
             mine = [ref for ref in refs if (turn, ref) in formed]
             forms = [formed[turn, ref] for ref in mine]
             if len({encode(f) for f in forms}) > 1:
@@ -93,11 +91,11 @@ def write_gold_answers(
                     turn=turn,
                     key=[key],
                 )
-            keys.append((key, forms))
-    old = _copied(copy_from, [key for key, _ in keys], results)
+            keys.append((ident, key, refs, forms))
+    old = _held(copy_from, [(ident, key) for ident, key, _, _ in keys], results)
     written: list[dict[str, Any]] = []
-    for key, forms in keys:
-        value = forms[0] if forms else old.get(_id(key))
+    for ident, key, refs, forms in keys:
+        value = forms[0] if forms else _copied(old[ident], refs[0], key, asked, logs)
         if value is not None:
             written.append({"kind": KIND, "format": FORMAT, "key": key, "value": value})
     held: list[_Key] = [e["key"] for e in written if results.lookup(KIND, e["key"]) is not None]
@@ -105,7 +103,7 @@ def write_gold_answers(
         raise EvaluationRefusal(
             f"the store holds {len(held)} of the {KIND} keys to write", reason=_R.held_key, key=held
         )
-    done: list[_Key] = []
+    done: list[_Key] = []  # not atomic across keys: a failure here leaves these written
     for entry in written:
         try:
             results.write(entry)
@@ -154,6 +152,28 @@ def _given(
     return given
 
 
+def _checked(
+    label: object, turn: str, ref: str, asked: dict[str, dict[str, Any]], logs: dict[str, _Log]
+) -> object:
+    """``label`` as written for the question at ``ref`` in ``turn``; ``invalid-label``
+    otherwise."""
+    question = asked[turn][ref]
+    form = _form(label, question, logs[turn])
+    if form is None:
+        fits = (
+            '{"value": v}, v conforming to its value type or null'
+            if question["kind"] == AnswerKind.extraction
+            else "the name of one of its question's labels"
+        )
+        raise EvaluationRefusal(
+            f"label {guarded_repr(label)} for {ref} in turn {turn} is not {fits}",
+            reason=_R.invalid_label,
+            turn=turn,
+            ref=ref,
+        )
+    return form
+
+
 def _form(label: object, question: dict[str, Any], log: _Log) -> object | None:
     """The label as written: a name of the question's labels, or an extraction label's
     ``{"value": v}`` with ``v`` as the answer holds it, a list a list; ``None`` when it is
@@ -172,51 +192,55 @@ def _form(label: object, question: dict[str, Any], log: _Log) -> object | None:
             return None
         return {"value": list(cast("tuple[object, ...]", v)) if type(v) is tuple else v}
     names = _labels(question, log)
-    return label if type(label) is str and names is not None and label in names else None
+    if names is None:  # a candidate set holding a marker: its fixed part's names stand
+        names = tuple(_name(n) for n in cast("list[object]", question["labels"]["fixed"]))
+    return label if type(label) is str and label in names else None
 
 
 def _keys(
     gold_set: str, turn: str, asked: dict[str, dict[str, Any]]
-) -> list[tuple[_Key, list[str]]]:
+) -> list[tuple[_Id, _Key, list[str]]]:
     """Each gold key of a turn's questions, in log order of its first ref, with its refs."""
-    keys: dict[tuple[str, str], tuple[_Key, list[str]]] = {}
+    keys: dict[_Id, tuple[_Id, _Key, list[str]]] = {}
     for ref, question in asked.items():
-        candidate = parse_ref(ref).candidate or ""
-        key = {
-            "gold_set": gold_set,
-            "question": question["identity"],
-            "turn": turn,
-            "candidate": candidate,
-        }
-        keys.setdefault((key["question"], candidate), (key, []))[1].append(ref)
+        ident = (turn, question["identity"], parse_ref(ref).candidate or "")
+        _, identity, candidate = ident
+        key = {"gold_set": gold_set, "question": identity, "turn": turn, "candidate": candidate}
+        keys.setdefault(ident, (ident, key, []))[2].append(ref)
     return list(keys.values())
 
 
-def _id(key: _Key) -> tuple[str, str, str]:
-    return key["question"], key["turn"], key["candidate"]
-
-
-def _copied(
-    copy_from: str | None, keys: list[_Key], results: EvaluationStore
-) -> dict[tuple[str, str, str], object]:
-    """Each key's value under ``copy_from``, by question, turn and candidate; ``unknown-entry``
-    for an entry of a format the job does not know, then ``empty-copy`` when none is held."""
+def _held(
+    copy_from: str | None, keys: list[tuple[_Id, _Key]], results: EvaluationStore
+) -> dict[_Id, dict[str, Any] | None]:
+    """Each key's entry under ``copy_from``, or ``None``; ``empty-copy`` when none is held,
+    whatever its format."""
     if copy_from is None:
-        return {}
-    old: dict[tuple[str, str, str], object] = {}
-    for key in keys:
-        entry = results.lookup(KIND, {**key, "gold_set": copy_from})
-        if entry is None:
-            continue
-        if entry["format"] not in _READ:
-            raise EvaluationRefusal(
-                f"the {KIND} entry under {entry['key']!r} is format {entry['format']}, not 1 or 2",
-                reason=_R.unknown_entry,
-                key=[entry["key"]],
-            )
-        old[_id(key)] = entry["value"]
-    if not old:
+        return {ident: None for ident, _ in keys}
+    old = {ident: results.lookup(KIND, {**key, "gold_set": copy_from}) for ident, key in keys}
+    if all(entry is None for entry in old.values()):
         raise EvaluationRefusal(
             f"gold set {copy_from!r} holds no key the job looks up", reason=_R.empty_copy
         )
     return old
+
+
+def _copied(
+    entry: dict[str, Any] | None,
+    ref: str,
+    key: _Key,
+    asked: dict[str, dict[str, Any]],
+    logs: dict[str, _Log],
+) -> object:
+    """The old entry's value, checked as a given label is; ``unknown-entry`` for a format the
+    job does not read; ``None`` with no entry."""
+    if entry is None:
+        return None
+    if entry["format"] not in _READ:
+        raise EvaluationRefusal(
+            f"the {KIND} entry under {entry['key']!r} is format {entry['format']}, not one of "
+            f"{', '.join(map(str, _READ))}",
+            reason=_R.unknown_entry,
+            key=[entry["key"]],
+        )
+    return _checked(entry["value"], key["turn"], ref, asked, logs)
