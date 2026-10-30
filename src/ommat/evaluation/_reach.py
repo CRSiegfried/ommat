@@ -143,7 +143,8 @@ def _points(
     rendered: tuple[str, ...] | None = None
     if question in loaded._label_sets:
         # A returned call asked it over a set holding a value of at least one candidate: a
-        # marker or an empty set leaves the question out with its call null (§candidate-sets).
+        # marker, an empty set or labels the engine refuses leave the question out with its call
+        # null (§candidate-sets).
         rendered = _labels(call["questions"][question], log)
         assert rendered is not None
     recorded = encode(entry["value"] if "value" in entry else entry["marker"], _ITEM_DEPTH)
