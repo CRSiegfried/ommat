@@ -1,8 +1,9 @@
 """The evaluation subpackage: jobs that measure a design against past turns through replay,
 and the two stores they keep their inputs and results in. The names ``__all__`` lists are
 public, under the same deprecation rule as ``ommat.__all__``. Do-and-diff's six jobs, the
-deciding inputs, the switching-value job and the sweep job are shipped, each async with a
-``_sync`` twin, and the gold-answers job and the correlated-group confirmation job, sync.
+deciding inputs, the switching-value job, the sweep job and the question-reach job are
+shipped, each async with a ``_sync`` twin, and the gold-answers job and the correlated-group
+confirmation job, sync.
 
 ``set_entry``, ``fail_call``, ``set_state_field`` and ``constant_rule`` each change one input of a
 recorded turn, an entry a call wrote, a whole call, a ``t:state`` field or a rule made constant, and
@@ -25,6 +26,10 @@ and the choice as a ``certificate`` entry. ``confirm_group``, sync, counts for e
 declared correlated group's ``q:`` refs, over a split's turns, or turns and candidates for a
 grounded group, in which both hold an answer, the units in which each erred against its gold answer
 and those in which both did, and writes them as a ``group-counts`` entry, giving no verdict.
+``question_reach`` tries each question's answer, changed alone at each of its lint points by
+``set_entry``'s edit, in every ``q:`` entry a returned call wrote in the records given, and
+reports a question ``live`` with its first witness when some trial changes the plan or the
+verdict, else ``not-determined``, ``no-change-found`` or ``never-asked``.
 ``split_id``, sync, gives the id of a split of records, so a caller names a split as the sweep and
 ``confirm_group`` check it. ``DesignStore`` keeps a loaded design's document under its design hash
 and fetches it back through ``load``; ``EvaluationStore`` keeps write-once entries by kind and key.
@@ -32,7 +37,8 @@ A job or a store refuses with ``EvaluationRefusal``, its ``reason`` a ``RefusalR
 
 The edits are in ``_edit``, the deciding inputs, tried through them, in ``_deciding``, the
 switching-value job in ``_switching``, the gold-answers job in ``_gold``, the sweep job in
-``_sweep``, the correlated-group confirmation job in ``_group``, the splits both read in
+``_sweep``, the correlated-group confirmation job in ``_group``, the question-reach job in
+``_reach``, the splits both read in
 ``_splits``, ``use_answers`` and the
 record checks and replay they share in ``_diff``, the stores in ``_store`` and the refusal in
 ``_refusal``.
@@ -54,6 +60,7 @@ from ommat.evaluation._edit import (
 )
 from ommat.evaluation._gold import write_gold_answers
 from ommat.evaluation._group import confirm_group
+from ommat.evaluation._reach import question_reach, question_reach_sync
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._splits import split_id
 from ommat.evaluation._store import DesignStore, EvaluationStore
@@ -74,6 +81,8 @@ __all__ = [
     "fail_call_sync",
     "intervene",
     "intervene_sync",
+    "question_reach",
+    "question_reach_sync",
     "set_entry",
     "set_entry_sync",
     "set_state_field",

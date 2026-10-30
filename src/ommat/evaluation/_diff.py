@@ -104,15 +104,19 @@ OUTSIDE = frozenset(
 """The findings of a run that asked outside the record, which therefore says nothing of it."""
 
 
-async def baseline(log: list[dict[str, Any]], loaded: LoadedDesign) -> None:
+async def baseline(
+    log: list[dict[str, Any]], loaded: LoadedDesign, *, turn: str | None = None
+) -> None:
     """Replay ``log`` unedited under ``loaded``; ``baseline-differs`` on any finding but
-    ``helpers-mismatch``, a note on the helper version alone, the kinds in the message."""
+    ``helpers-mismatch``, a note on the helper version alone, the kinds in the message, naming
+    ``turn`` when given."""
     found = await _replayed(log, loaded, log)
     kinds = [str(f["kind"]) for f in found if f["kind"] is not FindingKind.helpers_mismatch]
     if kinds:
         raise EvaluationRefusal(
             f"the record does not replay cleanly under loaded: {', '.join(dict.fromkeys(kinds))}",
             reason=_R.baseline_differs,
+            turn=turn,
         )
 
 

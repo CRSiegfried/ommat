@@ -205,6 +205,8 @@ EVALUATION = {
     "fail_call_sync",
     "intervene",
     "intervene_sync",
+    "question_reach",
+    "question_reach_sync",
     "set_entry",
     "set_entry_sync",
     "set_state_field",
