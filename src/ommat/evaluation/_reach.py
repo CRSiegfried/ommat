@@ -15,10 +15,11 @@ recorded ``Failed``, in log order, the job runs one form 1 trial, ``set_entry``'
 ``_edit``'s one procedure, at each of the entry's points other than its recorded value or marker
 by canonical bytes. An entry's points are its declared question's lint points, a grounded
 entry's with its own marker last; a candidate-valued question's are each fixed label and then
-the first candidate at 1, every other label the call asked at 0, the candidate point dropped
-when the set rendered no candidate. A trial whose replay reports ``not-in-record``,
-``ref-not-in-record`` or ``question-changed`` is undetermined; any other reaches when its
-findings hold ``plan`` or ``verdict``, a plan compared without its ``context``.
+the first candidate at 1, every other label the call asked with at 0; a returned call always
+rendered a candidate, since an empty set leaves the question out with its call null. A trial
+whose replay reports ``not-in-record``, ``ref-not-in-record`` or ``question-changed`` is
+undetermined, whatever else it finds; any other reaches when its findings hold ``plan`` or
+``verdict``, a plan compared without its ``context``.
 
 A question is ``live`` when some trial of an entry of it reaches; else ``not-determined`` when
 some trial was undetermined; else ``no-change-found`` when some trial ran; else
@@ -41,7 +42,7 @@ from ommat._values import type_name
 from ommat.evaluation._diff import OUTSIDE, _read, _refuse_unfit, _run_sync, baseline
 from ommat.evaluation._edit import _applied, _labels, _q_value, _SetEntry
 from ommat.evaluation._splits import _refuse_records
-from ommat.helpers._points import OnTop, Point, entry_points, filled, fresh, labels_of
+from ommat.helpers._points import OnTop, Point, entry_points, filled, fresh
 
 _K = FindingKind
 _DECIDING = frozenset({_K.plan, _K.verdict})
@@ -141,7 +142,10 @@ def _points(
     call = log[cast(int, entry["call"])]
     rendered: tuple[str, ...] | None = None
     if question in loaded._label_sets:
+        # A returned call asked it over a set holding a value of at least one candidate: a
+        # marker or an empty set leaves the question out with its call null (§candidate-sets).
         rendered = _labels(call["questions"][question], log)
+        assert rendered is not None
     recorded = encode(entry["value"] if "value" in entry else entry["marker"], _ITEM_DEPTH)
     out: list[object] = []
     for point in points:
@@ -151,11 +155,7 @@ def _points(
                 out.append(live)
             continue
         if isinstance(live, OnTop):
-            if rendered is None:  # the set holds no value: no answer fits the labels asked
-                continue
-            fixed = labels_of(loaded, question)
-            if live.label is None and len(rendered) == len(fixed):
-                continue  # no candidate rendered
+            assert rendered is not None
             live = live.over(rendered, loaded._label_at[question])
         written = _q_value(ref, live, call, log, loaded)
         if written is not None and encode(written, _ITEM_DEPTH) == recorded:

@@ -26,6 +26,7 @@ from ommat import (
     Policy,
     Question,
     Record,
+    Requirement,
     Rule,
     Source,
     Text,
@@ -227,6 +228,87 @@ def test_a_reaching_trial_beats_an_undetermined_one() -> None:
     assert report["questions"]["q:tone"]["status"] == "live"  # the marker reaches
 
 
+def by_cold(r: Any) -> Plan:
+    if r.read("d:cold") is True:
+        return Plan("execute")
+    return Plan("escalate", reason="warm")
+
+
+def test_a_trial_outside_the_record_is_undetermined_though_its_plan_changes(
+    tried: list[Any],
+) -> None:
+    loaded = load(
+        design(
+            sources={"ask": ASK, "late": LATE, "more": MORE},
+            policy=Policy(by_cold, version="p", reads=["d:cold"]),
+            rules={"cold": Rule("d:cold", t.boolean, cold, version="1", reads=["q:tone"])},
+        )
+    )
+    report = question_reach_sync([turn(loaded=loaded)], loaded)
+    tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
+    # cold at 1 opens the gate on a source never called and changes the plan
+    assert "not-in-record" in tone[1]
+    assert "plan" in tone[1]
+    assert not any("plan" in kinds or "verdict" in kinds for kinds in (tone[0], tone[2]))
+    assert report["questions"]["q:tone"] == {"status": "not-determined", "witness": None}
+
+
+def always(r: Any) -> Plan:
+    return Plan("execute")
+
+
+def test_a_trial_changing_the_verdict_alone_reaches(tried: list[Any]) -> None:
+    ok = Rule(
+        "d:ok",
+        t.boolean,
+        go,
+        version="1",
+        reads=["q:go"],
+        params=["go/bar", "go/margin"],
+        boundaries={"q:go": roles(bar=["go/bar"], margin=["go/margin"])},
+    )
+    loaded = load(
+        design(
+            policy=Policy(always, version="p"),
+            rules={"ok": ok},
+            requirements=[Requirement("d:ok", True)],
+            default_deny=False,
+        )
+    )
+    record = turn(loaded=loaded)
+    report = question_reach_sync([record], loaded)
+    assert report["questions"]["q:go"]["status"] == "live"
+    first = next(kinds for ref, _, kinds in tried if ref == "q:go" and "verdict" in kinds)
+    assert "plan" not in first
+    witness = report["questions"]["q:go"]["witness"]
+    assert witness["value"]["probabilities"] == {"yes": 0.0, "no": 1.0}
+
+
+def by_both(r: Any) -> Plan:
+    if r.read("d:go") is True and r.read("d:known") is True:
+        return Plan("execute")
+    return Plan("escalate", reason="not both")
+
+
+BOTH = load(
+    design(
+        policy=Policy(by_both, version="p", reads=["d:go", "d:known"]),
+        rules={"go": GO, "known": KNOWN},
+    )
+)
+
+
+def test_the_witness_is_the_second_record_when_only_it_reaches(tried: list[Any]) -> None:
+    shut, open_ = turn(p_yes=0.0, loaded=BOTH), turn(p_yes=0.95, loaded=BOTH)
+    report = question_reach_sync([shut, open_], BOTH)
+    tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
+    assert len(tone) == 6  # three in each record
+    assert not any("plan" in kinds for kinds in tone[:3])  # q:go escalates the first anyway
+    witness = report["questions"]["q:tone"]["witness"]
+    assert witness["record"] == open_.record_hash
+    assert witness["value"]["kind"] == "Unavailable"
+
+
 def test_no_record_asks_nothing_and_runs_no_trial() -> None:
     report = question_reach_sync([], LOADED)
     assert report["records"] == []
@@ -399,6 +481,17 @@ def test_a_candidate_valued_answer_recorded_at_a_point_is_skipped(tried: list[An
 # values
 
 
+def test_a_candidate_valued_question_over_an_empty_set_is_never_asked(tried: list[Any]) -> None:
+    # An empty set leaves the question out with its call null, so a returned call always
+    # rendered a candidate and no trial is ever made without one.
+    record = label_sets.run([])
+    assert entry(record.log, "q:sender")["call"] is None
+    report = question_reach_sync([record], load(label_sets.design()))
+    assert [ref for ref, _, _ in tried] == ["q:other"] * 3
+    assert report["trials"] == 3
+    assert report["questions"]["q:sender"] == {"status": "never-asked", "witness": None}
+
+
 def test_values_narrows_a_label_question_with_no_grid_entry(tried: list[Any]) -> None:
     report = question_reach_sync([turn()], LOADED, values={"q:tone": ["cold"], "q:late": ["no"]})
     assert report["narrowed"] == ["q:late", "q:tone"]
@@ -553,3 +646,53 @@ def test_the_sync_twin_inside_a_running_loop_raises_before_doing_anything() -> N
             question_reach_sync(object(), object())  # type: ignore[arg-type]
 
     asyncio.run(main())
+
+
+def test_witness_and_trial_values_are_copies(monkeypatch: pytest.MonkeyPatch) -> None:
+    record = turn(loaded=MARKED)
+    parsed = json.loads(record.document)
+    kept = copy.deepcopy(parsed)
+    held: list[Any] = []  # each trial's value and the entry its copy wrote
+    real = _reach._applied
+
+    async def holding(read: Any, log: Any, loaded: Any, edits: Any, rule: Any, f: Any) -> Any:
+        out = await real(read, log, loaded, edits, rule, f)
+        held.append((edits[0].value, out[0][0]))
+        return out
+
+    monkeypatch.setattr(_reach, "_applied", holding)
+    report = question_reach_sync([parsed], MARKED)
+    expected = copy.deepcopy(report)
+    assert report["questions"]["q:tone"]["status"] == "live"
+    for value, item in held:  # spoil every trial's value and written entry
+        if type(value) is dict:
+            cast("dict[str, Any]", value).clear()
+        cast("dict[str, Any]", item.get("value", item.get("marker"))).clear()
+    assert report == expected  # the witness shares nothing with a trial
+    report["questions"]["q:tone"]["witness"]["value"]["cause"]["refs"].append("q:go")
+    report["records"].clear()
+    assert question_reach_sync([parsed], MARKED) == expected  # nor with a later run
+    assert question_reach_sync([record], MARKED) == expected
+    assert parsed == kept
+
+
+def test_a_trial_value_spoiled_by_its_trial_reaches_no_later_trial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = turn()
+    given: list[Any] = []
+    real = _reach._applied
+
+    async def spoiling(read: Any, log: Any, loaded: Any, edits: Any, rule: Any, f: Any) -> Any:
+        value = edits[0].value
+        given.append(copy.deepcopy(value))
+        out = await real(read, log, loaded, edits, rule, f)
+        if type(value) is dict:
+            cast("dict[str, Any]", value).clear()  # the points are shared across records
+        return out
+
+    monkeypatch.setattr(_reach, "_applied", spoiling)
+    report = question_reach_sync([record, record], LOADED)
+    half = len(given) // 2
+    assert repr(given[:half]) == repr(given[half:])
+    assert report["trials"] == len(given)
