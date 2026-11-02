@@ -68,7 +68,7 @@ def answer(binding: FixtureBinding, *batch: SourceCall) -> object:
 
 def values(result: object) -> dict[str, Any]:
     assert type(result) is CallResult
-    for name in (*HASHED_DETAILS, "usage", "attempts", "request_id", "calibrated", "missing"):
+    for name in (*HASHED_DETAILS, "usage", "attempts", "request_id", "missing"):
         assert getattr(result, name) is None
     assert (result.claimed, result.clients) == ((), None)
     return result.values

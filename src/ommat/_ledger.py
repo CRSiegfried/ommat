@@ -27,9 +27,9 @@ from ommat._canonical import (
 )
 from ommat._markers import CauseCode, MarkerKind, OutcomeKind, PlanKind, VerdictKind
 from ommat._provenance import (
-    DETAILS,
     HASHED_DETAILS,
     REASONS,
+    RECORDED_DETAILS,
     STRING_DETAILS,
     precision_conforms,
 )
@@ -54,6 +54,7 @@ from ommat._values import (
     RECORD_FORMAT,
     RECORD_FORMATS,
     SETS_FORMAT,
+    UNCALIBRATED_FORMAT,
     UNSUPPORTED_FORMAT,
     WARNINGS_FORMAT,
     clipped,
@@ -695,10 +696,11 @@ _VERSIONS = _kind(_is_versions, "a non-empty object of strings")
 
 
 def _claimed_shape(value: Any, where: str) -> None:
-    """A ``claimed``: a list of strings, each a detail's name of the provenance profile."""
+    """A ``claimed``: a list of strings, each a detail's name of the provenance profile, or
+    ``calibrated``, which the format check refuses from format 7."""
     _STRINGS(value, where)
     for name in cast("list[str]", value):
-        if name not in DETAILS:
+        if name not in RECORDED_DETAILS:
             raise _LedgerError(f"{where} names {clipped(name)}, which is no detail")
 
 
@@ -706,7 +708,7 @@ _CLAIMED = cast(_Check, _claimed_shape)
 _PROFILE_ONLY = ("provider", "model_requested", "model_reported", "revision", "runtime", "claimed")
 """The call item's members from format 5, in place of ``snapshot``."""
 _CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
-"""A ``calls`` entry's members from format 5."""
+"""A ``calls`` entry's members from format 5, ``calibrated`` only before format 7."""
 
 _SHAPES: dict[str, _Check] = {
     "design": _shape({"hash": _STR, "format": _INT, "helpers": _INT}),
@@ -1015,7 +1017,7 @@ def _missing(value: Any, where: str) -> None:
     if not value:
         raise _LedgerError(f"{where} is empty; an empty member is not written")
     for name, reason in cast("dict[str, Any]", value).items():
-        if name not in DETAILS:
+        if name not in RECORDED_DETAILS:
             raise _LedgerError(f"{where} has the key {clipped(name)}, which names no detail")
         if type(reason) is not str or reason not in REASONS:
             raise _LedgerError(f"{where}[{name!r}] is not a reason of the provenance profile")
@@ -1216,6 +1218,9 @@ def _call_entry_format(entry: dict[str, Any], fmt: int, where: str) -> None:
             raise _LedgerError(f"{where} holds {name}, which a format-{fmt} record does not")
     if fmt >= PROFILE_FORMAT and "snapshot" in invalid:
         raise _LedgerError(f"{where} holds snapshot, which a format-{fmt} record does not")
+    missing = cast("dict[str, Any]", entry.get("missing", {}))
+    if fmt >= UNCALIBRATED_FORMAT and any("calibrated" in m for m in (entry, invalid, missing)):
+        raise _LedgerError(f"{where} holds calibrated, which a format-{fmt} record does not")
 
 
 def _codes(kind: str, item: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1369,6 +1374,8 @@ class Ledger:
         for name in refused:
             if name in item:
                 raise _LedgerError(f"{where} holds {name}, which a format-{fmt} record does not")
+        if fmt >= UNCALIBRATED_FORMAT and "calibrated" in item.get("claimed", ()):
+            raise _LedgerError(f"{where} claims calibrated, which a format-{fmt} record does not")
         if fmt < NOUL_DESCRIPTION_FORMAT and any(
             q["kind"] == AnswerKind.noul and q["labels"] is not None
             for q in cast("dict[str, Any]", item["questions"]).values()

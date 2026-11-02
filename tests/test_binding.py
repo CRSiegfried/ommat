@@ -23,12 +23,7 @@ def test_a_call_result_defaults_every_provenance_member_to_null() -> None:
     assert (result.warnings, result.precision) == ((), None)
     for name in ("provider", "model_requested", "model_reported", "runtime", "request_id"):
         assert getattr(result, name) is None
-    assert (result.calibrated, result.missing, result.clients, result.claimed) == (
-        None,
-        None,
-        None,
-        (),
-    )
+    assert (result.missing, result.clients, result.claimed) == (None, None, ())
 
 
 def test_a_call_result_takes_its_provenance_by_keyword_only() -> None:

@@ -24,14 +24,14 @@ The checks, by name:
   when the binding sent a request, its ``attempts`` above 0; a result that sent none, as a
   replay's, owes none;
 - ``warnings`` and ``precision``: each conforms as interpret tests it;
-- ``provenance``: each detail of the provenance profile, ``request_id``, ``calibrated``,
+- ``provenance``: each detail of the provenance profile, ``request_id``,
   ``usage``, ``attempts`` and ``clients`` in its form, ``claimed`` naming only details holding
   a value,
   ``missing`` only details and reasons of the profile and never a detail holding a value; a
   result that sent a request gives each detail a value or a reason, and one that sent none has
   no provenance;
 - ``unsupported-provenance``: a result whose every ref is ``unsupported`` has no provenance,
-  ``usage``, ``attempts``, ``request_id``, ``calibrated``, ``missing`` or ``clients``, and
+  ``usage``, ``attempts``, ``request_id``, ``missing`` or ``clients``, and
   ``truncated`` empty;
 - ``deterministic``, when asked: two calls with one batch return equal ``CallResult``s but
   for ``request_id``, which a provider gives each request afresh.
@@ -79,7 +79,6 @@ _UNSENT = (
     "usage",
     "attempts",
     "request_id",
-    "calibrated",
     "missing",
     "clients",
 )
@@ -415,9 +414,6 @@ def _provenance_problems(result: CallResult) -> list[str]:
         problems.append("clients is not null or a non-empty dict of exact strings")
     if not string_conforms(cast(object, result.request_id), exact=True):
         problems.append("request_id is not null or an exact string")
-    calibrated = cast(object, result.calibrated)
-    if not (calibrated is None or type(calibrated) is bool):
-        problems.append("calibrated is not null or a bool")
     usage = cast(object, result.usage)
     if usage is not None and not (
         type(usage) is dict and usage_conforms(cast("dict[object, object]", usage))

@@ -152,7 +152,6 @@ def _places(bad: object, key: object) -> list[tuple[str, dict[str, Any]]]:
         ("truncated", {"truncated": bad}),
         ("truncated item", {"truncated": (bad,)}),
         ("attempts", {"attempts": bad}),
-        ("calibrated", {"calibrated": bad}),
         ("request_id", {"request_id": bad}),
     ]
     for name in ("provider", "model_requested", "model_reported", "revision", "elicitation"):
@@ -205,7 +204,6 @@ _REQUEST_MEMBERS = (
     "claimed",
     "usage",
     "request_id",
-    "calibrated",
     "missing",
     "clients",
     "truncated",

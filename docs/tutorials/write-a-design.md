@@ -248,7 +248,7 @@ outside every hash.
 
 2. `start`, `latency`, `usage`, `attempts`, `warnings`, `truncated`, `sums`, `unexpected`
    and `invalid` sit under `unhashed["calls"]`, keyed by the call item's log index as a
-   string, with `request_id`, `calibrated`, `missing`, the reason for each provenance detail
+   string, with `request_id`, `missing`, the reason for each provenance detail
    a binding that sent a request leaves null, and `clients`, each present only when the binding
    gives it.
 

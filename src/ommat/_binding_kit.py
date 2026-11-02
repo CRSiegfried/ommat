@@ -253,7 +253,6 @@ class RequestProvenance:
     usage: Mapping[str, float] | None = None
     attempts: int = 0
     request_id: str | None = None
-    calibrated: bool | None = None
     missing: Mapping[str, str] | None = None
     clients: Mapping[str, str] | None = None
     truncated: tuple[str, ...] = ()
@@ -270,8 +269,7 @@ def call_result(
     ``attempts`` is above 0: each distinct ``provider``, ``model_requested``,
     ``model_reported``, ``revision``, ``elicitation``, ``prompt`` and ``request_id`` one per
     line in the order first given, ``None`` when none has one; ``runtime`` and ``clients`` each
-    merged; ``claimed`` the union, sorted; ``calibrated`` false when any request that holds one
-    says false, true when every one that holds one says true, ``None`` when none holds one;
+    merged; ``claimed`` the union, sorted;
     ``missing`` a detail's reason when every request gives one for it and the result holds no
     value for it, the first code other than ``not-sent``, else ``not-sent``;
     ``usage`` summed per key over the requests that report it, ``None`` when none does;
@@ -289,14 +287,6 @@ def call_result(
     def joined(name: str) -> str | None:
         return _joined(cast("str | None", getattr(r, name)) for r in sent)
 
-    says = [r.calibrated for r in sent if r.calibrated is not None]
-    # Read by identity, so a value off its form folds to None and never to a bool.
-    if any(x is False for x in says):
-        calibrated: bool | None = False
-    elif says and all(x is True for x in says):
-        calibrated = True
-    else:
-        calibrated = None
     result = CallResult(
         values,
         provider=joined("provider"),
@@ -311,7 +301,6 @@ def call_result(
         claimed=tuple(sorted({name for r in sent for name in r.claimed})),
         usage=usage or None,
         attempts=sum(r.attempts for r in sent) if sent else None,
-        calibrated=calibrated,
         clients=_merged("clients", (r.clients for r in sent)),
         truncated=tuple(sorted({ref for r in sent for ref in r.truncated})),
         warnings=warnings,

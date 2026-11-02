@@ -199,12 +199,12 @@ class CallResult:
     ``elicitation``, how it was asked, ``precision``, how the provider rounds probabilities
     (decimal places, ``"unrounded"``, ``{"step": s}`` or ``None`` when unknown), ``prompt``,
     and ``claimed``, the details the source asserts and cannot verify; and kept outside every
-    hash: ``usage``, ``attempts``, ``request_id``, ``calibrated``, the provider's claim that its
-    probabilities are calibrated, ``missing``, from each detail a call that sent a request
-    leaves null to its reason, ``clients``, the versions of the libraries that made the call,
-    ``truncated``, the ``q:`` refs whose answer came from a response the provider cut short, and
-    ``warnings``, the binding's own lines about the call. A binding that sent no request returns
-    no provenance. It checks nothing when built; interpret tests it at the write."""
+    hash: ``usage``, ``attempts``, ``request_id``, ``missing``, from each detail a call that
+    sent a request leaves null to its reason, ``clients``, the versions of the libraries that
+    made the call, ``truncated``, the ``q:`` refs whose answer came from a response the
+    provider cut short, and ``warnings``, the binding's own lines about the call. A binding that
+    sent no request returns no provenance. It checks nothing when built; interpret tests it at
+    the write."""
 
     values: dict[str, Any]
     _: KW_ONLY
@@ -220,7 +220,6 @@ class CallResult:
     usage: dict[str, float] | None = None
     attempts: int | None = None
     request_id: str | None = None
-    calibrated: bool | None = None
     missing: dict[str, str] | None = None
     clients: dict[str, str] | None = None
     truncated: tuple[str, ...] = ()

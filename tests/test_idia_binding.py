@@ -960,6 +960,42 @@ def test_a_local_leafs_runtime_reasons_and_claims_reach_the_call_under_ommats_na
     assert (result.provider, result.model_requested) == ("scripted", "scripted-1")
 
 
+def test_idias_calibrated_claim_is_dropped() -> None:
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        claimed: frozenset[Any] = frozenset({"model_reported", "calibrated"})
+        return Reply(answers=answer_all(wire_request, deadline), claimed=claimed)
+
+    binding, _ = built(script)
+    result = call(binding, source())
+    assert result.claimed == ("model_reported",)
+    assert not any(isinstance(v, Unavailable) for v in result.values.values())
+
+
+def test_idias_reason_for_calibrated_is_dropped() -> None:
+    from ommat.bindings.idia import _provenance  # pyright: ignore[reportPrivateUsage]
+
+    outcome = idia.Outcome(
+        keys=("q:triage/hazard",),
+        error=None,
+        provider="scripted",
+        model_requested="scripted-1",
+        model_reported=None,
+        snapshot=None,
+        elicitation=None,
+        calibrated=None,
+        prompt_sent=None,
+        usage=None,
+        latency=0.1,
+        started_at=0.0,
+        request_id=None,
+        failed_attempts=(),
+        warnings=(),
+        rounding=idia.Rounding(probability_decimals=2, score_decimals=2),
+        unreported={"calibrated": "not-reported", "snapshot": "not-pinned"},
+    )
+    assert _provenance(outcome).missing == {"revision": "not-pinned"}
+
+
 def test_a_wire_alias_is_an_unpinned_revision_and_a_runtime_that_does_not_apply() -> None:
     def script(wire_request: WireRequest, deadline: Deadline) -> Any:
         return Reply(answers=answer_all(wire_request, deadline), pinned=False)
@@ -1016,8 +1052,13 @@ def test_a_call_of_an_answered_and_a_failed_request_keeps_the_answered_ones_deta
 
 def test_idias_details_and_reasons_are_ommats_under_the_binding_names() -> None:
     from ommat._provenance import DETAILS, REASONS
-    from ommat.bindings.idia import _detail  # pyright: ignore[reportPrivateUsage]
+    from ommat.bindings.idia import (
+        _UNRECORDED,  # pyright: ignore[reportPrivateUsage]
+        _detail,  # pyright: ignore[reportPrivateUsage]
+    )
 
-    mapped = {_detail(d) for d in idia.DETAILS} | {"provider", "model_requested", "precision"}
-    assert mapped == DETAILS
+    kept = {_detail(d) for d in idia.DETAILS if d not in _UNRECORDED}
+    assert kept | {"provider", "model_requested", "precision"} == DETAILS
+    assert {"calibrated"} == _UNRECORDED
+    assert set(idia.DETAILS) >= _UNRECORDED
     assert set(idia.REASONS) == REASONS

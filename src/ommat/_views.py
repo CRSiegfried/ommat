@@ -512,8 +512,8 @@ class _Walk:
         """``unhashed`` with its text digested: exception text, ``unexpected``, ``warnings`` and
         ``request_id`` each whole, ``invalid``'s ``repr`` text, the ``reads`` values and an
         unknown member whole; member names, log-index keys, ``usage``, ``sums``, ``truncated``,
-        ``calibrated``, ``missing``, ``clients``, times, the engine and codec names and an
-        exception's ``type`` are open."""
+        ``calibrated`` (before format 7), ``missing``, ``clients``, times, the engine and codec
+        names and an exception's ``type`` are open."""
         out: dict[str, Any] = {}
         for member, value in unhashed.items():
             if member in ("turn", "engine", "codec"):

@@ -25,7 +25,6 @@ THRESHOLD = 0.5
 
 NOT_GIVEN = {
     "request_id": "not-reported",
-    "calibrated": "not-reported",
     "usage.input_tokens": "not-reported",
     "usage.output_tokens": "not-applicable",  # an encoder writes no tokens
     "usage.passes": "not-reported",

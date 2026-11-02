@@ -329,7 +329,6 @@ class _Judged:
     warnings: list[str] = field(default_factory=list[str])
     """The binding's warning lines, in its order."""
     request_id: str | None = None
-    calibrated: bool | None = None
     missing: dict[str, str] | None = None
     """Each null detail's reason; never on a failed call."""
     clients: dict[str, str] | None = None
@@ -562,7 +561,7 @@ def _held(name: str, result: object) -> bool:
 
 
 def _unhashed_details(result: object, judged: _Judged) -> None:
-    """Write ``request_id``, ``calibrated``, ``clients`` and ``missing`` when each conforms,
+    """Write ``request_id``, ``clients`` and ``missing`` when each conforms,
     else keep its ``repr`` in ``invalid``; never a fault. ``missing`` conforms when it is null
     or a ``dict`` from a detail's name to a reason, for details left null; an empty one is
     written nowhere, as null."""
@@ -571,11 +570,6 @@ def _unhashed_details(result: object, judged: _Judged) -> None:
         judged.request_id = cast("str | None", request_id)
     else:
         judged.invalid["request_id"] = guarded_repr(request_id)
-    calibrated = cast(object, getattr(result, "calibrated", None))
-    if calibrated is None or type(calibrated) is bool:
-        judged.calibrated = calibrated
-    else:
-        judged.invalid["calibrated"] = guarded_repr(calibrated)
     clients = cast(object, getattr(result, "clients", None))
     if versions_conform(clients, exact=True):
         judged.clients = versions(clients)
@@ -1096,7 +1090,7 @@ class _Turn:
                 unhashed["truncated"] = judged.truncated
             if judged.warnings:
                 unhashed["warnings"] = judged.warnings
-            for name in ("request_id", "calibrated", "missing", "clients"):
+            for name in ("request_id", "missing", "clients"):
                 if getattr(judged, name) is not None:
                     unhashed[name] = getattr(judged, name)
             self.ledger.write_unhashed("calls", unhashed, index)

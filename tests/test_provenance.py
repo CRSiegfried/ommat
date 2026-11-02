@@ -81,7 +81,6 @@ PROFILE: dict[str, Any] = {
     "usage": {"input_tokens": 12},
     "attempts": 1,
     "request_id": None,
-    "calibrated": False,
     "missing": {
         "request_id": "not-reported",
         "usage.output_tokens": "not-applicable",
@@ -125,7 +124,7 @@ def test_a_call_item_holds_the_profiles_hashed_details_and_its_claims_sorted() -
     assert call["claimed"] == ["model_reported", "revision"]
     assert "snapshot" not in call
     entry = calls_entry(record)
-    assert entry["calibrated"] is False
+    assert "calibrated" not in entry
     assert entry["missing"] == PROFILE["missing"]
     assert entry["clients"] == PROFILE["clients"]
     assert "request_id" not in entry  # null is not written
@@ -185,7 +184,6 @@ def test_a_hashed_detail_off_its_form_fails_the_call(member: str, value: object)
     ("member", "value"),
     [
         ("request_id", 3),
-        ("calibrated", 1),
         ("clients", {}),
         ("missing", {"snapshot": "not-pinned"}),
         ("missing", {"provider": "lost"}),
@@ -383,17 +381,54 @@ def test_the_fold_merges_runtimes_and_refuses_a_package_at_two_versions() -> Non
         )
 
 
-def test_the_fold_unions_claims_and_reads_calibrated_from_those_that_say() -> None:
+def test_the_fold_unions_claims() -> None:
     result = call_result(
-        {},
-        [sent(claimed=("revision",), calibrated=True), sent(claimed=("model_reported",))],
-        precision=None,
+        {}, [sent(claimed=("revision",)), sent(claimed=("model_reported",))], precision=None
     )
     assert result.claimed == ("model_reported", "revision")
-    assert result.calibrated is True
-    either = [sent(calibrated=True), sent(calibrated=False)]
-    assert call_result({}, either, precision=None).calibrated is False
-    assert call_result({}, [sent(), sent()], precision=None).calibrated is None
+
+
+def test_no_result_or_request_takes_calibrated() -> None:
+    with pytest.raises(TypeError, match="calibrated"):
+        CallResult({}, calibrated=True)  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="calibrated"):
+        RequestProvenance(calibrated=True)  # type: ignore[call-arg]
+    assert "calibrated" not in DETAILS
+    unreported = sent(missing={"calibrated": "not-reported"})
+    assert "calibrated" not in (call_result({}, [unreported], precision=0).missing or {})
+
+
+def as_format_6(doc: dict[str, Any]) -> dict[str, Any]:
+    """A current record document made format 6: the settings item's ``sets`` dropped."""
+    doc["log"][0]["format"] = 6
+    for item in doc["log"]:
+        if item["item"] == "settings":
+            item.pop("sets", None)
+    return doc
+
+
+def with_calibrated(doc: dict[str, Any], place: str) -> dict[str, Any]:
+    """``doc`` with ``calibrated`` in one place a record before format 7 may hold it."""
+    entry = next(iter(doc["unhashed"]["calls"].values()))
+    if place == "entry":
+        entry["calibrated"] = False
+    elif place == "missing":
+        entry["missing"] = {**entry["missing"], "calibrated": "not-reported"}
+    elif place == "invalid":
+        entry["invalid"] = {"calibrated": "1"}
+    else:
+        call = next(i for i in doc["log"] if i["item"] == "call")
+        call["claimed"] = sorted([*call["claimed"], "calibrated"])
+    return doc
+
+
+@pytest.mark.parametrize("place", ["entry", "missing", "invalid", "claimed"])
+def test_a_format_6_record_may_hold_calibrated_and_a_format_7_one_may_not(place: str) -> None:
+    old = with_calibrated(as_format_6(doc_of(turn(**PROFILE))), place)
+    read_record(rehashed(old))
+    current = with_calibrated(doc_of(turn(**PROFILE)), place)
+    verb = "claims" if place == "claimed" else "holds"
+    refused(current, f"{verb} calibrated, which a format-7 record does not")
 
 
 def test_a_detail_is_missing_only_when_every_sent_request_lacks_it() -> None:
@@ -485,11 +520,7 @@ def test_a_request_id_is_digested_and_the_other_new_members_are_open() -> None:
     view = json.loads(redact(record, ROOT))
     entry = next(iter(view["unhashed"]["calls"].values()))
     assert entry["request_id"] == digest("caller-case-42", record)
-    assert (entry["calibrated"], entry["missing"], entry["clients"]) == (
-        False,
-        missing,
-        PROFILE["clients"],
-    )
+    assert (entry["missing"], entry["clients"]) == (missing, PROFILE["clients"])
     call = next(i for i in view["log"] if i["item"] == "call")
     assert call["prompt"] == digest("the prompt", record)
     for name in ("provider", "model_requested", "model_reported", "revision", "elicitation"):
@@ -501,9 +532,7 @@ def test_a_request_id_is_digested_and_the_other_new_members_are_open() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("member", "value"), [("request_id", b"x"), ("calibrated", "y"), ("missing", 5)]
-)
+@pytest.mark.parametrize(("member", "value"), [("request_id", b"x"), ("missing", 5)])
 def test_an_invalid_new_member_is_digested_under_invalid(member: str, value: object) -> None:
     record = turn(**{member: value})
     view = json.loads(redact(record, ROOT))
@@ -524,11 +553,6 @@ def test_a_missing_reason_falls_back_to_not_sent_and_never_to_a_made_up_one() ->
     assert call_result({}, both_unsent, precision=0).missing == {"prompt": "not-sent"}
     odd = [sent(missing={"prompt": cast(Any, 5)}), sent(missing={"prompt": cast(Any, 5)})]
     assert call_result({}, odd, precision=0).missing is None
-
-
-def test_an_off_form_calibrated_folds_to_none_not_to_a_bool() -> None:
-    odd = [sent(calibrated=cast(Any, "no"))]
-    assert call_result({}, odd, precision=0).calibrated is None
 
 
 def test_the_fold_reads_no_request_whose_attempts_is_not_above_0() -> None:
@@ -600,7 +624,6 @@ def test_the_provenance_check_judges_the_unhashed_details_as_interpret_keeps_the
     every: dict[str, str] = dict.fromkeys(sorted(DETAILS), "not-reported")
     for members, says in (
         ({"request_id": cast(Any, 5)}, "request_id is not null or an exact string"),
-        ({"calibrated": cast(Any, 1)}, "calibrated is not null or a bool"),
         ({"usage": {"input_tokens": float("nan")}}, "usage is not null or a dict"),
     ):
         failures = check(answering(attempts=1, missing=every, **members), batches=ONE)
@@ -701,9 +724,9 @@ def unsupported_with(**members: Any) -> Any:
     return binding
 
 
-def test_an_all_unsupported_result_with_calibrated_false_is_reported() -> None:
-    failures = check(unsupported_with(calibrated=False), batches=ONE)
-    assert any("unsupported-provenance" in f and "calibrated" in f for f in failures), failures
+def test_an_all_unsupported_result_with_a_request_id_is_reported() -> None:
+    failures = check(unsupported_with(request_id="r"), batches=ONE)
+    assert any("unsupported-provenance" in f and "request_id" in f for f in failures), failures
 
 
 def test_the_suite_runs_no_code_of_a_bindings_odd_member() -> None:

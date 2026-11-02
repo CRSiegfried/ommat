@@ -82,7 +82,7 @@ returned call."""
 PROFILE_FORMAT = 5
 """The first record format whose call item holds the provenance profile's details in place of
 ``snapshot``, ``precision``'s ``unrounded`` and step forms, and whose ``calls`` entry holds
-``request_id``, ``calibrated``, ``missing`` and ``clients``."""
+``request_id``, ``missing`` and ``clients``, and before format 7 ``calibrated``."""
 
 CONTEXT_FORMAT = 5
 """The first design format whose document holds a ``context`` member, and the first record
@@ -100,6 +100,10 @@ under ``grounded``, and whose log may hold a grounded ref."""
 TARGETS_FORMAT = 7
 """The first design format whose document holds ``targets``, a question's ``target`` and
 ``latent_targets``, and a rule's ``target``."""
+
+UNCALIBRATED_FORMAT = 7
+"""The first record format with no ``calibrated`` detail: no ``calls`` entry holds it, and no
+``claimed``, ``missing`` or ``invalid`` names it."""
 
 CANDIDATE_FIELD_FORMAT = 8
 """The first design format whose ``candidates`` member may name a candidate field, for a

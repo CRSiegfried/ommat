@@ -30,8 +30,11 @@ HASHED_DETAILS = (*STRING_DETAILS, "runtime", "precision")
 USAGE_DETAILS = ("usage.input_tokens", "usage.output_tokens", "usage.passes")
 """The ``usage`` figures that are each a detail of their own."""
 
-DETAILS: frozenset[str] = frozenset((*HASHED_DETAILS, *USAGE_DETAILS, "request_id", "calibrated"))
+DETAILS: frozenset[str] = frozenset((*HASHED_DETAILS, *USAGE_DETAILS, "request_id"))
 """Every detail's name: the closed set a ``missing`` key and a ``claimed`` name come from."""
+
+RECORDED_DETAILS: frozenset[str] = DETAILS | {"calibrated"}
+"""Every detail's name a record may hold: ``calibrated`` only before record format 7."""
 
 REASONS: frozenset[str] = frozenset(
     {"not-reported", "not-pinned", "not-sent", "hidden", "not-applicable", "not-exposed"}

@@ -224,7 +224,7 @@ A call's provenance is hashed on its call item: `provider`, `model_requested` an
 `model_reported`, `revision`, `runtime`, the code that ran the model, `elicitation`, the
 method, `precision`, how the provider rounds probabilities, `prompt`, what the model was sent,
 and `claimed`, the details the source asserts and cannot verify. `usage`, `attempts`,
-`request_id`, `calibrated`, `missing`, `clients`, `warnings` and `truncated` go under the
+`request_id`, `missing`, `clients`, `warnings` and `truncated` go under the
 record's `unhashed`, outside every hash. A binding that sends a request gives each detail a
 value, or a reason in `missing` why it has none;
 [The provenance profile](../spec/README.md#the-provenance-profile) lists the details and the
@@ -559,7 +559,6 @@ check, so it claims them; a request that failed reports no model, its `model_rep
 ```python
 NOT_GIVEN = {
     "request_id": "not-reported",
-    "calibrated": "not-reported",
     "usage.input_tokens": "not-reported",
     "usage.output_tokens": "not-applicable",  # an encoder writes no tokens
     "usage.passes": "not-reported",

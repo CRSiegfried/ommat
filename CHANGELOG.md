@@ -62,6 +62,10 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 - Design format 8 and record format 7: a `candidates` member may name a candidate field, and the `settings` item holds `sets`. A design built in Python has a new design hash; a stored document of formats 1 to 7 loads to its own hash, and load refuses one naming a candidate field. A record of formats 1 to 6 reads under its own rules, and the ledger refuses `sets` in one.
 
+### Removed
+
+- The `calibrated` provenance detail, a provider's own claim that its probabilities are calibrated, which nothing checked. `CallResult` and `RequestProvenance` no longer take it, so a binding passing `calibrated=` gets a `TypeError`; `call_result` no longer folds it; the conformance kit no longer checks it; and the idia binding drops idia's `calibrated` from the call, its reason and its claim included. Record format 7 holds it nowhere, and the ledger refuses it there as a `calls` entry's member, a `missing` or `invalid` key or a `claimed` name; a record of formats 5 and 6 reads with it as before.
+
 - Design format 7: the document holds `targets`, each question's `target` and `latent_targets` and each rule's `target`. A design built in Python has a new design hash; a stored document of formats 1 to 6 loads to its own hash, and load refuses one holding a target member.
 
 ## [0.4.0] - 2026-10-23

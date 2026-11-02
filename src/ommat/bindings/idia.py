@@ -373,6 +373,10 @@ def _error(error: idia.ProviderError) -> str:
 _NAMES = {"snapshot": "revision", "versions": "runtime", "prompt_sent": "prompt"}
 """idia's name for a profile detail, where ommat's differs."""
 
+_UNRECORDED = frozenset({"calibrated"})
+"""idia's details ommat does not record: a provider's own claim that its probabilities are
+calibrated is unchecked, so it is dropped from ``claimed`` and ``missing``."""
+
 
 def _detail(name: str) -> str:
     return _NAMES.get(name, name)
@@ -407,12 +411,12 @@ def _provenance(outcome: idia.Outcome) -> RequestProvenance:
         runtime=dict(outcome.versions) or None,
         elicitation=outcome.elicitation,
         prompt=prompt_text(outcome.prompt_sent),
-        claimed=tuple(_detail(d) for d in outcome.claimed),
+        claimed=tuple(_detail(d) for d in outcome.claimed if d not in _UNRECORDED),
         usage=figures or None,
         attempts=outcome.attempts,
         request_id=outcome.request_id,
-        calibrated=outcome.calibrated,
-        missing={_detail(d): r for d, r in outcome.unreported.items()} or None,
+        missing={_detail(d): r for d, r in outcome.unreported.items() if d not in _UNRECORDED}
+        or None,
         clients=dict(outcome.client_versions) or None,
         truncated=tuple(outcome.keys) if cut else (),
     )
