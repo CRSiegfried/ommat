@@ -29,8 +29,8 @@ held key at a write is another run's, refused with the held key first, then thos
 wrote, in write order; any other refusal passes through. The entries written are returned, in
 write order, plain data.
 
-``known`` and ``conforming`` read a stored gold answer as the sweep job and the correlated-group
-job read one: format 1 or 2, and of its question's form, else ``unknown-entry``.
+``known`` and ``conforming`` read a stored gold answer as the correlated-group job reads one: format
+1 or 2, and of its question's form, else ``unknown-entry``.
 """
 
 from collections.abc import Iterable, Mapping

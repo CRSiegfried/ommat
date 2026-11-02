@@ -22,7 +22,7 @@ from ommat.evaluation import (
 )
 
 R = RefusalReason
-OTHERS = ("turn", "ref", "source", "point", "path", "group", "split", "error")
+OTHERS = ("turn", "ref", "source", "path", "group", "split", "error")
 HEX = "0" * 64
 
 
@@ -138,12 +138,11 @@ KEYS: dict[str, dict[str, str]] = {
         "candidate": "",
     },
     "switching-value": {"record": "sha256:1", "design": "sha256:2", "parameter": "intent/bar"},
-    "certificate": {"design": "sha256:2", "sweep": "s1"},
     "group-counts": {"design": "sha256:2", "group": "g", "split": "sha256:3", "gold_set": "g1"},
 }
 
 
-def entry(kind: str = "certificate", **changes: Any) -> dict[str, Any]:
+def entry(kind: str = "switching-value", **changes: Any) -> dict[str, Any]:
     fields: dict[str, Any] = {"kind": kind, "format": 1, "key": dict(KEYS[kind]), "value": None}
     fields.update(changes)
     return fields
@@ -168,9 +167,12 @@ def test_an_entry_of_each_kind_round_trips_as_its_canonical_envelope(
 
 def test_a_key_not_held_looks_up_as_none(tmp_path: Path) -> None:
     store = EvaluationStore(tmp_path)
-    assert store.lookup("certificate", KEYS["certificate"]) is None
+    assert store.lookup("switching-value", KEYS["switching-value"]) is None
     store.write(entry())
-    assert store.lookup("certificate", {**KEYS["certificate"], "sweep": "s2"}) is None
+    assert (
+        store.lookup("switching-value", {**KEYS["switching-value"], "parameter": "intent/baz"})
+        is None
+    )
 
 
 def test_a_grounded_gold_answer_key_is_its_own_entry(tmp_path: Path) -> None:
@@ -188,7 +190,7 @@ def test_a_grounded_gold_answer_key_is_its_own_entry(tmp_path: Path) -> None:
 def test_the_store_keeps_format_and_value_as_given(tmp_path: Path) -> None:
     store = EvaluationStore(tmp_path)
     store.write(entry(format=-7, value=["anything", {"at": 1.5}]))
-    assert store.lookup("certificate", KEYS["certificate"]) == entry(
+    assert store.lookup("switching-value", KEYS["switching-value"]) == entry(
         format=-7, value=["anything", {"at": 1.5}]
     )
 
@@ -198,8 +200,8 @@ def test_a_held_key_is_held_key_and_the_first_entry_stands(tmp_path: Path) -> No
     store.write(entry(value="first"))
     for again in (entry(value="second"), entry(value="first")):
         exc = refused(store.write, again)
-        assert (exc.reason, exc.key) == (R.held_key, [KEYS["certificate"]])
-    assert store.lookup("certificate", KEYS["certificate"]) == entry(value="first")
+        assert (exc.reason, exc.key) == (R.held_key, [KEYS["switching-value"]])
+    assert store.lookup("switching-value", KEYS["switching-value"]) == entry(value="first")
     assert len(files(tmp_path)) == 1
 
 
@@ -223,7 +225,7 @@ def test_racing_writers_under_one_key_leave_one_whole_entry(tmp_path: Path) -> N
     for th in threads:
         th.join()
     assert (len(won), refusals) == (1, [R.held_key] * 7)
-    assert store.lookup("certificate", KEYS["certificate"]) == entry(value=[won[0]] * 1000)
+    assert store.lookup("switching-value", KEYS["switching-value"]) == entry(value=[won[0]] * 1000)
     assert len(files(tmp_path)) == 1  # no temporary file left behind
 
 
@@ -241,7 +243,7 @@ def test_each_store_writes_its_files_readable_to_all(tmp_path: Path) -> None:
     EvaluationStore(tmp_path / "results").write(entry())
     paths = [
         tmp_path / "designs" / "sha256" / loaded.design_hash.removeprefix("sha256:"),
-        path_of(tmp_path / "results", "certificate", KEYS["certificate"]),
+        path_of(tmp_path / "results", "switching-value", KEYS["switching-value"]),
     ]
     assert [p.stat().st_mode & 0o777 for p in paths] == [0o644, 0o644]
 
@@ -262,19 +264,27 @@ def _nested(depth: int) -> list[Any]:
         ({**entry(), "extra": 1}, R.invalid_entry, "exactly kind"),
         ({**entry(), "kind": "calibration"}, R.unknown_kind, "'calibration'"),
         ({**entry(), "kind": 5, "format": "x"}, R.unknown_kind, "5"),
-        ({**entry(), "kind": ["certificate"]}, R.unknown_kind, "['certificate']"),
+        ({**entry(), "kind": ["switching-value"]}, R.unknown_kind, "['switching-value']"),
         ({**entry(), "kind": "calibration", "key": None}, R.unknown_kind, "'calibration'"),
         ({**entry(), "format": "1", "key": 1}, R.invalid_entry, "format is a str"),
         (entry(format=True), R.invalid_entry, "format is a bool"),
         (entry(format=1.0), R.invalid_entry, "format is a float"),
         (entry(key=[]), R.invalid_entry, "key is a list"),
-        (entry(key={"design": "d"}), R.invalid_entry, "exactly design, sweep"),
-        (entry(key={**KEYS["certificate"], "extra": "x"}), R.invalid_entry, "exactly design"),
-        (entry(key={"design": 1, "sweep": 2}), R.invalid_entry, "member design is a int"),
-        (entry(key={"design": "d", "sweep": None}), R.invalid_entry, "member sweep"),
+        (entry(key={"design": "d"}), R.invalid_entry, "exactly record, design, parameter"),
+        (entry(key={**KEYS["switching-value"], "extra": "x"}), R.invalid_entry, "exactly record"),
+        (
+            entry(key={"record": 1, "design": 2, "parameter": 3}),
+            R.invalid_entry,
+            "member record is a int",
+        ),
+        (
+            entry(key={"record": "r", "design": "d", "parameter": None}),
+            R.invalid_entry,
+            "member parameter",
+        ),
         (entry(value=float("nan")), R.invalid_entry, ""),
         (entry(value={1, 2}), R.invalid_entry, ""),
-        (entry(key={"design": "\ud800", "sweep": "s"}), R.invalid_entry, ""),
+        (entry(key={"record": "\ud800", "design": "d", "parameter": "p"}), R.invalid_entry, ""),
         (entry(value=["\udc80"]), R.invalid_entry, ""),
         (entry(value=_nested(MAX_DOCUMENT_DEPTH)), R.invalid_entry, "nests more than"),
     ],
@@ -291,13 +301,13 @@ def test_write_refuses_in_order_and_writes_nothing(
 @pytest.mark.parametrize(
     ("kind", "key", "reason"),
     [
-        ("calibration", KEYS["certificate"], R.unknown_kind),
+        ("calibration", KEYS["switching-value"], R.unknown_kind),
         ("calibration", None, R.unknown_kind),  # the kind before the key
-        (None, KEYS["certificate"], R.unknown_kind),
-        ("certificate", None, R.invalid_entry),
-        ("certificate", KEYS["switching-value"], R.invalid_entry),
-        ("certificate", {"design": "d", "sweep": 1}, R.invalid_entry),
-        ("certificate", {"design": "\udc80", "sweep": "s"}, R.invalid_entry),
+        (None, KEYS["switching-value"], R.unknown_kind),
+        ("switching-value", None, R.invalid_entry),
+        ("switching-value", KEYS["group-counts"], R.invalid_entry),
+        ("switching-value", {"record": "r", "design": "d", "parameter": 1}, R.invalid_entry),
+        ("switching-value", {"record": "r", "design": "\udc80", "parameter": "p"}, R.invalid_entry),
     ],
 )
 def test_lookup_refuses_its_kind_and_key_as_write_does(
@@ -308,7 +318,7 @@ def test_lookup_refuses_its_kind_and_key_as_write_does(
 
 
 def _misfile(root: Path, data: bytes) -> Path:
-    path = path_of(root, "certificate", KEYS["certificate"])
+    path = path_of(root, "switching-value", KEYS["switching-value"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path
@@ -318,33 +328,35 @@ def _misfile(root: Path, data: bytes) -> Path:
     "data",
     [
         b"not json",
-        b'{"kind": "certificate", "kind": "certificate"}',
-        encode(["certificate"]),
+        b'{"kind": "switching-value", "kind": "switching-value"}',
+        encode(["switching-value"]),
         encode({k: v for k, v in entry().items() if k != "value"}),
         encode(entry(format=True)),
         encode(entry(key={"design": "sha256:2"})),
-        b'{"format":1,"key":{"design":"sha256:2","sweep":"\\ud800"},"kind":"certificate","value":null}',
+        b'{"format":1,"key":{"design":"sha256:2","parameter":"\\ud800","record":"sha256:1"},"kind":"switching-value","value":null}',
     ],
 )
 def test_a_file_that_is_not_an_envelope_is_misfiled_entry(tmp_path: Path, data: bytes) -> None:
     path = _misfile(tmp_path, data)
-    exc = refused(EvaluationStore(tmp_path).lookup, "certificate", KEYS["certificate"])
+    exc = refused(EvaluationStore(tmp_path).lookup, "switching-value", KEYS["switching-value"])
     assert (exc.reason, exc.key) == (R.misfiled_entry, None)
     assert str(path) in str(exc)
 
 
 def test_an_envelope_filed_under_another_key_is_misfiled_entry(tmp_path: Path) -> None:
     store = EvaluationStore(tmp_path)
-    other = entry(key={**KEYS["certificate"], "sweep": "s2"})
+    other = entry(key={**KEYS["switching-value"], "parameter": "intent/baz"})
     store.write(other)
-    shutil.copy(path_of(tmp_path, "certificate", other["key"]), _misfile(tmp_path, b""))
-    exc = refused(store.lookup, "certificate", KEYS["certificate"])
+    shutil.copy(path_of(tmp_path, "switching-value", other["key"]), _misfile(tmp_path, b""))
+    exc = refused(store.lookup, "switching-value", KEYS["switching-value"])
     assert exc.reason is R.misfiled_entry
-    assert store.lookup("certificate", other["key"]) == other
+    assert store.lookup("switching-value", other["key"]) == other
 
 
 def test_the_file_name_is_the_hash_of_the_keys_canonical_bytes(tmp_path: Path) -> None:
-    key = {"sweep": "s1", "design": "sha256:2"}  # members in any order
+    key = {"parameter": "p1", "record": "sha256:1", "design": "sha256:2"}  # members in any order
     EvaluationStore(tmp_path).write(entry(key=key))
-    hex_ = sha256_ref(b'{"design":"sha256:2","sweep":"s1"}').removeprefix("sha256:")
-    assert files(tmp_path) == [Path("certificate", "sha256", hex_)]
+    hex_ = sha256_ref(b'{"design":"sha256:2","parameter":"p1","record":"sha256:1"}').removeprefix(
+        "sha256:"
+    )
+    assert files(tmp_path) == [Path("switching-value", "sha256", hex_)]

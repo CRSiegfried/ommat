@@ -40,15 +40,7 @@ class RefusalReason(enum.StrEnum):
     conflicting_labels = "conflicting-labels"
     unknown_entry = "unknown-entry"
     empty_copy = "empty-copy"
-    unknown_format = "unknown-format"
-    invalid_sweep = "invalid-sweep"
-    wrong_split = "wrong-split"
-    repeated_sweep = "repeated-sweep"
     split_id = "split-id"
-    shared_record = "shared-record"
-    no_gold_plan = "no-gold-plan"
-    not_determined = "not-determined"
-    empty_split = "empty-split"
     unknown_group = "unknown-group"
     too_few_refs = "too-few-refs"
     missing_gold = "missing-gold"
@@ -69,7 +61,6 @@ class EvaluationRefusal(Exception):
         turn: str | None = None,
         ref: str | None = None,
         source: str | None = None,
-        point: int | None = None,
         path: str | None = None,
         group: str | None = None,
         split: tuple[str, str] | None = None,
@@ -81,7 +72,6 @@ class EvaluationRefusal(Exception):
         self.turn = turn
         self.ref = ref
         self.source = source
-        self.point = point
         self.path = path
         self.group = group
         self.split = split

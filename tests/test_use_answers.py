@@ -410,7 +410,7 @@ def test_invalid_record_is_refused_before_unfinished() -> None:
 
 def test_a_refusal_names_only_what_its_reason_names() -> None:
     exc = refusal(unfinished(), go().record)
-    named = ("key", "ref", "source", "point", "path", "group", "split", "error")
+    named = ("key", "ref", "source", "path", "group", "split", "error")
     assert all(getattr(exc, name) is None for name in named)
     assert type(exc.reason) is RefusalReason
     assert {r.value for r in RefusalReason} == {
@@ -447,15 +447,7 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "conflicting-labels",
         "unknown-entry",
         "empty-copy",
-        "unknown-format",
-        "invalid-sweep",
-        "wrong-split",
-        "repeated-sweep",
         "split-id",
-        "shared-record",
-        "no-gold-plan",
-        "not-determined",
-        "empty-split",
         "unknown-group",
         "too-few-refs",
         "missing-gold",

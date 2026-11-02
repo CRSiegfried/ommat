@@ -9,7 +9,7 @@ for an ungrounded one, the gold key's ``candidate``; a group's refs are declared
 grounded group's entries are its refs' per-candidate entries. A ref holds an answer at a unit
 when a call wrote its entry there with a value; a marker, or no entry, holds none. A pair's
 ``turns`` counts units. Each gold answer is found as the gold-answers job derives its key,
-``_gold``'s, and read as the sweep job reads one, by ``_gold``'s ``known`` and ``conforming``:
+``_gold``'s, and read by ``_gold``'s ``known`` and ``conforming``:
 format 1 or 2, a format-1 value a label string, and of its question's form, as the gold-answers
 job checks a label.
 
@@ -17,16 +17,15 @@ job checks a label.
 tie for most probable an error; an extraction answer when ``{"value": v}``, ``v`` its value,
 differs from the gold answer by canonical bytes, null a value like any other.
 
-**The job.** A ``split`` not an ``(id, records)`` pair, checked by ``_splits`` as the sweep's are,
-is a ``TypeError`` before anything else. Refused in order: ``unknown-group`` and ``too-few-refs``,
-naming the group, before any record is read; ``invalid-record`` for each record in turn;
-``split-id``; ``wrong-design``, each record in the order given; ``missing-gold``, naming the turn
-and the entry's ref, each answer in turn and log order; ``unknown-entry``, naming the key, after
-every ``missing-gold``, for a gold entry of a kind or format the job does not read or a value not of
-its question's form, in the same order; ``held-key`` when the store holds the key, before any count;
-and the store's ``held-key`` at the write. A record is counted once by its record hash. The entry
-written is returned, plain data reaching no ``Record``.
-"""
+**The job.** A ``split`` not an ``(id, records)`` pair, checked by ``_splits``, is a ``TypeError``
+before anything else. Refused in order: ``unknown-group`` and ``too-few-refs``, naming the group,
+before any record is read; ``invalid-record`` for each record in turn; ``split-id``; ``wrong-
+design``, each record in the order given; ``missing-gold``, naming the turn and the entry's ref,
+each answer in turn and log order; ``unknown-entry``, naming the key, after every ``missing-gold``,
+for a gold entry of a kind or format the job does not read or a value not of its question's form, in
+the same order; ``held-key`` when the store holds the key, before any count; and the store's ``held-
+key`` at the write. A record is counted once by its record hash. The entry written is returned,
+plain data reaching no ``Record``."""
 
 import itertools
 from typing import Any, NamedTuple, cast

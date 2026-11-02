@@ -1,9 +1,9 @@
 # pyright: reportPrivateUsage=false
-"""Splits, shared by the sweep job and the correlated-group confirmation job: a split passed as
+"""Splits, read by the correlated-group confirmation job: a split passed as
 ``(id, records)``, its records read once each by record hash, and its id, SHA-256 over the
 canonical array of its records' hashes in code-point order (§evaluation-store).
 
-``split_id(records)``, public, gives that id, so a caller names a split as the jobs check it.
+``split_id(records)``, public, gives that id, so a caller names a split as the job checks it.
 """
 
 from collections.abc import Iterable, Mapping

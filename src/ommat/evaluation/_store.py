@@ -114,7 +114,6 @@ class DesignStore:
 _KEYS: dict[str, tuple[str, ...]] = {
     "gold-answer": ("gold_set", "question", "turn", "candidate"),
     "switching-value": ("record", "design", "parameter"),
-    "certificate": ("design", "sweep"),
     "group-counts": ("design", "group", "split", "gold_set"),
 }
 _ENVELOPE = ("kind", "format", "key", "value")
