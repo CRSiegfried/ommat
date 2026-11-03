@@ -31,6 +31,11 @@ write order, plain data.
 
 ``known`` and ``conforming`` read a stored gold answer: format 1 or 2, and of its question's
 form, else ``unknown-entry``.
+
+``gold_record`` replays a turn as ``intervene`` does with each ``q:`` entry a returned call wrote
+set to its gold answer, all the probability on the gold label or the gold extraction value with
+no doubt and no span; a question with no gold answer is given none and is stale, and one whose
+call was recorded ``Failed`` keeps that failure, the call given back whole.
 """
 
 from collections.abc import Iterable, Mapping
@@ -38,10 +43,12 @@ from typing import Any, cast
 
 from ommat._answer import AnswerKind, ValueType, _typed_member
 from ommat._canonical import encode
-from ommat._refs import declared_ref, parse_ref
+from ommat._design import LoadedDesign
+from ommat._refs import code_point_sorted, declared_ref, parse_ref
 from ommat._values import guarded_repr, type_name
-from ommat.evaluation._diff import _read
-from ommat.evaluation._edit import _labels, _name
+from ommat.evaluation._diff import _read, _run_sync
+from ommat.evaluation._edit import _NAMES, _applied, _Edit, _labels, _name, _SetEntry
+from ommat.evaluation._edit import _checked as _checked_record
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
 
@@ -272,3 +279,92 @@ def conforming(
             key=[key],
         )
     return form
+
+
+# ---------------------------------------------------------------------------------------------
+# The gold record
+
+
+async def gold_record(
+    record: object,
+    recorded_design: LoadedDesign,
+    gold_set: str,
+    *,
+    results: EvaluationStore,
+    rerun_design: LoadedDesign | None = None,
+) -> dict[str, Any]:
+    """Replay ``record`` once with every ``q:`` entry a returned call wrote set to its gold
+    answer under ``gold_set``, under ``rerun_design`` when given; ``{"record", "findings",
+    "stale", "missing"}``, ``missing`` the asked refs given no gold answer, in code-point
+    order."""
+    if type(gold_set) is not str:
+        raise TypeError(f"gold_set is a {type_name(gold_set)}, not a str")
+    if type(results) is not EvaluationStore:
+        raise TypeError(f"results is a {type_name(results)}, not an EvaluationStore")
+    read, log = _checked_record(record, recorded_design, rerun_design, names=_NAMES)
+    turn = read.record_hash
+    asked = _asked(log)
+    edits: list[_Edit] = []
+    missing: list[str] = []
+    unpinned: list[str] = []
+    for _, key, refs in _keys(gold_set, turn, asked):
+        entry = known(results.lookup(KIND, key), key)
+        for ref in refs:
+            question = asked[ref]
+            value = None if entry is None else conforming(entry, key, question, log)
+            call = log[cast(int, _entry_of(ref, log)["call"])]
+            if call["outcome"] != "returned":
+                missing.append(ref)  # its call is given back failed, as recorded
+            elif value is None:
+                missing.append(ref)
+                unpinned.append(ref)
+            else:
+                edits.append(_SetEntry(ref, _binding_form(value, question, log)))
+    done = await _applied(
+        read, log, recorded_design, edits, None, rerun_design, unpinned=frozenset(unpinned)
+    )
+    return {
+        "record": done.record,
+        "findings": done.findings,
+        "stale": done.stale,
+        "missing": code_point_sorted(missing),
+    }
+
+
+def gold_record_sync(
+    record: object,
+    recorded_design: LoadedDesign,
+    gold_set: str,
+    *,
+    results: EvaluationStore,
+    rerun_design: LoadedDesign | None = None,
+) -> dict[str, Any]:
+    """``gold_record`` run to completion; ``RuntimeError`` inside a running event loop."""
+    return _run_sync(
+        "gold_record",
+        lambda: gold_record(
+            record, recorded_design, gold_set, results=results, rerun_design=rerun_design
+        ),
+    )
+
+
+def _entry_of(ref: str, log: _Log) -> dict[str, Any]:
+    return next(e for e in log if e["item"] == "entry" and e["ref"] == ref)
+
+
+def _binding_form(value: object, question: dict[str, Any], log: _Log) -> object:
+    """A gold answer as a binding returns one: all the probability on the gold label, or an
+    extraction answer holding the gold value with no doubt and no span."""
+    if question["kind"] == AnswerKind.extraction:
+        v = cast("dict[str, object]", value)["value"]
+        return {
+            "value": v,
+            "guess": v,
+            "p_null": 1.0 if v is None else 0.0,
+            "confidence": 1.0,
+            "span": None,
+        }
+    names = _labels(question, log)
+    if names is None:  # a candidate set holding a marker: its fixed part's names stand
+        names = tuple(_name(n) for n in cast("list[object]", question["labels"]["fixed"]))
+    return {name: 1.0 if name == value else 0.0 for name in names}

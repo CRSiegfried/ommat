@@ -303,6 +303,7 @@ async def _applied(
     rerun: LoadedDesign | None = None,
     *,
     live: Mapping[str, OracleBinding] | None = None,
+    unpinned: frozenset[str] = frozenset(),
 ) -> _Applied:
     """The interventions applied and replayed once.
 
@@ -380,6 +381,7 @@ async def _applied(
         asked=asked,
         live=live,
         note=read.record_hash,
+        unpinned=unpinned,
     )
     stale = [cast(str, f["ref"]) for f in found if f["kind"] is FindingKind.stale_question]
     items = [copied[i] for i in sorted(changed)]

@@ -94,15 +94,16 @@ async def _replay_with(
     asked: frozenset[str] = frozenset(),
     live: Mapping[str, OracleBinding] | None = None,
     note: str = "",
+    unpinned: frozenset[str] = frozenset(),
 ) -> tuple[Record, list[Finding], FixtureBinding]:
-    """Rerun the finished turn ``log`` holds, with a state entry, under ``loaded``, the
-    fixture built from the call items and entries of ``answers``, each source checked against
-    ``base``, ``answers`` when ``None``, and against ``design``, the base's design, the refs in
+    """Rerun the finished turn ``log`` holds, with a state entry, under ``loaded``, the fixture
+    built from the call items and entries of ``answers``, each source checked against ``base``,
+    ``answers`` when ``None``, and against ``design``, the base's design, the refs in
     ``pinned`` and the sources in ``failed`` never, the sources in ``asked`` stale; the state
-    entry, the run settings, the cut and the log every finding compares against are
-    ``log``'s. With ``live``, the caller's bindings by oracle name, a stale source is asked of
-    them, on the running loop's clock with no cut, ``note`` naming the base record in their
-    warnings."""
+    entry, the run settings, the cut and the log every finding compares against are ``log``'s;
+    the refs in ``unpinned`` are stale, given no answer. With ``live``, the caller's bindings
+    by oracle name, a stale source is asked of them, on the running loop's clock with no cut,
+    ``note`` naming the base record in their warnings."""
     # Both callers checked that the log holds a state entry.
     state = next(item for item in log if item["item"] == "entry" and item["ref"] == _STATE)
     # The settings item is second in every record from the design item on.
@@ -116,7 +117,13 @@ async def _replay_with(
     )
     checked = Base(answers if base is None else base, loaded, design=design, asked=asked)
     fixture = FixtureBinding(
-        RecordedCalls(answers), loaded, checked, pinned=pinned, failed=failed, note=note
+        RecordedCalls(answers),
+        loaded,
+        checked,
+        pinned=pinned,
+        failed=failed,
+        unpinned=unpinned,
+        note=note,
     )
     if live is None:
         keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}

@@ -103,6 +103,7 @@ async def _replayed(
     asked: frozenset[str] = frozenset(),
     live: Mapping[str, OracleBinding] | None = None,
     note: str = "",
+    unpinned: frozenset[str] = frozenset(),
 ) -> tuple[Record, list[dict[str, Any]], frozenset[str]]:
     """The replay record of ``log`` rerun under ``loaded``, answered by ``answers``' calls and
     checked against ``base`` and ``design`` as ``_replay_with`` checks, stale sources asked of
@@ -120,6 +121,7 @@ async def _replayed(
         asked=asked,
         live=live,
         note=note,
+        unpinned=unpinned,
     )
     kept = [f for f in found if not _context_alone(f)]
     return rerun, kept, _stood(rerun.log, fixture.pinned, fixture.reproduced)

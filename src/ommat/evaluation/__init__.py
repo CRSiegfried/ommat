@@ -1,7 +1,7 @@
 """The evaluation subpackage: jobs that measure a design against past turns through replay,
 and the two stores they keep their inputs and results in. The names ``__all__`` lists are
 public, under the same deprecation rule as ``ommat.__all__``. Do-and-diff's three jobs, the
-deciding inputs, the switching-value job and the question-reach job are
+deciding inputs, the switching-value job, the question-reach job and the gold record are
 shipped, each async with a ``_sync`` twin, and the gold-answers job, sync.
 
 ``intervene`` replays a copy of a recorded turn once under a list of interventions, each setting an
@@ -17,13 +17,15 @@ probed at the values the turn compares it against and the gap and end values bet
 them, and writes, per entry and for the plan, the switching values, slacks and classes, or a
 ``boolean`` or ``label`` leaf's partition, to the evaluation store. ``write_gold_answers``, sync,
 writes a labeller's labels for the questions finished turns asked under a named gold set, copying
-an old set's for the questions given none. ``question_reach`` tries each question's answer, changed
-alone at each of its lint points by an entry set, in every ``q:`` entry a returned call wrote in
-the records given, and reports a question ``live`` with its first witness when some trial changes
-the plan or the verdict, else ``not-determined``, ``no-change-found`` or ``never-asked``.
-``DesignStore`` keeps a loaded design's document under its design hash and fetches it back through
-``load``; ``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses
-with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
+an old set's for the questions given none. ``gold_record`` replays a turn with every question it
+asked set to its gold answer, so its plan is what correct answers lead to. ``question_reach`` tries
+each question's answer, changed alone at each of its lint points by an entry set, in every ``q:``
+entry a returned call wrote in the records given, and reports a question ``live`` with its first
+witness when some trial changes the plan or the verdict, else ``not-determined``,
+``no-change-found`` or ``never-asked``. ``DesignStore`` keeps a loaded design's document under its
+design hash and fetches it back through ``load``; ``EvaluationStore`` keeps write-once entries by
+kind and key. A job or a store refuses with ``EvaluationRefusal``, its ``reason`` a
+``RefusalReason``.
 
 ``intervene`` and ``scenario`` are in ``_edit``, the deciding inputs, tried through it, in
 ``_deciding``, the switching-value job in ``_switching``, the gold-answers job in ``_gold``, the
@@ -34,7 +36,7 @@ question-reach job in ``_reach``, ``use_answers`` and the record checks and repl
 from ommat.evaluation._deciding import deciding_inputs, deciding_inputs_sync
 from ommat.evaluation._diff import use_answers, use_answers_sync
 from ommat.evaluation._edit import intervene, intervene_sync, scenario, scenario_sync
-from ommat.evaluation._gold import write_gold_answers
+from ommat.evaluation._gold import gold_record, gold_record_sync, write_gold_answers
 from ommat.evaluation._reach import question_reach, question_reach_sync
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import DesignStore, EvaluationStore
@@ -47,6 +49,8 @@ __all__ = [
     "RefusalReason",
     "deciding_inputs",
     "deciding_inputs_sync",
+    "gold_record",
+    "gold_record_sync",
     "intervene",
     "intervene_sync",
     "question_reach",

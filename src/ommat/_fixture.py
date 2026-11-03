@@ -202,7 +202,9 @@ class FixtureBinding:
     each source checked against ``base``. A ref in ``pinned`` is answered from ``answers`` and
     never checked: an edit set it. A source in ``failed``, whose call an edit failed, is never
     checked against ``base``; its failure comes back as for any recorded ``Failed`` call, whole
-    or not at all.
+    or not at all. A ref in ``unpinned`` is stale, ``no-answer``, unless an earlier clause holds:
+    the run gives no answer for it, as a gold record gives none to a question with no gold
+    answer.
 
     Called with a live binding, as a scenario's is, a source with a stale ref is passed whole
     to it in a sub-batch, and so is stale whole, a ref fresh alone taking its source's first
@@ -223,10 +225,12 @@ class FixtureBinding:
         *,
         pinned: frozenset[str] = frozenset(),
         failed: frozenset[str] = frozenset(),
+        unpinned: frozenset[str] = frozenset(),
         note: str = "",
     ) -> None:
         self._recorded = answers
         self._note = note
+        self._unpinned = unpinned
         self._types = loaded._types
         self._base = base
         self._pinned = pinned
@@ -357,12 +361,16 @@ class FixtureBinding:
                 held.append(ref)
 
     def _stale(self, source: SourceCall) -> dict[str, Stale]:
-        """Each stale ref of ``source`` that no edit set."""
+        """Each stale ref of ``source`` that no edit set, an unpinned ref among them."""
         if source.id in self._failed:
             return {}
         whole, refs = self._base.check(source)
         if whole is not None:
             refs = dict.fromkeys((*source.refs, *source.questions), whole)
+        given = Stale("no-answer", "the run gives no answer for it")
+        for ref in (*source.refs, *source.questions):
+            if ref in self._unpinned:
+                refs.setdefault(ref, given)
         return {r: why for r, why in refs.items() if r not in self._pinned}
 
     def _answer(self, ref: str, entry: Mapping[str, Any]) -> object:

@@ -198,6 +198,8 @@ EVALUATION = {
     "RefusalReason",
     "deciding_inputs",
     "deciding_inputs_sync",
+    "gold_record",
+    "gold_record_sync",
     "intervene",
     "intervene_sync",
     "question_reach",
