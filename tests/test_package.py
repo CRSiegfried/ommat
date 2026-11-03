@@ -196,6 +196,7 @@ EVALUATION = {
     "EvaluationRefusal",
     "EvaluationStore",
     "RefusalReason",
+    "answers",
     "deciding_inputs",
     "deciding_inputs_sync",
     "gold_record",

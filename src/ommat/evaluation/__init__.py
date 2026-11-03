@@ -18,21 +18,24 @@ them, and writes, per entry and for the plan, the switching values, slacks and c
 ``boolean`` or ``label`` leaf's partition, to the evaluation store. ``write_gold_answers``, sync,
 writes a labeller's labels for the questions finished turns asked under a named gold set, copying
 an old set's for the questions given none. ``gold_record`` replays a turn with every question it
-asked set to its gold answer, so its plan is what correct answers lead to. ``question_reach`` tries
-each question's answer, changed alone at each of its lint points by an entry set, in every ``q:``
-entry a returned call wrote in the records given, and reports a question ``live`` with its first
-witness when some trial changes the plan or the verdict, else ``not-determined``,
-``no-change-found`` or ``never-asked``. ``DesignStore`` keeps a loaded design's document under its
-design hash and fetches it back through ``load``; ``EvaluationStore`` keeps write-once entries by
-kind and key. A job or a store refuses with ``EvaluationRefusal``, its ``reason`` a
-``RefusalReason``.
+asked set to its gold answer, so its plan is what correct answers lead to. ``answers``, sync, gives
+the answers table, one row per question a call answered in each record, with its gold answer and
+whether it erred when a gold set is given. ``question_reach`` tries each question's answer, changed
+alone at each of its lint points by an entry set, in every ``q:`` entry a returned call wrote in
+the records given, and reports a question ``live`` with its first witness when some trial changes
+the plan or the verdict, else ``not-determined``, ``no-change-found`` or ``never-asked``.
+``DesignStore`` keeps a loaded design's document under its design hash and fetches it back through
+``load``; ``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses
+with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
 
-``intervene`` and ``scenario`` are in ``_edit``, the deciding inputs, tried through it, in
-``_deciding``, the switching-value job in ``_switching``, the gold-answers job in ``_gold``, the
-question-reach job in ``_reach``, ``use_answers`` and the record checks and replay they share in
-``_diff``, the stores in ``_store`` and the refusal in ``_refusal``.
+``intervene`` and ``scenario`` are in ``_edit``, the answers table in ``_answers``, the deciding
+inputs, tried through it, in ``_deciding``, the switching-value job in ``_switching``, the
+gold-answers job in ``_gold``, the question-reach job in ``_reach``, ``use_answers`` and the record
+checks and replay they share in ``_diff``, the stores in ``_store`` and the refusal in
+``_refusal``.
 """
 
+from ommat.evaluation._answers import answers
 from ommat.evaluation._deciding import deciding_inputs, deciding_inputs_sync
 from ommat.evaluation._diff import use_answers, use_answers_sync
 from ommat.evaluation._edit import intervene, intervene_sync, scenario, scenario_sync
@@ -47,6 +50,7 @@ __all__ = [
     "EvaluationRefusal",
     "EvaluationStore",
     "RefusalReason",
+    "answers",
     "deciding_inputs",
     "deciding_inputs_sync",
     "gold_record",
