@@ -2,17 +2,17 @@
 """The deciding inputs of an entry: each declared read of the rule providing it, classed by
 whether some do-and-diff intervention on the read changes the entry (§do-and-diff).
 
-Each intervention is one of forms 1 to 4 run through ``_edit``'s one procedure, so its checks,
-its copy and its replay are those of ``set_entry``, ``fail_call``, ``set_state_field`` and
-``constant_rule``. A ``q:`` or ``t:`` read is tried through its entry, a grounded declared
-ref's through each of its entries: form 1 at each marker a binding may return and the record's
-format holds, a ``q:`` answer at ``Unavailable`` with ``refused`` only, and a ``t:`` entry at
-each value of a finite type; then form 2 at each structural code, once per call, when every
-entry the call wrote is of the read's declared ref. A ``t:state`` field is tried by form 3 at
-each value of a finite type, and a ``d:`` read by form 4 at ``Unsure`` and each value of a
-finite type. A field-path read of a ``t:`` or ``d:`` entry is tried through the whole entry or
-rule, at its declared type's values, since forms 1 and 4 set it whole; a ``t:state`` field is
-set alone. A finite type is ``boolean``, a label, or either nullable.
+Each intervention is a list of one for ``_edit``'s one procedure, so its checks, its copy and
+its replay are ``intervene``'s. A ``q:`` or ``t:`` read is tried through its entry, a grounded
+declared ref's through each of its entries: an entry set at each marker a binding may return
+and the record's format holds, a ``q:`` answer at ``Unavailable`` with ``refused`` only, and a
+``t:`` entry at each value of a finite type; then a call failed at each structural code, once
+per call, when every entry the call wrote is of the read's declared ref. A ``t:state`` field is
+tried by a state field set at each value of a finite type, and a ``d:`` read by a rule made
+constant at ``Unsure`` and each value of a finite type. A field-path read of a ``t:`` or ``d:``
+entry is tried through the whole entry or rule, at its declared type's values, since an entry
+set and a constant rule set it whole; a ``t:state`` field is set alone. A finite type is
+``boolean``, a label, or either nullable.
 
 A trial the form refuses at its target, ``null-call``, ``failed-call``, ``not-found`` or
 ``candidate-rule``, is not run; any other refusal propagates. A run trial whose replay gives
@@ -26,7 +26,7 @@ was undetermined; else ``markers-only`` when some target is not of a finite type
 ``not-deciding``. Each trial is one intervention, so ``not-deciding`` says no single one changes
 the entry; joint effects are not explored.
 
-The record is checked as the edits check it, then ``ref`` refused ``not-found`` unless it names
+The record is checked as ``intervene`` checks it, then ``ref`` refused ``not-found`` unless it names
 an entry of the record a rule provides; then the record is replayed unedited under ``loaded``
 and refused ``baseline-differs`` on any finding but ``helpers-mismatch``, the kinds in the
 message, before any trial.
@@ -63,7 +63,7 @@ from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 _R = RefusalReason
 _K = FindingKind
 _Functions = Mapping[str, Callable[..., Any]] | None
-_Trial = tuple[list[_Edit], _Constant | None]
+_Trial = list[_Edit]
 
 _UNREACHED = frozenset({_R.null_call, _R.failed_call, _R.not_found, _R.candidate_rule})
 
@@ -115,9 +115,9 @@ async def _classed(
     ``not-determined`` when no trial ran or one was undetermined; else by whether the trials
     were exhaustive. A trial refused at its target is not run."""
     ran = undetermined = False
-    for edits, constant in trials:
+    for edits in trials:
         try:
-            _, _, found = await _applied(read, log, loaded, edits, constant, functions)
+            found = (await _applied(read, log, loaded, edits, functions)).findings
         except EvaluationRefusal as exc:
             if exc.reason not in _UNREACHED:
                 raise
@@ -133,7 +133,7 @@ async def _classed(
 
 
 def _trials(r: str, log: _Log, loaded: LoadedDesign) -> tuple[list[_Trial], bool]:
-    """The interventions on read ``r``, each as ``_applied``'s edits and rule, and whether they
+    """The interventions on read ``r``, each as ``_applied``'s list, and whether they
     try every value of each target. A read with no trial is ``not-determined`` whatever the
     flag."""
     if is_candidate_read(r):
@@ -142,11 +142,11 @@ def _trials(r: str, log: _Log, loaded: LoadedDesign) -> tuple[list[_Trial], bool
     declared = f"{parsed.level}:{parsed.name}"
     if declared == _STATE:
         values = _values(_field_type(loaded._types[_STATE], parsed.fields)) or []
-        return [([_SetField(r, v)], None) for v in values], True
+        return [[_SetField(r, v)] for v in values], True
     if parsed.level == "d":
         values = _values(loaded._types[declared])
         outputs = [Unsure, *(values or ())]
-        return [([], _Constant(declared, o)) for o in outputs], values is not None
+        return [[_Constant(declared, o)] for o in outputs], values is not None
     fmt = log[0]["format"]
     codes = ["refused"] if parsed.level == "q" else sorted(_BINDING_MARKERS)
     markers = [Unavailable(Cause(c)) for c in codes if held_marker_code(c, fmt)]
@@ -156,13 +156,13 @@ def _trials(r: str, log: _Log, loaded: LoadedDesign) -> tuple[list[_Trial], bool
     for entry in log:
         if entry["item"] != "entry" or _declared(entry["ref"]) != declared:
             continue
-        trials.extend(([_SetEntry(entry["ref"], v)], None) for v in [*markers, *(values or ())])
+        trials.extend([_SetEntry(entry["ref"], v)] for v in [*markers, *(values or ())])
         call = entry["call"]
         if call is not None and call not in calls and _sole_writer(call, declared, log):
             calls[call] = None
     for call in calls:
         source = cast(str, log[call]["sources"][0])
-        trials.extend(([_FailCall(source, c.value)], None) for c in sorted(_STRUCTURAL))
+        trials.extend([_FailCall(source, c.value)] for c in sorted(_STRUCTURAL))
     return trials, values is not None
 
 
@@ -188,7 +188,7 @@ def _values(t: Type | None) -> list[object] | None:
 
 def _field_type(t: Type, fields: tuple[str, ...]) -> Type:
     """The declared type of a state field through ``fields``, its definitions resolved; a null
-    record on the path holds no field, which ``set_state_field`` refuses ``not-found``."""
+    record on the path holds no field, which ``intervene`` refuses ``not-found``."""
     for name in fields:
         if isinstance(t, Nullable):
             t = t.inner

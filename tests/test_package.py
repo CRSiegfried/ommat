@@ -197,20 +197,12 @@ EVALUATION = {
     "EvaluationStore",
     "RefusalReason",
     "confirm_group",
-    "constant_rule",
-    "constant_rule_sync",
     "deciding_inputs",
     "deciding_inputs_sync",
-    "fail_call",
-    "fail_call_sync",
     "intervene",
     "intervene_sync",
     "question_reach",
     "question_reach_sync",
-    "set_entry",
-    "set_entry_sync",
-    "set_state_field",
-    "set_state_field_sync",
     "split_id",
     "switching_values",
     "switching_values_sync",
@@ -220,8 +212,18 @@ EVALUATION = {
 }
 
 
+CUT = {
+    f"{name}{twin}"
+    for name in ("set_entry", "fail_call", "set_state_field", "constant_rule")
+    for twin in ("", "_sync")
+}
+"""The single-intervention jobs, whose forms are ``intervene``'s intervention kinds."""
+
+
 def test_ommat_evaluation_exports_exactly_its_jobs_stores_and_refusal() -> None:
     import ommat.evaluation
+
+    assert not CUT & set(dir(ommat.evaluation))
 
     assert "evaluation" not in ommat.__all__
     assert set(ommat.evaluation.__all__) == EVALUATION

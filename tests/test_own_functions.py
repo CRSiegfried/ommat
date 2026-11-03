@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
-"""The jobs given ``loaded`` that load an edited design, ``constant_rule``, ``intervene``,
-``deciding_inputs`` and ``switching_values``, take ``loaded``'s own callables when
-``functions`` is ``None``, so a design of lambdas and closures needs none passed; explicit
-``functions`` still override them (§evaluation-jobs)."""
+"""The jobs given ``loaded`` that load an edited design, ``intervene``, ``deciding_inputs`` and
+``switching_values``, take ``loaded``'s own callables when ``functions`` is ``None``, so a
+design of lambdas and closures needs none passed; explicit ``functions`` still override them
+(§evaluation-jobs)."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -29,7 +29,6 @@ from ommat.evaluation import (
     EvaluationRefusal,
     EvaluationStore,
     RefusalReason,
-    constant_rule_sync,
     deciding_inputs_sync,
     intervene_sync,
     switching_values_sync,
@@ -91,14 +90,9 @@ def test_the_document_alone_does_not_load() -> None:
         load(LOADED.document)
 
 
-def test_constant_rule_takes_loadeds_own_functions() -> None:
-    out = constant_rule_sync(RECORD, LOADED, "d:big", False)
-    assert any(f["kind"] == "plan" for f in out["findings"])
-
-
 def test_intervene_takes_loadeds_own_functions() -> None:
-    out = intervene_sync(RECORD, LOADED, [], rule={"rule": "d:say", "output": "small"})
-    assert out["document"]["rules"]["say"]["form"] == "table"
+    out = intervene_sync(RECORD, LOADED, [{"rule": "d:big", "output": False}])
+    assert any(f["kind"] == "plan" for f in out["findings"])
 
 
 def test_deciding_inputs_takes_loadeds_own_functions() -> None:
@@ -114,17 +108,23 @@ def test_switching_values_takes_loadeds_own_functions(tmp_path: Path) -> None:
 def test_explicit_functions_override_loadeds_own() -> None:
     other = closures("other: ")
     assert other.design_hash == LOADED.design_hash  # the same code, closing over another value
-    out = constant_rule_sync(RECORD, LOADED, "d:big", False, functions=other._callables)
+    out = intervene_sync(
+        RECORD, LOADED, [{"rule": "d:big", "output": False}], functions=other._callables
+    )
+    (plan,) = [f for f in out["findings"] if f["kind"] == "plan"]
+    assert plan["replayed"]["reply"] == "other: small"
+
+
+def test_a_rule_made_constant_loads_with_the_rerun_designs_own_functions() -> None:
+    rerun = closures("other: ")
+    out = intervene_sync(RECORD, LOADED, [{"rule": "d:big", "output": False}], rerun_design=rerun)
     (plan,) = [f for f in out["findings"] if f["kind"] == "plan"]
     assert plan["replayed"]["reply"] == "other: small"
 
 
 def test_explicit_empty_functions_do_not_fall_back(tmp_path: Path) -> None:
     jobs: list[Callable[[], object]] = [
-        lambda: constant_rule_sync(RECORD, LOADED, "d:big", True, functions={}),
-        lambda: intervene_sync(
-            RECORD, LOADED, [], rule={"rule": "d:big", "output": True}, functions={}
-        ),
+        lambda: intervene_sync(RECORD, LOADED, [{"rule": "d:big", "output": True}], functions={}),
         lambda: deciding_inputs_sync(RECORD, LOADED, "d:say", functions={}),
         lambda: switching_values_sync(
             RECORD, LOADED, "lim/k", functions={}, results=EvaluationStore(tmp_path)

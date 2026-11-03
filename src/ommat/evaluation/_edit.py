@@ -1,36 +1,38 @@
 # pyright: reportPrivateUsage=false
-"""Do-and-diff's edits: ``set_entry``, ``fail_call``, ``set_state_field`` and
-``constant_rule`` each change one input of a recorded turn, and ``intervene`` several; each
-replays once.
+"""Do-and-diff's scenario with no live binding: ``intervene`` replays a copy of a recorded turn
+once under a list of interventions, each changing one input, and under ``rerun_design``, a
+design the caller built, when given; ``recorded_design`` is the design the record was decided
+under.
 
-``set_entry`` sets a ``q:`` or ``t:`` entry a returned call wrote to a value or to a marker a
-binding may return and the record's format holds; ``fail_call`` sets a returned call to
-``Failed`` with a structural code, every entry it wrote ``Unavailable`` with that cause;
-``set_state_field`` sets a ``t:state`` field to a value; ``constant_rule`` replaces a rule's
-declaration by a one-row table of ``-`` cells over its reads, outputting the set value or
-``Unsure``, and loads the edited document. ``intervene`` takes the first three as a list of
-edits and ``constant_rule``'s as ``rule``; their targets are disjoint, so the list's order
-changes neither the copy nor the findings.
+An intervention sets a ``q:`` or ``t:`` entry a returned call wrote to a value or to a marker a
+binding may return and the record's format holds (``{"ref", "value"}``); sets a returned call
+to ``Failed`` with a structural code, every entry it wrote ``Unavailable`` with that cause
+(``{"source", "code"}``); sets a ``t:state`` field to a value (``{"path", "value"}``);
+replaces a rule's declaration by a one-row table of ``-`` cells over its reads, outputting the
+set value or ``Unsure`` (``{"rule", "output"}``); or asks a source afresh (``{"ask"}``). Their
+targets are disjoint, so the list's order changes neither the copy nor the findings.
 
-A ``loaded`` that is not exactly a ``LoadedDesign`` is an ``EntryRefusal`` before the record is
-read; the record is then read and refused ``invalid-record``, ``unfinished``,
-``nothing-to-replay`` and ``wrong-design``, as ``use_answers`` refuses it; ``intervene`` then
-refuses ``invalid-edit``, ``no-edit``, ``duplicate-target`` and ``conflicting-edits``. Then
-each edit's target is checked against the record as read, in list order, then the rule's; then
-each value against its declared type alone, in list order; then every edit is applied to one
-copy and each answer checked against it, its labels from a candidate set and its spans against
-its text as edited; then the modified design is loaded. A record edit is made on a copy: its
-log edited, its ``hash`` set from format 3 to the edited log's record hash, and read back
-through ``read_record`` (§record-hash-member); ``constant_rule`` alone edits only the document
-and makes no copy, loading it with ``functions``, or when ``None`` with ``loaded``'s own
-callables. Replay reruns the copy, its state entry, calls and cut, under the record's
-design or the modified one, so the findings are what the edits changed downstream; the edited
-entry itself, answered as set, is none. Each source is checked against the record as read, so a
-question asked over an edited entry, as a need or a wording slot, is ``stale-question`` and
-not answered; an entry an edit set is never checked, nor are a failed call's needs, though
-its failure comes back only for the call asked whole, as for a recorded one. A plan is
-compared without its ``context``. Neither the record nor the loaded design is changed, and
-nothing returned holds a ``Record``.
+A ``recorded_design``, or a ``rerun_design`` other than ``None``, that is not exactly a
+``LoadedDesign`` is an ``EntryRefusal`` before the record is read; the record is then read and
+refused ``invalid-record``, ``unfinished``, ``nothing-to-replay`` and ``wrong-design``, as
+``use_answers`` refuses it, ``recorded_design`` being its design; then ``invalid-edit``,
+``no-edit``, ``duplicate-target`` and ``conflicting-edits``. Then each intervention's target is
+checked, in list order, a record edit's against the record as read and a rule's or an asked
+source's against the design run, ``rerun_design`` or ``recorded_design``; then each value
+against its declared type in ``recorded_design`` alone, in list order; then every edit is
+applied to one copy and each answer checked against it, its labels from a candidate set and its
+spans against its text as edited; then the design run with its rules made constant is loaded,
+with ``functions``, or when ``None`` with its own callables. A record edit is made on a copy:
+its log edited, its ``hash`` set from format 3 to the edited log's record hash, and read back
+through ``read_record`` (§record-hash-member). Replay reruns the copy, its state entry, calls
+and cut, under the design run, so the findings are what the interventions changed downstream;
+an edited entry itself, answered as set, is none. Each source is checked against the record as
+read and ``recorded_design``, so a question asked over an edited entry, as a need or a wording
+slot, or under another payload, ``oracle`` key or question, is ``stale-question`` and not
+answered, as is an asked source; an entry an edit set is never checked, nor are a failed call's
+needs, though its failure comes back only for the call asked whole, as for a recorded one. A
+plan is compared without its ``context``. Neither the record nor either design is changed; the
+replay record is returned, and the edited copy is not.
 """
 
 import sys
@@ -69,6 +71,7 @@ from ommat._refs import (
     entry_ref,
     parse_ref,
 )
+from ommat._replay import FindingKind
 from ommat._typed import decoded, is_a, typed
 from ommat._values import HASH_FORMAT, KEY_ORDER_FORMAT, in_domain, type_name
 from ommat.evaluation._diff import _read, _refuse_unfit, _replayed, _run_sync, own_functions
@@ -104,17 +107,24 @@ class _Constant:
     output: object
 
 
-_Edit = _SetEntry | _FailCall | _SetField
+@dataclass(frozen=True, slots=True)
+class _Ask:
+    ask: object
+
+
+_Edit = _SetEntry | _FailCall | _SetField | _Constant | _Ask
 _SHAPES: dict[frozenset[str], type[_Edit]] = {
     frozenset({"ref", "value"}): _SetEntry,
     frozenset({"source", "code"}): _FailCall,
     frozenset({"path", "value"}): _SetField,
+    frozenset({"rule", "output"}): _Constant,
+    frozenset({"ask"}): _Ask,
 }
 
 
 @dataclass(frozen=True, slots=True)
 class _EntryAt:
-    """A ``set_entry`` edit's entry, by index, and its call item, located."""
+    """An entry set's entry, by index, and its call item, located."""
 
     edit: _SetEntry
     ref: str
@@ -125,7 +135,7 @@ class _EntryAt:
 
 @dataclass(frozen=True, slots=True)
 class _CallAt:
-    """A ``fail_call`` edit's call item, by index, and its code, located."""
+    """A failed call's call item, by index, and its code, located."""
 
     index: int
     call: dict[str, Any]
@@ -134,7 +144,7 @@ class _CallAt:
 
 @dataclass(frozen=True, slots=True)
 class _FieldAt:
-    """A ``set_state_field`` edit's path, its field names and its value."""
+    """A state field set's path, its field names and its value."""
 
     path: str
     names: tuple[str, ...]
@@ -142,128 +152,81 @@ class _FieldAt:
 
 
 # ---------------------------------------------------------------------------------------------
-# The jobs
-
-
-async def set_entry(
-    record: object, loaded: LoadedDesign, ref: str, value: object
-) -> dict[str, Any]:
-    """Replay a copy of ``record`` with the ``q:`` or ``t:`` entry at ``ref`` set to ``value``;
-    ``{"entry", "findings"}``, ``entry`` the edited log entry."""
-    read, log = _checked(record, loaded)
-    items, _, found = await _applied(read, log, loaded, [_SetEntry(ref, value)], None, None)
-    return {"entry": items[0], "findings": found}
-
-
-async def fail_call(record: object, loaded: LoadedDesign, source: str, code: str) -> dict[str, Any]:
-    """Replay a copy of ``record`` with the call listing ``source`` set to ``Failed`` with
-    ``code``; ``{"call", "findings"}``, ``call`` the edited call item."""
-    read, log = _checked(record, loaded)
-    items, _, found = await _applied(read, log, loaded, [_FailCall(source, code)], None, None)
-    return {"call": items[0], "findings": found}  # a call item precedes the entries it wrote
-
-
-async def set_state_field(
-    record: object, loaded: LoadedDesign, path: str, value: object
-) -> dict[str, Any]:
-    """Replay a copy of ``record`` with the ``t:state`` field at ``path``, a ref such as
-    ``t:state.sender.address``, set to ``value``; ``{"entry", "findings"}``, ``entry`` the
-    edited state entry."""
-    read, log = _checked(record, loaded)
-    items, _, found = await _applied(read, log, loaded, [_SetField(path, value)], None, None)
-    return {"entry": items[0], "findings": found}
-
-
-async def constant_rule(
-    record: object,
-    loaded: LoadedDesign,
-    rule: str,
-    output: object,
-    *,
-    functions: _Functions = None,
-) -> dict[str, Any]:
-    """Replay ``record`` under ``loaded`` with the rule providing the ``d:`` ref ``rule``
-    replaced by a one-row table outputting ``output``, a value or ``Unsure``;
-    ``{"document", "findings"}``, ``document`` the modified document, parsed."""
-    read, log = _checked(record, loaded)
-    constant = _Constant(rule, output)
-    _, document, found = await _applied(read, log, loaded, [], constant, functions)
-    return {"document": document, "findings": found}
+# The job
 
 
 async def intervene(
     record: object,
-    loaded: LoadedDesign,
-    edits: object,
+    recorded_design: LoadedDesign,
+    interventions: object,
     *,
-    rule: object = None,
+    rerun_design: LoadedDesign | None = None,
     functions: _Functions = None,
 ) -> dict[str, Any]:
-    """``set_entry``, ``fail_call`` and ``set_state_field`` edits as ``edits``, each
-    ``{"ref", "value"}``, ``{"source", "code"}`` or ``{"path", "value"}``, and a
-    ``constant_rule`` as ``rule``, ``{"rule", "output"}`` or ``None``, on one copy, replayed
-    once; ``{"items", "document", "findings"}``, ``items`` each log item the edits changed,
-    once, in log order, ``document`` the modified document or ``None``."""
-    read, log = _checked(record, loaded)
-    listed, constant = _shaped(edits, rule)
-    items, document, found = await _applied(read, log, loaded, listed, constant, functions)
-    return {"items": items, "document": document, "findings": found}
-
-
-def set_entry_sync(record: object, loaded: LoadedDesign, ref: str, value: object) -> dict[str, Any]:
-    """``set_entry`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return _run_sync("set_entry", lambda: set_entry(record, loaded, ref, value))
-
-
-def fail_call_sync(record: object, loaded: LoadedDesign, source: str, code: str) -> dict[str, Any]:
-    """``fail_call`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return _run_sync("fail_call", lambda: fail_call(record, loaded, source, code))
-
-
-def set_state_field_sync(
-    record: object, loaded: LoadedDesign, path: str, value: object
-) -> dict[str, Any]:
-    """``set_state_field`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return _run_sync("set_state_field", lambda: set_state_field(record, loaded, path, value))
-
-
-def constant_rule_sync(
-    record: object,
-    loaded: LoadedDesign,
-    rule: str,
-    output: object,
-    *,
-    functions: _Functions = None,
-) -> dict[str, Any]:
-    """``constant_rule`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return _run_sync(
-        "constant_rule",
-        lambda: constant_rule(record, loaded, rule, output, functions=functions),
-    )
+    """Replay a copy of ``record``, decided under ``recorded_design``, once with every
+    intervention of the list ``interventions`` applied, under ``rerun_design`` when given;
+    ``{"record", "findings", "stale"}``, ``record`` the replay record and ``stale`` the refs
+    ``stale-question`` names, in code-point order."""
+    read, log = _checked(record, recorded_design, rerun_design, names=_NAMES)
+    listed = _shaped(interventions, rerun_design)
+    done = await _applied(read, log, recorded_design, listed, functions, rerun_design)
+    return {"record": done.record, "findings": done.findings, "stale": done.stale}
 
 
 def intervene_sync(
     record: object,
-    loaded: LoadedDesign,
-    edits: object,
+    recorded_design: LoadedDesign,
+    interventions: object,
     *,
-    rule: object = None,
+    rerun_design: LoadedDesign | None = None,
     functions: _Functions = None,
 ) -> dict[str, Any]:
     """``intervene`` run to completion; ``RuntimeError`` inside a running event loop."""
     return _run_sync(
-        "intervene", lambda: intervene(record, loaded, edits, rule=rule, functions=functions)
+        "intervene",
+        lambda: intervene(
+            record,
+            recorded_design,
+            interventions,
+            rerun_design=rerun_design,
+            functions=functions,
+        ),
     )
+
+
+_NAMES = ("recorded_design", "rerun_design")
 
 
 # ---------------------------------------------------------------------------------------------
 # The one procedure
 
 
-def _checked(record: object, loaded: LoadedDesign) -> tuple[Record, _Log]:
-    """The record read, and its log, after the record checks."""
+@dataclass(frozen=True, slots=True)
+class _Applied:
+    """What an intervention run gives: each log item the edits changed, once, in log order;
+    the design run; the replay record; replay's findings; and the stale refs, in code-point
+    order."""
+
+    items: _Log
+    design: LoadedDesign
+    record: Record
+    findings: list[dict[str, Any]]
+    stale: list[str]
+
+
+def _checked(
+    record: object,
+    loaded: LoadedDesign,
+    rerun: object = None,
+    *,
+    names: tuple[str, str] = ("loaded", "rerun_design"),
+) -> tuple[Record, _Log]:
+    """The record read, and its log, after the record checks; each design named as its job
+    names it."""
     if type(loaded) is not LoadedDesign:
-        raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
+        raise EntryRefusal(f"{names[0]} is a {type_name(loaded)}, not exactly a LoadedDesign")
+    if rerun is not None and type(rerun) is not LoadedDesign:
+        raise EntryRefusal(f"{names[1]} is a {type_name(rerun)}, not exactly a LoadedDesign")
     read = _read(record, "record")
     log = read.log  # read once: every read decodes afresh
     _refuse_unfit(("record",), (read,), (log,), loaded)
@@ -275,25 +238,27 @@ async def _applied(
     log: _Log,
     loaded: LoadedDesign,
     edits: list[_Edit],
-    constant: _Constant | None,
     functions: _Functions,
-) -> tuple[_Log, dict[str, Any] | None, list[dict[str, Any]]]:
-    """The changed items in log order, the modified document or ``None``, and the findings.
+    rerun: LoadedDesign | None = None,
+) -> _Applied:
+    """The interventions applied and replayed once.
 
-    Once duplicate and conflicting targets are refused, the edits' targets are disjoint, so no
-    order among the edits changes the copy. The checks run in this order: each edit's target
-    against the record as read, in list order, then the rule's; each value against its
-    declared type alone, in list order; then, with every edit applied to one copy, each answer
-    against that copy, its labels from a candidate set and its spans against its text as
-    edited, in list order; then the load of the modified design. Nothing replays before every
-    check passes."""
-    _refuse_targets(edits, log)
-    located = [_target(edit, log) for edit in edits]
-    rule = None if constant is None else _rule_target(constant, log, loaded)
+    Once duplicate and conflicting targets are refused, the targets are disjoint, so no order
+    among the interventions changes the copy. The checks run in this order: each target, in
+    list order, a record edit's against the record as read and a rule's or an asked source's
+    against the design run; each value against its declared type in ``loaded`` alone, in list
+    order; then, with every edit applied to one copy, each answer against that copy, its labels
+    from a candidate set and its spans against its text as edited, in list order; then the load
+    of the design run with its rules made constant. Nothing replays before every check
+    passes."""
+    running = loaded if rerun is None else rerun
+    _refuse_targets(edits, log, running)
+    located = [_target(edit, log, running) for edit in edits]
     edited = list(log)
     changed: set[int] = set()
     answers: list[_EntryAt] = []
     fields: list[_FieldAt] = []
+    rules: list[_RuleAt] = []
     for at in located:
         if type(at) is _EntryAt:
             written = _alone(at, loaded)
@@ -309,6 +274,8 @@ async def _applied(
         elif type(at) is _FieldAt:
             _field_alone(at, log, loaded)
             fields.append(at)
+        elif type(at) is _RuleAt:
+            rules.append(at)
     if fields:
         index, state = cast("tuple[int, dict[str, Any]]", _entry(_STATE, log))
         t = loaded._types[_STATE]
@@ -325,13 +292,12 @@ async def _applied(
             _nonconforming(at.ref)
         edited[at.index] = _rewritten(edited[at.index], value=written)
         changed.add(at.index)
-    design, document = loaded, None
-    if rule is not None:
-        design, document = _rule_loaded(*rule, own_functions(loaded, functions))
+    if rules:
+        running = _rule_loaded(running, rules, own_functions(running, functions))
     copied = _record_copy(edited, read.unhashed).log if changed else log
-    items = [copied[i] for i in sorted(changed)]
-    # The copy answers; each source is checked against the record as read, since its calls
-    # were asked over the record's entries, not the copy's. What an edit set is never checked.
+    # The copy answers; each source is checked against the record as read and its design,
+    # since its calls were asked over the record's entries, not the copy's. What an edit set is
+    # never checked.
     pinned = frozenset(at.ref for at in located if type(at) is _EntryAt)
     failed = frozenset(
         sid
@@ -339,42 +305,62 @@ async def _applied(
         if type(at) is _CallAt
         for sid in cast("list[str]", at.call["sources"])
     )
-    found = await _replayed(copied, design, copied, base=log, pinned=pinned, failed=failed)
-    return items, document, found
+    asked = frozenset(at for at in located if type(at) is str)
+    rerun, found = await _replayed(
+        copied,
+        running,
+        copied,
+        base=log,
+        pinned=pinned,
+        failed=failed,
+        design=loaded,
+        asked=asked,
+    )
+    stale = [cast(str, f["ref"]) for f in found if f["kind"] is FindingKind.stale_question]
+    return _Applied([copied[i] for i in sorted(changed)], running, rerun, found, stale)
 
 
-def _target(edit: _Edit, log: _Log) -> "_EntryAt | _CallAt | _FieldAt":
-    """An edit's target located in the record as read, after its target refusals."""
+def _target(
+    edit: _Edit, log: _Log, running: LoadedDesign
+) -> "_EntryAt | _CallAt | _FieldAt | _RuleAt | str":
+    """An intervention's target located, after its target refusals: a record edit's in the
+    record as read, a rule's or an asked source's, given as its id, in the design run."""
     if type(edit) is _SetEntry:
         return _entry_target(edit, log)
     if type(edit) is _FailCall:
         return _call_target(edit, log)
-    return _field_target(cast(_SetField, edit), log)
+    if type(edit) is _SetField:
+        return _field_target(edit, log)
+    if type(edit) is _Constant:
+        return _rule_target(edit, log, running)
+    source = cast(_Ask, edit).ask
+    if type(source) is not str or source not in running._design.sources:
+        _not_found("the design run declares no source", source, "source")
+    return source
 
 
-def _shaped(edits: object, rule: object) -> tuple[list[_Edit], _Constant | None]:
-    """``intervene``'s arguments as edits, refused ``invalid-edit`` then ``no-edit``."""
-    if type(edits) is not list:
+def _shaped(interventions: object, rerun: object) -> list[_Edit]:
+    """``intervene``'s list as interventions, refused ``invalid-edit``, then ``no-edit`` when
+    it is empty and ``rerun_design`` is ``None``."""
+    if type(interventions) is not list:
         raise EvaluationRefusal(
-            f"edits is a {type_name(edits)}, not a list", reason=_R.invalid_edit
+            f"interventions is a {type_name(interventions)}, not a list", reason=_R.invalid_edit
         )
     out: list[_Edit] = []
-    for i, item in enumerate(cast("list[object]", edits)):
+    for i, item in enumerate(cast("list[object]", interventions)):
         form = _SHAPES.get(_keys(item))
         if form is None:
             raise EvaluationRefusal(
-                f"edit {i} is not one of {{ref, value}}, {{source, code}} or {{path, value}}",
+                f"intervention {i} is not one of {{ref, value}}, {{source, code}}, "
+                "{path, value}, {rule, output} or {ask}",
                 reason=_R.invalid_edit,
             )
         out.append(form(**cast("dict[str, Any]", item)))
-    constant: _Constant | None = None
-    if rule is not None:
-        if _keys(rule) != frozenset({"rule", "output"}):
-            raise EvaluationRefusal("rule is not None or {rule, output}", reason=_R.invalid_edit)
-        constant = _Constant(**cast("dict[str, Any]", rule))
-    if not out and constant is None:
-        raise EvaluationRefusal("edits is empty and rule is None", reason=_R.no_edit)
-    return out, constant
+    if not out and rerun is None:
+        raise EvaluationRefusal(
+            "interventions is empty and rerun_design is None", reason=_R.no_edit
+        )
+    return out
 
 
 def _keys(item: object) -> frozenset[str]:
@@ -386,13 +372,17 @@ def _keys(item: object) -> frozenset[str]:
     return frozenset(cast("list[str]", keys)) if all(type(k) is str for k in keys) else frozenset()
 
 
-def _refuse_targets(edits: list[_Edit], log: _Log) -> None:
-    """Refuse ``duplicate-target``, two edits naming one ref, one call or one ``t:state`` path
-    or a path within another, naming the later; then ``conflicting-edits``, a ``set_entry``
-    edit of an entry a ``fail_call`` edit's call wrote, naming both."""
+def _refuse_targets(edits: list[_Edit], log: _Log, running: LoadedDesign) -> None:
+    """Refuse ``duplicate-target``, two interventions naming one ref, one call, one
+    ``t:state`` path or a path within another, one rule or one asked source, naming the later;
+    then ``conflicting-edits``, an entry set beside a failed call that wrote it, or a source
+    asked beside a failed call that lists it or a set entry it provides in the design run,
+    naming both."""
     refs: set[str] = set()
     calls: dict[int, str] = {}
     paths: list[str] = []
+    rules: set[str] = set()
+    asked: set[str] = set()
     for edit in edits:
         if type(edit) is _SetEntry and type(edit.ref) is str:
             if edit.ref in refs:
@@ -409,17 +399,34 @@ def _refuse_targets(edits: list[_Edit], log: _Log) -> None:
                 if _within(path, edit.path) or _within(edit.path, path):
                     _duplicate(f"path {edit.path}, beside {path}", path=edit.path)
             paths.append(edit.path)
+        elif type(edit) is _Constant and type(edit.rule) is str:
+            if edit.rule in rules:
+                _duplicate(f"rule {edit.rule}", ref=edit.rule)
+            rules.add(edit.rule)
+        elif type(edit) is _Ask and type(edit.ask) is str:
+            if edit.ask in asked:
+                _duplicate(f"asked source {edit.ask}", source=edit.ask)
+            asked.add(edit.ask)
     for edit in edits:
         if type(edit) is _SetEntry and type(edit.ref) is str:
             entry = _entry(edit.ref, log)
             source = None if entry is None else calls.get(cast(int, entry[1]["call"]))
             if source is not None:
-                raise EvaluationRefusal(
-                    f"ref {edit.ref} is an entry of the call source {source}'s edit fails",
-                    reason=_R.conflicting_edits,
-                    ref=edit.ref,
-                    source=source,
-                )
+                what = f"ref {edit.ref} is an entry of the call source {source}'s edit fails"
+                _conflicting(what, edit.ref, source)
+            source = running._providers.get(_declared(edit.ref))
+            if source in asked:
+                what = f"ref {edit.ref} is set and its source {source} asked"
+                _conflicting(what, edit.ref, source)
+    for index, failing in calls.items():
+        for source in cast("list[str]", log[index]["sources"]):
+            if source in asked:
+                what = f"source {source} is asked and its call fails by source {failing}'s edit"
+                _conflicting(what, None, source)
+
+
+def _conflicting(what: str, ref: str | None, source: str | None) -> NoReturn:
+    raise EvaluationRefusal(what, reason=_R.conflicting_edits, ref=ref, source=source)
 
 
 def _duplicate(
@@ -454,7 +461,7 @@ def _not_found(what: str, given: object, member: Literal["ref", "source", "path"
 
 
 # ---------------------------------------------------------------------------------------------
-# set_entry
+# An entry set
 
 
 def _entry_target(edit: _SetEntry, log: _Log) -> _EntryAt:
@@ -600,7 +607,7 @@ def _t_value(ref: str, value: object, loaded: LoadedDesign) -> tuple[object] | N
 
 
 # ---------------------------------------------------------------------------------------------
-# fail_call
+# A call failed
 
 
 def _call_target(edit: _FailCall, log: _Log) -> _CallAt:
@@ -641,7 +648,7 @@ def _failed(at: _CallAt, log: _Log) -> list[tuple[int, dict[str, Any]]]:
 
 
 # ---------------------------------------------------------------------------------------------
-# set_state_field
+# A state field set
 
 
 def _field_target(edit: _SetField, log: _Log) -> _FieldAt:
@@ -703,18 +710,25 @@ def _put(value: object, names: tuple[str, ...], given: object) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# constant_rule
+# A rule made constant
 
 
-def _rule_target(
-    constant: _Constant, log: _Log, loaded: LoadedDesign
-) -> tuple[dict[str, Any], str, str]:
-    """The loaded design's document with the rule replaced, the rule's name and its ref;
-    refused ``not-found``, ``candidate-rule``, then ``marker``. A rule reading a grounded
-    declared ref, which the record's ``settings`` item names under ``grounded``, is a candidate
-    rule: no table but one grounded over its set may read it."""
+@dataclass(frozen=True, slots=True)
+class _RuleAt:
+    """A constant rule's name, its ref and the one-row table replacing it."""
+
+    name: str
+    ref: str
+    table: dict[str, Any]
+
+
+def _rule_target(constant: _Constant, log: _Log, running: LoadedDesign) -> _RuleAt:
+    """The rule of the design run providing the ref, and its table; refused ``not-found``,
+    ``candidate-rule``, then ``marker``. A rule reading a grounded declared ref, which the
+    record's ``settings`` item names under ``grounded``, is a candidate rule: no table but one
+    grounded over its set may read it."""
     ref = constant.rule
-    document = cast("dict[str, Any]", decode(loaded.document))
+    document = cast("dict[str, Any]", decode(running.document))
     rules = cast("dict[str, dict[str, Any]]", document["rules"])
     name = next((n for n, r in rules.items() if type(ref) is str and r["provides"] == ref), None)
     if name is None:
@@ -760,27 +774,30 @@ def _rule_target(
             }
         ],
     )
-    rules[name] = table
-    return document, name, ref
+    return _RuleAt(name, ref, table)
 
 
 def _rule_loaded(
-    document: dict[str, Any], name: str, ref: str, functions: _Functions
-) -> tuple[LoadedDesign, dict[str, Any]]:
-    """The modified design loaded, and its document parsed; ``invalid-design`` carrying the
-    ``InvalidDesign`` load raised, said plainly for an output holding bytes."""
+    running: LoadedDesign, rules: list[_RuleAt], functions: _Functions
+) -> LoadedDesign:
+    """The design run with each rule replaced by its table, loaded; ``invalid-design``
+    carrying the ``InvalidDesign`` load raised, naming the first rule whose output holds bytes,
+    said plainly, else the first rule."""
+    document = cast("dict[str, Any]", decode(running.document))
+    for at in rules:
+        document["rules"][at.name] = at.table
     try:
-        modified = load(document, functions=functions)
+        return load(document, functions=functions)
     except InvalidDesign as exc:
-        output = document["rules"][name]["rows"][0]["output"]
-        why = "a table has no bytes literal" if _holds_bytes(output) else exc
+        held = [at for at in rules if _holds_bytes(at.table["rows"][0]["output"])]
+        at = (held or rules)[0]
+        why = "a table has no bytes literal" if held else exc
         raise EvaluationRefusal(
-            f"the design with rule {name} constant does not load: {why}",
+            f"the design with rule {at.name} constant does not load: {why}",
             reason=_R.invalid_design,
-            ref=ref,
+            ref=at.ref,
             error=exc,
         ) from exc
-    return modified, cast("dict[str, Any]", decode(modified.document))
 
 
 def _holds_bytes(value: object) -> bool:

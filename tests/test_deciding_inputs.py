@@ -7,6 +7,7 @@ that reaches no ``Record``."""
 import asyncio
 import copy
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -39,8 +40,7 @@ from ommat.evaluation import (
     _edit,
     deciding_inputs,
     deciding_inputs_sync,
-    set_entry_sync,
-    set_state_field_sync,
+    intervene_sync,
 )
 from scripted import Scripted, returns
 from test_decide import ASK, BODY, LOADED, RULES, ok_policy, slice_design
@@ -99,13 +99,13 @@ def decided() -> Any:
 
 @pytest.fixture
 def tried(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
-    """Each intervention tried, as its edits and its rule."""
+    """Each intervention tried, as its list."""
     seen: list[Any] = []
     real = _deciding._applied
 
-    async def spy(read: Any, log: Any, loaded: Any, edits: Any, rule: Any, f: Any) -> Any:
-        seen.append((edits, rule))
-        return await real(read, log, loaded, edits, rule, f)
+    async def spy(read: Any, log: Any, loaded: Any, edits: Any, f: Any) -> Any:
+        seen.append(edits)
+        return await real(read, log, loaded, edits, f)
 
     monkeypatch.setattr(_deciding, "_applied", spy)
     return seen
@@ -184,8 +184,8 @@ def test_a_read_of_a_grounded_rule_is_not_determined() -> None:
 
 
 def flat(trials: list[Any]) -> list[Any]:
-    """Each trial's one edit, or its rule."""
-    return [edits[0] if edits else rule for edits, rule in trials]
+    """Each trial's one intervention."""
+    return [one for (one,) in trials]
 
 
 def test_a_finite_entry_is_tried_at_every_marker_and_value_and_its_lone_call_failed() -> None:
@@ -206,7 +206,7 @@ def test_a_read_no_intervention_changes_runs_every_trial_through_the_job(
     assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-deciding"}
     trials, _ = _deciding._trials("t:kind", decided().log, DESIGN)
     assert tried == trials
-    assert any(type(e) is _edit._FailCall for edits, _ in tried for e in edits)
+    assert any(type(e) is _edit._FailCall for edits in tried for e in edits)
 
 
 @pytest.mark.parametrize(
@@ -306,7 +306,7 @@ def test_a_nullable_finite_t_entry_is_tried_at_null_too(tried: list[Any]) -> Non
 
 def test_a_change_of_rows_alone_is_no_change_of_the_entry() -> None:
     record = nullable_record()
-    found = set_state_field_sync(record, NULLABLE, "t:state.k", "b")["findings"]
+    found = intervene_sync(record, NULLABLE, [{"path": "t:state.k", "value": "b"}])["findings"]
     assert [(f["ref"], f["replayed"]["rows"]) for f in found] == [("d:tab", [2])]
     assert deciding_inputs_sync(record, NULLABLE, "d:tab") == {"t:state.k": "not-deciding"}
 
@@ -341,7 +341,7 @@ def stubbed(monkeypatch: pytest.MonkeyPatch, *outcomes: object) -> None:
         outcome: object = given.pop(0) if given else list[Any]()
         if isinstance(outcome, EvaluationRefusal):
             raise outcome
-        return list[Any](), None, outcome
+        return SimpleNamespace(findings=outcome)
 
     monkeypatch.setattr(_deciding, "_applied", applied)
 
@@ -380,7 +380,7 @@ GATED = load(
 def test_a_value_whose_replay_asks_outside_the_record_leaves_the_read_not_determined() -> None:
     replies = Scripted({"src": returns({"t:lab": "q"}), "gated": returns({"t:other": True})})
     record = decide_sync(GATED, {}, {"default": replies}).record
-    found = set_entry_sync(record, GATED, "t:lab", "p")["findings"]
+    found = intervene_sync(record, GATED, [{"ref": "t:lab", "value": "p"}])["findings"]
     assert FindingKind.stale_question in [f["kind"] for f in found]
     assert deciding_inputs_sync(record, GATED, "d:r") == {"t:lab": "not-determined"}
 
@@ -450,7 +450,7 @@ def test_a_field_path_read_of_an_entry_is_tried_through_the_whole_entry(
     trials, exhaustive = _deciding._trials("t:rec.f", record.log, loaded)
     assert not exhaustive  # a record type: the entry is tried at markers only
     assert {x.ref for x in flat(trials) if type(x) is _edit._SetEntry} == {"t:rec"}
-    assert all(type(e) is not _edit._SetField for edits, _ in tried for e in edits)
+    assert all(type(e) is not _edit._SetField for edits in tried for e in edits)
 
 
 def test_an_unexpected_refusal_propagates(monkeypatch: pytest.MonkeyPatch) -> None:

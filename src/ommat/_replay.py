@@ -14,8 +14,9 @@ propagates as decide lets it out, with the replay record so far and no findings.
 ``_replay_with`` is the rerun itself, its fixture built from a given log's calls while the
 state entry, the settings, the cut and the compared log are the record's; ``replay`` gives the
 record's log as both, and the evaluation subpackage's ``use_answers`` another record's. Each
-asked source is checked against a base log, the answering log unless an edit made it from
-another, and a ``stale-question`` finding names each ref the fixture found stale.
+asked source is checked against a base log, the answering log unless ``intervene`` made it
+from another, and against the base's design when ``intervene`` gives one, and a
+``stale-question`` finding names each ref the fixture found stale.
 
 The findings are plain ``dict``s in a fixed order, two items differing when their
 canonical bytes differ. Replay reads nothing from ``unhashed``.
@@ -85,12 +86,15 @@ async def _replay_with(
     base: list[dict[str, Any]] | None = None,
     pinned: frozenset[str] = frozenset(),
     failed: frozenset[str] = frozenset(),
+    design: LoadedDesign | None = None,
+    asked: frozenset[str] = frozenset(),
 ) -> tuple[Record, list[Finding]]:
     """Rerun the finished turn ``log`` holds, with a state entry, under ``loaded``, the
     fixture built from the call items and entries of ``answers``, each source checked against
-    ``base``, ``answers`` when ``None``, the refs in ``pinned`` and the sources in ``failed``
-    never; the state entry, the run settings, the cut and the log every finding compares
-    against are ``log``'s."""
+    ``base``, ``answers`` when ``None``, and against ``design``, the base's design, the refs in
+    ``pinned`` and the sources in ``failed`` never, the sources in ``asked`` stale; the state
+    entry, the run settings, the cut and the log every finding compares against are
+    ``log``'s."""
     # Both callers checked that the log holds a state entry.
     state = next(item for item in log if item["item"] == "entry" and item["ref"] == _STATE)
     # The settings item is second in every record from the design item on.
@@ -102,7 +106,7 @@ async def _replay_with(
         recorded["deadline"],
         recorded["certificate_cap"],
     )
-    checked = Base(answers if base is None else base, loaded)
+    checked = Base(answers if base is None else base, loaded, design=design, asked=asked)
     fixture = FixtureBinding(RecordedCalls(answers), loaded, checked, pinned=pinned, failed=failed)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
     bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))

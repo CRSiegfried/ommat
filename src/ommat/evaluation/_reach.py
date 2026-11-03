@@ -11,7 +11,7 @@ refuse one, ``invalid-record``, ``unfinished``, ``nothing-to-replay``, ``wrong-d
 any trial.
 
 For each record in list order, and each ``q:`` entry it holds whose call is neither null nor
-recorded ``Failed``, in log order, the job runs one form 1 trial, ``set_entry``'s edit through
+recorded ``Failed``, in log order, the job runs one trial, ``intervene``'s entry set through
 ``_edit``'s one procedure, at each of the entry's points other than its recorded value or marker
 by canonical bytes. An entry's points are its declared question's lint points, a grounded
 entry's with its own marker last; a candidate-valued question's are each fixed label and then
@@ -82,15 +82,14 @@ async def question_reach(
             ref = cast(str, entry["ref"])
             question = declared_ref(ref)
             for value in _points(ref, entry, log, loaded, fills[question]):
-                items, _, found = await _applied(
-                    record, log, loaded, [_SetEntry(ref, value)], None, None
-                )
+                done = await _applied(record, log, loaded, [_SetEntry(ref, value)], None)
+                found = done.findings
                 trials += 1
                 ran.add(question)
                 if any(f["kind"] in OUTSIDE for f in found):
                     undetermined.add(question)
                 elif question not in witnesses and any(f["kind"] in _DECIDING for f in found):
-                    written = items[0]
+                    written = done.items[0]
                     shown = written["value"] if "value" in written else written["marker"]
                     witnesses[question] = {
                         "record": record.record_hash,
@@ -134,7 +133,7 @@ def _asked(entry: dict[str, Any], log: _Log) -> bool:
 def _points(
     ref: str, entry: dict[str, Any], log: _Log, loaded: LoadedDesign, points: list[Point]
 ) -> list[object]:
-    """The entry's points in their order, each as form 1 takes it, less the one whose record
+    """The entry's points in their order, each as an entry set takes it, less the one whose record
     form is the entry's recorded value or marker by canonical bytes."""
     question = declared_ref(ref)
     if ref != question:  # a grounded entry: its own marker last

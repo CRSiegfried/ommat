@@ -8,8 +8,10 @@ A source is matched to the recorded call item that lists it, never by round or b
 of its refs is answered only from a recorded entry naming that call. The check compares the
 source as now asked with the base record, the record the answers were given in: a ref is
 stale when the base holds no answer for it (``no-answer``), when a need's value differs from
-the base's entry (``needs``), or when its question as now asked differs from the call item's
-(``question``). The fixture gives a stale ref no key and logs it, so the engine writes
+the base's entry (``needs``), when its question as now asked differs from the call item's, or a
+``t:`` ref's declared type from the base design's (``question``), when the source's payload
+differs from the base design's (``payload``), or when its ``oracle`` key differs or a scenario
+asks it afresh (``oracle``). The fixture gives a stale ref no key and logs it, so the engine writes
 ``not-returned`` and replay names it; ``from_record`` refuses it with ``unsupported``. No answer
 depends on an earlier call; neither binding waits, and each returns fresh containers with null
 provenance, a null precision and no truncated refs.
@@ -70,8 +72,8 @@ class RecordedCalls:
 
 @dataclass(frozen=True, slots=True)
 class Stale:
-    """Why a ref is stale: its clause, ``no-answer``, ``needs`` or ``question``, and a line
-    saying why."""
+    """Why a ref is stale: its clause, ``no-answer``, ``needs``, ``question``, ``payload`` or
+    ``oracle``, and a line saying why."""
 
     clause: str
     why: str
@@ -79,9 +81,18 @@ class Stale:
 
 class Base:
     """The base record's calls and entries, read once, against which a source asked under
-    ``loaded`` is checked."""
+    ``loaded`` is checked; ``design``, the design the base was decided under, ``loaded`` when
+    ``None``, gives each source's payload, ``oracle`` key and ``t:`` types; each source in
+    ``asked`` is asked afresh."""
 
-    def __init__(self, log: list[dict[str, Any]], loaded: LoadedDesign) -> None:
+    def __init__(
+        self,
+        log: list[dict[str, Any]],
+        loaded: LoadedDesign,
+        *,
+        design: LoadedDesign | None = None,
+        asked: frozenset[str] = frozenset(),
+    ) -> None:
         self.calls = RecordedCalls(log)
         self.entries = {cast(str, i["ref"]): i for i in log if i["item"] == "entry"}
         # A record before format 6 holds no order, so its needs are compared without it.
@@ -90,14 +101,18 @@ class Base:
         # record before format 7 holds only list<string> sets.
         self._sets = cast("dict[str, str | None]", log[1].get("sets", {}))
         self._loaded = loaded
+        self._design = loaded if design is None else design
+        self._asked = asked
         self._sources = cast("dict[str, Any]", decode(loaded.document))["sources"]
 
     def check(self, source: SourceCall) -> tuple[Stale | None, dict[str, Stale]]:
-        """Whether ``source`` is stale whole, and why, else each stale ref of it: a source with
-        no call item listing it is ``no-answer`` and one whose needs differ ``needs``; a
-        question whose kind, labels, value type, list flag or identity differ is ``question``,
-        and a ref the call wrote no entry for ``no-answer``. A ``t:`` ref is checked for its
-        entry alone, since the record holds no type for it. A recorded ``Failed`` call is the
+        """Whether ``source`` is stale whole, and why, else each stale ref of it, by the first
+        clause that holds: a source with no call item listing it is ``no-answer`` and one whose
+        needs differ ``needs``; a question whose kind, labels, value type, list flag or identity
+        differ, or a ``t:`` ref whose declared type differs from the base design's, is
+        ``question``, and a ref the call wrote no entry for ``no-answer``; every other ref is
+        ``payload`` when the source's payload differs from the base design's, then ``oracle``
+        when its ``oracle`` key differs or it is asked afresh. A recorded ``Failed`` call is the
         bindings' to judge."""
         found = self.calls.call_of(source.id)
         if found is None:
@@ -108,6 +123,7 @@ class Base:
             return Stale("needs", f"needs differ from the stored turn's: {shown}"), {}
         index, item = found
         stored = cast("dict[str, Any]", item["questions"])
+        rest = self._rest(source.id)
         stale: dict[str, Stale] = {}
         for ref in (*source.refs, *source.questions):
             if ref in source.questions:
@@ -115,9 +131,34 @@ class Base:
                 if why:
                     stale[ref] = Stale("question", why)
                     continue
+            elif self._retyped(ref):
+                stale[ref] = Stale("question", "its declared type differs from the base's")
+                continue
             if (index, ref) not in self.calls.entries:
                 stale[ref] = Stale("no-answer", "the recorded call wrote no entry for it")
+            elif rest is not None:
+                stale[ref] = rest
         return None, stale
+
+    def _rest(self, sid: str) -> Stale | None:
+        """Why every ref of source ``sid`` is stale by its payload or its oracle, or ``None``."""
+        here = self._loaded._design.sources.get(sid)
+        there = self._design._design.sources.get(sid)
+        if here is not None and there is not None:
+            if self._loaded._payload_bytes[sid] != self._design._payload_bytes[sid]:
+                return Stale("payload", "its payload differs from the base design's")
+            if here.oracle != there.oracle:
+                return Stale("oracle", "its oracle key differs from the base design's")
+        if sid in self._asked:
+            return Stale("oracle", "the scenario asks it afresh")
+        return None
+
+    def _retyped(self, ref: str) -> bool:
+        """Whether a ``t:`` ref the base design declares has another declared type; a ref it
+        does not declare has no entry in its record, so it is ``no-answer``."""
+        declared = declared_ref(ref)
+        held = self._design._types.get(declared)
+        return held is not None and self._loaded._types.get(declared) != held
 
     def _question(self, ref: str, asked: RenderedQuestion, stored: dict[str, Any]) -> str:
         """Why the question asked at ``ref`` is not the call item's, or empty when it is."""

@@ -1,35 +1,35 @@
 """The evaluation subpackage: jobs that measure a design against past turns through replay,
 and the two stores they keep their inputs and results in. The names ``__all__`` lists are
-public, under the same deprecation rule as ``ommat.__all__``. Do-and-diff's six jobs, the
+public, under the same deprecation rule as ``ommat.__all__``. Do-and-diff's two jobs, the
 deciding inputs, the switching-value job and the question-reach job are
 shipped, each async with a ``_sync`` twin, and the gold-answers job and the correlated-group
 confirmation job, sync.
 
-``set_entry``, ``fail_call``, ``set_state_field`` and ``constant_rule`` each change one input of a
-recorded turn, an entry a call wrote, a whole call, a ``t:state`` field or a rule made constant, and
-``intervene`` several at once; each replays the change once and returns what it edited beside
-replay's findings, the changes downstream. ``use_answers`` reruns one record's turn with another
-record's calls answering. ``deciding_inputs`` classes each declared read of the rule providing an
-entry by whether some single edit on it, as the four single-edit jobs make one, changes that entry:
-``deciding``, ``not-deciding``, ``markers-only`` or ``not-determined``. ``switching_values`` replays
-a record under each value of one parameter leaf, probed at the values the turn compares it against
-and the gap and end values between and beyond them, and writes, per entry and for the plan, the
-switching values, slacks and classes, or a ``boolean`` or ``label`` leaf's partition, to the
-evaluation store. ``write_gold_answers``, sync, writes a labeller's labels for the questions
-finished turns asked under a named gold set, copying an old set's for the questions given none.
-``confirm_group``, sync, counts for each pair of a declared correlated group's ``q:`` refs, over a
-split's turns, or turns and candidates for a grounded group, in which both hold an answer, the units
-in which each erred against its gold answer and those in which both did, and writes them as a
-``group-counts`` entry, giving no verdict. ``question_reach`` tries each question's answer, changed
-alone at each of its lint points by ``set_entry``'s edit, in every ``q:`` entry a returned call
-wrote in the records given, and reports a question ``live`` with its first witness when some trial
-changes the plan or the verdict, else ``not-determined``, ``no-change-found`` or ``never-asked``.
-``split_id``, sync, gives the id of a split of records, so a caller names a split as
-``confirm_group`` checks it. ``DesignStore`` keeps a loaded design's document under its design hash
-and fetches it back through ``load``; ``EvaluationStore`` keeps write-once entries by kind and key.
-A job or a store refuses with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
+``intervene`` replays a copy of a recorded turn once under a list of interventions, each setting an
+entry a call wrote, failing a whole call, setting a ``t:state`` field, making a rule constant or
+asking a source afresh, and under a changed design when given; it returns the replay record,
+replay's findings, the changes downstream, and the stale refs. ``use_answers`` reruns one record's
+turn with another record's calls answering. ``deciding_inputs`` classes each declared read of the
+rule providing an entry by whether some single intervention on it changes that entry: ``deciding``,
+``not-deciding``, ``markers-only`` or ``not-determined``. ``switching_values`` replays a record
+under each value of one parameter leaf, probed at the values the turn compares it against and the
+gap and end values between and beyond them, and writes, per entry and for the plan, the switching
+values, slacks and classes, or a ``boolean`` or ``label`` leaf's partition, to the evaluation
+store. ``write_gold_answers``, sync, writes a labeller's labels for the questions finished turns
+asked under a named gold set, copying an old set's for the questions given none. ``confirm_group``,
+sync, counts for each pair of a declared correlated group's ``q:`` refs, over a split's turns, or
+turns and candidates for a grounded group, in which both hold an answer, the units in which each
+erred against its gold answer and those in which both did, and writes them as a ``group-counts``
+entry, giving no verdict. ``question_reach`` tries each question's answer, changed alone at each of
+its lint points by an entry set, in every ``q:`` entry a returned call wrote in the records given,
+and reports a question ``live`` with its first witness when some trial changes the plan or the
+verdict, else ``not-determined``, ``no-change-found`` or ``never-asked``. ``split_id``, sync, gives
+the id of a split of records, so a caller names a split as ``confirm_group`` checks it.
+``DesignStore`` keeps a loaded design's document under its design hash and fetches it back through
+``load``; ``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses
+with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
 
-The edits are in ``_edit``, the deciding inputs, tried through them, in ``_deciding``, the
+``intervene`` is in ``_edit``, the deciding inputs, tried through it, in ``_deciding``, the
 switching-value job in ``_switching``, the gold-answers job in ``_gold``, the correlated-group
 confirmation job in ``_group``, the question-reach job in ``_reach``, the splits it reads in
 ``_splits``, ``use_answers`` and the record checks and replay they share in ``_diff``, the stores in
@@ -38,18 +38,7 @@ confirmation job in ``_group``, the question-reach job in ``_reach``, the splits
 
 from ommat.evaluation._deciding import deciding_inputs, deciding_inputs_sync
 from ommat.evaluation._diff import use_answers, use_answers_sync
-from ommat.evaluation._edit import (
-    constant_rule,
-    constant_rule_sync,
-    fail_call,
-    fail_call_sync,
-    intervene,
-    intervene_sync,
-    set_entry,
-    set_entry_sync,
-    set_state_field,
-    set_state_field_sync,
-)
+from ommat.evaluation._edit import intervene, intervene_sync
 from ommat.evaluation._gold import write_gold_answers
 from ommat.evaluation._group import confirm_group
 from ommat.evaluation._reach import question_reach, question_reach_sync
@@ -64,20 +53,12 @@ __all__ = [
     "EvaluationStore",
     "RefusalReason",
     "confirm_group",
-    "constant_rule",
-    "constant_rule_sync",
     "deciding_inputs",
     "deciding_inputs_sync",
-    "fail_call",
-    "fail_call_sync",
     "intervene",
     "intervene_sync",
     "question_reach",
     "question_reach_sync",
-    "set_entry",
-    "set_entry_sync",
-    "set_state_field",
-    "set_state_field_sync",
     "split_id",
     "switching_values",
     "switching_values_sync",

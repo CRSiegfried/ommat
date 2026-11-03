@@ -156,9 +156,9 @@ def tried(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any, list[str]]]:
     seen: list[tuple[str, Any, list[str]]] = []
     real = _reach._applied
 
-    async def spy(read: Any, log: Any, loaded: Any, edits: Any, rule: Any, f: Any) -> Any:
-        out = await real(read, log, loaded, edits, rule, f)
-        seen.append((edits[0].ref, edits[0].value, [str(x["kind"]) for x in out[2]]))
+    async def spy(read: Any, log: Any, loaded: Any, edits: Any, f: Any) -> Any:
+        out = await real(read, log, loaded, edits, f)
+        seen.append((edits[0].ref, edits[0].value, [str(x["kind"]) for x in out.findings]))
         return out
 
     monkeypatch.setattr(_reach, "_applied", spy)
@@ -600,7 +600,8 @@ def test_a_record_differing_only_in_helpers_mismatch_is_tried(
     real = _diff._replayed
 
     async def noted(log: Any, loaded: Any, answers: Any) -> Any:
-        return [*(await real(log, loaded, answers)), {"kind": FindingKind.helpers_mismatch}]
+        rerun, found = await real(log, loaded, answers)
+        return rerun, [*found, {"kind": FindingKind.helpers_mismatch}]
 
     monkeypatch.setattr(_diff, "_replayed", noted)
     assert question_reach_sync([turn()], LOADED)["questions"]["q:go"]["status"] == "live"
@@ -655,9 +656,9 @@ def test_witness_and_trial_values_are_copies(monkeypatch: pytest.MonkeyPatch) ->
     held: list[Any] = []  # each trial's value and the entry its copy wrote
     real = _reach._applied
 
-    async def holding(read: Any, log: Any, loaded: Any, edits: Any, rule: Any, f: Any) -> Any:
-        out = await real(read, log, loaded, edits, rule, f)
-        held.append((edits[0].value, out[0][0]))
+    async def holding(read: Any, log: Any, loaded: Any, edits: Any, f: Any) -> Any:
+        out = await real(read, log, loaded, edits, f)
+        held.append((edits[0].value, out.items[0]))
         return out
 
     monkeypatch.setattr(_reach, "_applied", holding)
@@ -683,10 +684,10 @@ def test_a_trial_value_spoiled_by_its_trial_reaches_no_later_trial(
     given: list[Any] = []
     real = _reach._applied
 
-    async def spoiling(read: Any, log: Any, loaded: Any, edits: Any, rule: Any, f: Any) -> Any:
+    async def spoiling(read: Any, log: Any, loaded: Any, edits: Any, f: Any) -> Any:
         value = edits[0].value
         given.append(copy.deepcopy(value))
-        out = await real(read, log, loaded, edits, rule, f)
+        out = await real(read, log, loaded, edits, f)
         if type(value) is dict:
             cast("dict[str, Any]", value).clear()  # the points are shared across records
         return out

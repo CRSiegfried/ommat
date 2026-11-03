@@ -13,7 +13,7 @@ from either's ``unhashed``.
 
 The record read, its checks, the replay less context-alone plan findings, the sync runner and
 ``own_functions``, the ``functions`` a job given ``loaded`` loads an edited design with, are
-shared with the edits of ``_edit``.
+shared with ``intervene`` in ``_edit``.
 """
 
 import asyncio
@@ -58,7 +58,8 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
                 reason=_R.different_turn,
                 turn=records[1].record_hash,
             )
-    return {"other": records[1].record_hash, "findings": await _replayed(mine, loaded, theirs)}
+    _, found = await _replayed(mine, loaded, theirs)
+    return {"other": records[1].record_hash, "findings": found}
 
 
 def _refuse_unfit(
@@ -97,14 +98,24 @@ async def _replayed(
     base: list[dict[str, Any]] | None = None,
     pinned: frozenset[str] = frozenset(),
     failed: frozenset[str] = frozenset(),
-) -> list[dict[str, Any]]:
-    """Replay's findings for ``log`` rerun under ``loaded``, answered by ``answers``' calls and
-    checked against ``base``'s as ``_replay_with`` checks, less a ``plan`` finding of context
-    alone; the replay record is dropped (§store-integrity)."""
-    _, found = await _replay_with(
-        log, loaded, answers, observer=None, base=base, pinned=pinned, failed=failed
+    design: LoadedDesign | None = None,
+    asked: frozenset[str] = frozenset(),
+) -> tuple[Record, list[dict[str, Any]]]:
+    """The replay record of ``log`` rerun under ``loaded``, answered by ``answers``' calls and
+    checked against ``base`` and ``design`` as ``_replay_with`` checks, and replay's findings
+    less a ``plan`` finding of context alone."""
+    rerun, found = await _replay_with(
+        log,
+        loaded,
+        answers,
+        observer=None,
+        base=base,
+        pinned=pinned,
+        failed=failed,
+        design=design,
+        asked=asked,
     )
-    return [f for f in found if not _context_alone(f)]
+    return rerun, [f for f in found if not _context_alone(f)]
 
 
 OUTSIDE = frozenset({FindingKind.stale_question})
@@ -118,7 +129,7 @@ async def baseline(
     """Replay ``log`` unedited under ``loaded``; ``baseline-differs`` on any finding but
     ``helpers-mismatch``, a note on the helper version alone, the kinds in the message, naming
     ``turn`` when given."""
-    found = await _replayed(log, loaded, log)
+    _, found = await _replayed(log, loaded, log)
     kinds = [str(f["kind"]) for f in found if f["kind"] is not FindingKind.helpers_mismatch]
     if kinds:
         raise EvaluationRefusal(
