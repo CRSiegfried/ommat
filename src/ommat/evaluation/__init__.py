@@ -21,7 +21,7 @@ an old set's for the questions given none. ``gold_record`` replays a turn with e
 asked set to its gold answer, so its plan is what correct answers lead to. ``answers``, sync, gives
 the answers table, one row per question a call answered in each record, with its gold answer and
 whether it erred when a gold set is given. ``question_reach`` tries each question's answer, changed
-alone at each of its lint points by an entry set, in every ``q:`` entry a returned call wrote in
+alone at each of its read points by an entry set, in every ``q:`` entry a returned call wrote in
 the records given, and reports a question ``live`` with its first witness when some trial changes
 the plan or the verdict, else ``not-determined``, ``no-change-found`` or ``never-asked``.
 ``DesignStore`` keeps a loaded design's document under its design hash and fetches it back through

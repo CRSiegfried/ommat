@@ -697,3 +697,15 @@ def test_a_trial_value_spoiled_by_its_trial_reaches_no_later_trial(
     half = len(given) // 2
     assert repr(given[:half]) == repr(given[half:])
     assert report["trials"] == len(given)
+
+
+def test_every_unfilled_question_is_named_in_one_line_as_the_lints_name_them() -> None:
+    loaded = load(extraction.plain())
+    with pytest.raises(ValueError, match="unfilled") as raised:
+        question_reach_sync([b"not json"], loaded)
+    assert str(raised.value) == 'unfilled: "q:amount", "q:dates"; give each a list in values'
+
+
+def test_a_values_key_that_is_not_a_string_is_a_value_error() -> None:
+    with pytest.raises(ValueError, match="the values key 5 is not a string"):
+        question_reach_sync([b"not json"], LOADED, values={5: [1]})  # type: ignore[dict-item]

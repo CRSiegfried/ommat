@@ -1,7 +1,7 @@
 # pyright: reportPrivateUsage=false
-"""The lints' points: an axis, the answer points by kind, the exact arithmetic
-and its landing through the helpers, the fill order and the ``values`` slips. Both lints
-call the one ``_points`` module; the lints' own tests are in ``test_dead_questions.py`` and
+"""The read points: an axis, the answer points by kind, the exact arithmetic and its landing
+through the helpers, the fill order and the ``values`` slips, and the public ``points``. Both
+lints and question reach use them; the lints' own tests are in ``test_dead_questions.py`` and
 ``test_unsure_to_execute.py``."""
 
 import math
@@ -27,7 +27,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._read_view import ComponentKind, ReadView, Role
-from ommat.helpers import mass, pick_with_margin, pick_with_thresholds
+from ommat.helpers import mass, pick_with_margin, pick_with_thresholds, points
 from ommat.helpers._numbers import exact
 from ommat.helpers._points import axis, fill, filled
 
@@ -614,3 +614,58 @@ def test_a_narrowing_slip_is_a_value_error(listed: list[object], says: str) -> N
 def test_a_question_on_the_grid_takes_no_narrowing() -> None:
     with pytest.raises(ValueError, match='"q:go", which its grid points or its type fill'):
         fill(noul(bar=0.5), ["q:go"], {"q:go": ["yes"]})
+
+
+# ---------------------------------------------------------------------------------------------
+# The public generator
+
+
+def test_points_gives_a_reads_points_in_record_form_and_order() -> None:
+    from test_decide import LOADED
+
+    assert points(LOADED, "q:spam") == [
+        {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"yes": 1.0, "no": 0.0}},
+        {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"yes": 0.0, "no": 1.0}},
+        {"kind": "Unavailable", "cause": {"code": "refused", "refs": ["q:spam"]}},
+    ]
+    assert points(LOADED, "d:route") == ["no", "yes"]
+    assert points(LOADED, "t:size", values=[1, 2]) == [1, 2]
+    assert points(LOADED, "t:state.subject", values=["a"]) == ["a"]
+    yes, refused = points(LOADED, "q:spam", values=["yes"])  # a label question narrowed
+    assert yes["probabilities"] == {"yes": 1.0, "no": 0.0}
+    assert refused["kind"] == "Unavailable"
+
+
+def test_points_are_fresh_each_call() -> None:
+    from test_decide import LOADED
+
+    first = points(LOADED, "q:spam")
+    first[0]["probabilities"]["yes"] = 0.5
+    assert points(LOADED, "q:spam")[0]["probabilities"]["yes"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("ref", "values", "error", "says"),
+    [
+        (5, None, TypeError, "not a str"),
+        ("q:nope", None, ValueError, "names no read"),
+        ("t:state.nope", ["a"], ValueError, "names no read"),
+        ("d:route.x", None, ValueError, "names no read"),
+        ('q:spam["a"]', None, ValueError, "names no read"),
+        ("not a ref", None, ValueError, "names no read"),
+        ("t:size", None, ValueError, "unfilled"),
+        ("d:route", ["no"], ValueError, "its grid points or its type fill"),
+    ],
+)
+def test_points_refuses_a_read_it_cannot_fill(
+    ref: Any, values: Any, error: type[Exception], says: str
+) -> None:
+    from test_decide import LOADED
+
+    with pytest.raises(error, match=says):
+        points(LOADED, ref, values=values)
+
+
+def test_points_takes_exactly_a_loaded_design() -> None:
+    with pytest.raises(TypeError, match="exactly a LoadedDesign"):
+        points(object(), "q:spam")  # type: ignore[arg-type]

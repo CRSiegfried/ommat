@@ -12,7 +12,7 @@ value whose design fails load is ``not-loading``, each failure as plain data; th
 both.
 
 A numeric leaf is tried at its own value, whose result is the record's, and in two rounds at
-the points of §lint-points' axis within the leaf's type: round 0 over the compared values the
+the points of §read-points' axis within the leaf's type: round 0 over the compared values the
 record holds, round 1 over those and the new ones round 0's replays recompute. On an integer
 axis each compared value also adds the integers either side of it, clipped to the interval. A
 compared value first recomputed in round 1 is not probed, and the component comparing it joins
@@ -64,6 +64,7 @@ from collections.abc import Callable, Iterable, Mapping
 from fractions import Fraction
 from typing import Any, cast
 
+from ommat._axis import numeric_axis
 from ommat._canonical import decode, encode
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._load import load
@@ -86,7 +87,6 @@ from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
 from ommat.helpers._choice import _lead
 from ommat.helpers._numbers import exact
-from ommat.helpers._points import numeric_axis
 
 _R = RefusalReason
 _K = FindingKind
@@ -209,7 +209,7 @@ class _Run:
 
 
 def _points(bounds: set[Fraction], t: Type, integer: bool) -> list[_Value]:
-    """§lint-points' axis over ``bounds`` within ``t``, ascending; on an integer axis each
+    """§read-points' axis over ``bounds`` within ``t``, ascending; on an integer axis each
     boundary also adds the integers either side of it, clipped to the interval, so the least
     integer above every boundary is tried."""
     points: set[_Value] = set(numeric_axis(sorted(bounds), t))

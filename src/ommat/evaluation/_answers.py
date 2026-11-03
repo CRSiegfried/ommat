@@ -44,7 +44,7 @@ def answers(
     ``gold_set`` when given."""
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
-    if not isinstance(records, Iterable) or isinstance(records, str | bytes | Mapping):
+    if not isinstance(records, Iterable) or isinstance(records, str | bytes | Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"records are a {type_name(cast(object, records))}, not records")
     if (gold_set is None) != (results is None):
         raise TypeError("gold_set and results are given together or not at all")
@@ -98,7 +98,12 @@ def _row(
             names = tuple(_name(n) for n in cast("list[object]", question["labels"]["fixed"]))
         labels = list(names)
     provider = loaded._providers.get(declared)
-    asked = {} if provider is None else sources[provider]["provides"].get(declared, {})
+    asked: dict[str, Any] = (
+        {}
+        if provider is None
+        else cast("dict[str, Any]", sources[provider]["provides"]).get(declared, {})
+    )
+    links = cast("list[dict[str, str]]", asked.get("latent_targets", []))
     return {
         "turn": turn,
         "ref": ref,
@@ -111,7 +116,7 @@ def _row(
         "marker": entry.get("marker"),
         "top": _top(answer),
         "target": asked.get("target"),
-        "latent_targets": [dict(link) for link in asked.get("latent_targets", [])],
+        "latent_targets": [dict(link) for link in links],
         "groups": [
             {"group": name, "reason": list(reasons)}
             for name, reasons in groups.items()

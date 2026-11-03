@@ -3,7 +3,7 @@
 plan or the verdict of a recorded turn (§question-reach).
 
 It asks the dead-question lint's question from turns the design is known to reach. ``values``
-is checked as the lints check it, through ``_points``' fill over every ``q:`` ref a source
+is checked as the lints check it, through ``points`` over every ``q:`` ref a source
 provides, before any record is read; a key naming any other read, an unfilled read and each
 other slip is one ``ValueError``. Each record is then read and refused as the deciding inputs
 refuse one, ``invalid-record``, ``unfinished``, ``nothing-to-replay``, ``wrong-design`` and
@@ -13,13 +13,12 @@ any trial.
 For each record in list order, and each ``q:`` entry it holds whose call is neither null nor
 recorded ``Failed``, in log order, the job runs one trial, ``intervene``'s entry set through
 ``_edit``'s one procedure, at each of the entry's points other than its recorded value or marker
-by canonical bytes. An entry's points are its declared question's lint points, a grounded
-entry's with its own marker last; a candidate-valued question's are each fixed label and then
-the first candidate at 1, every other label the call asked with at 0; a returned call always
-rendered a candidate, since an empty set leaves the question out with its call null. A trial
-whose replay reports ``stale-question`` is
-undetermined, whatever else it finds; any other reaches when its findings hold ``plan`` or
-``verdict``, a plan compared without its ``context``.
+by canonical bytes. An entry's points are its declared question's read points, from ``points``,
+a grounded entry's with its own marker last; a candidate-valued question's are each fixed label
+and then the first candidate at 1, every other label the call asked with at 0; a returned call
+always rendered a candidate, since an empty set leaves the question out with its call null. A
+trial whose replay reports ``stale-question`` is undetermined, whatever else it finds; any other
+reaches when its findings hold ``plan`` or ``verdict``, a plan compared without its ``context``.
 
 A question is ``live`` when some trial of an entry of it reaches; else ``not-determined`` when
 some trial was undetermined; else ``no-change-found`` when some trial ran; else
@@ -28,20 +27,23 @@ then point order: ``{"record", "ref", "value"}``, the entry's ref and its value 
 copy's record wrote it. The report is plain data.
 """
 
+import copy
 from collections.abc import Iterable, Mapping
 from typing import Any, cast
 
+from ommat._answer import AnswerKind
 from ommat._canonical import encode
 from ommat._decide import EntryRefusal
-from ommat._design import LoadedDesign
+from ommat._design import LoadedDesign, Question
+from ommat._fixture import _binding_form
 from ommat._ledger import _ITEM_DEPTH, Record
-from ommat._markers import Undetermined
+from ommat._markers import Cause, Unavailable
 from ommat._refs import code_point_sorted, declared_ref
 from ommat._replay import FindingKind
-from ommat._values import type_name
+from ommat._values import described, is_scalar_string, quote, string_data, type_name
 from ommat.evaluation._diff import OUTSIDE, _read, _refuse_unfit, _run_sync, baseline
 from ommat.evaluation._edit import _applied, _labels, _q_value, _SetEntry
-from ommat.helpers._points import OnTop, Point, entry_points, filled, fresh
+from ommat.helpers import points
 
 _K = FindingKind
 _DECIDING = frozenset({_K.plan, _K.verdict})
@@ -69,7 +71,7 @@ async def question_reach(
     provided = code_point_sorted(
         ref for s in loaded._design.sources.values() for ref in s.provides if ref.startswith("q:")
     )
-    fills, _, narrowed = filled(loaded, provided, values)
+    fills, narrowed = _filled(loaded, provided, values)
     read: list[tuple[Record, _Log]] = []
     for i, document in enumerate(records):
         record = _read(document, f"record {i}")
@@ -100,7 +102,7 @@ async def question_reach(
                     witnesses[question] = {
                         "record": record.record_hash,
                         "ref": ref,
-                        "value": fresh(shown),
+                        "value": copy.deepcopy(shown),
                     }
     questions: dict[str, Any] = {}
     for question in provided:
@@ -136,14 +138,67 @@ def _asked(entry: dict[str, Any], log: _Log) -> bool:
     return call is not None and log[cast(int, call)]["outcome"] == "returned"
 
 
+def _filled(
+    loaded: LoadedDesign, provided: list[str], values: Mapping[str, Any] | None
+) -> tuple[dict[str, list[Any]], list[str]]:
+    """Each question's read points, in record form, and the questions ``values`` narrowed, in
+    code-point order; one ``ValueError`` names, as the lints name them, each key that is not a
+    string, each slip ``points`` finds, each key naming no question a source provides, then
+    every question nothing fills."""
+    if values is None:
+        values = {}
+    if not issubclass(type(values), Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(f"values is a {type_name(values)}, not a mapping or None")
+    given: dict[str, list[object]] = {}
+    problems: list[str] = []
+    for key, listed in cast("Mapping[object, object]", values).items():
+        if not is_scalar_string(key):
+            problems.append(f"the values key {described(key)} is not a string")
+            continue
+        name = string_data(cast(str, key))
+        if type(listed) is not list and type(listed) is not tuple:
+            raise TypeError(f"values for {quote(name)} is not a list")
+        given[name] = list(cast("list[object]", listed))
+    fills: dict[str, list[Any]] = {}
+    unfilled: list[str] = []
+    for question in provided:
+        try:
+            fills[question] = points(loaded, question, values=given.get(question))
+        except ValueError as exc:
+            if question not in given and str(exc) == _UNFILLED.format(quote(question)):
+                unfilled.append(question)
+            else:
+                problems.append(str(exc))
+    problems += [
+        f"values names {quote(key)}, a read the lint does not fill"
+        for key in given
+        if key not in provided
+    ]
+    if unfilled:
+        problems.append(_UNFILLED.format(", ".join(quote(q) for q in unfilled)))
+    if problems:
+        raise ValueError("; ".join(problems))
+    narrowed = [q for q in given if q in provided and _kind(loaded, q) != AnswerKind.extraction]
+    return fills, code_point_sorted(narrowed)
+
+
+_UNFILLED = "unfilled: {}; give each a list in values"
+"""The lints' line naming the reads nothing fills."""
+
+
+def _kind(loaded: LoadedDesign, ref: str) -> object:
+    """The kind of the question a source provides at ``ref``."""
+    return cast(Question, loaded._design.sources[loaded._providers[ref]].provides[ref]).kind
+
+
 def _points(
-    ref: str, entry: dict[str, Any], log: _Log, loaded: LoadedDesign, points: list[Point]
+    ref: str, entry: dict[str, Any], log: _Log, loaded: LoadedDesign, points: list[Any]
 ) -> list[object]:
     """The entry's points in their order, each as an entry set takes it, less the one whose record
-    form is the entry's recorded value or marker by canonical bytes."""
+    form is the entry's recorded value or marker by canonical bytes: an answer in the binding's
+    form, a marker, a grounded entry's naming that entry, and a candidate-valued question's
+    label at 1 over the labels its call asked."""
     question = declared_ref(ref)
-    if ref != question:  # a grounded entry: its own marker last
-        points = entry_points(points, ref)
     call = log[cast(int, entry["call"])]
     rendered: tuple[str, ...] | None = None
     if question in loaded._label_sets:
@@ -155,16 +210,23 @@ def _points(
     recorded = encode(entry["value"] if "value" in entry else entry["marker"], _ITEM_DEPTH)
     out: list[object] = []
     for point in points:
-        live = point.live
-        if isinstance(live, Undetermined):  # the marker, whose record form is its document
-            if encode(point.record, _ITEM_DEPTH) != recorded:
-                out.append(live)
+        record = cast("dict[str, Any]", point)
+        if "cause" in record:  # the marker; a grounded entry's names that entry
+            cause = cast("dict[str, Any]", record["cause"])
+            refs = [ref] if ref != question else list(cast("list[str]", cause["refs"]))
+            document = {**record, "cause": {**cause, "refs": refs}}
+            if encode(document, _ITEM_DEPTH) != recorded:
+                out.append(Unavailable(Cause(cast(str, cause["code"]), refs)))
             continue
-        if isinstance(live, OnTop):
+        if "on_top" in record:
             assert rendered is not None
-            live = live.over(rendered, loaded._label_at[question])
+            label = cast("str | None", record["on_top"])
+            top = rendered[loaded._label_at[question]] if label is None else label
+            live: object = {name: 1.0 if name == top else 0.0 for name in rendered}
+        else:
+            live = _binding_form(record)
         written = _q_value(ref, live, call, log, loaded)
         if written is not None and encode(written, _ITEM_DEPTH) == recorded:
             continue  # the recorded value: replay would find nothing
-        out.append(fresh(live))
+        out.append(copy.deepcopy(live))
     return out

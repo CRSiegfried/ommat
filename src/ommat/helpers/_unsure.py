@@ -2,7 +2,7 @@
 """The ``Unsure``-to-execute lint, ``unsure_to_execute``: every ``execute`` plan the policy
 returns when one of its ``d:`` reads is ``Unsure``.
 
-It fills the policy's declared reads by the lint points: a read under another declared read's
+It fills the policy's declared reads by the read points: a read under another declared read's
 path is filled as a field of that read, and every other read is written at its path, on a
 board holding one entry per base ref. It sets each ``d:`` base ref in turn to ``Unsure``
 with cause ``abstained``, naming the declared reads of the rule that writes it, but for a

@@ -2,7 +2,7 @@
 """The extraction kind through a turn: what the binding is passed, each value fault and each
 temporal grammar at the write, ``truncated``, the ledger's shape and kind checks and its read of
 earlier formats, a golden extraction record, replay and the fixture's form, a format-1 record
-and design, the lint's points over an extraction read, and redaction field by field."""
+and design, the read points over an extraction read, and redaction field by field."""
 
 import copy
 import hashlib
@@ -800,7 +800,7 @@ def test_a_format_1_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# The lint's points
+# The read points
 
 
 def test_an_extraction_reads_points_cross_value_null_and_confidence() -> None:

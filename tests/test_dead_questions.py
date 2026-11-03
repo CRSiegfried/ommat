@@ -2,7 +2,7 @@
 """The dead-question lint, ``dead_questions``: one ``decide_sync`` run
 per point through a binding answering from the point, each status with its witness, the
 byte comparison of the ``plan`` and ``verdict`` items, the ``ValueError``s before any run, and
-a report of plain data. The points themselves are tested in ``test_lint_points.py``."""
+a report of plain data. The points themselves are tested in ``test_read_points.py``."""
 
 import copy
 import json

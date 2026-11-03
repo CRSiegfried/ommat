@@ -404,7 +404,7 @@ def test_check_9_reads_the_label_names_alone() -> None:
     assert any('the key "Kind"' in f.message for f in found)
 
 
-def test_the_lint_points_take_the_label_names() -> None:
+def test_the_read_points_take_the_label_names() -> None:
     loaded = load(described())
     fills, _, _ = filled(loaded, ["q:tone"], None)
     records: list[object] = [p.record for p in fills["q:tone"]]

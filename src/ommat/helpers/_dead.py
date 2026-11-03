@@ -2,7 +2,7 @@
 """The dead-question lint, ``dead_questions``: whether any point the lint ran found a
 question's answer changing the plan or the verdict.
 
-It fills the exogenous values, every ref a source provides and ``t:state``, by the lint points,
+It fills the exogenous values, every ref a source provides and ``t:state``, by the read points,
 and runs ``decide_sync`` once per point with the default run settings, no codec, the point's
 ``t:state`` as the state and one binding, under ``default`` and every declared oracle name,
 that answers each asked ref from the point. So the ``d:`` values, ``Unasked`` and ``Unsure``

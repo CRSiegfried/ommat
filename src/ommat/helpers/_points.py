@@ -1,5 +1,6 @@
 # pyright: reportPrivateUsage=false
-"""The lints' points: each read's fill and the grid order the lints run them in.
+"""The read points: each read's fill and the grid order the lints run them in, and ``points``,
+the public generator giving one read's points in record form.
 
 Both lints call ``fill`` with the reads they fill, and it raises one ``ValueError`` listing
 every slip in ``values`` and every unfilled read before either lint runs a point. A read is
@@ -22,8 +23,7 @@ binding's form of its kind, the probabilities or an extraction's five members.
 
 import copy
 import itertools
-import math
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, cast
@@ -36,6 +36,7 @@ from ommat._answer import (
     binding_form,
     extraction_document,
 )
+from ommat._axis import _end, axis, numeric_axis
 from ommat._canonical import encode
 from ommat._design import LoadedDesign, Question
 from ommat._interpret import _marker_document
@@ -49,11 +50,9 @@ from ommat._types import (
     Scalar,
     Type,
     TypeFailure,
-    _numeric,
     read_type,
 )
 from ommat._values import (
-    MAX_INTEGER,
     described,
     domain_error,
     is_scalar_string,
@@ -99,77 +98,6 @@ class AtZero(OnTop):
 # An axis
 
 
-def axis(
-    bounds: Iterable[Fraction], lo: Fraction | None, hi: Fraction | None, *, integer: bool
-) -> list[Fraction]:
-    """An axis's points, exact and ascending: every boundary, one inside each gap (the
-    midpoint, or on an integer axis the least integer above the lower boundary, a gap
-    holding none skipped) and one past each end (the type's bound, else the end boundary
-    minus or plus 1, on an integer axis the nearest integer beyond it). On an integer axis a
-    boundary that is not integral, or of magnitude above 2^53 - 1, is no point, but the
-    integers either side of it within those bounds are, and an end past that bound is the
-    bound. A boundary outside the interval is not on the axis; an axis so left with no
-    boundary has the interval's two bounds, or on an unbounded integer axis the domain's. An
-    axis given no boundary has no points. Rounding is the caller's."""
-    given = set(bounds)
-    on = {
-        b
-        for b in given
-        if (not integer or (b.denominator == 1 and abs(b) <= MAX_INTEGER))
-        and (lo is None or lo <= b)
-        and (hi is None or b <= hi)
-    }
-    if integer:  # each side of a boundary between two integers
-        for b in given:
-            if b.denominator != 1 and (lo is None or lo <= b) and (hi is None or b <= hi):
-                for n in (math.floor(b), math.ceil(b)):
-                    side = Fraction(max(-MAX_INTEGER, min(n, MAX_INTEGER)))
-                    if (lo is None or lo <= side) and (hi is None or side <= hi):
-                        on.add(side)
-    ordered = sorted(on)
-    if not ordered:
-        if given and integer and lo is None and hi is None:
-            return [Fraction(-MAX_INTEGER), Fraction(MAX_INTEGER)]
-        return sorted({lo, hi}) if given and lo is not None and hi is not None else []
-    points = set(ordered)
-    for a, b in itertools.pairwise(ordered):
-        if integer:
-            n = Fraction(math.floor(a) + 1)
-            if n < b:
-                points.add(n)
-        else:
-            points.add((a + b) / 2)
-    first, last = ordered[0], ordered[-1]
-    if lo is None:
-        lo = Fraction(max(math.ceil(first) - 1, -MAX_INTEGER)) if integer else first - 1
-    if hi is None:
-        hi = Fraction(min(math.floor(last) + 1, MAX_INTEGER)) if integer else last + 1
-    points |= {lo, hi}
-    return sorted(points)
-
-
-def numeric_axis(bounds: Sequence[Fraction], t: Type) -> list[int | float]:
-    """A numeric type's axis over ``bounds``, each point rounded once to the type's form: an
-    ``integer`` or integer interval's an ``int``, a ``number``'s a ``float``, its ends past an
-    unbounded ``number``'s boundaries by ``_end``. Given no boundary, the interval's two bounds,
-    or on an unbounded type ``-(2^53 - 1)`` and ``2^53 - 1``. Repeats are the caller's."""
-    numeric = _numeric(t)
-    assert numeric is not None  # the caller's type is numeric
-    integer, interval = numeric[0] == "integer", numeric[1]
-    lo: Fraction | None = None
-    hi: Fraction | None = None
-    if interval is not None:
-        lo, hi = exact(interval[0]), exact(interval[1])
-    if not bounds:
-        ends = (lo, hi) if lo is not None and hi is not None else (-MAX_INTEGER, MAX_INTEGER)
-        points: Sequence[Fraction | int] = ends
-    else:
-        if not integer and lo is None:
-            lo, hi = _end(min(bounds), -1), _end(max(bounds), 1)
-        points = axis(bounds, lo, hi, integer=integer)
-    return [int(x) if integer else float(x) for x in points]
-
-
 # ---------------------------------------------------------------------------------------------
 # A read's type and question
 
@@ -198,6 +126,43 @@ def labels_of(loaded: LoadedDesign, ref: str) -> tuple[str, ...]:
 
 # ---------------------------------------------------------------------------------------------
 # The fill
+
+
+def points(loaded: LoadedDesign, ref: str, *, values: Sequence[object] | None = None) -> list[Any]:
+    """The read points of ``ref`` in ``loaded``, in their order, each in record form and fresh:
+    ``ref`` is ``t:state`` or a field path under it, or a declared ``t:``, ``q:`` or ``d:`` ref,
+    a per-candidate question by its declared ref; ``values``, the read's own list, is taken
+    where nothing else fills it, as the lints take a list in theirs. A ``TypeError`` for a
+    ``loaded`` that is not exactly a ``LoadedDesign`` or a ``ref`` that is not a ``str``; a
+    ``ValueError`` for a ref that names no read of ``loaded``, a ``values`` its grid points or
+    its type already fill, or a read nothing fills."""
+    if type(loaded) is not LoadedDesign:
+        raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
+    if type(ref) is not str:
+        raise TypeError(f"ref is a {type_name(ref)}, not a str")
+    if not _declared_read(loaded, ref):
+        raise ValueError(f"{quote(ref)} names no read of the design")
+    given = None if values is None else {ref: values}
+    return [fresh(p.record) for p in fill(loaded, [ref], given)[ref]]
+
+
+def _declared_read(loaded: LoadedDesign, ref: str) -> bool:
+    """Whether ``ref`` is ``t:state``, a field path under it, or a declared ``t:``, ``q:`` or
+    ``d:`` ref with no field path or bracket, as ``points`` takes one."""
+    try:
+        parsed = parse_ref(ref)
+    except ValueError:
+        return False
+    base = f"{parsed.level}:{parsed.name}"
+    if parsed.candidate is not None or (
+        base not in loaded._types and base not in loaded._providers
+    ):
+        return False
+    if parsed.fields and base != "t:state":
+        return False
+    if parsed.fields:
+        return not isinstance(read_type(loaded._types[base], parsed.fields, {}), TypeFailure)
+    return True
 
 
 def fill(loaded: LoadedDesign, reads: Sequence[str], values: object) -> dict[str, list[Point]]:
@@ -572,16 +537,6 @@ def _choice(
             placed.update({k: (1 - x) / len(outside) for k in outside})
             out.append(_at(labels, placed))
     return out
-
-
-def _end(x: Fraction, step: int) -> Fraction:
-    """A number axis's end past ``x``: ``x`` plus ``step``, or the nearest ``float`` beyond
-    ``x`` when that rounds onto it; ``x`` itself at the largest ``float``, past which there
-    is none."""
-    if float(x + step) != float(x):
-        return x + step
-    beyond = math.nextafter(float(x), step * math.inf)
-    return x if math.isinf(beyond) else Fraction(beyond)
 
 
 def _once(points: list[Point]) -> list[Point]:
