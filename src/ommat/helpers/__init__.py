@@ -2,17 +2,17 @@
 rule or the policy calls with its read view; the design-check lints, ``dead_questions`` and
 ``unsure_to_execute``, which the consumer's tests run over a loaded design, and ``points``, the
 read points they range a read over; and the reference runner, ``run_plan``, which the caller
-runs after decide. The names ``__all__`` lists are public, under the same deprecation rule as
-``ommat.__all__``.
+runs after decide, and ``decide_many``, which decides one turn per state, many at once. The
+names ``__all__`` lists are public, under the same deprecation rule as ``ommat.__all__``.
 
 ``HELPERS`` is the helper library's version, which the record's ``design`` item carries; it
-counts the library's helpers, ``determined`` among them, and combinators alone, never a lint
-or the runner.
+counts the library's helpers, ``determined`` among them, and combinators alone, never a lint, the
+runner or ``decide_many``.
 
 The choice helpers are in ``_choice``, the combinators in ``_combinator``, and the mechanics
-each of them is built on in ``_call``. The lints are in ``_dead`` and ``_unsure``, over the
-read points both share in ``_points``, which also gives ``points``, one read's points in record
-form.
+each of them is built on in ``_call``. ``decide_many`` is in ``_many``. The lints are in
+``_dead`` and ``_unsure``, over the read points both share in ``_points``, which also gives
+``points``, one read's points in record form.
 """
 
 from ommat.helpers._choice import (
@@ -27,6 +27,7 @@ from ommat.helpers._choice import (
 from ommat.helpers._combinator import agree, collect, first, priority, unique
 from ommat.helpers._dead import dead_questions
 from ommat.helpers._determined import determined
+from ommat.helpers._many import TurnFailure, decide_many
 from ommat.helpers._points import points
 from ommat.helpers._runner import BindingNotFound, RunRefusal, run_plan
 from ommat.helpers._unsure import unsure_to_execute
@@ -34,9 +35,11 @@ from ommat.helpers._unsure import unsure_to_execute
 __all__ = [
     "BindingNotFound",
     "RunRefusal",
+    "TurnFailure",
     "agree",
     "collect",
     "dead_questions",
+    "decide_many",
     "determined",
     "extract",
     "first",

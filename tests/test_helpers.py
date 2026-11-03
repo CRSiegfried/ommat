@@ -110,6 +110,8 @@ def test_helpers_is_not_in_the_engines_api() -> None:
         "agree",
         "first",
         "points",
+        "decide_many",
+        "TurnFailure",
         "priority",
         "collect",
         "run_plan",
