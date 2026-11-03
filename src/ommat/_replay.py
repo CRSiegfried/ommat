@@ -13,7 +13,9 @@ propagates as decide lets it out, with the replay record so far and no findings.
 
 ``_replay_with`` is the rerun itself, its fixture built from a given log's calls while the
 state entry, the settings, the cut and the compared log are the record's; ``replay`` gives the
-record's log as both, and the evaluation subpackage's ``use_answers`` another record's.
+record's log as both, and the evaluation subpackage's ``use_answers`` another record's. Each
+asked source is checked against a base log, the answering log unless an edit made it from
+another, and a ``stale-question`` finding names each ref the fixture found stale.
 
 The findings are plain ``dict``s in a fixed order, two items differing when their
 canonical bytes differ. Replay reads nothing from ``unhashed``.
@@ -21,16 +23,15 @@ canonical bytes differ. Replay reads nothing from ``unhashed``.
 
 import asyncio
 import enum
-from collections.abc import Mapping
 from typing import Any, cast
 
 from ommat._canonical import decode, encode
 from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings
 from ommat._design import LoadedDesign
-from ommat._fixture import FixtureBinding, RecordedCalls
+from ommat._fixture import Base, FixtureBinding, RecordedCalls
 from ommat._interpret import SORTED_TEXT
 from ommat._ledger import _ITEM_DEPTH, Observer, Record
-from ommat._refs import candidate_values, code_point_sorted
+from ommat._refs import code_point_sorted
 from ommat._typed import decoded
 from ommat._values import CONTEXT_FORMAT, KEY_ORDER_FORMAT, type_name
 from ommat.helpers import HELPERS
@@ -47,9 +48,7 @@ class FindingKind(enum.StrEnum):
     design_mismatch = "design-mismatch"
     helpers_mismatch = "helpers-mismatch"
     nothing_to_replay = "nothing-to-replay"
-    not_in_record = "not-in-record"
-    ref_not_in_record = "ref-not-in-record"
-    question_changed = "question-changed"
+    stale_question = "stale-question"
     unfinished = "unfinished"
     entry = "entry"
     plan = "plan"
@@ -83,10 +82,15 @@ async def _replay_with(
     answers: list[dict[str, Any]],
     *,
     observer: Observer | None,
+    base: list[dict[str, Any]] | None = None,
+    pinned: frozenset[str] = frozenset(),
+    failed: frozenset[str] = frozenset(),
 ) -> tuple[Record, list[Finding]]:
     """Rerun the finished turn ``log`` holds, with a state entry, under ``loaded``, the
-    fixture built from the call items and entries of ``answers``; the state entry, the run
-    settings, the cut and the log every finding compares against are ``log``'s."""
+    fixture built from the call items and entries of ``answers``, each source checked against
+    ``base``, ``answers`` when ``None``, the refs in ``pinned`` and the sources in ``failed``
+    never; the state entry, the run settings, the cut and the log every finding compares
+    against are ``log``'s."""
     # Both callers checked that the log holds a state entry.
     state = next(item for item in log if item["item"] == "entry" and item["ref"] == _STATE)
     # The settings item is second in every record from the design item on.
@@ -98,8 +102,8 @@ async def _replay_with(
         recorded["deadline"],
         recorded["certificate_cap"],
     )
-    calls = RecordedCalls(answers)
-    fixture = FixtureBinding(calls, loaded)
+    checked = Base(answers if base is None else base, loaded)
+    fixture = FixtureBinding(RecordedCalls(answers), loaded, checked, pinned=pinned, failed=failed)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
     bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))
     value = decoded(state["value"], loaded._types[_STATE])
@@ -112,7 +116,7 @@ async def _replay_with(
     finally:
         SORTED_TEXT.reset(token)
     rerun = decision.record
-    return rerun, _findings(log, rerun.log, loaded, calls, fixture.asked, answers)
+    return rerun, _findings(log, rerun.log, loaded, fixture)
 
 
 def _cut(log: list[dict[str, Any]]) -> tuple[int, bool] | None:
@@ -147,9 +151,7 @@ def _findings(
     log: list[dict[str, Any]],
     rerun: list[dict[str, Any]],
     loaded: LoadedDesign,
-    calls: RecordedCalls,
-    asked: dict[str, tuple[str, ...]],
-    answers: list[dict[str, Any]],
+    fixture: FixtureBinding,
 ) -> list[Finding]:
     found: list[Finding] = []
     design = log[0]
@@ -161,9 +163,9 @@ def _findings(
         found.append(
             {"kind": _K.helpers_mismatch, "recorded": design["helpers"], "replayed": HELPERS}
         )
-    found += _call_findings(
-        rerun, asked, calls, _by_ref(answers), _by_ref(rerun), loaded._candidate_sets
-    )
+    for ref in code_point_sorted(fixture.stale):
+        sid, why = fixture.stale[ref]
+        found.append({"kind": _K.stale_question, "ref": ref, "source": sid, "clause": why.clause})
     found += _entry_findings(log, rerun, loaded)
     for kind in (_K.plan, _K.verdict):
         mine, theirs = _first(log, kind.value), _first(rerun, kind.value)
@@ -172,87 +174,6 @@ def _findings(
             compared = {**mine, "context": None}  # a record before format 5 holds no block
         if _differ(compared, theirs):
             found.append({"kind": kind, "recorded": mine, "replayed": theirs})
-    return found
-
-
-def _by_ref(log: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """A log's entries by ref; one write per ref makes each unique."""
-    return {item["ref"]: item for item in log if item["item"] == "entry"}
-
-
-def _candidates_differ(
-    a: dict[str, Any] | None, b: dict[str, Any] | None, field: str | None
-) -> bool:
-    """Whether two entries of a candidate set hold different candidate values, in order, by
-    canonical bytes; a missing entry, a marker on either side, or a member of neither form
-    differs."""
-    if a is None or b is None or "value" not in a or "value" not in b:
-        return True
-    try:
-        return encode(candidate_values(a["value"], field), _ITEM_DEPTH) != encode(
-            candidate_values(b["value"], field), _ITEM_DEPTH
-        )
-    except (KeyError, TypeError):  # a member that is no record holding the field
-        return True
-
-
-def _call_findings(
-    rerun: list[dict[str, Any]],
-    asked: dict[str, tuple[str, ...]],
-    calls: RecordedCalls,
-    answered: dict[str, dict[str, Any]],
-    replayed: dict[str, dict[str, Any]],
-    sets: Mapping[str, str | None],
-) -> list[Finding]:
-    """``not-in-record`` per fixture call, by first source id, then one ``ref-not-in-record``
-    and one ``question-changed`` for the run. The replay record's call items give one per
-    fixture call, the sources it asked and their questions' identities; the fixture's ``asked``
-    map gives the refs each source was asked. ``question-changed`` compares identities, and for
-    a candidate-valued label set the set's candidate values in the replay record against the
-    answering log's, over which the recorded answer was given, by the candidate field of the
-    design replay ran under."""
-    missing: list[list[str]] = []
-    refs: set[str] = set()
-    changed: set[str] = set()
-    for item in rerun:
-        if item["item"] != "call":
-            continue
-        sids = cast("list[str]", item["sources"])
-        absent = code_point_sorted(s for s in sids if calls.call_of(s) is None)
-        if absent:
-            missing.append(absent)
-        for sid in sids:
-            call = calls.call_of(sid)
-            if call is None:
-                continue
-            index, recorded = call
-            # The asked refs are the ones the binding was given, a per-candidate question's
-            # grounded refs among them.
-            refs.update(r for r in asked[sid] if (index, r) not in calls.entries)
-            before = cast("dict[str, Any]", recorded["questions"])
-            now = cast("dict[str, Any]", item["questions"])
-            for ref, question in now.items():
-                if ref not in before:
-                    continue
-                labels: object = question["labels"]
-                named = (
-                    cast("dict[str, str]", labels)["candidates"] if type(labels) is dict else None
-                )
-                # Equal identities name one set: the identity hashes the set's ref.
-                if before[ref]["identity"] != question["identity"] or (
-                    named is not None
-                    and _candidates_differ(
-                        replayed.get(named), answered.get(named), sets.get(named)
-                    )
-                ):
-                    changed.add(ref)
-    found: list[Finding] = [
-        {"kind": _K.not_in_record, "sources": s} for s in sorted(missing, key=lambda s: s[0])
-    ]
-    if refs:
-        found.append({"kind": _K.ref_not_in_record, "refs": code_point_sorted(refs)})
-    if changed:
-        found.append({"kind": _K.question_changed, "refs": code_point_sorted(changed)})
     return found
 
 

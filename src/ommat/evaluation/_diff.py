@@ -5,9 +5,9 @@
 Both records are read first, then refused in order, each before any replay: ``unfinished``,
 ``nothing-to-replay`` and ``wrong-design``, each for ``record`` then ``other``, then
 ``different-turn`` when their state entries or ``settings`` items differ by canonical bytes.
-The findings are replay's: the entries, plan and verdict against ``record``,
-``question-changed`` against ``other``'s identities, and ``not-in-record`` and
-``ref-not-in-record`` meaning not in ``other``. A plan is compared without its ``context``, so
+The findings are replay's: the entries, plan and verdict against ``record``, and
+``stale-question`` for each ref whose source is checked against ``other``: not answered there,
+or asked with other needs or as another question. A plan is compared without its ``context``, so
 a change of context text alone is no plan change. Neither record is edited, and nothing is read
 from either's ``unhashed``.
 
@@ -90,18 +90,26 @@ def _refuse_unfit(
 
 
 async def _replayed(
-    log: list[dict[str, Any]], loaded: LoadedDesign, answers: list[dict[str, Any]]
+    log: list[dict[str, Any]],
+    loaded: LoadedDesign,
+    answers: list[dict[str, Any]],
+    *,
+    base: list[dict[str, Any]] | None = None,
+    pinned: frozenset[str] = frozenset(),
+    failed: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
-    """Replay's findings for ``log`` rerun under ``loaded``, answered by ``answers``' calls,
-    less a ``plan`` finding of context alone; the replay record is dropped (§store-integrity)."""
-    _, found = await _replay_with(log, loaded, answers, observer=None)
+    """Replay's findings for ``log`` rerun under ``loaded``, answered by ``answers``' calls and
+    checked against ``base``'s as ``_replay_with`` checks, less a ``plan`` finding of context
+    alone; the replay record is dropped (§store-integrity)."""
+    _, found = await _replay_with(
+        log, loaded, answers, observer=None, base=base, pinned=pinned, failed=failed
+    )
     return [f for f in found if not _context_alone(f)]
 
 
-OUTSIDE = frozenset(
-    {FindingKind.not_in_record, FindingKind.ref_not_in_record, FindingKind.question_changed}
-)
-"""The findings of a run that asked outside the record, which therefore says nothing of it."""
+OUTSIDE = frozenset({FindingKind.stale_question})
+"""The findings of a run that asked a question the record does not answer, which therefore says
+nothing of it."""
 
 
 async def baseline(

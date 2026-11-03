@@ -213,7 +213,7 @@ def test_a_trial_whose_replay_asks_outside_the_record_is_not_determined(
     assert report["questions"]["q:tone"] == {"status": "not-determined", "witness": None}
     tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
     # warm at 1 leaves the gate shut; cold at 1 opens it on a source never called
-    assert ["not-in-record" in kinds for kinds in tone] == [False, True, False]
+    assert ["stale-question" in kinds for kinds in tone] == [False, True, False]
 
 
 def test_a_reaching_trial_beats_an_undetermined_one() -> None:
@@ -247,7 +247,7 @@ def test_a_trial_outside_the_record_is_undetermined_though_its_plan_changes(
     report = question_reach_sync([turn(loaded=loaded)], loaded)
     tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
     # cold at 1 opens the gate on a source never called and changes the plan
-    assert "not-in-record" in tone[1]
+    assert "stale-question" in tone[1]
     assert "plan" in tone[1]
     assert not any("plan" in kinds or "verdict" in kinds for kinds in (tone[0], tone[2]))
     assert report["questions"]["q:tone"] == {"status": "not-determined", "witness": None}

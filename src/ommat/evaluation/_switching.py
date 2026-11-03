@@ -6,9 +6,8 @@ plan with the verdict, change, found by replaying the turn under each value's de
 A value's design is the loaded design's document with the leaf, or one key of a numeric mapping
 leaf, replaced, loaded with the caller's ``functions``, or ``loaded``'s own callables when ``None``;
 it is kept nowhere. Replay under it reports ``design-mismatch``, expected and dropped, as is
-``helpers-mismatch``, a note on the helper version. A run that asks outside the record,
-``not-in-record``, ``ref-not-in-record`` or ``question-changed``, or writes ``Unavailable`` with
-``not-returned`` for a ref whose recorded entry names a ``Failed`` call, is ``not-determined``; a
+``helpers-mismatch``, a note on the helper version. A run whose replay gives
+``stale-question``, as when the leaf fills a question's wording slot, is ``not-determined``; a
 value whose design fails load is ``not-loading``, each failure as plain data; the job goes on past
 both.
 
@@ -28,7 +27,7 @@ value, or the same role measure of its answer. Only an ``int`` or ``float`` is o
 ``boolean`` or ``label`` leaf is tried at every value.
 
 ``entries`` lists each ref whose entry some run changed in value, or in marker kind and cause
-code, a run outside the record included, and each one that carries the leaf; a result compares
+code, a run asking a stale question included, and each one that carries the leaf; a result compares
 those alone, so a change of ``rows``, ``derivation`` or ``round`` is none. A plan result is
 compared without its ``context`` and its ``rows``. A result is ``"carries"`` when at some value
 tried, read from that run's rows whatever its value, a table row giving its output, under ``F``
@@ -191,7 +190,7 @@ def _finite(t: Type) -> list[_Value] | None:
 
 class _Run:
     """One run: each changed entry's item by ref, the plan and verdict, and whether it asked
-    outside the record, so that it determines nothing."""
+    a stale question, so that it determines nothing."""
 
     def __init__(
         self,
@@ -305,9 +304,7 @@ class _Job:
             return {"not-loading": failures}, []
         rerun, found = await _replay_with(self.log, design, self.log, observer=None)
         rerun_log = rerun.log
-        outside = any(f["kind"] in OUTSIDE for f in found) or _unreturned(
-            self.mine, self.log, rerun_log
-        )
+        outside = any(f["kind"] in OUTSIDE for f in found)
         return _Run(self.log, found, self.carrying(rerun_log), outside), rerun_log
 
     def compared(self, log: _Log) -> _Compared:
@@ -343,22 +340,6 @@ class _Job:
                     out.add(ref)
 
         return out
-
-
-def _unreturned(mine: Mapping[str, Any], log: _Log, rerun: _Log) -> bool:
-    """Whether ``rerun`` writes ``Unavailable`` with ``not-returned`` for a ref whose entry in
-    ``log``, ``mine`` by ref, names a call item recorded ``Failed``."""
-    for item in rerun:
-        marker = item.get("marker") if item["item"] == "entry" else None
-        if marker is None or marker["kind"] != "Unavailable":
-            continue
-        if marker["cause"]["code"] != "not-returned":
-            continue
-        at = cast("dict[str, Any] | None", mine.get(item["ref"]))
-        call = None if at is None else at["call"]
-        if call is not None and log[call]["outcome"] != "returned":  # recorded Failed
-            return True
-    return False
 
 
 def _result(run: _Run | _Result, ref: str | None, mine: Mapping[str, Any]) -> _Result:

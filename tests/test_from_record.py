@@ -33,7 +33,7 @@ from ommat import (
     replay_sync,
 )
 from ommat import types as t
-from ommat._fixture import _differing, _FromRecord
+from ommat._fixture import Base, _differing
 from ommat._interpret import MAX_WARNINGS, _record_form
 from scripted import Scripted, raising, returns
 from test_decide import (
@@ -365,15 +365,15 @@ def test_a_document_that_does_not_read_is_an_invalid_record() -> None:
 
 def test_a_need_on_a_missing_entry_a_marker_or_a_path_the_entry_lacks_differs() -> None:
     record = stored(ask=returns({"q:spam": {"maybe": 1.0}, "t:body": "b"}))
-    binding = _FromRecord(record, LOADED)
-    assert binding._differs("t:state.subject", "hello") is False
-    assert binding._differs("t:missing", "x") is True
-    assert binding._differs("q:spam", None) is True  # its entry is a marker
-    assert binding._differs("t:state.subject.deeper", "x") is True
-    assert binding._differs("t:state.nope", "x") is True
+    base = Base(record.log, LOADED)
+    assert base.differs("t:state.subject", "hello") is False
+    assert base.differs("t:missing", "x") is True
+    assert base.differs("q:spam", None) is True  # its entry is a marker
+    assert base.differs("t:state.subject.deeper", "x") is True
+    assert base.differs("t:state.nope", "x") is True
     # A key that is not a ref, or a value outside the value domain, differs rather than raises.
-    assert binding._differs("not a ref", "x") is True
-    assert binding._differs("t:state.subject", object()) is True
+    assert base.differs("not a ref", "x") is True
+    assert base.differs("t:state.subject", object()) is True
 
 
 def test_the_record_form_of_a_need_value() -> None:
@@ -416,16 +416,36 @@ def test_a_source_refused_whole_gives_one_line_beside_the_record_hash() -> None:
     )
 
 
-def test_a_changed_wording_answers_and_the_caller_finds_it_by_identity_after_the_turn() -> None:
+def test_a_changed_wording_is_refused_by_its_identity() -> None:
     record = stored()
     reworded = dataclasses.replace(
         ASK, provides={"q:spam": Question("noul", Text("Is it junk mail?"))}
     )
     loaded = slice_design(sources={"ask": reworded, "body": BODY, "look": LOOK})
     again = mixed(record, loaded)[0]
-    assert "q:spam" not in markers(again)
-    before, after = (
-        next(c for c in calls(r) if "ask" in c["sources"])["questions"]["q:spam"]["identity"]
-        for r in (record, again)
-    )
-    assert before != after
+    assert markers(again)["q:spam"] == "unsupported"
+    assert "'q:spam': its identity differs from the stored question's" in warned(again, "ask")
+
+
+def _variant(name: str) -> LoadedDesign:
+    """``LOADED`` with one change to the ``mail`` sources, which ``from_record`` answers."""
+    if name == "reworded":
+        ask = dataclasses.replace(ASK, provides={"q:spam": Question("noul", Text("Junk?"))})
+        return slice_design(sources={"ask": ask, "body": BODY, "look": LOOK})
+    if name == "relabelled":
+        q = Question("choice", Text("Is it spam?"), labels=("ham", "spam"))
+        ask = dataclasses.replace(ASK, provides={"q:spam": q})
+        return slice_design(sources={"ask": ask, "body": BODY, "look": LOOK})
+    body = Source({**BODY.provides, "t:more": t.string}, needs=BODY.needs, oracle="mail")
+    return slice_design(sources={"ask": ASK, "body": body, "look": LOOK})
+
+
+@pytest.mark.parametrize("name", ["reworded", "relabelled", "added"])
+def test_from_record_refuses_exactly_the_refs_replay_finds_stale(name: str) -> None:
+    record = stored()
+    loaded = _variant(name)
+    stale = {f["ref"] for f in replay_sync(record, loaded)[1] if f["kind"] == "stale-question"}
+    again = mixed(record, loaded)[0]
+    refused = {r for r, code in markers(again).items() if code == "unsupported" and r[0] in "qt"}
+    assert stale
+    assert refused == stale

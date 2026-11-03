@@ -32,6 +32,7 @@ from ommat import (
     Record,
     Rule,
     Source,
+    SourceRequirement,
     Table,
     Text,
     Unasked,
@@ -396,12 +397,71 @@ def test_setting_a_state_field_to_its_value_gives_no_finding() -> None:
     assert result == {"entry": entry(record.log, "t:state"), "findings": []}
 
 
-def test_setting_a_state_field_gives_exactly_the_findings_downstream_of_it() -> None:
+def test_setting_a_state_field_stales_each_question_that_needs_it() -> None:
     record, other = live(REFUSING), live(REFUSING, state={**STATE, "subject": "bye"})
     result = set_state_field_sync(record, REFUSING, "t:state.subject", "bye")
     assert result["entry"] == entry(other.log, "t:state")
-    assert result["findings"] == downstream(record, other, "t:state")
-    assert kinds(result["findings"]) == [(K.entry, "d:echo")]
+    # Each source needing the subject was asked about the old one, so none is answered.
+    found = result["findings"]
+    assert [(f["kind"], f.get("ref"), f.get("clause")) for f in found[:3]] == [
+        (K.stale_question, "q:spam", "needs"),
+        (K.stale_question, "t:body", "needs"),
+        (K.stale_question, "t:size", "needs"),
+    ]
+    for ref in ("q:spam", "t:body", "t:size"):
+        assert entry_finding(found, ref)["replayed"]["marker"]["cause"]["code"] == "not-returned"
+    assert entry_finding(found, "d:echo")["replayed"]["value"] == "bye"
+    assert kinds(found[3:]) == [
+        (K.entry, "d:echo"),
+        (K.entry, "d:route"),
+        (K.entry, "q:spam"),
+        (K.entry, "t:body"),
+        (K.entry, "t:size"),
+        (K.plan, None),
+        (K.verdict, None),
+    ]
+
+
+def entry_finding(found: list[Any], ref: str) -> Any:
+    return next(f for f in found if f["kind"] is K.entry and f["ref"] == ref)
+
+
+def gate(r: Any) -> str:
+    return "on" if r.read("t:state.weight") > 1 else "off"
+
+
+def test_a_call_an_edit_fails_asked_without_a_source_of_it_is_stale() -> None:
+    rules = {
+        **RULES,
+        "gate": Rule("d:gate", t.label("on", "off"), gate, version="1", reads=["t:state.weight"]),
+    }
+    body = Source(
+        BODY.provides,
+        needs=BODY.needs,
+        oracle="mail",
+        requirement=SourceRequirement("d:gate", ["on"]),
+    )
+    loaded = slice_design(sources={"ask": ASK, "body": body}, rules=rules)
+    record = live(loaded)
+    failed = {"source": "ask", "code": "raised"}
+    alone = intervene_sync(record, loaded, [failed])["findings"]
+    assert K.stale_question not in [f["kind"] for f in alone]
+    # Shutting body's gate leaves ask asked alone, which the failed call says nothing of.
+    found = intervene_sync(record, loaded, [failed, {"path": "t:state.weight", "value": 0}])
+    stale = [(f["ref"], f["clause"]) for f in found["findings"] if f["kind"] is K.stale_question]
+    assert stale == [("q:spam", "no-answer")]
+
+
+def test_a_call_an_edit_fails_is_never_stale_though_its_needs_change() -> None:
+    edits = [{"source": "ask", "code": "raised"}, {"path": "t:state.subject", "value": "bye"}]
+    found = intervene_sync(live(REFUSING), REFUSING, edits)["findings"]
+    # ask and body share the failed call, so only look, needing the whole state, is stale.
+    assert [(f["kind"], f.get("ref"), f.get("clause")) for f in found[:1]] == [
+        (K.stale_question, "t:size", "needs")
+    ]
+    assert K.stale_question not in [f["kind"] for f in found[1:]]
+    route = entry_finding(found, "d:route")["replayed"]["marker"]["cause"]
+    assert route == {"code": "raised", "refs": ["q:spam", "t:body"]}
 
 
 @pytest.mark.parametrize(
@@ -651,16 +711,12 @@ def test_several_edits_replay_once_on_one_copy_in_any_order() -> None:
         ("entry", "q:spam", None),
         ("entry", "t:size", None),
     ]
-    other = live(
-        REFUSING,
-        state={**STATE, "subject": "bye"},
-        ask=returns(HAM),
-        look=Failed(Cause("raised", [])),
-    )
-    assert result["findings"] == downstream(record, other, "t:state", "q:spam", "t:size")
+    # The set answer and the failed call are pinned; body, needing the subject, is stale.
     assert kinds(result["findings"]) == [
+        (K.stale_question, "t:body"),
         (K.entry, "d:echo"),
         (K.entry, "d:route"),
+        (K.entry, "t:body"),
         (K.plan, None),
         (K.verdict, None),
     ]
@@ -687,8 +743,14 @@ def test_edits_and_a_rule_replay_together_under_the_modified_design() -> None:
     assert result["document"]["rules"]["route"]["form"] == "table"
     assert kinds(result["findings"]) == [
         (K.design_mismatch, None),
+        (K.stale_question, "q:spam"),
+        (K.stale_question, "t:body"),
+        (K.stale_question, "t:size"),
         (K.entry, "d:echo"),
         (K.entry, "d:route"),
+        (K.entry, "q:spam"),
+        (K.entry, "t:body"),
+        (K.entry, "t:size"),
         (K.plan, None),
     ]
 

@@ -26,7 +26,7 @@ from ommat import (
     read_record,
 )
 from ommat import types as t
-from ommat._fixture import FixtureBinding, RecordedCalls
+from ommat._fixture import Base, FixtureBinding, RecordedCalls
 from ommat._provenance import HASHED_DETAILS
 from ommat._typed import decoded
 from ommat._types import AnswerType, Interval, ListOf, MappingOf, Nullable, RecordOf, Scalar
@@ -59,7 +59,7 @@ def recorded(loaded: LoadedDesign = LOADED, **replies: object) -> Record:
 
 
 def fixture(record: Record, loaded: LoadedDesign = LOADED) -> FixtureBinding:
-    return FixtureBinding(RecordedCalls(record.log), loaded)
+    return FixtureBinding(RecordedCalls(record.log), loaded, Base(record.log, loaded))
 
 
 def answer(binding: FixtureBinding, *batch: SourceCall) -> object:
@@ -174,16 +174,17 @@ def test_only_the_asked_refs_are_returned() -> None:
 # Failed calls
 
 
-def test_a_failed_call_comes_back_as_its_outcome_when_it_holds_every_asked_source() -> None:
+def test_a_failed_call_comes_back_as_its_outcome_when_its_sources_are_asked() -> None:
     record = recorded(ask=raising(ValueError("down")))
-    got = answer(fixture(record), ask())
+    got = answer(fixture(record), ask(), body())
     assert got == Failed(Cause(CauseCode.raised, ["q:spam", "t:body"]))
     assert type(got) is Failed
 
 
 def test_a_timed_out_call_comes_back_at_once() -> None:
     record = recorded(ask=Failed(Cause("timed-out", [])))
-    assert answer(fixture(record), ask()) == Failed(Cause("timed-out", ["q:spam", "t:body"]))
+    got = answer(fixture(record), ask(), body())
+    assert got == Failed(Cause("timed-out", ["q:spam", "t:body"]))
 
 
 def test_a_source_in_a_failed_call_beside_others_gets_no_key() -> None:
@@ -318,13 +319,39 @@ def merged(record: Record) -> Record:
     return read_record(rehashed(doc))
 
 
-def test_a_subset_of_a_recorded_failed_call_of_several_sources_comes_back_as_that_failed() -> None:
+def test_a_recorded_failed_call_comes_back_only_for_its_sources_asked_together() -> None:
     record = merged(recorded(ask=raising(ValueError("down"))))
-    binding = fixture(record)
     expected = Failed(Cause(CauseCode.raised, ["q:spam", "t:blob", "t:body"]))
-    assert answer(binding, ask()) == expected
-    assert answer(binding, look()) == expected
-    assert answer(binding, ask(), look()) == expected
+    assert answer(fixture(record), ask(), body(), look()) == expected
+    # A smaller batch is another request: the recorded failure says nothing of it.
+    binding = fixture(record)
+    assert values(answer(binding, ask(), look())) == {}
+    assert {r: why.clause for r, (_, why) in binding.stale.items()} == {
+        "q:spam": "no-answer",
+        "t:blob": "no-answer",
+        "t:size": "no-answer",
+        "t:weight": "no-answer",
+    }
+
+
+def test_a_call_an_edit_failed_comes_back_only_for_its_sources_asked_together() -> None:
+    log = recorded(ask=raising(ValueError("down"))).log
+    binding = FixtureBinding(
+        RecordedCalls(log), LOADED, Base(log, LOADED), failed=frozenset({"ask", "body"})
+    )
+    assert type(answer(binding, ask(), body())) is Failed
+    assert binding.stale == {}
+    assert values(answer(binding, ask())) == {}
+    assert {r: why.clause for r, (_, why) in binding.stale.items()} == {"q:spam": "no-answer"}
+
+
+def test_a_need_whose_base_entry_is_a_marker_stales_the_source_whole() -> None:
+    record = recorded(ask=returns({**SPAM, "q:spam": Unavailable(Cause("refused", ["x"]))}))
+    asked = SourceCall("look", None, {"q:spam": {"yes": 1.0}}, ("t:size",), {})
+    whole, refs = Base(record.log, LOADED).check(asked)
+    assert whole is not None
+    assert whole.clause == "needs"
+    assert refs == {}
 
 
 def test_a_recorded_returned_call_split_across_two_batches_answers_each_half() -> None:
@@ -357,7 +384,12 @@ def test_a_t_ref_the_given_design_dropped_is_not_asked_and_so_left_out() -> None
     assert got == {"q:spam": {"yes": 0.9, "no": 0.1}}
 
 
-def test_the_fixture_logs_the_refs_each_source_was_asked() -> None:
+def test_the_fixture_logs_each_stale_ref_with_its_source_and_clause() -> None:
     binding = fixture(recorded())
-    answer(binding, ask(refs=()), look(("t:size",)))
-    assert binding.asked == {"ask": ("q:spam",), "look": ("t:size",)}
+    xtra = SourceCall("xtra", None, {}, ("t:xtra",), {})
+    got = values(answer(binding, ask(refs=()), look(("t:size", "t:more")), xtra))
+    assert got == {"q:spam": {"yes": 0.9, "no": 0.1}, "t:size": 4}
+    assert {r: (sid, why.clause) for r, (sid, why) in binding.stale.items()} == {
+        "t:more": ("look", "no-answer"),
+        "t:xtra": ("xtra", "no-answer"),
+    }

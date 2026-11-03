@@ -1,26 +1,31 @@
 # pyright: reportPrivateUsage=false
 """The fixture binding: replay's oracle binding, answering each call from the recorded calls
-of its sources, so the turn reruns with no provider; and ``from_record``'s, answering a
-caller's live turn from a record under the oracle names it is bound to.
+of its sources, so the turn reruns with no provider; ``from_record``'s, answering a caller's
+live turn from a record under the oracle names it is bound to; and the stale-question check
+both share.
 
-Built once from a record's log and the given loaded design. Each asked source is matched to
-the recorded call item that lists it, never by round or batch, and each of its refs is
-answered only from a recorded entry naming that call. No answer
-depends on an earlier call; it waits for nothing and returns fresh containers with null
-provenance, a null precision and no truncated refs or warnings. It logs the refs each source
-was asked, which replay reads for ``ref-not-in-record``.
+A source is matched to the recorded call item that lists it, never by round or batch, and each
+of its refs is answered only from a recorded entry naming that call. The check compares the
+source as now asked with the base record, the record the answers were given in: a ref is
+stale when the base holds no answer for it (``no-answer``), when a need's value differs from
+the base's entry (``needs``), or when its question as now asked differs from the call item's
+(``question``). The fixture gives a stale ref no key and logs it, so the engine writes
+``not-returned`` and replay names it; ``from_record`` refuses it with ``unsupported``. No answer
+depends on an earlier call; neither binding waits, and each returns fresh containers with null
+provenance, a null precision and no truncated refs.
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 
 from ommat._answer import AnswerKind, ValueType
 from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
 from ommat._binding_kit import bounded_warnings
-from ommat._canonical import _CanonicalError, encode, ordered
+from ommat._canonical import _CanonicalError, decode, encode, ordered
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
-from ommat._interpret import _record_form
+from ommat._interpret import _record_form, question_identity
 from ommat._ledger import Record, read_record
 from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
@@ -63,39 +68,159 @@ class RecordedCalls:
         return self.calls.get(sid)
 
 
-class FixtureBinding:
-    """An oracle binding answering from a record under a given design."""
+@dataclass(frozen=True, slots=True)
+class Stale:
+    """Why a ref is stale: its clause, ``no-answer``, ``needs`` or ``question``, and a line
+    saying why."""
 
-    def __init__(self, recorded: RecordedCalls, loaded: LoadedDesign) -> None:
-        self._recorded = recorded
+    clause: str
+    why: str
+
+
+class Base:
+    """The base record's calls and entries, read once, against which a source asked under
+    ``loaded`` is checked."""
+
+    def __init__(self, log: list[dict[str, Any]], loaded: LoadedDesign) -> None:
+        self.calls = RecordedCalls(log)
+        self.entries = {cast(str, i["ref"]): i for i in log if i["item"] == "entry"}
+        # A record before format 6 holds no order, so its needs are compared without it.
+        self._held = log[0]["format"] >= KEY_ORDER_FORMAT
+        # Each candidate set's candidate field, by which its stored labels are rendered; a
+        # record before format 7 holds only list<string> sets.
+        self._sets = cast("dict[str, str | None]", log[1].get("sets", {}))
+        self._loaded = loaded
+        self._sources = cast("dict[str, Any]", decode(loaded.document))["sources"]
+
+    def check(self, source: SourceCall) -> tuple[Stale | None, dict[str, Stale]]:
+        """Whether ``source`` is stale whole, and why, else each stale ref of it: a source with
+        no call item listing it is ``no-answer`` and one whose needs differ ``needs``; a
+        question whose kind, labels, value type, list flag or identity differ is ``question``,
+        and a ref the call wrote no entry for ``no-answer``. A ``t:`` ref is checked for its
+        entry alone, since the record holds no type for it. A recorded ``Failed`` call is the
+        bindings' to judge."""
+        found = self.calls.call_of(source.id)
+        if found is None:
+            return Stale("no-answer", "the record holds no call for it"), {}
+        differ = [need for need, value in source.needs.items() if self.differs(need, value)]
+        if differ:
+            shown = ", ".join(clipped(need) for need in differ)
+            return Stale("needs", f"needs differ from the stored turn's: {shown}"), {}
+        index, item = found
+        stored = cast("dict[str, Any]", item["questions"])
+        stale: dict[str, Stale] = {}
+        for ref in (*source.refs, *source.questions):
+            if ref in source.questions:
+                why = self._question(ref, source.questions[ref], stored)
+                if why:
+                    stale[ref] = Stale("question", why)
+                    continue
+            if (index, ref) not in self.calls.entries:
+                stale[ref] = Stale("no-answer", "the recorded call wrote no entry for it")
+        return None, stale
+
+    def _question(self, ref: str, asked: RenderedQuestion, stored: dict[str, Any]) -> str:
+        """Why the question asked at ``ref`` is not the call item's, or empty when it is."""
+        declared = declared_ref(ref)
+        held = cast("dict[str, Any] | None", stored.get(declared))
+        why = _differing(asked, held, self.entries, self._sets)
+        if why or held is None:
+            return why
+        if question_identity(self._loaded, self._sources, declared) != held["identity"]:
+            return "its identity differs from the stored question's"
+        return ""
+
+    def differs(self, need: str, value: object) -> bool:
+        """Whether a need's live value differs from the record's entry at its base, read through
+        its field path, by its ordered encoding, or by canonical bytes for a record before format
+        6; a marker, a missing entry or path, a need that is not a ref and a value outside the
+        value domain differ."""
+        try:
+            entry = self.entries.get(entry_ref(need))
+            if entry is None or "value" not in entry:
+                return True
+            stored = walk(entry["value"], parse_ref(need).fields, need)
+            live = _record_form(value)
+            if self._held:
+                return ordered(stored) != ordered(live)
+            return encode(stored) != encode(live)
+        except (_RefError, _ViewError, _CanonicalError):
+            return True
+
+
+class FixtureBinding:
+    """An oracle binding answering from ``answers``, a record's calls, under a given design,
+    each source checked against ``base``. A ref in ``pinned`` is answered from ``answers`` and
+    never checked: an edit set it. A source in ``failed``, whose call an edit failed, is never
+    checked against ``base``; its failure comes back as for any recorded ``Failed`` call, whole
+    or not at all."""
+
+    def __init__(
+        self,
+        answers: RecordedCalls,
+        loaded: LoadedDesign,
+        base: Base,
+        *,
+        pinned: frozenset[str] = frozenset(),
+        failed: frozenset[str] = frozenset(),
+    ) -> None:
+        self._recorded = answers
         self._types = loaded._types
-        self.asked: dict[str, tuple[str, ...]] = {}
-        """Each asked source's ``refs`` followed by its question keys, as passed; a source is
-        asked at most once in a turn."""
+        self._base = base
+        self._pinned = pinned
+        self._failed = failed
+        self.stale: dict[str, tuple[str, Stale]] = {}
+        """Each stale ref the fixture gave no key, with its source's id and why."""
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> object:
         # The fixture waits for nothing, so the call's seconds are not read.
-        for source in batch:
-            self.asked[source.id] = (*source.refs, *source.questions)
+        stale: dict[str, dict[str, Stale]] = {s.id: self._stale(s) for s in batch}
         calls = [self._recorded.call_of(s.id) for s in batch]
         indices = {c[0] for c in calls if c is not None}
+        fresh = not any(stale.values())
         if None not in calls and len(indices) == 1:
-            outcome = cast("tuple[int, dict[str, Any]]", calls[0])[1]["outcome"]
-            if outcome != "returned":
+            item = cast("tuple[int, dict[str, Any]]", calls[0])[1]
+            outcome = item["outcome"]
+            # A failure comes back only for the call as recorded: every source, none stale.
+            whole = {s.id for s in batch} == set(cast("list[str]", item["sources"]))
+            if outcome != "returned" and fresh and whole:
                 failed = cast("dict[str, Any]", outcome)["failed"]
                 return Failed(Cause(failed["code"], list(failed["refs"])))
         values: dict[str, Any] = {}
         for source, found in zip(batch, calls, strict=True):
+            mine = stale[source.id]
+            refs = (*source.refs, *source.questions)
+            if found is not None and found[1]["outcome"] != "returned":
+                # A Failed call asked with other sources, without some of its own, or beside a
+                # stale batchmate cannot be reproduced whole: what was not pinned is stale.
+                why = Stale("no-answer", "its recorded call failed and is not reproduced whole")
+                for ref in refs:
+                    if ref not in mine and ref not in self._pinned:
+                        mine[ref] = why
+            for ref in refs:
+                if ref in mine:
+                    self.stale[ref] = (source.id, mine[ref])
             if found is None or found[1]["outcome"] != "returned":
-                continue  # no call, or a Failed call beside others: no key
+                continue  # no call, or a Failed call not reproduced: no key
             index = found[0]
-            for ref in self.asked[source.id]:
+            for ref in refs:
+                if ref in mine:
+                    continue
                 entry = self._recorded.entries.get((index, ref))
                 if entry is not None:
                     answer = self._answer(ref, entry)
                     if answer is not _NO_KEY:
                         values[ref] = answer
         return CallResult(values)
+
+    def _stale(self, source: SourceCall) -> dict[str, Stale]:
+        """Each stale ref of ``source`` that no edit set."""
+        if source.id in self._failed:
+            return {}
+        whole, refs = self._base.check(source)
+        if whole is not None:
+            refs = dict.fromkeys((*source.refs, *source.questions), whole)
+        return {r: why for r, why in refs.items() if r not in self._pinned}
 
     def _answer(self, ref: str, entry: Mapping[str, Any]) -> object:
         """The recorded entry's value, typed, a ``q:`` value in the binding's form of its
@@ -166,7 +291,8 @@ def from_record(record: object, loaded: LoadedDesign) -> OracleBinding:
     per-candidate question's stored entry found under its declared ref, each ref
     from the entry that call wrote, in the binding's form. It refuses with ``unsupported``,
     each refusal a line of ``warnings``: every ref of a source the record holds no returned
-    call for, or whose ``needs`` differ from the record's entries by canonical bytes; a
+    call for, or whose ``needs`` differ from the record's entries by their ordered encoding, or
+    by canonical bytes for a record before format 6; a
     question whose kind, labels as declared, value type or list flag differ from the call
     item's, a candidate-valued set's labels as its fixed part and its set's stored entry give
     them, or whose set's stored entry is missing or a marker; a ref with no recorded entry
@@ -174,11 +300,10 @@ def from_record(record: object, loaded: LoadedDesign) -> OracleBinding:
     ``invalid-return``, which come back as recorded. Its provenance is null and its first
     warnings line names the record's hash.
 
-    The binding cannot check a question's identity or wording: a ``SourceCall`` carries no
-    identity and the call item holds no wording. Under the record's own design neither can
-    differ; nor can it see a label set's ref, so a set named otherwise holding the same members
-    is answered. Under another design the caller compares, after the turn, each new call item's
-    ``questions`` identities with the stored call item's, by ``q:`` ref."""
+    The checks are the fixture's (``Base.check``): a question's identity under ``loaded`` is
+    compared with the call item's too, so a question reworded under another design is refused.
+    It cannot see a label set's ref, so a set named otherwise holding the same members is
+    answered."""
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     read = record if type(record) is Record else read_record(record)
@@ -189,14 +314,7 @@ class _FromRecord:
     """``from_record``'s binding: the record's calls and entries, read once."""
 
     def __init__(self, record: Record, loaded: LoadedDesign) -> None:
-        log = record.log  # read once: every read decodes afresh
-        self._recorded = RecordedCalls(log)
-        self._entries = {cast(str, i["ref"]): i for i in log if i["item"] == "entry"}
-        # A record before format 6 holds no order, so its needs are compared without it.
-        self._held = log[0]["format"] >= KEY_ORDER_FORMAT
-        # Each candidate set's candidate field, by which its stored labels are rendered; a
-        # record before format 7 holds only list<string> sets.
-        self._sets = cast("dict[str, str | None]", log[1].get("sets", {}))
+        self._base = Base(record.log, loaded)  # read once: every read decodes afresh
         self._types = loaded._types
         self._note = f"answered from record {record.record_hash}"
 
@@ -211,41 +329,26 @@ class _FromRecord:
     def _source(self, source: SourceCall, values: dict[str, object], lines: list[str]) -> None:
         refs = (*source.refs, *source.questions)
         unsupported = Unavailable(Cause(_C.unsupported))
-        found = self._recorded.call_of(source.id)
-        refusal: str | None = None
-        if found is None:
-            refusal = "the record holds no call for it"
-        elif found[1]["outcome"] != "returned":
+        found = self._base.calls.call_of(source.id)
+        if found is not None and found[1]["outcome"] != "returned":
             code = cast("dict[str, Any]", found[1]["outcome"])["failed"]["code"]
-            refusal = f"its recorded call failed with {code}"
-        else:
-            differ = [need for need, value in source.needs.items() if self._differs(need, value)]
-            if differ:
-                shown = ", ".join(clipped(need) for need in differ)
-                refusal = f"needs differ from the stored turn's: {shown}"
-        if refusal is not None or found is None:
             values.update(dict.fromkeys(refs, unsupported))
-            lines.append(f"source {clipped(source.id)}: {refusal}")
+            lines.append(f"source {clipped(source.id)}: its recorded call failed with {code}")
             return
-        index, item = found
-        stored = cast("dict[str, Any]", item["questions"])
+        whole, stale = self._base.check(source)
+        if whole is not None:
+            values.update(dict.fromkeys(refs, unsupported))
+            lines.append(f"source {clipped(source.id)}: {whole.why}")
+            return
+        assert found is not None  # the check finds a source with no call stale whole
+        index = found[0]
         for ref in refs:
-            if ref in source.questions:
-                why = _differing(
-                    source.questions[ref],
-                    stored.get(declared_ref(ref)),
-                    self._entries,
-                    self._sets,
-                )
-                if why:
-                    values[ref] = unsupported
-                    lines.append(f"{clipped(ref)}: {why}")
-                    continue
-            entry = self._recorded.entries.get((index, ref))
-            if entry is None:
+            if ref in stale:
                 values[ref] = unsupported
-                lines.append(f"{clipped(ref)}: the recorded call wrote no entry for it")
-            elif "value" in entry:
+                lines.append(f"{clipped(ref)}: {stale[ref].why}")
+                continue
+            entry = self._base.calls.entries[(index, ref)]
+            if "value" in entry:
                 values[ref] = (
                     _binding_form(cast("dict[str, Any]", entry["value"]))
                     if ref.startswith("q:")
@@ -259,23 +362,6 @@ class _FromRecord:
                 else:
                     values[ref] = unsupported
                     lines.append(f"{clipped(ref)}: recorded {code}, no answer to give")
-
-    def _differs(self, need: str, value: object) -> bool:
-        """Whether a need's live value differs from the record's entry at its base, read through
-        its field path, by its ordered encoding, or by canonical bytes for a record before format
-        6; a marker, a missing entry or path, a need that is not a ref and a value outside the
-        value domain differ."""
-        try:
-            entry = self._entries.get(entry_ref(need))
-            if entry is None or "value" not in entry:
-                return True
-            stored = walk(entry["value"], parse_ref(need).fields, need)
-            live = _record_form(value)
-            if self._held:
-                return ordered(stored) != ordered(live)
-            return encode(stored) != encode(live)
-        except (_RefError, _ViewError, _CanonicalError):
-            return True
 
 
 def _differing(

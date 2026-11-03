@@ -510,13 +510,13 @@ def test_a_probability_keyed_by_a_description_is_invalid_answer() -> None:
     }
 
 
-def test_a_description_change_is_question_changed_and_design_mismatch() -> None:
+def test_a_description_change_is_a_stale_question_and_design_mismatch() -> None:
     undescribed = load(described(tone_question(["warm", "cold"])))
     record = ran(loaded=undescribed)
     _, findings = replay_sync(read_record(record.document), load(described()))
     kinds = [f["kind"] for f in findings]
-    assert kinds[:2] == [FindingKind.design_mismatch, FindingKind.question_changed]
-    assert findings[1]["refs"] == ["q:tone"]
+    assert kinds[:2] == [FindingKind.design_mismatch, FindingKind.stale_question]
+    assert (findings[1]["ref"], findings[1]["clause"]) == ("q:tone", "question")
     again = load(described(tone_question([{**WARM, "description": "Kind"}, "cold"])))
     _, findings = replay_sync(read_record(ran().document), again)
     assert [f["kind"] for f in findings][:2] == kinds[:2]

@@ -25,8 +25,12 @@ through ``read_record`` (§record-hash-member); ``constant_rule`` alone edits on
 and makes no copy, loading it with ``functions``, or when ``None`` with ``loaded``'s own
 callables. Replay reruns the copy, its state entry, calls and cut, under the record's
 design or the modified one, so the findings are what the edits changed downstream; the edited
-entry itself, answered as set, is none. A plan is compared without its ``context``. Neither the
-record nor the loaded design is changed, and nothing returned holds a ``Record``.
+entry itself, answered as set, is none. Each source is checked against the record as read, so a
+question asked over an edited entry, as a need or a wording slot, is ``stale-question`` and
+not answered; an entry an edit set is never checked, nor are a failed call's needs, though
+its failure comes back only for the call asked whole, as for a recorded one. A plan is
+compared without its ``context``. Neither the record nor the loaded design is changed, and
+nothing returned holds a ``Record``.
 """
 
 import sys
@@ -326,7 +330,17 @@ async def _applied(
         design, document = _rule_loaded(*rule, own_functions(loaded, functions))
     copied = _record_copy(edited, read.unhashed).log if changed else log
     items = [copied[i] for i in sorted(changed)]
-    return items, document, await _replayed(copied, design, copied)
+    # The copy answers; each source is checked against the record as read, since its calls
+    # were asked over the record's entries, not the copy's. What an edit set is never checked.
+    pinned = frozenset(at.ref for at in located if type(at) is _EntryAt)
+    failed = frozenset(
+        sid
+        for at in located
+        if type(at) is _CallAt
+        for sid in cast("list[str]", at.call["sources"])
+    )
+    found = await _replayed(copied, design, copied, base=log, pinned=pinned, failed=failed)
+    return items, document, found
 
 
 def _target(edit: _Edit, log: _Log) -> "_EntryAt | _CallAt | _FieldAt":

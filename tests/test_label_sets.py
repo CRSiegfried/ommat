@@ -453,23 +453,23 @@ def versioned(function: Any, version: str) -> Design:
 
 
 @pytest.mark.parametrize("changed", [found_v2, found_reversed])
-def test_a_recomputed_set_that_differs_is_question_changed(changed: Any) -> None:
+def test_a_recomputed_set_that_differs_is_a_stale_question(changed: Any) -> None:
     recorded = run(["x"], Model(top="ana@x.org"), versioned(found_v1, "1"))
     _, found = replay_sync(recorded, load(versioned(changed, "2")))
     kinds = [f["kind"] for f in found]
-    assert kinds[:2] == ["design-mismatch", "question-changed"]
-    assert found[1]["refs"] == ["q:sender"]
+    assert kinds[:2] == ["design-mismatch", "stale-question"]
+    assert (found[1]["ref"], found[1]["clause"]) == ("q:sender", "question")
     (entry,) = [f for f in found if f["kind"] == "entry" and f["ref"] == "d:find"]
     assert entry["rule"]["version"] == "2"
 
 
-def test_a_recomputed_set_alike_is_no_question_changed() -> None:
+def test_a_recomputed_set_alike_is_no_stale_question() -> None:
     recorded = run(["x"], Model(), versioned(found_v1, "1"))
     _, found = replay_sync(recorded, load(versioned(found_v1, "2")))
-    assert "question-changed" not in [f["kind"] for f in found]
+    assert "stale-question" not in [f["kind"] for f in found]
 
 
-def test_another_records_set_answering_is_no_question_changed() -> None:
+def test_another_records_set_answering_is_no_stale_question() -> None:
     from ommat.evaluation import use_answers_sync
 
     loaded = load(design())
@@ -481,7 +481,7 @@ def test_another_records_set_answering_is_no_question_changed() -> None:
     second = run(["ana@x.org", "bob@y.org"], Model(top="bob@y.org"), tools=other_set)
     report = use_answers_sync(first, loaded, second)
     kinds = [f["kind"] for f in report["findings"]]
-    assert "question-changed" not in kinds
+    assert "stale-question" not in kinds
     refs = [f["ref"] for f in report["findings"] if f["kind"] == "entry"]
     assert SET in refs
 
@@ -655,7 +655,7 @@ def test_the_unsure_lint_runs_over_a_candidate_valued_design() -> None:
 def test_from_record_and_the_fixture_pass_the_suite_on_the_batches_their_record_answers(
     candidates: list[str],
 ) -> None:
-    from ommat._fixture import FixtureBinding, RecordedCalls
+    from ommat._fixture import Base, FixtureBinding, RecordedCalls
     from ommat.bindings.conformance import check
 
     model = Model()
@@ -665,7 +665,8 @@ def test_from_record_and_the_fixture_pass_the_suite_on_the_batches_their_record_
     ).record
     seen = list(model.batches)
     assert check(from_record(record, loaded), batches=seen) == []
-    assert check(FixtureBinding(RecordedCalls(record.log), loaded), batches=seen) == []
+    fixture = FixtureBinding(RecordedCalls(record.log), loaded, Base(record.log, loaded))
+    assert check(fixture, batches=seen) == []
 
 
 # ---------------------------------------------------------------------------------------------

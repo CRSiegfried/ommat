@@ -27,7 +27,7 @@ from ommat import (
     load,
 )
 from ommat._binding import OracleBinding
-from ommat._fixture import FixtureBinding, RecordedCalls
+from ommat._fixture import Base, FixtureBinding, RecordedCalls
 from ommat._interpret import MAX_WARNINGS
 from ommat._provenance import DETAILS
 from ommat.bindings import image_need
@@ -69,7 +69,8 @@ def test_from_record_passes_on_the_batches_its_record_answers(name: str) -> None
 @pytest.mark.parametrize("name", list(street.TURNS))
 def test_the_fixture_binding_passes_on_the_batches_its_record_answers(name: str) -> None:
     loaded, decision, seen = street_turn(name)
-    fixture = FixtureBinding(RecordedCalls(decision.record.log), loaded)
+    log = decision.record.log
+    fixture = FixtureBinding(RecordedCalls(log), loaded, Base(log, loaded))
     assert check(fixture, batches=seen, deterministic=True) == []
 
 

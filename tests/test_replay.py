@@ -401,7 +401,11 @@ def test_a_changed_function_rule_is_an_entry_finding_naming_the_given_designs_ru
     assert found[1]["replayed"]["value"] == "other"
 
 
-def test_an_added_source_is_not_in_record_and_its_refs_entry_findings() -> None:
+def stale(ref: str, source: str, clause: str) -> dict[str, Any]:
+    return {"kind": K.stale_question, "ref": ref, "source": source, "clause": clause}
+
+
+def test_an_added_source_is_stale_and_its_refs_entry_findings() -> None:
     # Both ids sort after the kept sources, so the kept calls keep their indices.
     extra = Source({"t:extra": t.string})
     zed = Source({"t:zed": t.string})
@@ -416,8 +420,8 @@ def test_an_added_source_is_not_in_record_and_its_refs_entry_findings() -> None:
             "recorded": LOADED.design_hash,
             "replayed": changed.design_hash,
         },
-        {"kind": K.not_in_record, "sources": ["xtra"]},
-        {"kind": K.not_in_record, "sources": ["zed"]},
+        stale("t:extra", "xtra", "no-answer"),
+        stale("t:zed", "zed", "no-answer"),
         {
             "kind": K.entry,
             "ref": "t:extra",
@@ -439,7 +443,7 @@ def test_an_added_source_is_not_in_record_and_its_refs_entry_findings() -> None:
     }
 
 
-def test_an_added_ref_is_ref_not_in_record_once_for_the_run() -> None:
+def test_each_added_ref_is_stale_in_code_point_order() -> None:
     body = Source(
         {**BODY.provides, "t:more": t.string, "t:also": t.string}, needs=BODY.needs, oracle="mail"
     )
@@ -452,28 +456,68 @@ def test_an_added_ref_is_ref_not_in_record_once_for_the_run() -> None:
             "recorded": LOADED.design_hash,
             "replayed": changed.design_hash,
         },
-        {"kind": K.ref_not_in_record, "refs": ["t:also", "t:bigger", "t:more"]},
+        stale("t:also", "body", "no-answer"),
     ]
-    assert [f.get("ref") for f in found[2:]] == ["t:also", "t:bigger", "t:more"]
+    assert found[2:4] == [
+        stale("t:bigger", "look", "no-answer"),
+        stale("t:more", "body", "no-answer"),
+    ]
+    assert [f.get("ref") for f in found[4:]] == ["t:also", "t:bigger", "t:more"]
 
 
 def test_a_ref_moved_to_another_source_finds_no_entry_under_that_sources_call() -> None:
     look = Source({**LOOK.provides, "t:body": t.string}, needs=LOOK.needs)
     changed = slice_design(sources={"ask": ASK, "look": look})
     found = findings(go().record, changed)
-    assert found[1] == {"kind": K.ref_not_in_record, "refs": ["t:body"]}
+    assert found[1] == stale("t:body", "look", "no-answer")
     assert [f.get("ref") for f in found[2:]] == ["t:body"]
 
 
-def test_a_ref_asked_under_a_failed_call_with_no_entry_is_ref_not_in_record() -> None:
+def test_a_ref_added_to_a_failed_call_is_stale_and_its_batchmates_too() -> None:
     record = live(look=raising(ValueError("down")))
     look = Source({**LOOK.provides, "t:bigger": t.integer()}, needs=LOOK.needs)
     changed = slice_design(sources={"ask": ASK, "body": BODY, "look": look})
     found = findings(record, changed)
-    assert found[1] == {"kind": K.ref_not_in_record, "refs": ["t:bigger"]}
+    # A call asking another ref cannot reproduce the failure, so the ref the record holds is
+    # stale too, and comes back not-returned where the record holds the failure's cause.
+    assert [(f["kind"], f.get("ref"), f.get("clause")) for f in found] == [
+        (K.design_mismatch, None, None),
+        (K.stale_question, "t:bigger", "no-answer"),
+        (K.stale_question, "t:size", "no-answer"),
+        (K.entry, "t:bigger", None),
+        (K.entry, "t:size", None),
+    ]
 
 
-def test_a_changed_wording_is_question_changed_and_still_answered() -> None:
+def stale_refs(found: list[Any]) -> list[tuple[str, str, str]]:
+    return [(f["ref"], f["source"], f["clause"]) for f in found if f["kind"] is K.stale_question]
+
+
+def test_a_failed_call_beside_a_stale_batchmate_is_stale_whole() -> None:
+    record = live(ask=raising(ValueError("down")))  # ask and body fail in one mail call
+    body = Source({**BODY.provides, "t:more": t.string}, needs=BODY.needs, oracle="mail")
+    changed = slice_design(sources={"ask": ASK, "body": body, "look": LOOK})
+    rerun, found = run(record, changed)
+    assert stale_refs(found) == [
+        ("q:spam", "ask", "no-answer"),
+        ("t:body", "body", "no-answer"),
+        ("t:more", "body", "no-answer"),
+    ]
+    assert rerun is not None
+    assert entry(rerun.log, "q:spam")["marker"]["cause"]["code"] == "not-returned"
+
+
+def test_a_failed_call_asked_now_in_two_batches_is_stale() -> None:
+    record = live(ask=raising(ValueError("down")))
+    body = Source(BODY.provides, needs=BODY.needs, oracle="post")
+    changed = slice_design(sources={"ask": ASK, "body": body, "look": LOOK})
+    assert stale_refs(findings(record, changed)) == [
+        ("q:spam", "ask", "no-answer"),
+        ("t:body", "body", "no-answer"),
+    ]
+
+
+def test_a_changed_wording_is_a_stale_question_and_not_answered() -> None:
     q = Question("noul", Text("Is it spam, really?"))
     ask = Source({"q:spam": q}, needs=ASK.needs, oracle="mail", cost=1)
     changed = slice_design(sources={"ask": ask, "body": BODY, "look": LOOK})
@@ -484,13 +528,14 @@ def test_a_changed_wording_is_question_changed_and_still_answered() -> None:
             "recorded": LOADED.design_hash,
             "replayed": changed.design_hash,
         },
-        {"kind": K.question_changed, "refs": ["q:spam"]},
+        stale("q:spam", "ask", "question"),
+        *found[2:],
     ]
     assert rerun is not None
-    assert entry(rerun.log, "q:spam")["value"]["probabilities"] == {"yes": 0.9, "no": 0.1}
+    assert entry(rerun.log, "q:spam")["marker"]["cause"]["code"] == "not-returned"
 
 
-def test_changed_labels_are_question_changed_and_the_answer_invalid() -> None:
+def test_changed_labels_are_a_stale_question_and_not_answered() -> None:
     q = Question("choice", Text("Is it spam?"), labels=("ham", "spam"))
     ask = Source({"q:spam": q}, needs=ASK.needs, oracle="mail", cost=1)
     rules = {
@@ -499,9 +544,9 @@ def test_changed_labels_are_question_changed_and_the_answer_invalid() -> None:
     }
     changed = slice_design(sources={"ask": ask, "body": BODY, "look": LOOK}, rules=rules)
     rerun, found = run(go().record, changed)
-    assert [f["kind"] for f in found[:2]] == [K.design_mismatch, K.question_changed]
+    assert found[:2] == [found[0], stale("q:spam", "ask", "question")]
     assert rerun is not None
-    assert entry(rerun.log, "q:spam")["marker"]["cause"]["code"] == "invalid-answer"
+    assert entry(rerun.log, "q:spam")["marker"]["cause"]["code"] == "not-returned"
 
 
 def other_route(r: Any) -> Any:
@@ -525,12 +570,15 @@ def test_every_kind_together_is_in_the_fixed_order() -> None:
     assert [(f["kind"], f.get("ref")) for f in found] == [
         (K.design_mismatch, None),
         (K.helpers_mismatch, None),
-        (K.not_in_record, None),
-        (K.ref_not_in_record, None),
-        (K.question_changed, None),
+        (K.stale_question, "q:spam"),
+        (K.stale_question, "t:more"),
+        (K.stale_question, "t:new"),
         (K.entry, "d:echo"),
+        (K.entry, "d:route"),
+        (K.entry, "q:spam"),
         (K.entry, "t:more"),
         (K.entry, "t:new"),
+        (K.plan, None),
     ]
 
 
@@ -718,12 +766,12 @@ def test_a_copy_clearing_a_refused_answer_replays_the_value() -> None:
     assert (found[0]["kind"], found[0].get("ref")) == (K.entry, "d:route")
 
 
-def test_a_dropped_t_ref_is_never_asked_so_it_is_no_ref_not_in_record() -> None:
+def test_a_dropped_t_ref_is_never_asked_so_it_is_no_stale_question() -> None:
     echo = Rule("d:echo", t.string, RULES["echo"].function, version="1", reads=["t:state.subject"])
     changed = slice_design(sources={"ask": ASK, "look": LOOK}, rules={**RULES, "echo": echo})
     record = go().record
     found = findings(record, changed)
-    assert K.ref_not_in_record not in [f["kind"] for f in found]
+    assert K.stale_question not in [f["kind"] for f in found]
     (body,) = [f for f in found if f.get("ref") == "t:body"]
     assert body["replayed"] is None
 
@@ -818,7 +866,7 @@ def test_a_recorded_budget_cut_replays_with_no_finding() -> None:
     assert findings(record, costly) == []
 
 
-def test_a_changed_parameter_a_slot_reads_is_question_changed() -> None:
+def test_a_changed_parameter_a_slot_reads_is_a_stale_question() -> None:
     def design(bar: float) -> LoadedDesign:
         q = Question(
             "noul", Text("Is it spam above {bar}?", [{"name": "bar", "origin": {"param": "bar"}}])
@@ -834,8 +882,9 @@ def test_a_changed_parameter_a_slot_reads_is_question_changed() -> None:
     assert findings(record, before) == []
     after = design(0.6)
     found = findings(record, after)
-    assert [f["kind"] for f in found] == [K.design_mismatch, K.question_changed]
-    assert found[1]["refs"] == ["q:spam"]
+    assert [f["kind"] for f in found[:2]] == [K.design_mismatch, K.stale_question]
+    assert found[1] == stale("q:spam", "ask", "question")
+    assert K.stale_question not in [f["kind"] for f in found[2:]]
 
 
 class Slowly:
@@ -1090,7 +1139,7 @@ def test_a_regrouped_batch_is_answered_by_source_in_its_new_batch(
     ]
 
 
-def test_a_format_2_record_whose_question_is_now_described_is_mismatch_and_changed() -> None:
+def test_a_format_2_record_whose_question_is_now_described_is_mismatch_and_stale() -> None:
     import test_format_3 as f3
 
     undescribed = load(f3.described(f3.tone_question(["warm", "cold"])))
@@ -1101,5 +1150,6 @@ def test_a_format_2_record_whose_question_is_now_described_is_mismatch_and_chang
         if item["item"] == "call":
             del item["precision"]
     _, found = run(read_record(doc), load(f3.described()))
-    assert [f["kind"] for f in found] == [FindingKind.design_mismatch, FindingKind.question_changed]
-    assert found[1]["refs"] == ["q:tone"]
+    kinds = [f["kind"] for f in found[:2]]
+    assert kinds == [FindingKind.design_mismatch, FindingKind.stale_question]
+    assert (found[1]["ref"], found[1]["clause"]) == ("q:tone", "question")

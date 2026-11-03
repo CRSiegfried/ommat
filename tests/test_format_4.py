@@ -333,9 +333,9 @@ def test_the_fixture_binding_returns_per_ref_markers_and_passes_the_suite() -> N
         return await split(batch, seconds=seconds)
 
     decide_sync(LOADED, {"text": "a report"}, {"o": capturing})
-    from ommat._fixture import FixtureBinding, RecordedCalls
+    from ommat._fixture import Base, FixtureBinding, RecordedCalls
 
-    fixture = FixtureBinding(RecordedCalls(record.log), LOADED)
+    fixture = FixtureBinding(RecordedCalls(record.log), LOADED, Base(record.log, LOADED))
     # The fixture returns warnings empty and null provenance, so it owes no per-ref line.
     assert check(fixture, batches=seen, deterministic=True) == []
     assert check(split, batches=seen, deterministic=True) == []

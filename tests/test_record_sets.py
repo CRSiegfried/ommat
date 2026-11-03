@@ -439,14 +439,14 @@ def replayed_with_set(members: list[Any]) -> list[Any]:
     return [f["kind"] for f in found]
 
 
-def test_replay_finds_no_question_changed_for_a_change_outside_the_candidate_field() -> None:
+def test_replay_finds_no_stale_question_for_a_change_outside_the_candidate_field() -> None:
     kinds = replayed_with_set([{**ANA, "age": 99}, BO])
-    assert FindingKind.question_changed not in kinds
+    assert FindingKind.stale_question not in kinds
     assert FindingKind.entry in kinds
 
 
-def test_replay_finds_question_changed_for_a_changed_candidate_value() -> None:
-    assert FindingKind.question_changed in replayed_with_set([{**ANA, "name": "Cy"}, BO])
+def test_replay_finds_a_stale_question_for_a_changed_candidate_value() -> None:
+    assert FindingKind.stale_question in replayed_with_set([{**ANA, "name": "Cy"}, BO])
 
 
 def test_from_record_answers_a_record_set_turn() -> None:

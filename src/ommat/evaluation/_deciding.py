@@ -16,10 +16,9 @@ set alone. A finite type is ``boolean``, a label, or either nullable.
 
 A trial the form refuses at its target, ``null-call``, ``failed-call``, ``not-found`` or
 ``candidate-rule``, is not run; any other refusal propagates. A run trial whose replay gives
-``not-in-record``, ``ref-not-in-record`` or ``question-changed`` is undetermined, whatever else
-it finds. A run trial changes the entry when replay gives an ``entry`` finding at its ref whose
-value, or marker kind and cause code, differ; ``rows``, ``derivation``, ``round`` or a cause's
-refs alone are no change.
+``stale-question`` is undetermined, whatever else it finds. A run trial changes the entry when
+replay gives an ``entry`` finding at its ref whose value, or marker kind and cause code, differ;
+``rows``, ``derivation``, ``round`` or a cause's refs alone are no change.
 
 A read is ``deciding`` when a run trial, not undetermined, changes the entry; else
 ``not-determined`` when no trial ran, as for a ``candidate`` read, which no form reaches, or one
@@ -125,7 +124,7 @@ async def _classed(
             continue
         ran = True
         if any(f["kind"] in OUTSIDE for f in found):
-            undetermined = True  # answered outside the record: no finding of it counts
+            undetermined = True  # it asked a stale question: no finding of it counts
         elif any(f["kind"] is _K.entry and f["ref"] == ref and changed(f) for f in found):
             return "deciding"
     if not ran or undetermined:

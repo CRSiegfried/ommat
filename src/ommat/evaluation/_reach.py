@@ -17,7 +17,7 @@ by canonical bytes. An entry's points are its declared question's lint points, a
 entry's with its own marker last; a candidate-valued question's are each fixed label and then
 the first candidate at 1, every other label the call asked with at 0; a returned call always
 rendered a candidate, since an empty set leaves the question out with its call null. A trial
-whose replay reports ``not-in-record``, ``ref-not-in-record`` or ``question-changed`` is
+whose replay reports ``stale-question`` is
 undetermined, whatever else it finds; any other reaches when its findings hold ``plan`` or
 ``verdict``, a plan compared without its ``context``.
 

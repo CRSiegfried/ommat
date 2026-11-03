@@ -10,7 +10,6 @@ import json
 import math
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -20,10 +19,8 @@ import test_grounded_rules as grounded
 from designs import minimal, slot
 from ommat import (
     CallResult,
-    Cause,
     Context,
     ContextEntry,
-    Failed,
     Helper,
     Input,
     InvalidDesign,
@@ -50,6 +47,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._canonical import decode
+from ommat._replay import FindingKind
 from ommat.evaluation import (
     EvaluationRefusal,
     EvaluationStore,
@@ -60,7 +58,7 @@ from ommat.evaluation import (
     switching_values,
     switching_values_sync,
 )
-from scripted import Scripted
+from scripted import Scripted, returns
 from test_decide import LOADED
 from test_use_answers import broken, unfinished
 
@@ -956,31 +954,6 @@ def test_the_margin_probe_rounds_down_when_the_nearest_float_is_above_the_lead()
     assert Fraction(repr(math.nextafter(probe, math.inf))) > lead
 
 
-def test_a_not_returned_ref_of_a_failed_call_is_not_determined() -> None:
-    cause = {"code": "not-returned", "refs": ["t:x"]}
-    rerun = [{"item": "entry", "ref": "t:x", "marker": {"kind": "Unavailable", "cause": cause}}]
-
-    def log(outcome: object) -> list[dict[str, Any]]:
-        return [
-            {"item": "design"},
-            {"item": "call", "outcome": outcome},
-            {"item": "entry", "ref": "t:x", "call": 1},
-        ]
-
-    def unreturned(outcome: object, rerun: list[dict[str, Any]]) -> bool:
-        held = log(outcome)
-        mine = {i["ref"]: i for i in held if i["item"] == "entry"}
-        return _switching._unreturned(mine, held, rerun)
-
-    assert unreturned({"failed": {"code": "raised", "refs": []}}, rerun)
-    assert not unreturned("returned", rerun)
-    other = [{**rerun[0], "marker": {"kind": "Unavailable", "cause": {**cause, "code": "raised"}}}]
-    assert not unreturned({"failed": {}}, other)
-    unsure = [{**rerun[0], "marker": {"kind": "Unsure", "cause": cause}}]
-    assert not unreturned({"failed": {}}, unsure)
-    assert not unreturned({"failed": {}}, [{**rerun[0], "ref": "t:other"}])
-
-
 def test_a_marker_a_candidate_read_and_a_missing_field_give_no_value() -> None:
     marker: dict[str, Any] = {"item": "entry", "ref": "t:x", "marker": {"kind": "Unsure"}}
     held = {"item": "entry", "ref": "t:y", "value": {"f": 2}}
@@ -1039,7 +1012,7 @@ def test_a_change_of_rows_alone_is_no_change(tmp_path: Path) -> None:
     assert list(entries) == ["d:big"]  # d:same's rows change past 7, its value never
 
 
-def test_a_run_writing_not_returned_for_a_failed_call_is_not_determined(
+def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     loaded = load(
@@ -1051,22 +1024,18 @@ def test_a_run_writing_not_returned_for_a_failed_call_is_not_determined(
             policy=Policy(constant, version="1", reads=["d:big"]),
         )
     )
-    binding = Scripted({"a": Failed(Cause("raised", ["t:a"]))})
+    binding = Scripted({"a": returns({"t:a": "x"})})
     record = decide_sync(loaded, STATE, {"o": binding, "default": binding}).record
     real = _switching._replay_with
+    stale = {"kind": FindingKind.stale_question, "ref": "t:a", "source": "a", "clause": "needs"}
 
-    async def unreturned(*args: Any, **kwargs: Any) -> Any:
+    async def staled(*args: Any, **kwargs: Any) -> Any:
         rerun, found = await real(*args, **kwargs)
+        return rerun, [*found, stale]
 
-        marker = {"kind": "Unavailable", "cause": {"code": "not-returned"}}
-        log = [
-            {**i, "marker": marker} if i["item"] == "entry" and i["ref"] == "t:a" else i
-            for i in rerun.log
-        ]
-        return SimpleNamespace(log=log), found
-
-    monkeypatch.setattr(_switching, "_replay_with", unreturned)
+    monkeypatch.setattr(_switching, "_replay_with", staled)
     plan = run(record, loaded, "lim/n", tmp_path)["value"]["plan"]
+    # Its own value's result is the record's, not replayed; every other value's is undetermined.
     assert [value_of(c["result"]) for c in plan["classes"]] == ["ok", "not-determined"]
 
 

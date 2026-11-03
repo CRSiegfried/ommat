@@ -831,11 +831,12 @@ def test_a_per_candidate_turn_replays_with_no_finding() -> None:
     assert q_refs(replayed) == q_refs(record)
 
 
-def test_question_changed_names_the_declared_ref() -> None:
+def test_a_reworded_per_candidate_question_is_stale_at_each_grounded_ref() -> None:
     record = decided(STREETS[:2])
     changed = load(reworded())
     found = replay_sync(record, changed)[1]
-    assert {"kind": FindingKind.question_changed, "refs": [OUT]} in found
+    stale = [(f["ref"], f["clause"]) for f in found if f["kind"] is FindingKind.stale_question]
+    assert stale == [(grounded_ref(OUT, s), "question") for s in sorted(STREETS[:2])]
 
 
 def reworded() -> Design:
@@ -851,11 +852,12 @@ def with_streets(record: Record, names: list[str]) -> Record:
     return read_record(edited(record, change))
 
 
-def test_a_copy_adding_a_candidate_replays_to_ref_not_in_record_and_an_entry() -> None:
+def test_a_copy_adding_a_candidate_replays_to_a_stale_question_and_an_entry() -> None:
     record = decided(STREETS[:3])
     added = grounded_ref(OUT, "Ash")
     found = replay_sync(with_streets(record, [*STREETS[:3], "Ash"]), LOADED)[1]
-    assert {"kind": FindingKind.ref_not_in_record, "refs": [added]} in found
+    stale = [(f["ref"], f["clause"]) for f in found if f["kind"] is FindingKind.stale_question]
+    assert stale == [(added, "no-answer")]
     refs = [f["ref"] for f in found if f["kind"] is FindingKind.entry]
     assert refs == [SET, added]
 

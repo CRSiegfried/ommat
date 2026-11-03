@@ -133,8 +133,8 @@ def test_each_read_is_classed_in_declared_order() -> None:
     result = deciding_inputs_sync(decided(), DESIGN, "d:pick")
     assert list(result.items()) == [
         ("t:kind", "deciding"),  # a value and every marker change it
-        ("t:state.flag", "not-deciding"),  # a finite field tried at every value
-        ("t:state.mood", "deciding"),  # wild changes it
+        ("t:state.flag", "not-determined"),  # false changes a need of t:kind's source
+        ("t:state.mood", "not-determined"),  # wild changes a need of t:kind's source
         ("t:state.subject", "not-determined"),  # a string field: form 3 sets values only
         ("t:body", "markers-only"),  # a string entry, never read
         ("t:gone", "not-determined"),  # its call is null: its source was not asked
@@ -280,7 +280,7 @@ NULLABLE = load(
     minimal(
         policy=Policy(ok_policy, version="1"),
         state=t.record(k=t.label("a", "b", "c")),
-        sources={"src": Source({"t:bb": t.nullable(t.boolean)}, needs=["t:state"])},
+        sources={"src": Source({"t:bb": t.nullable(t.boolean)})},
         rules={
             "m": Rule("d:m", t.nullable(t.boolean), maybe, version="1", reads=["t:bb"]),
             "tab": Table(
@@ -346,12 +346,10 @@ def stubbed(monkeypatch: pytest.MonkeyPatch, *outcomes: object) -> None:
     monkeypatch.setattr(_deciding, "_applied", applied)
 
 
-@pytest.mark.parametrize(
-    "kind", [FindingKind.not_in_record, FindingKind.ref_not_in_record, FindingKind.question_changed]
-)
-def test_a_trial_whose_replay_leaves_the_record_is_undetermined_even_if_it_changes(
-    kind: FindingKind, monkeypatch: pytest.MonkeyPatch
+def test_a_trial_whose_replay_asks_a_stale_question_is_undetermined_even_if_it_changes(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    kind = FindingKind.stale_question
     changed = {"kind": FindingKind.entry, "ref": "d:still", "recorded": None, "replayed": None}
     stubbed(monkeypatch, [{"kind": kind}, changed])
     assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-determined"}
@@ -383,14 +381,14 @@ def test_a_value_whose_replay_asks_outside_the_record_leaves_the_read_not_determ
     replies = Scripted({"src": returns({"t:lab": "q"}), "gated": returns({"t:other": True})})
     record = decide_sync(GATED, {}, {"default": replies}).record
     found = set_entry_sync(record, GATED, "t:lab", "p")["findings"]
-    assert FindingKind.not_in_record in [f["kind"] for f in found]
+    assert FindingKind.stale_question in [f["kind"] for f in found]
     assert deciding_inputs_sync(record, GATED, "d:r") == {"t:lab": "not-determined"}
 
 
 def test_one_undetermined_trial_among_unchanged_ones_is_not_determined(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stubbed(monkeypatch, [], [{"kind": FindingKind.question_changed}])
+    stubbed(monkeypatch, [], [{"kind": FindingKind.stale_question}])
     assert deciding_inputs_sync(decided(), DESIGN, "d:still") == {"t:kind": "not-determined"}
 
 

@@ -745,29 +745,31 @@ def changed_question(q: Question) -> list[dict[str, Any]]:
         Question("noul", Text("Is anything owed?")),
     ],
 )
-def test_a_changed_value_type_list_flag_or_kind_is_question_changed_then_invalid_answer(
+def test_a_changed_value_type_list_flag_or_kind_is_a_stale_question_not_answered(
     q: Question,
 ) -> None:
     findings = changed_question(q)
     kinds = [f["kind"] for f in findings]
     assert kinds == [
         FindingKind.design_mismatch,
-        FindingKind.question_changed,
+        FindingKind.stale_question,
         FindingKind.entry,
         FindingKind.entry,
         FindingKind.plan,
     ]
-    assert findings[1]["refs"] == ["q:amount"]
+    assert (findings[1]["ref"], findings[1]["clause"]) == ("q:amount", "question")
     (found,) = [f for f in findings if f["kind"] == FindingKind.entry and f["ref"] == "q:amount"]
-    assert found["replayed"]["marker"] == invalid_answer("q:amount")
+    assert found["replayed"]["marker"]["cause"]["code"] == "not-returned"
 
 
-def test_a_recorded_probability_answer_asked_now_as_an_extraction_is_invalid_answer() -> None:
+def test_a_recorded_probability_answer_asked_now_as_an_extraction_is_not_answered() -> None:
     noul = Question("noul", Text("Is anything owed?"))
     record = ran({"q:amount": {"yes": 0.9, "no": 0.1}}, loaded=load(x.plain(**{"q:amount": noul})))
     _, findings = replay_sync(read_record(record.document), load(x.plain()))
+    stale = [(f["ref"], f["clause"]) for f in findings if f["kind"] is FindingKind.stale_question]
+    assert stale == [("q:amount", "question")]
     (found,) = [f for f in findings if f["kind"] == FindingKind.entry and f["ref"] == "q:amount"]
-    assert found["replayed"]["marker"] == invalid_answer("q:amount")
+    assert found["replayed"]["marker"]["cause"]["code"] == "not-returned"
 
 
 def test_a_format_1_record_replays_under_its_format_1_design_with_helpers_mismatch_alone() -> None:

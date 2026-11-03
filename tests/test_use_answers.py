@@ -212,20 +212,25 @@ def test_records_cut_holds_when_other_ran_more_rounds() -> None:
     assert entry(other.log, "t:late")["value"] == "x"
     assert all(not cut for _, cut in cut_of(other))
     result = found(record, other, CHAINED)
-    assert K.not_in_record not in [f["kind"] for f in result]
+    assert K.stale_question not in [f["kind"] for f in result]
     # Only look's answer comes back; late, past the cut, is cut again.
     assert [f.get("ref") for f in result] == ["t:size"]
     assert result[0]["replayed"] == entry(other.log, "t:size")
 
 
-def test_a_source_other_never_called_is_not_in_record() -> None:
+def test_a_source_other_never_called_is_a_stale_question() -> None:
     record = live(CHAINED, CUT, late=returns({"t:late": "x"}))
     other = live(CHAINED, CUT, look=Slowly(10, returns({"t:size": 4})))
     assert cut_of(other) == [(1, True)]
     result = found(record, other, CHAINED)
-    assert result[0] == {"kind": K.not_in_record, "sources": ["late"]}
-    assert K.ref_not_in_record not in [f["kind"] for f in result]
-    late = next(f for f in result if f.get("ref") == "t:late")
+    assert result[0] == {
+        "kind": K.stale_question,
+        "ref": "t:late",
+        "source": "late",
+        "clause": "no-answer",
+    }
+    assert [f["kind"] for f in result].count(K.stale_question) == 1
+    late = next(f for f in result if f["kind"] is K.entry and f["ref"] == "t:late")
     assert late["replayed"]["marker"]["cause"]["code"] == "not-returned"
 
 
@@ -305,7 +310,10 @@ def test_a_source_the_seconds_thresholds_skipped_shows_in_the_replay_and_the_dif
     assert entry(theirs.log, "t:held")["marker"]["kind"] == "Unasked"
     rerun, findings = replay_sync(theirs, first)
     assert rerun is not None
-    assert {"kind": K.not_in_record, "sources": ["held"]} in findings
+    stale = {"kind": K.stale_question, "ref": "t:held", "source": "held", "clause": "no-answer"}
+    assert stale in findings
+    # The replay record holds the call it asked, which wrote not-returned: until a replay
+    # marks what it had no answer for, that answer is pinned as recorded.
     result = found(live(first, held=returns({"t:held": "h"})), rerun, first)
     assert [f.get("ref") for f in result] == ["t:held"]
     assert result[0]["replayed"]["marker"]["cause"] == {

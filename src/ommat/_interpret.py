@@ -1437,23 +1437,8 @@ class _Turn:
         return values
 
     def identity(self, ref: str) -> str:
-        """The question identity: the hash of the question's design-document object, each
-        parameter origin with its leaf's value in record form, no other slot's value. The document
-        is left as it was."""
-        declared = cast("dict[str, Any]", self.document[self.loaded._providers[ref]])
-        question = cast("dict[str, Any]", declared["provides"][ref])
-        wording = cast("dict[str, Any]", question["wording"])
-        slots: list[dict[str, Any]] = []
-        for slot in cast("list[dict[str, Any]]", wording["slots"]):
-            origin = cast("dict[str, Any]", slot["origin"])
-            if "param" in origin:
-                path = cast(str, origin["param"])
-                origin = {"param": path, "value": decode(self.loaded._leaf_bytes[path])}
-            slots.append({**slot, "origin": origin})
-        # The question's object is a holder of design members, held to no size bound; its
-        # targets guide a reader and are not what was asked.
-        hashed = {k: v for k, v in question.items() if k not in ("target", "latent_targets")}
-        return hash_value({**hashed, "wording": {**wording, "slots": slots}}, MAX_DOCUMENT_DEPTH)
+        """The question identity of ``ref`` under the turn's design (``question_identity``)."""
+        return question_identity(self.loaded, self.document, ref)
 
     def slot_key(self, origin: str, candidate: str | None) -> str:
         """A slot ref's needs key: a ref on a grounded declared ref, in a per-candidate
@@ -1625,3 +1610,24 @@ class _Turn:
         index = self.ledger.append(item)
         self.board[ref] = live
         return index
+
+
+def question_identity(loaded: LoadedDesign, sources: Mapping[str, Any], ref: str) -> str:
+    """The question identity of declared ``q:`` ref ``ref``: the hash of the question's
+    design-document object, each parameter origin with its leaf's value in record form, no
+    other slot's value, its targets left out. ``sources`` is the design document's ``sources``
+    object, which is left as it was."""
+    declared = cast("dict[str, Any]", sources[loaded._providers[ref]])
+    question = cast("dict[str, Any]", declared["provides"][ref])
+    wording = cast("dict[str, Any]", question["wording"])
+    slots: list[dict[str, Any]] = []
+    for slot in cast("list[dict[str, Any]]", wording["slots"]):
+        origin = cast("dict[str, Any]", slot["origin"])
+        if "param" in origin:
+            path = cast(str, origin["param"])
+            origin = {"param": path, "value": decode(loaded._leaf_bytes[path])}
+        slots.append({**slot, "origin": origin})
+    # The question's object is a holder of design members, held to no size bound; its targets
+    # guide a reader and are not what was asked.
+    hashed = {k: v for k, v in question.items() if k not in ("target", "latent_targets")}
+    return hash_value({**hashed, "wording": {**wording, "slots": slots}}, MAX_DOCUMENT_DEPTH)
