@@ -156,7 +156,7 @@ def downstream(record: Record, other: Record, *edited: str) -> list[Any]:
 
 
 # ---------------------------------------------------------------------------------------------
-# set_entry
+# An entry set
 
 
 def test_setting_an_entry_to_its_recorded_value_gives_no_finding() -> None:
@@ -381,7 +381,7 @@ def test_an_entry_of_a_failed_call_is_failed_call_before_marker() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# fail_call
+# A call failed
 
 
 def test_failing_a_call_gives_exactly_the_findings_downstream_of_it() -> None:
@@ -443,7 +443,7 @@ def test_a_failed_call_is_failed_call_before_fault_code() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# set_state_field
+# A state field set
 
 
 def test_setting_a_state_field_to_its_value_gives_no_finding() -> None:
@@ -559,7 +559,7 @@ def test_set_state_field_refusals(path: Any, value: object, reason: RefusalReaso
 
 
 # ---------------------------------------------------------------------------------------------
-# constant_rule
+# A rule made constant
 
 
 def test_a_constant_rule_gives_exactly_the_findings_downstream_of_it() -> None:
@@ -1224,10 +1224,10 @@ def test_each_design_not_exactly_a_loaded_design_is_refused_by_name_before_the_r
 
 def job_calls() -> list[tuple[str, Callable[[object], Any]]]:
     return [
-        ("set_entry", lambda r: entry_set(r, LOADED, "q:spam", NO)),
-        ("fail_call", lambda r: call_failed(r, LOADED, "ask", "raised")),
-        ("set_state_field", lambda r: field_set(r, LOADED, "t:state.subject", "b")),
-        ("constant_rule", lambda r: rule_constant(r, LOADED, "d:route", "no")),
+        ("an entry set", lambda r: entry_set(r, LOADED, "q:spam", NO)),
+        ("a call failed", lambda r: call_failed(r, LOADED, "ask", "raised")),
+        ("a state field set", lambda r: field_set(r, LOADED, "t:state.subject", "b")),
+        ("a rule made constant", lambda r: rule_constant(r, LOADED, "d:route", "no")),
         (
             "intervene",
             lambda r: intervene_sync(
@@ -1285,7 +1285,7 @@ def test_a_loaded_not_exactly_a_loaded_design_is_refused_first(job: Callable[[],
 
 
 @pytest.mark.parametrize(
-    "job", [j for name, j in JOBS if name != "constant_rule"], ids=IDS[:3] + IDS[4:]
+    "job", [j for name, j in JOBS if name != "a rule made constant"], ids=IDS[:3] + IDS[4:]
 )
 def test_the_copy_carries_its_own_hash_and_is_read_back(
     job: Callable[[object], Any], monkeypatch: pytest.MonkeyPatch

@@ -12,7 +12,7 @@ The spec covers what record format 7 and design format 9 hold and the engine doe
 - the context block a design declares, rendered into the record, and the record views: the escalation view, the handoff view, the transcript view and the redacted view;
 - the conversation renderers, which render a handoff as text and a transcript as Chat Completions or Pydantic AI messages;
 - the record lens, which renders stored records and designs as an HTML page a person reads;
-- replay of a recorded turn with no model call, the do-and-diff evaluation jobs `intervene`, `scenario` and `use_answers`, the deciding inputs, the switching-value job, the gold-answers job, the gold record and the answers table, and the design store and the evaluation store;
+- replay of a recorded turn with no model call, the do-and-diff evaluation jobs `intervene`, `scenario` and `use_answers`, the deciding inputs, the switching-value job, the question-reach job, the gold-answers job, the gold record and the answers table, a design's groups, and the design store and the evaluation store;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;
 - the answer kinds: `noul`, `choice` and `score`, which give a probability to each label, and `extraction`, a typed value read from a text, with the probability that the text holds none, the model's reading whatever it answered, its confidence and the span it read;
 - the candidate-valued label set: a `choice` whose labels are a fixed part and the members of a `list<string>` candidate set, rendered each time it is asked;
