@@ -40,10 +40,6 @@ class RefusalReason(enum.StrEnum):
     conflicting_labels = "conflicting-labels"
     unknown_entry = "unknown-entry"
     empty_copy = "empty-copy"
-    split_id = "split-id"
-    unknown_group = "unknown-group"
-    too_few_refs = "too-few-refs"
-    missing_gold = "missing-gold"
 
 
 class EvaluationRefusal(Exception):

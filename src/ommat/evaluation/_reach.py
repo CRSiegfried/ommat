@@ -41,12 +41,18 @@ from ommat._replay import FindingKind
 from ommat._values import type_name
 from ommat.evaluation._diff import OUTSIDE, _read, _refuse_unfit, _run_sync, baseline
 from ommat.evaluation._edit import _applied, _labels, _q_value, _SetEntry
-from ommat.evaluation._splits import _refuse_records
 from ommat.helpers._points import OnTop, Point, entry_points, filled, fresh
 
 _K = FindingKind
 _DECIDING = frozenset({_K.plan, _K.verdict})
 _Log = list[dict[str, Any]]
+
+
+def _refuse_records(what: str, records: object) -> None:
+    """``TypeError`` for ``records`` that are not an iterable other than a string, bytes or a
+    mapping."""
+    if not isinstance(records, Iterable) or isinstance(records, str | bytes | Mapping):
+        raise TypeError(f"{what} are a {type_name(cast(object, records))}, not records")
 
 
 async def question_reach(

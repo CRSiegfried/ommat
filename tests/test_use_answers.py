@@ -455,10 +455,6 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "conflicting-labels",
         "unknown-entry",
         "empty-copy",
-        "split-id",
-        "unknown-group",
-        "too-few-refs",
-        "missing-gold",
     }
 
 

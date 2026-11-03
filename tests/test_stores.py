@@ -138,7 +138,6 @@ KEYS: dict[str, dict[str, str]] = {
         "candidate": "",
     },
     "switching-value": {"record": "sha256:1", "design": "sha256:2", "parameter": "intent/bar"},
-    "group-counts": {"design": "sha256:2", "group": "g", "split": "sha256:3", "gold_set": "g1"},
 }
 
 
@@ -305,7 +304,7 @@ def test_write_refuses_in_order_and_writes_nothing(
         ("calibration", None, R.unknown_kind),  # the kind before the key
         (None, KEYS["switching-value"], R.unknown_kind),
         ("switching-value", None, R.invalid_entry),
-        ("switching-value", KEYS["group-counts"], R.invalid_entry),
+        ("switching-value", KEYS["gold-answer"], R.invalid_entry),
         ("switching-value", {"record": "r", "design": "d", "parameter": 1}, R.invalid_entry),
         ("switching-value", {"record": "r", "design": "\udc80", "parameter": "p"}, R.invalid_entry),
     ],
