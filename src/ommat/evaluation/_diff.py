@@ -20,6 +20,7 @@ import asyncio
 from collections.abc import Callable, Coroutine, Mapping
 from typing import Any, TypeVar
 
+from ommat._binding import OracleBinding
 from ommat._canonical import encode
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
@@ -58,7 +59,7 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
                 reason=_R.different_turn,
                 turn=records[1].record_hash,
             )
-    _, found = await _replayed(mine, loaded, theirs)
+    _, found, _ = await _replayed(mine, loaded, theirs)
     return {"other": records[1].record_hash, "findings": found}
 
 
@@ -100,11 +101,14 @@ async def _replayed(
     failed: frozenset[str] = frozenset(),
     design: LoadedDesign | None = None,
     asked: frozenset[str] = frozenset(),
-) -> tuple[Record, list[dict[str, Any]]]:
+    live: Mapping[str, OracleBinding] | None = None,
+    note: str = "",
+) -> tuple[Record, list[dict[str, Any]], frozenset[str]]:
     """The replay record of ``log`` rerun under ``loaded``, answered by ``answers``' calls and
-    checked against ``base`` and ``design`` as ``_replay_with`` checks, and replay's findings
-    less a ``plan`` finding of context alone."""
-    rerun, found = await _replay_with(
+    checked against ``base`` and ``design`` as ``_replay_with`` checks, stale sources asked of
+    ``live`` when given; replay's findings less a ``plan`` finding of context alone; and the
+    refs answered from ``answers``."""
+    rerun, found, fixture = await _replay_with(
         log,
         loaded,
         answers,
@@ -114,8 +118,24 @@ async def _replayed(
         failed=failed,
         design=design,
         asked=asked,
+        live=live,
+        note=note,
     )
-    return rerun, [f for f in found if not _context_alone(f)]
+    kept = [f for f in found if not _context_alone(f)]
+    return rerun, kept, _stood(rerun.log, fixture.pinned, fixture.reproduced)
+
+
+def _stood(log: list[dict[str, Any]], given: set[str], reproduced: set[str]) -> frozenset[str]:
+    """The refs given an answer from the record whose call the turn wrote ``returned``, and
+    those of a recorded failure given back."""
+    entries = {i["ref"]: i for i in log if i["item"] == "entry"}
+    stood: set[str] = set(reproduced)
+    for ref in given:
+        entry = entries.get(ref)
+        call = None if entry is None else entry["call"]
+        if call is not None and log[call]["outcome"] == "returned":
+            stood.add(ref)
+    return frozenset(stood)
 
 
 OUTSIDE = frozenset({FindingKind.stale_question})
@@ -129,7 +149,7 @@ async def baseline(
     """Replay ``log`` unedited under ``loaded``; ``baseline-differs`` on any finding but
     ``helpers-mismatch``, a note on the helper version alone, the kinds in the message, naming
     ``turn`` when given."""
-    _, found = await _replayed(log, loaded, log)
+    _, found, _ = await _replayed(log, loaded, log)
     kinds = [str(f["kind"]) for f in found if f["kind"] is not FindingKind.helpers_mismatch]
     if kinds:
         raise EvaluationRefusal(

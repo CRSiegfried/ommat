@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""Do-and-diff's scenario with no live binding: ``intervene`` replays a copy of a recorded turn
+"""Do-and-diff's scenarios: ``intervene`` replays a copy of a recorded turn
 once under a list of interventions, each changing one input, and under ``rerun_design``, a
 design the caller built, when given; ``recorded_design`` is the design the record was decided
 under.
@@ -33,6 +33,9 @@ answered, as is an asked source; an entry an edit set is never checked, nor are 
 needs, though its failure comes back only for the call asked whole, as for a recorded one. A
 plan is compared without its ``context``. Neither the record nor either design is changed; the
 replay record is returned, and the edited copy is not.
+
+``scenario`` is ``intervene`` with each stale source asked of the caller's bindings, checked
+as decide checks them before the record is read, on the running loop's clock with no cut.
 """
 
 import sys
@@ -41,8 +44,9 @@ from dataclasses import dataclass
 from typing import Any, Literal, NoReturn, cast
 
 from ommat._answer import AnswerKind, ValueType
+from ommat._binding import OracleBinding
 from ommat._canonical import decode, encode, record_hash
-from ommat._decide import EntryRefusal
+from ommat._decide import EntryRefusal, _bound, _copied
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._interpret import (
     _BINDING_MARKERS,
@@ -197,6 +201,56 @@ def intervene_sync(
 _NAMES = ("recorded_design", "rerun_design")
 
 
+async def scenario(
+    record: object,
+    recorded_design: LoadedDesign,
+    interventions: object,
+    bindings: Mapping[str, OracleBinding],
+    *,
+    rerun_design: LoadedDesign | None = None,
+    functions: _Functions = None,
+) -> dict[str, Any]:
+    """``intervene`` with the stale questions asked live of ``bindings``, keyed as decide's
+    are, on the running loop's clock with no cut; ``{"record", "findings", "stale",
+    "pinned"}``, ``stale`` the refs asked live and ``pinned`` those answered from the record,
+    each in code-point order."""
+    _designs(recorded_design, rerun_design, _NAMES)
+    running = recorded_design if rerun_design is None else rerun_design
+    live = _bound(running, _copied(bindings))  # refused before the record is read, as decide
+    read, log = _checked(record, recorded_design, rerun_design, names=_NAMES)
+    listed = _shaped(interventions, rerun_design)
+    done = await _applied(read, log, recorded_design, listed, functions, rerun_design, live=live)
+    return {
+        "record": done.record,
+        "findings": done.findings,
+        "stale": done.stale,
+        "pinned": done.pinned,
+    }
+
+
+def scenario_sync(
+    record: object,
+    recorded_design: LoadedDesign,
+    interventions: object,
+    bindings: Mapping[str, OracleBinding],
+    *,
+    rerun_design: LoadedDesign | None = None,
+    functions: _Functions = None,
+) -> dict[str, Any]:
+    """``scenario`` run to completion; ``RuntimeError`` inside a running event loop."""
+    return _run_sync(
+        "scenario",
+        lambda: scenario(
+            record,
+            recorded_design,
+            interventions,
+            bindings,
+            rerun_design=rerun_design,
+            functions=functions,
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------------------------
 # The one procedure
 
@@ -212,6 +266,7 @@ class _Applied:
     record: Record
     findings: list[dict[str, Any]]
     stale: list[str]
+    pinned: list[str]
 
 
 def _checked(
@@ -223,14 +278,20 @@ def _checked(
 ) -> tuple[Record, _Log]:
     """The record read, and its log, after the record checks; each design named as its job
     names it."""
-    if type(loaded) is not LoadedDesign:
-        raise EntryRefusal(f"{names[0]} is a {type_name(loaded)}, not exactly a LoadedDesign")
-    if rerun is not None and type(rerun) is not LoadedDesign:
-        raise EntryRefusal(f"{names[1]} is a {type_name(rerun)}, not exactly a LoadedDesign")
+    _designs(loaded, rerun, names)
     read = _read(record, "record")
     log = read.log  # read once: every read decodes afresh
     _refuse_unfit(("record",), (read,), (log,), loaded)
     return read, log
+
+
+def _designs(loaded: object, rerun: object, names: tuple[str, str]) -> None:
+    """``EntryRefusal`` for a design that is not exactly a ``LoadedDesign``, named as its job
+    names it; ``rerun`` may be ``None``."""
+    if type(loaded) is not LoadedDesign:
+        raise EntryRefusal(f"{names[0]} is a {type_name(loaded)}, not exactly a LoadedDesign")
+    if rerun is not None and type(rerun) is not LoadedDesign:
+        raise EntryRefusal(f"{names[1]} is a {type_name(rerun)}, not exactly a LoadedDesign")
 
 
 async def _applied(
@@ -240,6 +301,8 @@ async def _applied(
     edits: list[_Edit],
     functions: _Functions,
     rerun: LoadedDesign | None = None,
+    *,
+    live: Mapping[str, OracleBinding] | None = None,
 ) -> _Applied:
     """The interventions applied and replayed once.
 
@@ -306,7 +369,7 @@ async def _applied(
         for sid in cast("list[str]", at.call["sources"])
     )
     asked = frozenset(at for at in located if type(at) is str)
-    rerun, found = await _replayed(
+    replayed, found, held = await _replayed(
         copied,
         running,
         copied,
@@ -315,9 +378,12 @@ async def _applied(
         failed=failed,
         design=loaded,
         asked=asked,
+        live=live,
+        note=read.record_hash,
     )
     stale = [cast(str, f["ref"]) for f in found if f["kind"] is FindingKind.stale_question]
-    return _Applied([copied[i] for i in sorted(changed)], running, rerun, found, stale)
+    items = [copied[i] for i in sorted(changed)]
+    return _Applied(items, running, replayed, found, stale, code_point_sorted(held))
 
 
 def _target(

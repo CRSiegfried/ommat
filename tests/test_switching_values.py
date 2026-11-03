@@ -1030,8 +1030,8 @@ def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
     stale = {"kind": FindingKind.stale_question, "ref": "t:a", "source": "a", "clause": "needs"}
 
     async def staled(*args: Any, **kwargs: Any) -> Any:
-        rerun, found = await real(*args, **kwargs)
-        return rerun, [*found, stale]
+        rerun, found, fixture = await real(*args, **kwargs)
+        return rerun, [*found, stale], fixture
 
     monkeypatch.setattr(_switching, "_replay_with", staled)
     plan = run(record, loaded, "lim/n", tmp_path)["value"]["plan"]

@@ -8,7 +8,8 @@ is ``nothing-to-replay``: either returns ``None`` with that finding alone. Other
 run settings go through decide's bounds check, and decide's body runs through its internal
 entry: the recorded state entry typed by the given design in place of the codec, the fixture
 binding under every declared oracle name and ``default``, the observer, and the record's cut in
-place of a clock reading. A cancellation or the observer's exception
+place of a clock reading; a scenario instead binds the fixture over the caller's bindings and
+runs on the loop's clock with no cut. A cancellation or the observer's exception
 propagates as decide lets it out, with the replay record so far and no findings.
 
 ``_replay_with`` is the rerun itself, its fixture built from a given log's calls while the
@@ -24,12 +25,14 @@ canonical bytes differ. Replay reads nothing from ``unhashed``.
 
 import asyncio
 import enum
+from collections.abc import Mapping
 from typing import Any, cast
 
+from ommat._binding import OracleBinding
 from ommat._canonical import decode, encode
 from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings
 from ommat._design import LoadedDesign
-from ommat._fixture import Base, FixtureBinding, RecordedCalls
+from ommat._fixture import Base, FixtureBinding, Keyed, RecordedCalls
 from ommat._interpret import SORTED_TEXT
 from ommat._ledger import _ITEM_DEPTH, Observer, Record
 from ommat._refs import code_point_sorted
@@ -74,7 +77,8 @@ async def replay(
         return None, [{"kind": _K.unfinished}]
     if not any(item["item"] == "entry" and item["ref"] == _STATE for item in log):
         return None, [{"kind": _K.nothing_to_replay}]
-    return await _replay_with(log, loaded, log, observer=observer)
+    rerun, found, _ = await _replay_with(log, loaded, log, observer=observer)
+    return rerun, found
 
 
 async def _replay_with(
@@ -88,13 +92,17 @@ async def _replay_with(
     failed: frozenset[str] = frozenset(),
     design: LoadedDesign | None = None,
     asked: frozenset[str] = frozenset(),
-) -> tuple[Record, list[Finding]]:
+    live: Mapping[str, OracleBinding] | None = None,
+    note: str = "",
+) -> tuple[Record, list[Finding], FixtureBinding]:
     """Rerun the finished turn ``log`` holds, with a state entry, under ``loaded``, the
     fixture built from the call items and entries of ``answers``, each source checked against
     ``base``, ``answers`` when ``None``, and against ``design``, the base's design, the refs in
     ``pinned`` and the sources in ``failed`` never, the sources in ``asked`` stale; the state
     entry, the run settings, the cut and the log every finding compares against are
-    ``log``'s."""
+    ``log``'s. With ``live``, the caller's bindings by oracle name, a stale source is asked of
+    them, on the running loop's clock with no cut, ``note`` naming the base record in their
+    warnings."""
     # Both callers checked that the log holds a state entry.
     state = next(item for item in log if item["item"] == "entry" and item["ref"] == _STATE)
     # The settings item is second in every record from the design item on.
@@ -107,20 +115,27 @@ async def _replay_with(
         recorded["certificate_cap"],
     )
     checked = Base(answers if base is None else base, loaded, design=design, asked=asked)
-    fixture = FixtureBinding(RecordedCalls(answers), loaded, checked, pinned=pinned, failed=failed)
-    keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
-    bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))
+    fixture = FixtureBinding(
+        RecordedCalls(answers), loaded, checked, pinned=pinned, failed=failed, note=note
+    )
+    if live is None:
+        keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
+        bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))
+        clock, cut = None, _cut(log)
+    else:
+        bindings = {key: cast(OracleBinding, Keyed(fixture, b)) for key, b in live.items()}
+        clock, cut = asyncio.get_running_loop().time(), None
     value = decoded(state["value"], loaded._types[_STATE])
     # A record before format 6 rendered slot text sorted; its rerun renders it so too.
     token = SORTED_TEXT.set(log[0]["format"] < KEY_ORDER_FORMAT)
     try:
         decision = await _turn(
-            loaded, value, bindings, run, codec=None, clock=None, cut=_cut(log), observer=observer
+            loaded, value, bindings, run, codec=None, clock=clock, cut=cut, observer=observer
         )
     finally:
         SORTED_TEXT.reset(token)
     rerun = decision.record
-    return rerun, _findings(log, rerun.log, loaded, fixture)
+    return rerun, _findings(log, rerun.log, loaded, fixture), fixture
 
 
 def _cut(log: list[dict[str, Any]]) -> tuple[int, bool] | None:

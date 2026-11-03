@@ -600,8 +600,8 @@ def test_a_record_differing_only_in_helpers_mismatch_is_tried(
     real = _diff._replayed
 
     async def noted(log: Any, loaded: Any, answers: Any) -> Any:
-        rerun, found = await real(log, loaded, answers)
-        return rerun, [*found, {"kind": FindingKind.helpers_mismatch}]
+        rerun, found, pinned = await real(log, loaded, answers)
+        return rerun, [*found, {"kind": FindingKind.helpers_mismatch}], pinned
 
     monkeypatch.setattr(_diff, "_replayed", noted)
     assert question_reach_sync([turn()], LOADED)["questions"]["q:go"]["status"] == "live"

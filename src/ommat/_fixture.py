@@ -11,14 +11,15 @@ stale when the base holds no answer for it (``no-answer``), when a need's value 
 the base's entry (``needs``), when its question as now asked differs from the call item's, or a
 ``t:`` ref's declared type from the base design's (``question``), when the source's payload
 differs from the base design's (``payload``), or when its ``oracle`` key differs or a scenario
-asks it afresh (``oracle``). The fixture gives a stale ref no key and logs it, so the engine writes
-``not-returned`` and replay names it; ``from_record`` refuses it with ``unsupported``. No answer
-depends on an earlier call; neither binding waits, and each returns fresh containers with null
-provenance, a null precision and no truncated refs.
+asks it afresh (``oracle``). Offline the fixture gives a stale ref no key and logs it, so the
+engine writes ``not-returned`` and replay names it; in a scenario it asks the stale source of the
+caller's binding and merges the answers; ``from_record`` refuses a stale ref with
+``unsupported``. No answer depends on an earlier call; offline neither binding waits, and each
+returns fresh containers with null provenance, a null precision and no truncated refs.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from ommat._answer import AnswerKind, ValueType
@@ -27,13 +28,20 @@ from ommat._binding_kit import bounded_warnings
 from ommat._canonical import _CanonicalError, decode, encode, ordered
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
-from ommat._interpret import _record_form, question_identity
+from ommat._interpret import _record_form, question_identity, warnings_conform
 from ommat._ledger import Record, read_record
 from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
-from ommat._refs import _RefError, candidate_values, declared_ref, entry_ref, parse_ref
-from ommat._typed import decoded
-from ommat._values import KEY_ORDER_FORMAT, clipped, type_name
+from ommat._refs import (
+    _RefError,
+    candidate_values,
+    code_point_sorted,
+    declared_ref,
+    entry_ref,
+    parse_ref,
+)
+from ommat._typed import decoded, is_a
+from ommat._values import KEY_ORDER_FORMAT, clipped, string_data, type_name
 
 _C = CauseCode
 _RETURNED_MARKERS = frozenset(
@@ -194,7 +202,18 @@ class FixtureBinding:
     each source checked against ``base``. A ref in ``pinned`` is answered from ``answers`` and
     never checked: an edit set it. A source in ``failed``, whose call an edit failed, is never
     checked against ``base``; its failure comes back as for any recorded ``Failed`` call, whole
-    or not at all."""
+    or not at all.
+
+    Called with a live binding, as a scenario's is, a source with a stale ref is passed whole
+    to it in a sub-batch, and so is stale whole, a ref fresh alone taking its source's first
+    clause; the rest are answered from ``answers``, and the two merge into the live
+    ``CallResult``, a pinned ref of a live source answered from ``answers``. When any ref was
+    so answered and the live warnings conform, they are led by ``answered from record <note>``,
+    a line per ref so answered and a line per such ref the live ``truncated`` named, which is
+    dropped from it. A live result that is not a ``CallResult`` holding a ``dict``, a ``Failed``
+    among them, is returned as it is, failing the whole call, and a live value for a
+    batchmate's ref fails it ``unexpected-ref``; either way no ref is counted pinned. A wholly
+    pinned batch is answered as offline, with null provenance."""
 
     def __init__(
         self,
@@ -204,17 +223,31 @@ class FixtureBinding:
         *,
         pinned: frozenset[str] = frozenset(),
         failed: frozenset[str] = frozenset(),
+        note: str = "",
     ) -> None:
         self._recorded = answers
+        self._note = note
         self._types = loaded._types
         self._base = base
         self._pinned = pinned
         self._failed = failed
         self.stale: dict[str, tuple[str, Stale]] = {}
-        """Each stale ref the fixture gave no key, with its source's id and why."""
+        """Each stale ref, given no key or asked live, with its source's id and why."""
+        self.pinned: set[str] = set()
+        """Each ref given an answer from the record, a recorded failure given back among them;
+        whether the call then stood is read from the record the turn wrote."""
+        self.reproduced: set[str] = set()
+        """Each ref of a recorded failure given back."""
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> object:
-        # The fixture waits for nothing, so the call's seconds are not read.
+        return await self.call(batch, seconds, None)
+
+    async def call(
+        self, batch: tuple[SourceCall, ...], seconds: float, live: OracleBinding | None
+    ) -> object:
+        """The batch answered from the record; a source with a stale ref given no key, or,
+        with ``live``, passed whole to ``live`` in a sub-batch under the same ``seconds``,
+        every ref of it but a pinned one then stale."""
         stale: dict[str, dict[str, Stale]] = {s.id: self._stale(s) for s in batch}
         calls = [self._recorded.call_of(s.id) for s in batch]
         indices = {c[0] for c in calls if c is not None}
@@ -226,8 +259,13 @@ class FixtureBinding:
             whole = {s.id for s in batch} == set(cast("list[str]", item["sources"]))
             if outcome != "returned" and fresh and whole:
                 failed = cast("dict[str, Any]", outcome)["failed"]
+                refs = [r for s in batch for r in (*s.refs, *s.questions)]
+                self.pinned.update(refs)
+                self.reproduced.update(refs)
                 return Failed(Cause(failed["code"], list(failed["refs"])))
         values: dict[str, Any] = {}
+        asked: list[SourceCall] = []
+        held: list[str] = []
         for source, found in zip(batch, calls, strict=True):
             mine = stale[source.id]
             refs = (*source.refs, *source.questions)
@@ -238,21 +276,85 @@ class FixtureBinding:
                 for ref in refs:
                     if ref not in mine and ref not in self._pinned:
                         mine[ref] = why
+            if live is not None and mine:
+                # Asked live whole, so stale whole: a ref fresh alone takes its source's clause.
+                first = next(r for r in refs if r in mine)
+                why = Stale(mine[first].clause, f"asked with its source, stale at {first}")
+                for ref in refs:
+                    if ref not in mine and ref not in self._pinned:
+                        mine[ref] = why
+                asked.append(source)
             for ref in refs:
                 if ref in mine:
                     self.stale[ref] = (source.id, mine[ref])
+            if source in asked:
+                continue  # its pinned refs are answered after the live call
             if found is None or found[1]["outcome"] != "returned":
                 continue  # no call, or a Failed call not reproduced: no key
-            index = found[0]
             for ref in refs:
-                if ref in mine:
-                    continue
-                entry = self._recorded.entries.get((index, ref))
-                if entry is not None:
-                    answer = self._answer(ref, entry)
-                    if answer is not _NO_KEY:
-                        values[ref] = answer
-        return CallResult(values)
+                if ref not in mine:
+                    self._give(ref, found[0], values, held)
+        if live is None or not asked:
+            self.pinned.update(held)
+            return CallResult(values)
+        return self._merged(await live(tuple(asked), seconds=seconds), batch, asked, values, held)
+
+    def _merged(
+        self,
+        result: object,
+        batch: tuple[SourceCall, ...],
+        asked: list[SourceCall],
+        values: dict[str, Any],
+        held: list[str],
+    ) -> object:
+        """The live result with the record's answers merged in, or as it is when it fails the
+        call."""
+        if type(result) is not CallResult or type(result.values) is not dict:
+            return result  # interpret judges it, failing the whole call
+        own = {r for s in asked for r in (*s.refs, *s.questions)}
+        others = {r for s in batch for r in (*s.refs, *s.questions)} - own
+        given = cast("dict[object, object]", result.values)
+        named = {k: string_data(cast(str, k)) for k in given if is_a(k, str)}
+        wrong = code_point_sorted(ref for ref in named.values() if ref in others)
+        if wrong:
+            # The live binding answered a ref of a batchmate it was not asked.
+            return Failed(Cause(CauseCode.unexpected_ref, wrong))
+        for source in asked:
+            found = self._recorded.call_of(source.id)
+            for ref in (*source.refs, *source.questions):
+                if ref in self._pinned:
+                    # A pinned ref keeps its set value, or no key when its call is not recorded.
+                    given = {k: v for k, v in given.items() if named.get(k) != ref}
+                    if found is not None:
+                        self._give(ref, found[0], values, held)
+        merged: dict[Any, Any] = {**given, **values}
+        truncated: object = result.truncated
+        dropped: list[str] = []
+        if type(truncated) is tuple:
+            # Only a pinned question of an asked source is dropped; any other wrong member is
+            # left for interpret to judge.
+            ours = {q for s in asked for q in s.questions if q in held}
+            members = cast("tuple[object, ...]", truncated)
+            dropped = [m for m in members if type(m) is str and m in ours]
+            truncated = tuple(m for m in members if not (type(m) is str and m in ours))
+        warnings: object = result.warnings
+        if held and warnings_conform(warnings):
+            lines = [f"answered from record {self._note}"]
+            lines += [f"{clipped(ref)}: pinned" for ref in held]
+            lines += [f"{clipped(ref)}: named truncated, answered from record" for ref in dropped]
+            warnings = bounded_warnings([*lines, *cast("tuple[str, ...]", warnings)])
+        self.pinned.update(held)
+        return replace(result, values=merged, truncated=truncated, warnings=warnings)
+
+    def _give(self, ref: str, index: int, values: dict[Any, Any], held: list[str]) -> None:
+        """The recorded answer to ``ref`` under the call at ``index``, when it has one a binding
+        may give, put in ``values`` and listed in ``held``."""
+        entry = self._recorded.entries.get((index, ref))
+        if entry is not None:
+            answer = self._answer(ref, entry)
+            if answer is not _NO_KEY:
+                values[ref] = answer
+                held.append(ref)
 
     def _stale(self, source: SourceCall) -> dict[str, Stale]:
         """Each stale ref of ``source`` that no edit set."""
@@ -464,3 +566,15 @@ def _differing(
     if stored.get("is_list", False) != asked.is_list:
         found.append("list flag")
     return f"its {', '.join(found)} differ from the stored question's" if found else ""
+
+
+class Keyed:
+    """The fixture under one oracle name, asking stale sources of the caller's binding under
+    that name."""
+
+    def __init__(self, fixture: FixtureBinding, live: OracleBinding) -> None:
+        self._fixture = fixture
+        self._live = live
+
+    async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> object:
+        return await self._fixture.call(batch, seconds, self._live)

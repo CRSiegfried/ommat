@@ -203,6 +203,8 @@ EVALUATION = {
     "intervene_sync",
     "question_reach",
     "question_reach_sync",
+    "scenario",
+    "scenario_sync",
     "split_id",
     "switching_values",
     "switching_values_sync",

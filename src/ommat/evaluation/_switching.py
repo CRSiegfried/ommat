@@ -302,7 +302,7 @@ class _Job:
             components = _components(self.document)
             self.late |= {n for f in exc.failures for n in f.names if n in components}
             return {"not-loading": failures}, []
-        rerun, found = await _replay_with(self.log, design, self.log, observer=None)
+        rerun, found, _ = await _replay_with(self.log, design, self.log, observer=None)
         rerun_log = rerun.log
         outside = any(f["kind"] in OUTSIDE for f in found)
         return _Run(self.log, found, self.carrying(rerun_log), outside), rerun_log
