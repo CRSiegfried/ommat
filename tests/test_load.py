@@ -233,7 +233,9 @@ def test_requirements_default_deny_tools_parameters_types_and_groups() -> None:
         "weights": {"type": "mapping<string, number>", "value": {"a": 1}, "order": {}},
     }
     assert doc["types"] == {"verdict": 'label{"no", "yes"}'}
-    assert doc["groups"] == {"intents": ["q:intent/email", "q:intent/tone"]}
+    assert doc["groups"] == {
+        "intents": {"refs": ["q:intent/email", "q:intent/tone"], "reason": ["convergent"]}
+    }
     assert doc["state"] == "record{subject: string, sender: record{address: string}}"
     assert doc["name"] == "mail"
 
@@ -515,7 +517,7 @@ def test_load_takes_a_design_or_a_document() -> None:
         with_rule(minimal(), "codec", rule("codec")),
         minimal(types={"number": t.string}),
         minimal(types={"Upper": t.string}),
-        minimal(groups={"bad group": Group([])}),
+        minimal(groups={"bad group": Group([], ["convergent"])}),
         minimal(tools=["send", "send"]),
         minimal(tools=["Send"]),
         minimal(parameters={"a": Parameter(t.number(), 1), "a/b": Parameter(t.number(), 2)}),
@@ -579,8 +581,8 @@ def nowhere(design: Design, *, check: int = 3) -> None:
         with_rule(minimal(), "r", rule("r", reads=("q:none",))),
         minimal(policy=Policy(designs.policy, version="1", reads=["d:none"])),
         minimal(requirements=[Requirement("d:none", True)]),
-        minimal(groups={"g": Group(["q:none"])}),
-        full(groups={"g": Group(["q:intent/tone", "q:intent/tone"])}),
+        minimal(groups={"g": Group(["q:none"], ["convergent"])}),
+        full(groups={"g": Group(["q:intent/tone", "q:intent/tone"], ["convergent"])}),
         with_source(minimal(), "s", Source({"q:x": question("Is {a}?", slot("a", ref="t:none"))})),
     ],
 )
@@ -744,7 +746,7 @@ def test_the_loaded_graph_drives_a_sorter() -> None:
         with_rule(minimal(), "r", rule("r", provides="d:r.f")),
         minimal(policy=Policy(designs.policy, version="1", reads=["t:state["])),
         minimal(requirements=[Requirement("rule:1", True)]),
-        minimal(groups={"g": Group(["q:"])}),
+        minimal(groups={"g": Group(["q:"], ["convergent"])}),
         with_source(minimal(), "s", Source({"q:x": question("Is {a}?", slot("a", ref="nope"))})),
     ],
 )
@@ -980,7 +982,7 @@ FORMS: list[Design] = [
     minimal(rules={"r": 1}),
     minimal(parameters={"p": 1}),
     minimal(groups={"g": 1}),
-    minimal(groups={"g": Group("q:x")}),
+    minimal(groups={"g": Group("q:x", ["convergent"])}),
     minimal(plans={"p": 1}),
     full(requirements=[Requirement("d:score", {0.5})]),
     minimal(name=b"x"),

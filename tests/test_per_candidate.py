@@ -359,7 +359,7 @@ def test_check_3_holds_a_candidate_slot_and_a_grounding_to_a_candidate_set(
             'rule "r" names "q:x[\\"a\\"]", a grounded ref',
         ),
         (
-            over_t(GROUNDED, groups={"both": Group(['q:x["a"]', "q:y"])}),
+            over_t(GROUNDED, groups={"both": Group(['q:x["a"]', "q:y"], ["convergent"])}),
             'group "both" names "q:x[\\"a\\"]", a grounded ref',
         ),
     ],
@@ -915,7 +915,7 @@ def test_a_rules_read_set_holds_the_grounding_set_with_the_declared_ref() -> Non
 
 
 def test_a_group_of_grounded_and_ungrounded_refs_or_two_sets_is_refused() -> None:
-    mixed = over_t(GROUNDED, groups={"g": Group(["q:x", "q:y"])})
+    mixed = over_t(GROUNDED, groups={"g": Group(["q:x", "q:y"], ["convergent"])})
     assert (
         3,
         'group "g" names q: refs grounded over different candidate sets, or grounded and '
@@ -926,10 +926,12 @@ def test_a_group_of_grounded_and_ungrounded_refs_or_two_sets_is_refused() -> Non
         GROUNDED,
         other,
         ("sets2", Source({"t:s2": {"type": t.list_(t.string), "candidates": True}})),
-        groups={"g": Group(["q:x", "q:z"])},
+        groups={"g": Group(["q:x", "q:z"], ["convergent"])},
     )
     assert any(c == 3 and "different candidate sets" in m for c, m in failures(two_sets))
-    load(over_t(GROUNDED, groups={"g": Group(["q:x"])}))  # all grounded over one set
+    load(
+        over_t(GROUNDED, groups={"g": Group(["q:x"], ["convergent"])})
+    )  # all grounded over one set
 
 
 def test_a_grounded_design_round_trips_through_its_document() -> None:

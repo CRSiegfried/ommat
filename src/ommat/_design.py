@@ -324,12 +324,15 @@ class Parameter:
 
 @dataclass(frozen=True, slots=True)
 class Group:
-    """A correlated group: the refs it names."""
+    """A group: the refs it names, to be considered together, and ``reason``, why, each one of
+    ``convergent``, ``discriminant``, ``exclusive``, ``exhaustive`` and ``consistent``. It gates
+    nothing."""
 
     refs: Sequence[str]
+    reason: Sequence[str]
 
     def __post_init__(self) -> None:
-        _set(self, refs=_strings(self.refs))
+        _set(self, refs=_strings(self.refs), reason=_strings(self.reason))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -693,8 +696,8 @@ class LoadedDesign:
     ``when``; ``_types``, each ``t:`` and ``d:`` ref's
     declared type, ``t:state`` included, and ``_leaf_types``, each leaf's type, each with its
     definitions resolved; ``_needs``, each source's needs with its question slots' refs
-    added; ``_groups``, each group's refs in code-point order; ``_graph``,
-    each node's predecessors; ``_providers``, the ref-to-provider map;
+    added; ``_groups``, each group's refs in code-point order, and ``_group_reasons`` its
+    reasons; ``_graph``, each node's predecessors; ``_providers``, the ref-to-provider map;
     ``_grid``, the answer grid; ``_labels``, each ``q:`` ref's label names and descriptions,
     aligned, ``None`` where a label is undescribed, ``yes`` and ``no`` for ``noul`` and none for
     ``extraction``, a candidate-valued label set's fixed part alone; ``_label_sets``, each
@@ -723,6 +726,7 @@ class LoadedDesign:
         "_graph",
         "_grid",
         "_grounded",
+        "_group_reasons",
         "_groups",
         "_hash",
         "_label_at",
@@ -748,6 +752,7 @@ class LoadedDesign:
     _leaf_types: Mapping[str, Type]
     _needs: Mapping[str, frozenset[str]]
     _groups: Mapping[str, tuple[str, ...]]
+    _group_reasons: Mapping[str, tuple[str, ...]]
     _graph: Mapping[str, frozenset[str]]
     _providers: Mapping[str, str]
     _grid: Mapping[str, Any]

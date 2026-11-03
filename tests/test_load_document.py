@@ -589,7 +589,7 @@ def test_an_unordered_list_out_of_order() -> None:
 
 
 def reversed_group(doc: dict[str, Any]) -> None:
-    doc["groups"]["intents"].reverse()
+    doc["groups"]["intents"]["refs"].reverse()
 
 
 def listed_tool(doc: dict[str, Any]) -> None:
@@ -607,7 +607,7 @@ def unsorted_boundaries(doc: dict[str, Any]) -> None:
 @pytest.mark.parametrize(
     ("change", "names", "says"),
     [
-        (reversed_group, ("intents",), 'group "intents" is not'),
+        (reversed_group, ("intents",), 'group "intents"\'s refs are not in canonical order'),
         (listed_tool, ("send",), 'tool "send" is not'),
         (listed_tools, (), 'the document\'s "tools" is not'),
         (unsorted_boundaries, ("route",), '"boundaries" is not what load computes'),

@@ -184,7 +184,10 @@ class _Form:
             self.fail((), "requirements is not a list")
         parameters = self.members(d.parameters, "parameters", Parameter, dropped=self.leaves)
         groups = {
-            g: Group(self.strings(v.refs, f"group {quote(g)}'s refs", (g,)))
+            g: Group(
+                self.strings(v.refs, f"group {quote(g)}'s refs", (g,)),
+                self.strings(v.reason, f"group {quote(g)}'s reason", (g,)),
+            )
             for g, v in self.members(d.groups, "groups", Group).items()
         }
         targets = {

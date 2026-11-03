@@ -127,7 +127,7 @@ def full(**changes: Any) -> Design:
             "mood": Parameter(t.label("calm", "wild"), Mood.calm),
             "weights": Parameter(t.mapping(t.number()), {"a": 1}),
         },
-        "groups": {"intents": Group(["q:intent/tone", "q:intent/email"])},
+        "groups": {"intents": Group(["q:intent/tone", "q:intent/email"], ["convergent"])},
     }
     fields.update(changes)
     return Design(**fields)

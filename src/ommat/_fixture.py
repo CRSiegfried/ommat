@@ -346,7 +346,7 @@ class FixtureBinding:
             lines = [f"answered from record {self._note}"]
             lines += [f"{clipped(ref)}: pinned" for ref in held]
             lines += [f"{clipped(ref)}: named truncated, answered from record" for ref in dropped]
-            warnings = bounded_warnings([*lines, *cast("tuple[str, ...]", warnings)])
+            warnings = bounded_warnings([*lines, *warnings])
         self.pinned.update(held)
         return replace(result, values=merged, truncated=truncated, warnings=warnings)
 

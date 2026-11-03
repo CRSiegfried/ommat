@@ -141,7 +141,7 @@ def test_a_texts_slots_are_snapshotted() -> None:
         lambda: SourceRequirement("d:x", "ab"),
         lambda: When(1, version=2),  # type: ignore[arg-type]
         lambda: Source({}, when=designs.route),  # type: ignore[arg-type]
-        lambda: Group("q:x"),
+        lambda: Group("q:x", ["convergent"]),
         lambda: Table(1, t.boolean, "U", [], []),  # type: ignore[arg-type]
         lambda: Design(state=None, policy=1),  # type: ignore[arg-type]
         lambda: designs.minimal(sources=None, rules={"r": Source({})}, requirements=[1]),
@@ -196,5 +196,5 @@ def test_a_design_types_constructor_reads_a_field_by_its_type_not_its_class_attr
     # mapping's provides is copied. Nothing reads __class__ on the way.
     given = _ClassRaises()
     assert Source({"t:x": t.string}, needs=given).needs is given  # pyright: ignore[reportArgumentType]
-    assert Group(refs=given).refs is given  # pyright: ignore[reportArgumentType]
+    assert Group(refs=given, reason=["convergent"]).refs is given  # pyright: ignore[reportArgumentType]
     assert Source(given).provides is not given  # pyright: ignore[reportArgumentType]

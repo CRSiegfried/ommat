@@ -120,6 +120,8 @@ from ommat._values import (
     DESIGN_FORMAT,
     DESIGN_FORMATS,
     EXTRACTION_FORMAT,
+    GROUP_REASON_FORMAT,
+    GROUP_REASONS,
     KEY_ORDER_FORMAT,
     KNOWN_FORMAT,
     MAX_DOCUMENT_DEPTH,
@@ -1576,6 +1578,7 @@ class _Loader:
                 where = f"source {_q(sid)}'s question {_q(ref)}"
                 self.text(question.wording, where, (sid, ref))
         self.check_9_context()
+        self.check_9_groups()
         for u in self.uses:
             if u.role == "boundary":
                 continue  # a key's read is typed as its component's read (check 9)
@@ -2179,6 +2182,22 @@ class _Loader:
                 f"the policy table's last row names {_q(last['plan'])}, whose plan reads the board",
             )
 
+    def check_9_groups(self) -> None:
+        """Each group gives at least one reason, each one of the five, none twice."""
+        for gname, group in self.d.groups.items():
+            where, names = f"group {_q(gname)}", (gname,)
+            if not group.reason:
+                self.fail(9, names, f"{where} gives no reason")
+            for reason in group.reason:
+                if reason not in GROUP_REASONS:
+                    self.fail(
+                        9,
+                        names,
+                        f"{where}'s reason {_q(reason)} is not one of {', '.join(GROUP_REASONS)}",
+                    )
+            for reason in code_point_sorted({r for r in group.reason if group.reason.count(r) > 1}):
+                self.fail(9, names, f"{where} gives the reason {_q(reason)} more than once")
+
     def check_9_plan(self, name: str, plan: PlanDeclaration) -> None:
         where, names = f"plan declaration {_q(name)}", (name,)
         try:
@@ -2567,6 +2586,14 @@ class _Loader:
 
     # --- the document and the loaded design ------------------------------------------------
 
+    def _group(self, group: Group) -> object:
+        """A group as the document holds it: its refs and reasons in code-point order, or before
+        format 9 its refs alone."""
+        refs = code_point_sorted(group.refs)
+        if self.format < GROUP_REASON_FORMAT:
+            return refs
+        return {"refs": refs, "reason": code_point_sorted(group.reason)}
+
     def document(self) -> dict[str, Any]:
         d = self.d
         policy = d.policy
@@ -2608,7 +2635,7 @@ class _Loader:
             "parameters": parameters,
             "types": dict(d.types),
             "plans": {name: _plan(plan) for name, plan in d.plans.items()},
-            "groups": {g: code_point_sorted(group.refs) for g, group in d.groups.items()},
+            "groups": {g: self._group(group) for g, group in d.groups.items()},
             "classes": dict(d.classes),  # each tree plain data, from check 10's form test
             **({"context": _context(d.context)} if self.format >= CONTEXT_FORMAT else {}),
             **(
@@ -2762,6 +2789,9 @@ class _Loader:
             needs=MappingProxyType(self.needs()),
             groups=MappingProxyType(
                 {g: tuple(code_point_sorted(group.refs)) for g, group in self.d.groups.items()}
+            ),
+            group_reasons=MappingProxyType(
+                {g: tuple(code_point_sorted(group.reason)) for g, group in self.d.groups.items()}
             ),
             graph=graph,
             providers=MappingProxyType(providers),
@@ -3652,6 +3682,7 @@ _DOCUMENT = frozenset(
 )
 _CONTEXT = frozenset({"entries", "plan", "steps", "record"})
 _TARGET = frozenset({"statement", "values"})
+_GROUP = frozenset({"refs", "reason"})
 _LATENT = frozenset({"target", "role"})
 _FUNCTION = frozenset({"module", "qualname", "version", "source"})
 _SOURCE = frozenset(
@@ -3861,6 +3892,14 @@ def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str,
                 (rid,),
                 f"rule {_q(rid)} names a candidate field, which format {fmt} does not have",
             )
+    if fmt >= GROUP_REASON_FORMAT:
+        groups = cast("dict[str, Any]", doc["groups"]) if isinstance(doc["groups"], dict) else {}
+        for gname in code_point_sorted(groups):
+            group: object = groups[gname]
+            if isinstance(group, dict):  # a group of another form is check 10's
+                yield from _missing_or_extra(
+                    cast("dict[str, Any]", group), _GROUP, f"group {_q(gname)}", (gname,)
+                )
     if fmt < KNOWN_FORMAT:
         tables = [(f"rule {_q(rid)}", (rid,), r) for rid, r in _objects(doc["rules"])]
         if policy_doc is not None:
@@ -4295,12 +4334,27 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
                 v["grounded"],
             ),
         ),
-        groups=_each(doc["groups"], Group),
+        groups=_each(doc["groups"], _group_of(doc["format"])),
         classes=doc["classes"],
         name=doc["name"],
         context=_context_of(doc.get("context")),
         targets=block(doc.get("targets", {}), lambda _, v: Target(v["statement"], v["values"])),
     )
+
+
+def _group_of(fmt: int) -> Callable[[Any], Group]:
+    """A document's group as a ``Group``: from format 9 an object of its refs and reasons, one
+    of another form left for check 10; before it its refs alone, with the reason ``convergent``."""
+
+    def build(value: Any) -> Group:
+        if fmt < GROUP_REASON_FORMAT:
+            return Group(value, ("convergent",))
+        if isinstance(value, dict):
+            members = cast("dict[str, Any]", value)
+            return Group(members["refs"], members["reason"])
+        return Group(value, cast(Any, None))  # its reason is not a list: check 10
+
+    return build
 
 
 def _rows(value: object, *, policy: bool, hit: object = None) -> Any:

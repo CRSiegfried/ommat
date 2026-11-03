@@ -112,6 +112,13 @@ candidate set of records."""
 KNOWN_FORMAT = 9
 """The first design format whose tables may hold a ``known`` cell."""
 
+GROUP_REASON_FORMAT = 9
+"""The first design format whose group is an object of its ``refs`` and ``reason``; an earlier
+format's group is its refs alone, read with the reason ``convergent``."""
+
+GROUP_REASONS = ("convergent", "discriminant", "exclusive", "exhaustive", "consistent")
+"""The reasons a group may give, in their declared order."""
+
 SETS_FORMAT = 7
 """The first record format whose ``settings`` item names each candidate set's candidate field,
 under ``sets``."""
