@@ -840,7 +840,8 @@ def _rule_loaded(
 ) -> LoadedDesign:
     """The design run with each rule replaced by its table, loaded; ``invalid-design``
     carrying the ``InvalidDesign`` load raised, naming the first rule whose output holds bytes,
-    said plainly, else the first rule."""
+    said plainly, else the first whose output is the string ``Unsure``, saying the class is
+    meant, else the first rule."""
     document = cast("dict[str, Any]", decode(running.document))
     for at in rules:
         document["rules"][at.name] = at.table
@@ -848,8 +849,14 @@ def _rule_loaded(
         return load(document, functions=functions)
     except InvalidDesign as exc:
         held = [at for at in rules if _holds_bytes(at.table["rows"][0]["output"])]
-        at = (held or rules)[0]
-        why = "a table has no bytes literal" if held else exc
+        named = [at for at in rules if at.table["rows"][0]["output"] == {"literal": "Unsure"}]
+        at = (held or named or rules)[0]
+        if held:
+            why = "a table has no bytes literal"
+        elif named:
+            why = f"{exc}; Unsure is given as the class ommat.Unsure, not the string"
+        else:
+            why = str(exc)
         raise EvaluationRefusal(
             f"the design with rule {at.name} constant does not load: {why}",
             reason=_R.invalid_design,

@@ -709,6 +709,12 @@ def test_an_output_holding_bytes_is_invalid_design_saying_why() -> None:
         assert str(exc).endswith("a table has no bytes literal")
 
 
+def test_the_string_unsure_that_does_not_load_is_invalid_design_naming_the_class() -> None:
+    exc = refusal(rule_constant, go().record, LOADED, "d:route", "Unsure")
+    assert (exc.reason, type(exc.error)) == (R.invalid_design, InvalidDesign)
+    assert str(exc).endswith("; Unsure is given as the class ommat.Unsure, not the string")
+
+
 @pytest.mark.usefixtures("no_replay")
 def test_a_rule_reading_a_grounded_ref_is_candidate_rule() -> None:
     exc = refusal(rule_constant, grounded.decided(), grounded.LOADED, "d:summary", "x")

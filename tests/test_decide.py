@@ -353,6 +353,7 @@ def test_the_golden_undecided_record() -> None:
         "kind": "Unsure",
         "cause": {"code": "required", "refs": ["d:route"]},
         "root_cause": route["marker"]["cause"],
+        "defect": False,  # an oracle abstained
         "record_hash": record.record_hash,
     }
     assert route["marker"]["cause"]["code"] != "required"
@@ -1080,6 +1081,7 @@ def test_a_broken_entry_writes_the_policy_of_the_design_and_runs_no_rule() -> No
         "kind": "Unavailable",
         "cause": RAISED,
         "root_cause": RAISED,
+        "defect": True,
         "record_hash": decision.record.record_hash,
     }
 

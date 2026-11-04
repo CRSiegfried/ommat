@@ -1,7 +1,7 @@
 # pyright: reportPrivateUsage=false
-"""The record views: the escalation's four members, the root cause its ``required`` chain
-ends at, and when a record holds none; the transcript of a decided turn; and
-the redacted view, its digests recomputed here independently with ``hmac`` and the
+"""The record views: the escalation's five members, the root cause its ``required`` chain
+ends at, whether that is a defect, and when a record holds none; the transcript of a decided
+turn; and the redacted view, its digests recomputed here independently with ``hmac`` and the
 ``rfc8785`` oracle, over records decide wrote and over the synthetic logs and every prefix of
 them."""
 
@@ -54,6 +54,7 @@ from ommat import types as t
 from ommat._canonical import decode, encode
 from ommat._refs import grounded_ref
 from ommat._values import MAX_DOCUMENT_DEPTH
+from ommat._views import _defect
 
 ROOT = bytes(range(32))
 
@@ -143,6 +144,7 @@ def test_the_root_cause_follows_required_across_two_hops() -> None:
         "kind": "Unavailable",
         "cause": {"code": "required", "refs": ["d:mid"]},
         "root_cause": {"code": "raised", "refs": ["gone"]},  # d:act -> d:mid -> d:gone
+        "defect": True,
         "record_hash": record.record_hash,
     }
 
@@ -157,6 +159,7 @@ def test_a_cause_not_required_is_its_own_root() -> None:
         "kind": "Unavailable",
         "cause": cause,
         "root_cause": cause,
+        "defect": True,
         "record_hash": record.record_hash,
     }
 
@@ -266,11 +269,35 @@ def test_the_root_cause_hops_from_a_grounded_ref_to_the_entry_the_ledger_wrote()
     assert found["root_cause"] == {"code": "raised", "refs": ["fit"]}
 
 
-def test_the_escalation_is_plain_data_of_exactly_four_members() -> None:
+@pytest.mark.parametrize(
+    ("root", "defect"),
+    [
+        ({"code": "raised", "refs": ["route"]}, True),  # a rule
+        ({"code": "invalid-return", "refs": ["tagger"]}, True),
+        ({"code": "undeclared-read", "refs": ["route", "d:tags"]}, True),
+        ({"code": "raised", "refs": ["codec"]}, True),  # the codec
+        ({"code": "invalid-return", "refs": ["t:state"]}, True),
+        ({"code": "raised", "refs": ["q:spam"]}, False),  # an oracle's question
+        ({"code": "invalid-return", "refs": ["q:spam"]}, False),
+        ({"code": "raised", "refs": ["t:mail/body"]}, False),
+        ({"code": "undeclared-read", "refs": ["fetch_mail", "t:state.to"]}, False),  # a when
+        ({"code": "abstained", "refs": ["route"]}, False),
+        ({"code": "timed-out", "refs": ["q:spam"]}, False),
+        ({"code": "raised", "refs": []}, False),
+    ],
+)
+def test_a_root_cause_is_a_defect_when_its_code_is_and_it_names_a_rule_or_the_codec(
+    root: dict[str, Any], defect: bool
+) -> None:
+    assert _defect(fresh(NORMAL_8), root) is defect
+
+
+def test_the_escalation_is_plain_data_of_exactly_five_members() -> None:
     found = escalation(turn(requiring))
     assert found is not None
     assert type(found) is dict
-    assert list(found) == ["kind", "cause", "root_cause", "record_hash"]
+    assert list(found) == ["kind", "cause", "root_cause", "defect", "record_hash"]
+    assert type(found["defect"]) is bool
     cause: object = found["cause"]
     assert type(cause) is dict
     assert type(found["cause"]["refs"]) is list
@@ -293,6 +320,7 @@ def test_the_escalation_reads_the_markers_and_the_hash() -> None:
         "kind": "Unavailable",
         "cause": ENTRY_CAUSE["cause"],
         "root_cause": ENTRY_CAUSE["cause"],
+        "defect": True,
         "record_hash": record.record_hash,
     }
 

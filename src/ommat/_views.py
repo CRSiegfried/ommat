@@ -1,8 +1,9 @@
 """The record views: pure functions from a closed record to a value, for the caller, the
 escalation target or a verifier.
 
-``escalation(record)`` returns an undecided turn's four members: the marker's kind, its cause,
-the root cause and the record hash; ``None`` when the policy gave a value. ``transcript(record)``
+``escalation(record)`` returns an undecided turn's five members: the marker's kind, its cause,
+the root cause, whether that is a defect, and the record hash; ``None`` when the policy gave a
+value. ``transcript(record)``
 returns every source call and the decision, unworded. Each of the two gives ``None`` for a record
 before format 8, which holds no policy's entry, and finds the decision as ``decision_entry``
 does. ``redact(record, root_key)`` returns the redacted view's document as canonical bytes: the
@@ -53,20 +54,42 @@ def escalation(record: Record) -> dict[str, Any] | None:
     """An undecided turn's escalation: ``kind``, the policy's marker's kind; ``cause``, its
     cause; ``root_cause``, the cause reached by following each ``required`` cause to the entry
     its first ref names, until a cause whose code is not ``required`` or a ref with no marker
-    entry; and ``record_hash``. ``None`` when the policy gave a value, when the log holds no
-    entry at the policy's ref, or for a record before format 8."""
+    entry; ``defect``, whether the root cause is ``raised``, ``invalid-return`` or
+    ``undeclared-read`` naming a rule or the codec; and ``record_hash``. ``None`` when the
+    policy gave a value, when the log holds no entry at the policy's ref, or for a record
+    before format 8."""
     log = _closed(record).log
     entry = decision_entry(log)
     if entry is None or "value" in entry:
         return None
     marker = cast("dict[str, Any]", entry["marker"])
     cause = cast("dict[str, Any]", marker["cause"])
+    root = _root_cause(log, cause)
     return {
         "kind": marker["kind"],
         "cause": cause,
-        "root_cause": _root_cause(log, cause),
+        "root_cause": root,
+        "defect": _defect(log, root),
         "record_hash": record.record_hash,
     }
+
+
+_STATE = "t:state"
+_CODEC = "codec"
+_DEFECT_CODES = frozenset({CauseCode.raised, CauseCode.invalid_return, CauseCode.undeclared_read})
+"""The codes a root cause is a defect under when it names a rule or the codec."""
+
+
+def _defect(log: list[dict[str, Any]], root: dict[str, Any]) -> bool:
+    """Whether ``root`` is a defect code whose first ref names a rule, by the ``settings``
+    item's providers of ``d:`` refs, or the codec: ``codec``, or ``t:state``, whose value
+    only the codec gives."""
+    if root["code"] not in _DEFECT_CODES or not root["refs"]:
+        return False
+    providers = cast("dict[str, str]", log[1]["providers"])
+    rules = {rid for ref, rid in providers.items() if ref.startswith("d:")}
+    first = root["refs"][0]
+    return first in rules or first in (_CODEC, _STATE)
 
 
 def _root_cause(log: list[dict[str, Any]], cause: dict[str, Any]) -> dict[str, Any]:
