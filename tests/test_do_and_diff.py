@@ -9,25 +9,25 @@ import dataclasses
 import json
 import pathlib
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 import extraction
-import test_context as context
 import test_deciding_inputs as deciding
 import test_grounded_rules as grounded
 import test_label_sets as label_sets
 from designs import minimal
-from format_8_design import DESIGN
 from ommat import (
     Cause,
+    Design,
     EntryRefusal,
     Failed,
     FindingKind,
     InvalidDesign,
     InvalidRecord,
     LoadedDesign,
+    Parameter,
     Question,
     Record,
     Rule,
@@ -68,15 +68,35 @@ from test_decide import (
     route,
     slice_design,
 )
+from test_deciding_inputs import records_in
 from test_extraction_turn import ran as extraction_ran
 from test_replay import entry
-from test_use_answers import HAM, REFUSING, broken, diff, live, unfinished
+from test_use_answers import CHANGED, HAM, broken, diff, format_7, live, unfinished
 
 K = FindingKind
 R = RefusalReason
 NO = {"yes": 0.1, "no": 0.9}
 YES = {"yes": 0.9, "no": 0.1}
 TESTS = pathlib.Path(__file__).parent
+TABLED = Design(
+    name="tabled",
+    state=t.record(score=t.number(0, 1), name=t.string),
+    parameters={"bar": Parameter(t.number(0, 1), 0.8)},
+    rules={
+        "level": Table(
+            "d:level",
+            t.label("high", "low"),
+            "F",
+            ["t:state.score"],
+            [[">= bar", "high"], ["-", "low"]],
+        ),
+        "act": Table(
+            "d:act", t.label("page", "tell"), "F", ["d:level"], [["high", "page"], ["-", "tell"]]
+        ),
+    },
+    policy="d:act",
+)
+"""All tables, the policy a table over ``d:level``."""
 
 
 @pytest.fixture
@@ -152,7 +172,7 @@ def kinds(found: list[dict[str, Any]]) -> list[tuple[str, str | None]]:
 def downstream(record: Record, other: Record, *edited: str) -> list[Any]:
     """The findings a rerun reproducing ``other``'s turn gives against ``record``, less the
     edited entries themselves, which the copy holds as set."""
-    return [f for f in diff(record, other, REFUSING) if f.get("ref") not in edited]
+    return [f for f in diff(record, other, LOADED) if f.get("ref") not in edited]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -160,18 +180,18 @@ def downstream(record: Record, other: Record, *edited: str) -> list[Any]:
 
 
 def test_setting_an_entry_to_its_recorded_value_gives_no_finding() -> None:
-    record = live(REFUSING)
-    result = entry_set(record, REFUSING, "q:spam", YES)
+    record = live(LOADED)
+    result = entry_set(record, LOADED, "q:spam", YES)
     assert result == {"entry": entry(record.log, "q:spam"), "findings": []}
-    assert entry_set(record, REFUSING, "t:body", "text of the mail")["findings"] == []
+    assert entry_set(record, LOADED, "t:body", "text of the mail")["findings"] == []
 
 
 def test_setting_an_answer_gives_exactly_the_findings_downstream_of_it() -> None:
-    record, other = live(REFUSING), live(REFUSING, ask=returns(HAM))
-    result = entry_set(record, REFUSING, "q:spam", NO)
+    record, other = live(LOADED), live(LOADED, ask=returns(HAM))
+    result = entry_set(record, LOADED, "q:spam", NO)
     assert result["entry"] == entry(other.log, "q:spam")
     assert result["findings"] == downstream(record, other, "q:spam")
-    assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
+    assert kinds(result["findings"]) == [(K.entry, "d:act"), (K.entry, "d:route")]
 
 
 def test_a_t_entry_is_set_to_a_value_of_its_type() -> None:
@@ -182,13 +202,13 @@ def test_a_t_entry_is_set_to_a_value_of_its_type() -> None:
 
 @pytest.mark.parametrize("code", ["refused", "unsupported", "invalid-answer", "timed-out"])
 def test_an_entry_set_to_a_binding_marker_names_its_ref_alone(code: str) -> None:
-    record = live(REFUSING)
-    result = entry_set(record, REFUSING, "q:spam", Unavailable(Cause(code, ["x", "y"])))
+    record = live(LOADED)
+    result = entry_set(record, LOADED, "q:spam", Unavailable(Cause(code, ["x", "y"])))
     assert result["entry"]["marker"] == {
         "kind": "Unavailable",
         "cause": {"code": code, "refs": ["q:spam"]},
     }
-    assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
+    assert kinds(result["findings"]) == [(K.entry, "d:act"), (K.entry, "d:route")]
 
 
 def test_a_nullable_t_entry_is_set_to_null() -> None:
@@ -258,7 +278,7 @@ def test_an_extraction_answer_is_set_its_spans_bounded_by_the_text_as_logged() -
         "is_list": False,
         **amount,
     }
-    assert kinds(result["findings"]) == [(K.entry, "d:amount"), (K.plan, None)]
+    assert kinds(result["findings"]) == [(K.entry, "d:amount"), (K.entry, "d:reply")]
     dates = {**extraction.DATES, "value": ["2024-03-01"], "guess": ["2024-03-01"]}
     listed = entry_set(record, loaded, "q:dates", dates)["entry"]["value"]
     assert (listed["is_list"], listed["value"], listed["span"]) == (
@@ -385,11 +405,11 @@ def test_an_entry_of_a_failed_call_is_failed_call_before_marker() -> None:
 
 
 def test_failing_a_call_gives_exactly_the_findings_downstream_of_it() -> None:
-    record = live(REFUSING)
-    other = live(REFUSING, ask=Failed(Cause("raised", ["q:spam"])))
-    result = call_failed(record, REFUSING, "body", "raised")
+    record = live(LOADED)
+    other = live(LOADED, ask=Failed(Cause("raised", ["q:spam"])))
+    result = call_failed(record, LOADED, "body", "raised")
     assert result["findings"] == downstream(record, other, "q:spam", "t:body")
-    assert kinds(result["findings"]) == [(K.entry, "d:route"), (K.plan, None), (K.verdict, None)]
+    assert kinds(result["findings"]) == [(K.entry, "d:act"), (K.entry, "d:route")]
     call = result["call"]
     recorded = next(i for i in other.log if i["item"] == "call" and "ask" in i["sources"])
     assert call == recorded
@@ -453,8 +473,8 @@ def test_setting_a_state_field_to_its_value_gives_no_finding() -> None:
 
 
 def test_setting_a_state_field_stales_each_question_that_needs_it() -> None:
-    record, other = live(REFUSING), live(REFUSING, state={**STATE, "subject": "bye"})
-    result = field_set(record, REFUSING, "t:state.subject", "bye")
+    record, other = live(LOADED), live(LOADED, state={**STATE, "subject": "bye"})
+    result = field_set(record, LOADED, "t:state.subject", "bye")
     assert result["entry"] == entry(other.log, "t:state")
     # Each source needing the subject was asked about the old one, so none is answered.
     found = result["findings"]
@@ -467,13 +487,12 @@ def test_setting_a_state_field_stales_each_question_that_needs_it() -> None:
         assert entry_finding(found, ref)["replayed"]["marker"]["cause"]["code"] == "not-returned"
     assert entry_finding(found, "d:echo")["replayed"]["value"] == "bye"
     assert kinds(found[3:]) == [
+        (K.entry, "d:act"),
         (K.entry, "d:echo"),
         (K.entry, "d:route"),
         (K.entry, "q:spam"),
         (K.entry, "t:body"),
         (K.entry, "t:size"),
-        (K.plan, None),
-        (K.verdict, None),
     ]
 
 
@@ -509,7 +528,7 @@ def test_a_call_an_edit_fails_asked_without_a_source_of_it_is_stale() -> None:
 
 def test_a_call_an_edit_fails_is_never_stale_though_its_needs_change() -> None:
     edits = [{"source": "ask", "code": "raised"}, {"path": "t:state.subject", "value": "bye"}]
-    found = intervene_sync(live(REFUSING), REFUSING, edits)["findings"]
+    found = intervene_sync(live(LOADED), LOADED, edits)["findings"]
     # ask and body share the failed call, so only look, needing the whole state, is stale.
     assert [(f["kind"], f.get("ref"), f.get("clause")) for f in found[:1]] == [
         (K.stale_question, "t:size", "needs")
@@ -563,25 +582,20 @@ def test_set_state_field_refusals(path: Any, value: object, reason: RefusalReaso
 
 
 def test_a_constant_rule_gives_exactly_the_findings_downstream_of_it() -> None:
-    record, other = live(REFUSING), live(REFUSING, ask=returns(HAM))
-    result = rule_constant(record, REFUSING, "d:route", "no")
+    record, other = live(LOADED), live(LOADED, ask=returns(HAM))
+    result = rule_constant(record, LOADED, "d:route", "no")
     found = result["findings"]
-    assert kinds(found) == [
-        (K.design_mismatch, None),
-        (K.entry, "d:route"),
-        (K.plan, None),
-        (K.verdict, None),
-    ]
+    assert kinds(found) == [(K.design_mismatch, None), (K.entry, "d:act"), (K.entry, "d:route")]
     modified = load(result["document"])
     assert found[0] == {
         "kind": K.design_mismatch,
-        "recorded": REFUSING.design_hash,
+        "recorded": LOADED.design_hash,
         "replayed": modified.design_hash,
     }
-    route = found[1]["replayed"]
+    route = found[2]["replayed"]
     assert (route["value"], route["rows"]) == ("no", [1])
-    assert found[1]["rule"] is None  # a table now provides it
-    assert found[2:] == downstream(record, other, "q:spam", "d:route")
+    assert found[2]["rule"] is None  # a one-row table provides it
+    assert found[1:2] == downstream(record, other, "q:spam", "d:route")
 
 
 def test_the_modified_document_replaces_the_declaration_under_its_name() -> None:
@@ -611,11 +625,11 @@ def test_a_constant_rule_at_its_recorded_value_changes_only_how_the_entry_was_de
 
 def test_a_constant_unsure_rule_writes_unsure() -> None:
     found = rule_constant(go().record, LOADED, "d:route", Unsure)["findings"]
-    assert found[1]["replayed"]["marker"]["kind"] == "Unsure"
+    assert entry_finding(found, "d:route")["replayed"]["marker"]["kind"] == "Unsure"
 
 
 def test_a_table_rule_is_replaced_over_its_inputs_reads() -> None:
-    loaded = load(DESIGN)
+    loaded = load(TABLED)
     record = decide_sync(loaded, {"score": 0.9, "name": "n"}, {}).record
     result = rule_constant(record, loaded, "d:level", "low")
     assert result["document"]["rules"]["level"]["inputs"] == [
@@ -623,9 +637,8 @@ def test_a_table_rule_is_replaced_over_its_inputs_reads() -> None:
     ]
     assert kinds(result["findings"]) == [
         (K.design_mismatch, None),
+        (K.entry, "d:act"),
         (K.entry, "d:level"),
-        (K.plan, None),
-        (K.verdict, None),
     ]
 
 
@@ -680,21 +693,6 @@ def test_a_constant_rule_loads_with_the_callers_functions() -> None:
     assert "echo" in str(exc.error)
 
 
-def never(finding: object) -> bool:
-    return False
-
-
-def test_a_plan_change_of_context_alone_is_no_finding(monkeypatch: pytest.MonkeyPatch) -> None:
-    record = context.run().record
-    loaded = context.loaded()
-    path, value = "t:state.order.status", "shipped"
-    found = field_set(record, loaded, path, value)["findings"]
-    assert kinds(found) == [(K.entry, "d:status")]
-    monkeypatch.setattr(_diff, "_context_alone", never)
-    found = field_set(record, loaded, path, value)["findings"]
-    assert kinds(found) == [(K.entry, "d:status"), (K.plan, None)]
-
-
 def test_an_output_outside_the_value_domain_is_invalid_design() -> None:
     record = go().record
     for given in ({1: "x"}, {"a": {2: "x"}}):
@@ -739,7 +737,7 @@ def test_a_table_reading_one_ref_twice_is_replaced_over_it_once() -> None:
         ["t:state.score", "t:state.score"],
         [[">= bar", "-", "high"], ["-", "-", "low"]],
     )
-    loaded = load(dataclasses.replace(DESIGN, rules={"level": twice}))
+    loaded = load(dataclasses.replace(TABLED, rules={**TABLED.rules, "level": twice}))
     record = decide_sync(loaded, {"score": 0.9, "name": "n"}, {}).record
     table = rule_constant(record, loaded, "d:level", "low")["document"]["rules"]["level"]
     assert table["inputs"] == [{"read": "t:state.score", "helper": None, "params": {}}]
@@ -751,14 +749,14 @@ def test_a_table_reading_one_ref_twice_is_replaced_over_it_once() -> None:
 
 
 def test_several_edits_replay_once_on_one_copy_in_any_order() -> None:
-    record = live(REFUSING)
+    record = live(LOADED)
     edits = [
         {"path": "t:state.subject", "value": "bye"},
         {"ref": "q:spam", "value": NO},
         {"source": "look", "code": "raised"},
     ]
-    result = edited(record, REFUSING, edits)
-    assert edited(record, REFUSING, edits[::-1]) == result
+    result = edited(record, LOADED, edits)
+    assert edited(record, LOADED, edits[::-1]) == result
     assert result["document"] is None
     assert [(i["item"], i.get("ref"), i.get("sources")) for i in result["items"]] == [
         ("entry", "t:state", None),
@@ -769,11 +767,10 @@ def test_several_edits_replay_once_on_one_copy_in_any_order() -> None:
     # The set answer and the failed call are pinned; body, needing the subject, is stale.
     assert kinds(result["findings"]) == [
         (K.stale_question, "t:body"),
+        (K.entry, "d:act"),
         (K.entry, "d:echo"),
         (K.entry, "d:route"),
         (K.entry, "t:body"),
-        (K.plan, None),
-        (K.verdict, None),
     ]
 
 
@@ -814,12 +811,12 @@ def test_edits_and_a_rule_replay_together_under_the_modified_design() -> None:
         (K.stale_question, "q:spam"),
         (K.stale_question, "t:body"),
         (K.stale_question, "t:size"),
+        (K.entry, "d:act"),
         (K.entry, "d:echo"),
         (K.entry, "d:route"),
         (K.entry, "q:spam"),
         (K.entry, "t:body"),
         (K.entry, "t:size"),
-        (K.plan, None),
     ]
 
 
@@ -894,7 +891,7 @@ def test_a_span_is_bounded_by_the_text_another_edit_sets_in_either_order() -> No
         ([{"rule": "d:route"}], R.invalid_edit, "intervention 0"),
         ([{"ask": "look", "code": "raised"}], R.invalid_edit, "intervention 0"),
         (["d:route"], R.invalid_edit, "intervention 0"),
-        ([{}], R.invalid_edit, "intervention 0"),
+        ([dict[str, object]()], R.invalid_edit, "intervention 0"),
         ((), R.invalid_edit, None),
         ([type("D", (dict,), {})(ask="look")], R.invalid_edit, "intervention 0"),
         ([{Code("ask"): "look"}], R.invalid_edit, "intervention 0"),
@@ -1182,8 +1179,7 @@ def test_several_rules_are_made_constant_in_one_document() -> None:
 
 def test_a_rerun_design_changing_no_source_stales_none() -> None:
     record = go().record
-    rerun = slice_design(tools=["archive", "send"])
-    out = intervene_sync(record, LOADED, [], rerun_design=rerun)
+    out = intervene_sync(record, LOADED, [], rerun_design=CHANGED)
     assert out["stale"] == []
     assert kinds(out["findings"]) == [(K.design_mismatch, None)]
 
@@ -1204,9 +1200,8 @@ def test_an_asked_source_whose_call_failed_is_stale_and_not_failed_again() -> No
 
 def test_a_rule_made_constant_is_the_rerun_designs_rule() -> None:
     record = go().record
-    rerun = slice_design(tools=["archive", "send"])
-    out = edited(record, LOADED, [{"rule": "d:route", "output": "no"}], rerun_design=rerun)
-    assert set(out["document"]["tools"]) == {"archive", "send"}
+    out = edited(record, LOADED, [{"rule": "d:route", "output": "no"}], rerun_design=CHANGED)
+    assert out["document"]["name"] == "changed"
     assert out["document"]["rules"]["route"]["form"] == "table"
 
 
@@ -1253,9 +1248,10 @@ IDS = [name for name, _ in JOBS]
 def test_every_job_refuses_the_record_in_order_before_any_edit(
     job: Callable[[object], Any],
 ) -> None:
-    other_design = live(slice_design(tools=["archive", "send"]))
+    other_design = live(CHANGED)
     for given, reason in (
         (b"not json", R.invalid_record),
+        (format_7(), R.wrong_design),
         (unfinished(), R.unfinished),
         (broken(), R.nothing_to_replay),
         (other_design, R.wrong_design),
@@ -1325,17 +1321,6 @@ def test_neither_input_changes(job: Callable[[object], Any]) -> None:
     assert parsed == kept
 
 
-def records_in(value: object) -> list[object]:
-    """Every ``Record`` reachable from a plain return, through dicts, lists and tuples."""
-    if type(value) is Record:
-        return [value]
-    if type(value) is dict:
-        value = list(cast("dict[object, object]", value).values())
-    if type(value) in (list, tuple):
-        return [r for v in cast("list[object]", value) for r in records_in(v)]
-    return []
-
-
 ALL_JOBS: list[tuple[str, Callable[[object], Any]]] = [
     *JOBS,
     ("use_answers", lambda r: use_answers_sync(r, LOADED, live(ask=returns(HAM)))),
@@ -1358,66 +1343,17 @@ def test_no_record_is_reachable_from_a_jobs_output_but_intervenes_replay_record(
 # Records of earlier formats
 
 
-PROFILE = ["elicitation", "model_reported", "model_requested", "precision", "prompt", "provider"]
-NULLED: dict[int, list[str]] = {
-    2: ["elicitation", "prompt", "snapshot"],
-    3: ["elicitation", "precision", "prompt", "snapshot"],
-    4: ["elicitation", "precision", "prompt", "snapshot"],
-    5: [*PROFILE, "revision", "runtime"],
-    6: [*PROFILE, "revision", "runtime"],
-    7: [*PROFILE, "revision", "runtime"],
-}
-"""The hashed provenance members each stored record's call item holds, which fail_call nulls."""
-
-
-def stored(fmt: int) -> tuple[LoadedDesign, Record]:
-    folder = TESTS / f"format_{fmt}"
-    loaded = load((folder / "design.json").read_bytes())
-    return loaded, read_record((folder / "record.json").read_bytes())
-
-
-@pytest.mark.parametrize("fmt", sorted(NULLED))
-def test_a_record_of_an_earlier_format_is_copied_and_read_back(fmt: int) -> None:
-    loaded, record = stored(fmt)
-    asked = next(i for i in record.log if i["item"] == "entry" and i["ref"].startswith("q:"))
-    probabilities = asked["value"]["probabilities"]
-    same = entry_set(record, loaded, asked["ref"], probabilities)
-    assert same["entry"] == asked
-    assert [f for f in same["findings"] if f["kind"] is not K.helpers_mismatch] == []
-    index, call = next((n, i) for n, i in enumerate(record.log) if i["item"] == "call")
-    refs = sorted(i["ref"] for i in record.log if i["item"] == "entry" and i["call"] == index)
-    failed = call_failed(record, loaded, call["sources"][0], "raised")["call"]
-    nulled = dict[str, object].fromkeys(NULLED[fmt])
-    if fmt >= 5:
-        nulled["claimed"] = []
-    assert failed == {**call, "outcome": {"failed": {"code": "raised", "refs": refs}}, **nulled}
-    held = set(call) - {"item", "outcome", "questions", "round", "sources"}
-    assert held == set(nulled)
-
-
-@pytest.mark.parametrize(
-    ("fmt", "code", "held"),
-    [
-        (2, "unsupported", False),
-        (3, "unsupported", True),
-        (3, "timed-out", False),
-        (3, "raised", False),
-        (4, "timed-out", True),
-        (4, "raised", True),
-    ],
-)
-def test_a_marker_the_records_format_does_not_hold_is_refused_marker(
-    fmt: int, code: str, held: bool
-) -> None:
-    loaded, record = stored(fmt)
-    ref = next(i["ref"] for i in record.log if i["item"] == "entry" and i["ref"].startswith("q:"))
-    marker = Unavailable(Cause(code, [ref]))
-    if held:
-        assert entry_set(record, loaded, ref, marker)["entry"]["marker"]["cause"]["code"] == (code)
-    else:
-        exc = refusal(entry_set, record, loaded, ref, marker)
-        assert (exc.reason, exc.ref) == (R.marker, ref)
-        assert f"format-{fmt}" in str(exc)
+@pytest.mark.parametrize("folder", [f"format_{n}" for n in (1, 2, 3, 4, 5, 6, 7, 9)])
+@pytest.mark.usefixtures("no_replay")
+def test_a_stored_record_before_format_8_is_wrong_design(folder: str) -> None:
+    record = read_record((TESTS / folder / "record.json").read_bytes())
+    fmt = record.log[0]["format"]
+    assert fmt < 8
+    exc = refusal(intervene_sync, record, LOADED, [{"ref": "q:spam", "value": NO}])
+    assert (exc.reason, exc.turn) == (R.wrong_design, record.record_hash)
+    assert str(exc) == (
+        f"record is a format-{fmt} record, before format 8, so it holds no policy's entry"
+    )
 
 
 # ---------------------------------------------------------------------------------------------

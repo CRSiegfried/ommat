@@ -8,9 +8,9 @@ With ommat you write only the pieces, each declaring what it reads, and ommat wo
 
 - **A source** asks a model closed questions, yes or no, which label, a score or a value read from a text, each answer with probabilities, or with a confidence where the model gives one. A `when` asks it only if earlier answers call for it.
 - **A rule** reads answers and settles an estimate, or returns a marker such as `Unsure`, never a `None` standing in for no answer. It is a function, or a decision table of rows over its inputs.
-- **The policy** reads the estimates it needs and writes the plan: execute tool steps, clarify, inform or escalate.
+- **The policy** is the rule the design names as its own. Its estimate is the decision: a value, or a marker when the turn is undecided.
 - **ommat** builds the dependency graph from those declarations and runs it in rounds, and `load` checks the whole design before any turn: every read has a provider, nothing depends on itself, and the types agree. Get each piece right and `load` makes sure the pieces fit, whether you have a dozen questions or a few hundred.
-- **Each decision** is checked by a guard before any tool runs, and comes with a record that replays the turn with no model call.
+- **Each decision** comes with a record that replays the turn with no model call, and an undecided one with the root cause that says where to send it.
 
 [idia](https://github.com/CRSiegfried/idia) puts the questions to the models; ommat decides.
 
@@ -24,29 +24,21 @@ flowchart TD
     Bd --> Ru["Rules"] -->|"estimates or markers"| Bd
     Bd -->|"needs, next round"| Src
   end
-  subgraph C["Compile"]
-    P["Policy"] --> Pl["Plan: execute / clarify / inform / escalate"] --> G["Guard: requirements"]
-  end
-  Bd --> P
-  G --> D["Decision: plan, verdict, record"] --> Rp["Replay the record: no model call"]
+  Bd --> P["Policy: a rule"] --> D["Decision: estimate, record"] --> Rp["Replay the record: no model call"]
 ```
 
-ommat's one operation is **decide**, which runs two stages:
+ommat's one operation is **decide**, which runs interpret. Interpret: sources fetch model answers and other outside values onto a shared board, a blackboard, in rounds, through bindings the caller supplies; rules, which are functions or tables with declared reads, turn them into estimates. An unknown stays unknown, as a marker (`Unsure`, `Unavailable` or `Unasked`), never a quiet no or a `None`. The policy is one of the rules; its estimate is the decision.
 
-- **Interpret.** Sources fetch model answers and other outside values onto a shared board, a blackboard, in rounds, through bindings the caller supplies; rules, which are functions with declared reads, turn them into estimates. An unknown stays unknown, as a marker (`Unsure`, `Unavailable` or `Unasked`), never a quiet no or a `None`.
-- **Compile.** One policy reads the estimates and writes the plan: execute these steps, clarify, inform, or escalate. If the policy raises, reads what it did not declare, or returns a plan that breaks ommat's plan rules, compile puts a `broken` plan in its place that names the cause. The guard then checks an `execute` plan: every requirement the design declares for the plan and every requirement each step declares must hold, and a step that declares none refuses the plan unless the design turns that off. Every other plan passes.
-
-Decide returns the plan, the guard's verdict and a record of the turn, and calls no tool. A design that declares a context block also has compile write, into the record, what the turn settled for the next model in the conversation, which `handoff(record)` gives back; `transcript(record)` gives every call of the turn and its conclusion, for the next model as tool calls and their results. The caller runs the steps of a passed `execute` plan with its own workflow engine, or with the small reference runner ommat ships. Nothing after decide consults the model.
+Decide returns a `Decision`: `.estimate`, the policy's estimate, `.record`, the record of the turn, and `.design_hash`. It calls no tool and names no step or action; the caller acts on the decision. When the estimate is a marker the turn is undecided, and `escalation(record)` gives the marker's kind and cause, the root cause it traces to, and the record hash, to route it. `transcript(record)` gives every call of the turn and its decision, for the next model as tool calls and their results. Nothing after decide consults the model.
 
 ## A first decision
 
-This runs as it is, with no API keys: a stand-in binding answers in place of a model. The design asks one choice question, turns its answer into a topic with one rule, and routes on the topic with a policy:
+This runs as it is, with no API keys: a stand-in binding answers in place of a model. The design asks one choice question, turns its answer into a topic with one rule, and decides the route with a policy rule:
 
 <!-- demo -->
 ```python
-from ommat import CallResult, Design, Origin, Plan, Policy, Question, ReadView
-from ommat import Requirement, Rule, Source, SourceCall, Step, Text, Undetermined
-from ommat import decide_sync, load, replay_sync
+from ommat import CallResult, Design, Question, ReadView, Rule, Source, SourceCall, Text
+from ommat import Undetermined, decide_sync, escalation, load, replay_sync
 from ommat import types as t
 from ommat.helpers import pick_with_margin
 
@@ -58,21 +50,22 @@ def topic(r: ReadView) -> str | Undetermined:
     return pick_with_margin(r, "q:topic", 0.6, 0.2)
 
 
-def route(r: ReadView) -> Plan:
+def route(r: ReadView) -> str | Undetermined:
     value = r.read("d:topic")
     if isinstance(value, Undetermined):
-        return Plan("clarify", reply="Is this about billing or shipping?")
-    needs = [Requirement("d:topic", value)]
-    return Plan("execute", [Step("open_ticket", {"queue": Origin(ref="d:topic")}, needs)])
+        return value
+    return f"open_{value}_ticket"
 
 
 DESIGN = Design(
     name="helpdesk",
     state=t.record(message=t.string),
     sources={"triage": Source({"q:topic": ask}, needs=["t:state"])},
-    rules={"topic": Rule("d:topic", t.label(*topics), topic, version="1", reads=["q:topic"])},
-    policy=Policy(route, version="1", reads=["d:topic"]),
-    tools=["open_ticket"],
+    rules={
+        "topic": Rule("d:topic", t.label(*topics), topic, version="1", reads=["q:topic"]),
+        "route": Rule("d:route", t.string, route, version="1", reads=["d:topic"]),
+    },
+    policy="d:route",
 )
 ```
 
@@ -86,16 +79,14 @@ async def classifier(batch: tuple[SourceCall, ...], *, seconds: float) -> CallRe
     return CallResult({ref: answer for call in batch for ref in call.questions})
 ```
 
-Decide, print the plan and the verdict, then replay the turn from its record:
+Decide, print the decision, then replay the turn from its record:
 
 ```python
 loaded = load(DESIGN)
 message = {"message": "The invoice is overdue and I want a refund."}
 decision = decide_sync(loaded, message, {"default": classifier})
-print(decision.plan.kind, decision.verdict.kind)
-for step in decision.plan.steps:
-    args = {k: v.ref for k, v in step.arguments.items()}
-    print(step.tool, args, [(q.ref, q.value) for q in step.requirements])
+print(decision.estimate)
+print("escalation:", escalation(decision.record))
 rerun, findings = replay_sync(decision.record, loaded)
 print("replay findings:", findings)
 ```
@@ -103,13 +94,13 @@ print("replay findings:", findings)
 It prints:
 
 ```text
-execute passed
-open_ticket {'queue': 'd:topic'} [('d:topic', 'billing')]
+open_billing_ticket
+escalation: None
 replay findings: []
 ```
 <!-- /demo -->
 
-`billing` is at 0.8, at or above the bar of 0.6 and 0.7 ahead of the next label, so the rule picks it. Had `billing` been under 0.6, or less than 0.2 ahead, the rule would have returned `Unsure` and the policy would ask to clarify. The step's `queue` argument names `d:topic` rather than copying its value; whoever runs the step reads the value from the record. The step requires `d:topic` to be `billing`, the board holds `billing`, so the guard passes the plan. Replay reruns the turn from the record, under the same loaded design, with no model call, and finds no difference.
+`billing` is at 0.8, at or above the bar of 0.6 and 0.7 ahead of the next label, so the topic rule picks it and the policy decides `open_billing_ticket`. Had `billing` been under 0.6, or less than 0.2 ahead, the topic rule would have returned `Unsure`, the policy would have passed it on, and the turn would be undecided: `decision.estimate` would be that marker and `escalation(decision.record)` would say why. ommat stops at the decision; the caller opens the ticket. Replay reruns the turn from the record, under the same loaded design, with no model call, and finds no difference.
 
 **The name.** Ommat and Idia come from *ommatidia*, the thousands of small hexagonal eyes that make up a compound eye and combine into one picture: *ommat-* is the Greek stem for "eye", *-idia* "little ones". Many small, cheap questions add up to one full picture. Ommat is the engine that asks them; Idia puts them to the models.
 
@@ -159,7 +150,7 @@ To look at stored records, write them to `.json` files as `decision.record.docum
 - [Decide with real models through idia](docs/tutorials/decide-with-idia.md), which binds a design to model providers.
 - [Add a source](docs/how-to/add-a-source.md), which answers a new oracle through idia or a binding of your own.
 - [Gate a source on an earlier estimate](docs/how-to/gate-a-source.md), which asks a later question only when an estimate holds a value, without sending the estimate to the model.
-- [Hand off what a turn settled](docs/how-to/hand-off-context.md), which gives the next model in a conversation the plan and the estimates you choose, and the turn's calls as Chat Completions or Pydantic AI messages.
+- [Hand off a turn](docs/how-to/hand-off-a-turn.md), which gives the next model in a conversation the turn's calls and decision as Chat Completions or Pydantic AI messages, with the words you choose.
 - [The spec](docs/spec/README.md), what ommat does and leaves out.
 - [CHANGELOG.md](CHANGELOG.md), each release.
 - [idia](https://github.com/CRSiegfried/idia), the library that puts the questions to the models.
@@ -176,9 +167,9 @@ To use ommat with idia, add idia's own skill too, from its [skills/idia](https:/
 
 ## Status
 
-Pre-release, at 0.4.0. On `main` it writes format-7 records and format-9 design documents, and reads record formats 1 to 7 and design formats 1 to 9, so the records and designs of earlier releases still load and replay, given each design's stored document and the functions it names.
+Pre-release, at 0.4.0. On `main` it writes format-8 records and format-10 design documents. It reads record formats 1 to 8, but replays only format 8, and loads only design format 10; a design of an earlier format is refused, naming its format.
 
-0.4.0 refuses decision tables, data rules, the policy table and plan declarations at load; the next release, unreleased on `main`, runs them. 0.4.0 asks a `choice` over a candidate set of strings, and a question once per candidate of one, but leaves out candidate sets of records and grounded rules, tables, plan declarations and `t:` sources, which `main` runs. `load` refuses the forms the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
+0.4.0 refuses decision tables and data rules at load; the next release, unreleased on `main`, runs them. 0.4.0 asks a `choice` over a candidate set of strings, and a question once per candidate of one, but leaves out candidate sets of records and grounded rules, tables and `t:` sources, which `main` runs. `load` refuses the forms the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
 
 ## Contributing
 

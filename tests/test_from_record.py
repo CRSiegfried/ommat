@@ -35,6 +35,7 @@ from ommat import (
 from ommat import types as t
 from ommat._fixture import Base, _differing
 from ommat._interpret import MAX_WARNINGS, _record_form
+from ommat._ledger import decision_entry
 from scripted import Scripted, raising, returns
 from test_decide import (
     ASK,
@@ -86,19 +87,22 @@ def warned(record: Record, sid: str) -> list[str]:
     return record.unhashed["calls"][str(index)].get("warnings", [])
 
 
-def plan(record: Record) -> dict[str, Any]:
-    return next(i for i in record.log if i["item"] == "plan")
+def decision(record: Record) -> dict[str, Any]:
+    """The policy's entry, which the record holds on every finished turn."""
+    entry = decision_entry(record.log)
+    assert entry is not None
+    return entry
 
 
 # ---------------------------------------------------------------------------------------------
 # Whole turns
 
 
-def test_a_full_turn_answered_from_its_record_reproduces_the_plan_and_replays_clean() -> None:
+def test_a_full_turn_answered_from_its_record_reproduces_the_decision_and_replays_clean() -> None:
     record = stored()
     binding = from_record(record, LOADED)
     again = go(binds=bound(binding)).record
-    assert plan(again) == plan(record)
+    assert decision(again) == decision(record)
     assert {r: e.get("value") for r, e in entries(again).items()} == {
         r: e.get("value") for r, e in entries(record).items()
     }
@@ -112,20 +116,20 @@ def test_a_mixed_turn_answers_one_oracle_from_the_record_and_the_other_live() ->
     assert entries(again)["t:size"]["value"] == 9
     assert entries(again)["q:spam"] == entries(record)["q:spam"]
     assert entries(again)["t:body"] == entries(record)["t:body"]
-    assert plan(again) == plan(record)
+    assert decision(again) == decision(record)
 
 
 def test_a_stored_document_bytes_or_parsed_answers_as_the_record_does() -> None:
     record = stored()
     for given in (record.document, json.loads(record.document)):
-        assert plan(mixed(given)[0]) == plan(record)
+        assert decision(mixed(given)[0]) == decision(record)
 
 
-def test_an_extraction_turn_answered_from_its_record_reproduces_the_plan() -> None:
+def test_an_extraction_turn_answered_from_its_record_reproduces_the_decision() -> None:
     loaded = extraction.loaded()
     record = go(loaded, extraction.STATE, binds={"default": Scripted(_extraction_replies())}).record
     again = go(loaded, extraction.STATE, binds={"default": from_record(record, loaded)}).record
-    assert plan(again) == plan(record)
+    assert decision(again) == decision(record)
     assert replay_sync(again, loaded)[1] == []
 
 

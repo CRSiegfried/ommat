@@ -13,11 +13,7 @@ from ommat import (
     Design,
     Group,
     Parameter,
-    PlanDeclaration,
-    Policy,
-    PolicyTable,
     Question,
-    Requirement,
     Rule,
     Source,
     SourceRequirement,
@@ -38,28 +34,24 @@ class Name(str):
 def test_form_is_a_member_no_constructor_sets() -> None:
     assert designs.rule("r").form == "function"
     assert Table("d:t", t.boolean, "U", [], []).form == "table"
-    assert Policy(designs.policy).form == "function"
-    assert PolicyTable([], []).form == "table"
     with pytest.raises(TypeError):
         Rule("d:r", t.boolean, designs.route, form="table")  # type: ignore[call-arg]
 
 
 def test_a_design_snapshots_its_mappings_and_sequences() -> None:
     sources = {"s": Source({"t:x": t.string})}
-    tools = ["a"]
-    design = Design(state=t.record(), policy=Policy(designs.policy), sources=sources, tools=tools)
+    rules = {"decision": designs.DECISION}
+    design = Design(state=t.record(), policy="d:decision", sources=sources, rules=rules)
     sources["other"] = Source({"t:y": t.string})
-    tools.append("b")
+    rules["extra"] = designs.rule("extra")
     assert list(design.sources) == ["s"]
-    assert design.tools == ("a",)
+    assert list(design.rules) == ["decision"]
     assert isinstance(design.sources, MappingProxyType)
 
 
 def test_keys_are_read_by_their_string_data() -> None:
-    design = designs.minimal(tools=[Name("send")], parameters={Name("p"): Parameter("number", 1)})
+    design = designs.minimal(parameters={Name("p"): Parameter("number", 1)})
     assert type(next(iter(design.parameters))) is str
-    assert design.tools == ("send",)
-    assert type(design.tools[0]) is str
 
 
 def test_keys_that_would_share_string_data_are_kept_as_given() -> None:
@@ -77,11 +69,10 @@ def test_keys_that_would_share_string_data_are_kept_as_given() -> None:
 
 
 def test_the_design_defaults() -> None:
-    design = Design(state=t.record(), policy=Policy(designs.policy))
-    assert design.requirements == ()
-    assert design.default_deny is True
+    design = Design(state=t.record(), policy="d:decision")
+    assert design.policy == "d:decision"
     assert design.name is None
-    for name in ("sources", "rules", "parameters", "types", "plans", "groups", "classes"):
+    for name in ("sources", "rules", "parameters", "types", "groups", "classes"):
         assert dict(getattr(design, name)) == {}
 
 
@@ -136,16 +127,14 @@ def test_a_texts_slots_are_snapshotted() -> None:
         lambda: Source({}, cost=True, timeout=-1, feedback=1),  # type: ignore[arg-type]
         lambda: Rule("d:r", t.boolean, 1),  # type: ignore[arg-type]
         lambda: Rule(1, None, designs.route, boundaries=[]),  # type: ignore[arg-type]
-        lambda: Policy(designs.policy, reads="d:x"),
-        lambda: Requirement(1, {1}),  # type: ignore[arg-type]
         lambda: SourceRequirement("d:x", "ab"),
         lambda: When(1, version=2),  # type: ignore[arg-type]
         lambda: Source({}, when=designs.route),  # type: ignore[arg-type]
         lambda: Group("q:x", ["convergent"]),
         lambda: Table(1, t.boolean, "U", [], []),  # type: ignore[arg-type]
         lambda: Design(state=None, policy=1),  # type: ignore[arg-type]
-        lambda: designs.minimal(sources=None, rules={"r": Source({})}, requirements=[1]),
-        lambda: designs.minimal(default_deny=1, name=1, tools="send", types=None),
+        lambda: designs.minimal(sources=None, rules={"r": Source({})}),
+        lambda: designs.minimal(name=1, types=None),
     ],
 )
 def test_a_design_type_validates_nothing_when_built(build: Any) -> None:
@@ -159,12 +148,6 @@ def test_a_question_kind_that_is_no_answer_kind_is_kept() -> None:
 def test_design_types_are_frozen() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         designs.minimal().name = "x"  # type: ignore[misc]
-
-
-def test_refused_forms_build() -> None:
-    plan = PlanDeclaration("clarify", reply=Text("Which?"))
-    assert plan.kind == "clarify"
-    assert plan.steps == ()
 
 
 def test_a_when_holds_its_function_and_its_version_as_string_data() -> None:

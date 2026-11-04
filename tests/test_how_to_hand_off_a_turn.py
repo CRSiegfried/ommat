@@ -1,17 +1,17 @@
-"""The how-to's example runs as the guide says: docs/how-to/hand_off_context. Each Python
+"""The how-to's example runs as the guide says: docs/how-to/hand_off_a_turn. Each Python
 block in the guide is a passage of one of the example's files, and the driver prints the
-guide's output, and the agent example runs its pending call where Pydantic AI is installed."""
+guide's output, and the agent example acts on the decision where Pydantic AI is installed."""
 
 import re
 from pathlib import Path
 
 import pytest
 
-import handoff_run
+import turn_run
 
 DOCS = Path(__file__).resolve().parent.parent / "docs" / "how-to"
-GUIDE = DOCS / "hand-off-context.md"
-EXAMPLE = DOCS / "hand_off_context"
+GUIDE = DOCS / "hand-off-a-turn.md"
+EXAMPLE = DOCS / "hand_off_a_turn"
 
 
 def _blocks(language: str) -> list[str]:
@@ -36,12 +36,12 @@ def test_each_python_block_is_a_passage_of_the_example() -> None:
 
 
 def test_the_driver_prints_the_guide_s_output(capsys: pytest.CaptureFixture[str]) -> None:
-    handoff_run.main()
+    turn_run.main()
     (shown,) = _blocks("text")
     assert capsys.readouterr().out == shown
 
 
-def test_the_agent_runs_the_pending_refund_with_its_own_tool(
+def test_the_caller_acts_on_the_decision_before_the_agent_answers(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("pydantic_ai")

@@ -21,8 +21,6 @@ from ommat import (
     Design,
     InvalidDesign,
     LoadedDesign,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Record,
@@ -69,8 +67,8 @@ def cities(r: ReadView) -> object:
     return "seen"
 
 
-def plan(r: ReadView) -> Plan:
-    return Plan("inform", reply="done")
+def act(r: ReadView) -> str:
+    return "done"
 
 
 def design(**changes: Any) -> Design:
@@ -111,8 +109,9 @@ def design(**changes: Any) -> Design:
                 candidates="name",
             ),
             "cities": Rule("d:cities", t.string, cities, version="1", reads=[CITY]),
+            "act": Rule("d:act", t.string, act, version="1", reads=["d:cities"]),
         },
-        "policy": Policy(plan, version="1", reads=["d:cities"]),
+        "policy": "d:act",
         "classes": {SET: {"name": "identifier"}},
     }
     fields.update(changes)

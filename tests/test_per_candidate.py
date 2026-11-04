@@ -27,8 +27,6 @@ from ommat import (
     InvalidDesign,
     InvalidRecord,
     LoadedDesign,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Record,
@@ -98,8 +96,11 @@ def out(r: ReadView) -> object:
     return []
 
 
-def escalate(r: ReadView) -> Plan:
-    return Plan("escalate", reason="checked")
+def escalate(r: ReadView) -> str:
+    return "checked"
+
+
+ACT = Rule("d:act", t.string, escalate, version="1")
 
 
 def out_question(template: str = "Is a lamp out on {s}?", set_ref: str = SET) -> Question:
@@ -130,8 +131,9 @@ def design(source: Source | None = None, **changes: Any) -> Design:
                 candidates=True,
             ),
             "out": Rule("d:out", t.list_(t.string), out, version="1", reads=[OUT]),
+            "act": Rule("d:act", t.string, escalate, version="1", reads=["d:out"]),
         },
-        "policy": Policy(escalate, version="1", reads=["d:out"]),
+        "policy": "d:act",
     }
     fields.update(changes)
     return Design(**fields)
@@ -403,7 +405,7 @@ def test_the_settings_item_names_each_grounded_refs_set() -> None:
     record = decided()
     assert record.log[1]["grounded"] == {OUT: SET}
     assert record.log[1]["sets"] == {SET: None}
-    assert record.log[0]["format"] == 7
+    assert record.log[0]["format"] == 8
 
 
 def test_a_question_identity_is_one_across_candidates_and_turns() -> None:
@@ -449,8 +451,7 @@ def unasked_set_design(*, urgent: bool) -> Design:
     }
     return design(
         sources={"gate": gate, "lamps": lamps(urgent=urgent)},
-        rules=rules,
-        policy=Policy(escalate, version="1"),
+        rules={**rules, "act": ACT},
     )
 
 
@@ -528,7 +529,7 @@ def t_set_design(grounded_id: str = "lamps") -> Design:
             cost=1,
         ),
     }
-    return design(sources=sources, rules={}, policy=Policy(escalate, version="1"))
+    return design(sources=sources, rules={"act": ACT})
 
 
 async def tools(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
@@ -936,7 +937,7 @@ def test_a_group_of_grounded_and_ungrounded_refs_or_two_sets_is_refused() -> Non
 
 def test_a_grounded_design_round_trips_through_its_document() -> None:
     loaded = load(design())
-    again = load(loaded.document, functions={"streets": streets, "out": out, "policy": escalate})
+    again = load(loaded.document, functions={"streets": streets, "out": out, "act": escalate})
     assert again.design_hash == loaded.design_hash
     assert dict(again._grounded) == {OUT: SET}  # pyright: ignore[reportPrivateUsage]
 
@@ -956,7 +957,7 @@ def test_a_set_rule_reading_its_grounded_source_is_a_cycle() -> None:
             candidates=True,
         ),
     }
-    found = failures(design(rules=rules, policy=Policy(escalate, version="1")))
+    found = failures(design(rules={**rules, "act": ACT}))
     assert any(c == 5 for c, _ in found)
 
 
@@ -1145,8 +1146,9 @@ _MARKER = {"kind": "Unsure", "cause": {"code": "abstained", "refs": [GROUNDED_RE
     ids=["plan cause", "context entry's marker"],
 )
 def test_a_plan_s_causes_may_name_a_grounded_ref(item: dict[str, Any]) -> None:
-    # A cause's refs admit a grounded ref wherever the cause stands (§ledger), so a marker
-    # naming one candidate, passed on into a flagged context entry, does not break the turn.
+    # A cause's refs admit a grounded ref wherever the cause stands (§ledger): the check takes
+    # a plan item's cause or a context entry's marker naming one candidate, and refuses it
+    # where the settings ground no such ref.
     from ommat._ledger import _grounded_refs, _LedgerError  # pyright: ignore[reportPrivateUsage]
 
     _grounded_refs("plan", {"item": "plan", **item}, NAMED, {}, "item")

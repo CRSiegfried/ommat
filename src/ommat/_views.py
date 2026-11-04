@@ -1,17 +1,16 @@
 """The record views: pure functions from a closed record to a value, for the caller, the
 escalation target or a verifier.
 
-``escalation(record)`` returns the escalation's four members, or ``None`` for a record that
-holds none, reading only the ``plan`` and ``verdict`` items and the record hash.
-``handoff(record)`` returns what the turn hands its next reader under the design's context
-block, or ``None`` with no block or no ``plan`` item. ``transcript(record)`` returns every
-source call and the turn's conclusion, unworded, or ``None`` with no ``plan`` item. ``redact(record,
-root_key)`` returns the redacted view's document as canonical bytes: the record's ``log`` and
-``unhashed`` with a keyed digest where each ``content`` or ``identifier`` value was,
-``redacted``, the record hash its key came from, and from format 3 on the document's ``hash``,
-open. Each value's class is read from the ``settings`` item's class tree for its ref. In an
-answer to a candidate-valued choice, each label and ``probabilities`` key that is not a fixed
-name takes its set's class, found through the call item the answer's entry names.
+``escalation(record)`` returns an undecided turn's four members: the marker's kind, its cause,
+the root cause and the record hash; ``None`` when the policy gave a value. ``transcript(record)``
+returns every source call and the decision, unworded. Each of the two gives ``None`` for a record
+before format 8, which holds no policy's entry, and finds the decision as ``decision_entry``
+does. ``redact(record, root_key)`` returns the redacted view's document as canonical bytes: the
+record's ``log`` and ``unhashed`` with a keyed digest where each ``content`` or ``identifier``
+value was, ``redacted``, the record hash its key came from, and from format 3 on the document's
+``hash``, open. Each value's class is read from the ``settings`` item's class tree for its ref.
+In an answer to a candidate-valued choice, each label and ``probabilities`` key that is not a
+fixed name takes its set's class, found through the call item the answer's entry names.
 
 This engine's record holds no origin carrying ``set``, which the ledger refuses, so every literal
 takes its JSON form's default; it holds a grounded ref only at an entry's ref, a cause's refs and
@@ -25,12 +24,13 @@ from copy import deepcopy
 from typing import Any, cast
 
 from ommat._canonical import encode, keyed_digest, turn_key
-from ommat._design import Requirement
-from ommat._guard import GuardFailure, Verdict
-from ommat._ledger import Record, _with_held_order  # pyright: ignore[reportPrivateUsage]
-from ommat._markers import PlanKind, VerdictKind
-from ommat._refs import code_point_sorted, declared_ref, grounded_ref, parse_ref
-from ommat._resolve import board_entries, board_value
+from ommat._ledger import (
+    Record,
+    _with_held_order,  # pyright: ignore[reportPrivateUsage]
+    decision_entry,
+)
+from ommat._markers import CauseCode
+from ommat._refs import code_point_sorted, declared_ref, entry_ref, grounded_ref, parse_ref
 from ommat._typed import is_a
 from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH, type_name
 
@@ -50,86 +50,50 @@ def _closed(record: object) -> Record:
 
 
 def escalation(record: Record) -> dict[str, Any] | None:
-    """The escalation of a closed record: ``cause``, ``failures``, ``reason`` and
-    ``record_hash``; ``None`` when the log has no ``verdict`` item, or its plan is not
-    ``escalate`` and its verdict passed."""
+    """An undecided turn's escalation: ``kind``, the policy's marker's kind; ``cause``, its
+    cause; ``root_cause``, the cause reached by following each ``required`` cause to the entry
+    its first ref names, until a cause whose code is not ``required`` or a ref with no marker
+    entry; and ``record_hash``. ``None`` when the policy gave a value, when the log holds no
+    entry at the policy's ref, or for a record before format 8."""
     log = _closed(record).log
-    plans = [item for item in log if item["item"] == "plan"]
-    verdicts = [item for item in log if item["item"] == "verdict"]
-    if not verdicts:
+    entry = decision_entry(log)
+    if entry is None or "value" in entry:
         return None
-    plan, verdict = plans[0], verdicts[0]
-    escalated = plan["kind"] == PlanKind.escalate
-    if not escalated and verdict["kind"] == VerdictKind.passed:
-        return None
-    cause: dict[str, Any] | None = None
-    if verdict["kind"] == VerdictKind.refused:
-        derived = _verdict(verdict).cause
-        assert derived is not None  # a refused verdict's cause is never None
-        cause = {"code": derived.code.value, "refs": list(derived.refs)}
-    elif plan["cause"] is not None:  # the engine's `required` on a plan compile built
-        cause = cast("dict[str, Any]", plan["cause"])
+    marker = cast("dict[str, Any]", entry["marker"])
+    cause = cast("dict[str, Any]", marker["cause"])
     return {
+        "kind": marker["kind"],
         "cause": cause,
-        "failures": verdict["failures"],
-        "reason": plan["reason"] if escalated else None,
+        "root_cause": _root_cause(log, cause),
         "record_hash": record.record_hash,
     }
 
 
-# ---------------------------------------------------------------------------------------------
-# The handoff
+def _root_cause(log: list[dict[str, Any]], cause: dict[str, Any]) -> dict[str, Any]:
+    """The cause a ``required`` chain ends at: each step reads the marker at the entry of the
+    cause's first ref, its field path dropped and its grounded bracket kept."""
+    markers = {
+        cast(str, item["ref"]): cast("dict[str, Any]", item["marker"])
+        for item in log
+        if item["item"] == "entry" and "marker" in item
+    }
+    seen: set[str] = set()
+    while cause["code"] == CauseCode.required and cause["refs"]:
+        ref = _entry_ref(cast(str, cause["refs"][0]))
+        if ref is None or ref in seen or ref not in markers:
+            break
+        seen.add(ref)
+        cause = cast("dict[str, Any]", markers[ref]["cause"])
+    return cause
 
 
-def handoff(record: Record) -> dict[str, Any] | None:
-    """What a closed record hands its next reader: ``design`` and ``record_hash`` under the
-    ``record`` switch, ``plan`` with its kind, text and verdict kind under ``plan`` and its
-    steps under ``steps`` once the verdict passed, and ``context``, the entries as recorded;
-    ``None`` when the log has no ``plan`` item or the item holds no block."""
-    closed = _closed(record)
-    log = closed.log
-    plan = next((item for item in log if item["item"] == "plan"), None)
-    if plan is None or plan.get("context") is None:
+def _entry_ref(ref: str) -> str | None:
+    """The entry a ref is read at: its field path dropped, a grounded bracket kept; ``None``
+    for a cause ref that is no ref."""
+    try:
+        return entry_ref(ref)
+    except ValueError:
         return None
-    block = cast("dict[str, Any]", plan["context"])
-    verdict = next((item for item in log if item["item"] == "verdict"), None)
-    passed = verdict is not None and verdict["kind"] == VerdictKind.passed
-    out: dict[str, Any] = {}
-    if block["record"]:
-        out["design"] = {"name": block["design"], "hash": log[0]["hash"]}
-        out["record_hash"] = closed.record_hash
-    shown: dict[str, Any] = {}
-    if block["plan"]:
-        kind = None if verdict is None else verdict["kind"]
-        shown.update(kind=plan["kind"], reply=plan["reply"], reason=plan["reason"], verdict=kind)
-    if block["steps"] and passed:
-        entries = board_entries(log)
-        shown["steps"] = [_handed_step(step, entries, n) for n, step in enumerate(plan["steps"], 1)]
-    if shown:
-        out["plan"] = shown
-    out["context"] = block["entries"]
-    return out
-
-
-def _handed_step(step: dict[str, Any], entries: dict[str, object], n: int) -> dict[str, Any]:
-    """A step as the handoff gives it: its tool and each argument tagged, a literal as
-    ``{"value"}``, a board ref as ``{"ref", "value"}`` and a binding as ``{"step", "path"}``."""
-    arguments: dict[str, Any] = {}
-    for name, origin in cast("dict[str, Any]", step["arguments"]).items():
-        if "literal" in origin:
-            arguments[name] = {"value": origin["literal"]}
-        elif "ref" in origin:
-            ref = cast(str, origin["ref"])
-            try:
-                value = board_value(entries, ref)
-            except (KeyError, TypeError):
-                raise ValueError(
-                    f"step {n}'s argument {name!r} names {ref!r}, which holds no value in the log"
-                ) from None
-            arguments[name] = {"ref": ref, "value": value}
-        else:
-            arguments[name] = {"step": origin["step"], "path": origin["path"]}
-    return {"tool": step["tool"], "arguments": arguments}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -137,22 +101,20 @@ def _handed_step(step: dict[str, Any], entries: dict[str, object], n: int) -> di
 
 
 def transcript(record: Record) -> dict[str, Any] | None:
-    """Every source call of a closed record and its conclusion, unworded: ``record_hash``,
-    ``design``, ``rounds`` of calls, ``decide`` and the ``pending`` steps; ``None`` when the log
-    has no ``plan`` item. Each value and marker is tagged, and each id is ``om_``, the record
-    hash's first 24 hex digits and ``_c<n>``, ``_d`` or ``_s<n>``. ``pending`` holds a passed
-    ``execute`` plan's steps with their resolved arguments, and is empty for a plan with a
-    binding, which ``run_plan`` runs."""
+    """Every source call of a closed record and its decision, unworded: ``record_hash``,
+    ``design``, ``rounds`` of calls, then ``decide``, decide's call and its result: the
+    ``board``, each ``d:`` entry but the policy's, and the ``decision``, the policy's entry.
+    ``None`` for a record before format 8, or one with no entry at the policy's ref. Each value
+    and marker is tagged, and each id is ``om_``, the record hash's first 24 hex digits and
+    ``_c<n>`` or ``_d``."""
     closed = _closed(record)
     log = closed.log
-    plan = next((item for item in log if item["item"] == "plan"), None)
-    if plan is None:
+    decision = decision_entry(log)
+    if decision is None:
         return None
-    verdict = next((item for item in log if item["item"] == "verdict"), None)
     stem = "om_" + closed.record_hash.removeprefix("sha256:")[:24]
-    settings = next(item for item in log if item["item"] == "settings")
+    settings = log[1]
     providers = cast("dict[str, str]", settings["providers"])
-    block = cast("dict[str, Any] | None", plan.get("context"))
     written: dict[int, dict[str, Any]] = {}
     for item in log:
         if item["item"] == "entry" and item.get("call") is not None:
@@ -179,45 +141,19 @@ def transcript(record: Record) -> dict[str, Any] | None:
                 held[item["round"]] = []
                 rounds.append(held[item["round"]])
             held[item["round"]].append(call)
-    entries = board_entries(log)
-    steps = cast("list[dict[str, Any]]", plan["steps"])
     board = {
         entry["ref"]: _tagged(entry)
         for entry in log
-        if entry["item"] == "entry" and entry["ref"].startswith("d:")
+        if entry["item"] == "entry"
+        and entry["ref"].startswith("d:")
+        and entry["ref"] != settings["policy"]
     }
-    decided: dict[str, Any] = {
-        "id": f"{stem}_d",
-        "board": board,
-        "plan": {
-            "kind": plan["kind"],
-            "reason": plan["reason"],
-            "reply": plan["reply"],
-            "cause": plan["cause"],
-            "steps": [
-                {**_handed_step(step, entries, i), "requirements": step["requirements"]}
-                for i, step in enumerate(steps, 1)
-            ],
-        },
-        "verdict": None
-        if verdict is None
-        else {"kind": verdict["kind"], "failures": verdict["failures"]},
-    }
-    if block is not None:
-        decided["context"] = block["entries"]
-    pending: list[dict[str, Any]] = []
-    passed = verdict is not None and verdict["kind"] == VerdictKind.passed
-    bound = any("step" in origin for step in steps for origin in step["arguments"].values())
-    if passed and plan["kind"] == PlanKind.execute and not bound:  # a binding runs by run_plan
-        for i, step in enumerate(decided["plan"]["steps"], 1):
-            arguments = {name: deepcopy(tag["value"]) for name, tag in step["arguments"].items()}
-            pending.append({"id": f"{stem}_s{i}", "tool": step["tool"], "arguments": arguments})
+    decided = {"id": f"{stem}_d", "board": board, "decision": _tagged(decision)}
     return {
         "record_hash": closed.record_hash,
-        "design": {"name": None if block is None else block["design"], "hash": log[0]["hash"]},
+        "design": {"hash": log[0]["hash"]},
         "rounds": rounds,
         "decide": decided,
-        "pending": pending,
     }
 
 
@@ -226,16 +162,6 @@ def _tagged(entry: dict[str, Any]) -> dict[str, Any]:
     if "value" in entry:
         return {"value": entry["value"]}
     return {"marker": entry["marker"]}
-
-
-def _verdict(item: dict[str, Any]) -> Verdict:
-    """The guard's ``Verdict`` built from the recorded failures."""
-    failures: list[GuardFailure] = []
-    for f in cast("list[dict[str, Any]]", item["failures"]):
-        recorded = cast("dict[str, Any] | None", f["requirement"])
-        requirement = None if recorded is None else Requirement(recorded["ref"], recorded["value"])
-        failures.append(GuardFailure(f["step"], requirement, f["ref"]))
-    return Verdict(item["kind"], failures)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -339,7 +265,7 @@ class _Walk:
             return ref
         try:
             parsed = parse_ref(ref)
-        except ValueError:  # a role name, rule:N or step:N
+        except ValueError:  # a role name, rule:N, or step:N (only in records before format 8)
             return ref
         if parsed.candidate is None:
             return ref
@@ -350,7 +276,8 @@ class _Walk:
         return written + "".join(f".{field}" for field in parsed.fields)
 
     def context_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
-        """A context entry: its text digested, its marker's cause rewritten."""
+        """A plan's context entry, in a record before format 8: its text digested, its marker's
+        cause rewritten."""
         out = {**entry, "text": self.text(entry["text"])}
         if entry["marker"] is not None:
             marker = cast("dict[str, Any]", entry["marker"])
@@ -396,7 +323,7 @@ class _Walk:
                 out["value"] = self.answer(item["value"], tree, *asked)
         elif kind == "call":
             out["prompt"] = self.text(item["prompt"])
-        elif kind == "plan":
+        elif kind == "plan":  # a plan item: records before format 8 hold one
             out["reason"] = self.text(item["reason"])
             out["reply"] = self.text(item["reply"])
             out["steps"] = [self.step(step, classes) for step in item["steps"]]
@@ -409,7 +336,7 @@ class _Walk:
                     "design": self.text(context["design"]),
                     "entries": [self.context_entry(e) for e in context["entries"]],
                 }
-        elif kind == "verdict":
+        elif kind == "verdict":  # a verdict item: records before format 8 hold one
             out["failures"] = [
                 {**f, "requirement": self.requirement(f["requirement"], classes)}
                 if f["requirement"] is not None
@@ -417,8 +344,9 @@ class _Walk:
                 for f in cast("list[dict[str, Any]]", item["failures"])
             ]
         # Every other member is open, a cause's refs but their grounded refs: markers,
-        # derivation, rows, slots, a context entry's ref and the block's switches, the verdict's
-        # other members, the run settings and the call item's other members.
+        # derivation, rows, slots, a plan's context entry's ref and its block's switches, the
+        # verdict's other members, the run settings, the policy's ref and the call item's other
+        # members.
         if "order" in item:  # derived afresh over the item as the view writes it
             out = _with_held_order({k: v for k, v in out.items() if k != "order"})
         return out
@@ -444,8 +372,9 @@ class _Walk:
         }
 
     def requirement(self, requirement: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
-        """A requirement with its value under its ref's tree, as that ref's entry is; under a
-        ref the settings item holds no tree for, the value is digested whole."""
+        """A verdict's requirement, in a record before format 8, with its value under its ref's
+        tree, as that ref's entry is; under a ref the settings item holds no tree for, the value
+        is digested whole."""
         try:
             tree = classes.get(declared_ref(requirement["ref"]), "content")
         except ValueError:  # a ref outside the grammar names no tree
@@ -453,6 +382,7 @@ class _Walk:
         return {**requirement, "value": self.value(requirement["value"], tree)}
 
     def step(self, step: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
+        """A plan's step, in a record before format 8, its arguments redacted by origin."""
         arguments: dict[str, Any] = {}
         for name, given in cast("dict[str, Any]", step["arguments"]).items():
             if type(given) is not dict:  # the ledger holds each origin an object

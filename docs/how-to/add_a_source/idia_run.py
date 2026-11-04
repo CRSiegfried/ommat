@@ -23,7 +23,7 @@ from idia import (
 from idia.providers.scripted import Scripted
 
 from idia_path import idia_bindings
-from ommat import PlanKind, decide_sync, load, read_record, replay_sync
+from ommat import decide_sync, load, read_record, replay_sync
 from ommat.bindings.conformance import check
 from reports_design import DESIGN
 from reports_run import answers
@@ -109,18 +109,17 @@ async def provider(leaf: Any) -> Dispatcher:
     return Dispatcher(leaf)
 
 
-def main() -> list[PlanKind]:
-    """Decide each report through idia and replay it; return each plan's kind."""
+def main() -> list[object]:
+    """Decide each report through idia and replay it; return each decision."""
     script = Spans()
     leaf = Scripted(capabilities=CAPABILITIES, script=script)
     dispatcher = asyncio.run(provider(leaf))  # loaded on one loop, then decided on others
     print("conformance:", check(idia_bindings(dispatcher)["spans"], deterministic=True))
     loaded = load(DESIGN)
-    kinds: list[PlanKind] = []
+    decisions: list[object] = []
     for report in REPORTS:
         decision = decide_sync(loaded, {"text": report}, idia_bindings(dispatcher))
-        plan = decision.plan
-        print(plan.kind, "|", plan.reply or plan.reason, "|", decision.verdict.kind)
+        print("decision:", decision.estimate)
         print("  answers:", answers(decision))
         for call in decision.record.unhashed["calls"].values():
             for line in call.get("warnings", []):
@@ -128,9 +127,9 @@ def main() -> list[PlanKind]:
         before = script.calls
         _, findings = replay_sync(read_record(decision.record.document), loaded)
         print("  replay findings:", findings, "| leaf calls:", script.calls - before)
-        kinds.append(plan.kind)
+        decisions.append(decision.estimate)
     asyncio.run(dispatcher.aclose())  # release the leaf: a loaded model's worker, a client
-    return kinds
+    return decisions
 
 
 if __name__ == "__main__":

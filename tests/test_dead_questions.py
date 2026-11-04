@@ -1,8 +1,9 @@
 # pyright: reportPrivateUsage=false
 """The dead-question lint, ``dead_questions``: one ``decide_sync`` run
 per point through a binding answering from the point, each status with its witness, the
-byte comparison of the ``plan`` and ``verdict`` items, the ``ValueError``s before any run, and
-a report of plain data. The points themselves are tested in ``test_read_points.py``."""
+byte comparison of the policy's whole entry, the ``ValueError``s before any run and for a
+broken entry, and a report of plain data. The points themselves are tested in
+``test_read_points.py``."""
 
 import copy
 import json
@@ -11,18 +12,20 @@ from typing import Any
 
 import pytest
 
+import ommat._decide as _decide
 from designs import roles
 from ommat import (
+    Cause,
+    CauseCode,
     Design,
     Parameter,
-    Plan,
-    Policy,
     Question,
-    Requirement,
     Rule,
     Source,
     Text,
+    Unavailable,
     Undetermined,
+    Unsure,
     load,
 )
 from ommat import types as t
@@ -42,15 +45,13 @@ def mood(r: Any) -> object:
     return pick_with_thresholds(r, "q:mood", r.param("mood/th"), 0)
 
 
-def by_go(r: Any) -> Plan:
+def by_go(r: Any) -> str:
     CALLS.append("policy")
-    if r.read("d:go") is True:
-        return Plan("execute")
-    return Plan("escalate", reason="not sure")
+    return "send" if r.read("d:go") is True else "hold"
 
 
-def always(r: Any) -> Plan:
-    return Plan("execute")
+def decision(reads: list[str], fn: Any) -> Rule:
+    return Rule("d:decision", t.label("send", "hold"), fn, version="p", reads=reads)
 
 
 QUESTIONS = {
@@ -73,13 +74,18 @@ PARAMETERS = {
 
 
 def design(**changes: Any) -> Design:
+    """The policy ``d:decision`` is a rule; rules given in ``changes`` are added beside it
+    unless ``changes`` names the policy too."""
     fields: dict[str, Any] = {
         "state": t.record(),
-        "policy": Policy(by_go, version="p", reads=["d:go"]),
+        "policy": "d:decision",
         "sources": {"ask": Source(QUESTIONS)},
         "rules": {"go": GO},
         "parameters": PARAMETERS,
     }
+    fields["rules"]["decision"] = decision(["d:go"], by_go)
+    if "rules" in changes and "policy" not in changes:
+        changes = {**changes, "rules": {**fields["rules"], **changes["rules"]}}
     fields.update(changes)
     return Design(**fields)
 
@@ -95,7 +101,7 @@ def answer(kind: str, labels: list[str], **probabilities: float) -> dict[str, An
 # Statuses and the witness
 
 
-def test_a_question_whose_answer_changes_the_plan_is_live_with_its_exact_witness() -> None:
+def test_a_question_whose_answer_changes_the_decision_is_live_with_its_exact_witness() -> None:
     report = dead_questions(LOADED)
     assert report["questions"]["q:go"] == {
         "status": "live",
@@ -150,31 +156,6 @@ def test_a_question_on_the_grid_that_changes_nothing_is_no_change_found() -> Non
     assert report["questions"]["q:go"]["status"] == "live"
 
 
-def test_a_question_changing_only_the_verdict_is_live() -> None:
-    ok = Rule(
-        "d:ok",
-        t.boolean,
-        go,
-        version="1",
-        reads=["q:go"],
-        params=["go/bar", "go/margin"],
-        boundaries={"q:go": roles(bar=["go/bar"], margin=["go/margin"])},
-    )
-    loaded = load(
-        design(
-            policy=Policy(always, version="p"),
-            rules={"ok": ok},
-            requirements=[Requirement("d:ok", True)],
-            default_deny=False,
-        )
-    )
-    report = dead_questions(loaded)
-    assert report["questions"]["q:go"]["status"] == "live"
-    first, second = report["questions"]["q:go"]["witness"]
-    assert first["q:go"]["probabilities"] == {"yes": 0.0, "no": 1.0}
-    assert second["q:go"]["probabilities"] == {"yes": 0.8, "no": 0.2}
-
-
 def test_the_points_count_every_run() -> None:
     CALLS.clear()
     report = dead_questions(LOADED)
@@ -215,16 +196,16 @@ def test_a_point_with_the_marker_reaches_the_rule_as_unavailable_refused() -> No
 def test_the_state_is_the_points_t_state_live() -> None:
     seen: list[object] = []
 
-    def watch(r: Any) -> Plan:
+    def watch(r: Any) -> str:
         seen.append(r.read("t:state.blob"))
-        return Plan("escalate", reason="r")
+        return "hold"
 
     loaded = load(
         design(
             state=t.record(blob=t.bytes_),
-            policy=Policy(watch, version="p", reads=["t:state.blob"]),
+            policy="d:decision",
+            rules={"decision": decision(["t:state.blob"], watch)},
             sources={},
-            rules={},
             parameters={},
         )
     )
@@ -281,11 +262,13 @@ def test_the_lint_raises_nothing_on_a_finding_and_changes_no_loaded_design() -> 
     assert (LOADED.document, LOADED.design_hash, repr(LOADED._grid)) == before
 
 
-def test_a_plan_differing_only_in_its_reason_is_live() -> None:
-    def reasons(r: Any) -> Plan:
-        return Plan("escalate", reason="go" if r.read("d:go") is True else "stay")
+def test_a_decision_differing_only_in_its_marker_cause_is_live() -> None:
+    def causes(r: Any) -> object:
+        code = CauseCode.conflict if r.read("d:go") is True else CauseCode.abstained
+        return Unsure(Cause(code, ["d:go"]))
 
-    loaded = load(design(policy=Policy(reasons, version="p", reads=["d:go"])))
+    rule = Rule("d:decision", t.label("send", "hold"), causes, version="p", reads=["d:go"])
+    loaded = load(design(rules={"decision": rule}))
     assert dead_questions(loaded)["questions"]["q:go"]["status"] == "live"
 
 
@@ -310,14 +293,11 @@ def test_a_rule_changing_a_value_it_reads_reaches_no_later_point() -> None:
 
 
 def test_a_witness_found_only_under_a_later_assignment_of_the_other_reads() -> None:
-    def gated(r: Any) -> Plan:
-        if r.read("d:go") is True and r.read("t:n") == 2:
-            return Plan("execute")
-        return Plan("escalate", reason="r")
+    def gated(r: Any) -> str:
+        return "send" if r.read("d:go") is True and r.read("t:n") == 2 else "hold"
 
     sources = {"ask": Source({"q:go": QUESTIONS["q:go"]}), "look": Source({"t:n": t.integer()})}
-    policy = Policy(gated, version="p", reads=["d:go", "t:n"])
-    loaded = load(design(sources=sources, policy=policy))
+    loaded = load(design(sources=sources, rules={"decision": decision(["d:go", "t:n"], gated)}))
     witness = dead_questions(loaded, values={"t:n": [1, 2]})["questions"]["q:go"]["witness"]
     assert [w["t:n"] for w in witness] == [2, 2]
     assert [w["q:go"]["probabilities"]["yes"] for w in witness] == [0.0, 0.8]
@@ -386,3 +366,49 @@ def test_an_off_grid_question_narrowed_by_values_tries_its_listed_labels_and_is_
 def test_a_question_on_the_grid_is_not_narrowed() -> None:
     with pytest.raises(ValueError, match='"q:go", which its grid points or its type fill'):
         dead_questions(LOADED, values={"q:go": ["yes"]})
+
+
+# ---------------------------------------------------------------------------------------------
+# A broken entry
+
+
+def _crashing(_state: object) -> object:
+    raise RuntimeError("the codec failed")
+
+
+def _malformed(_state: object) -> object:
+    return 5  # not a record, so t:state does not conform
+
+
+@pytest.mark.parametrize(("codec", "code"), [(_crashing, "raised"), (_malformed, "invalid-return")])
+def test_a_broken_entry_raises_naming_the_point(
+    monkeypatch: pytest.MonkeyPatch, codec: Any, code: str
+) -> None:
+    real = _decide.decide_sync
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        return real(*args, **{**kwargs, "codec": codec})
+
+    monkeypatch.setattr("ommat._decide.decide_sync", broken)
+    with pytest.raises(ValueError, match=re.escape(f"cause {code!r}")) as caught:
+        dead_questions(LOADED)
+    assert "broken entry" in str(caught.value)
+    assert "'t:state': {}" in str(caught.value)
+    assert "'q:go'" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        Unsure(Cause(CauseCode.design_changed, [])),
+        Unavailable(Cause(CauseCode.invalid_return, ["t:state"])),
+    ],
+)
+def test_a_policy_returning_an_entry_cause_is_compared_not_refused(marker: Any) -> None:
+    def marked(r: Any) -> object:
+        return marker if r.read("d:go") is True else "hold"
+
+    loaded = load(design(rules={"decision": decision(["d:go"], marked)}))
+    report = dead_questions(loaded)
+    assert report["questions"]["q:go"]["status"] == "live"
+    assert report["questions"]["q:tone"] == {"status": "not-on-grid", "witness": None}

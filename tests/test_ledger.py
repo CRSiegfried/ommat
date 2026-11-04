@@ -4,6 +4,9 @@
 import asyncio
 import copy
 import enum
+import json
+import re
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -12,25 +15,42 @@ from counting import SmallBounds
 from ledger_logs import (
     ANSWER,
     BROKEN,
+    BROKEN_8,
     BROKEN_PLAN,
     CANCEL,
     CANCELLED,
+    CANCELLED_8,
     DESIGN,
+    DESIGN_8,
+    ENTRY_CAUSE,
     LOGS,
     NORMAL,
+    NORMAL_8,
     PLAN,
     QUESTIONS,
     SETTINGS,
+    SETTINGS_8,
     STATE,
     VERDICT,
     call,
+    call_8,
     entry,
     fresh,
+    rehashed,
     round_item,
 )
-from ommat import InvalidRecord, read_record
+from ommat import InvalidRecord, escalation, read_record, redact, transcript
 from ommat._canonical import encode, hash_value
-from ommat._ledger import Ledger, _LedgerError, record_prefix_hash
+from ommat._ledger import (
+    Ledger,
+    _LedgerError,
+    decision_bytes,
+    decision_entry,
+    finished,
+    record_prefix_hash,
+)
+from ommat._refs import grounded_ref
+from test_views import ROOT, digest
 
 
 def ledger_of(items: list[dict[str, Any]], observer: Any = None) -> Ledger:
@@ -1547,3 +1567,412 @@ def test_another_binding_marker_under_a_returned_call_is_kept_at_format_1(code: 
 def test_a_refused_call_item_leaves_no_returned_call() -> None:
     # The call names a source an earlier call lists, so nothing it would add is kept.
     refused(R2, call(2, "ask_spam"), "its sources list 'ask_spam', which call item 7 lists")
+
+
+# ---------------------------------------------------------------------------------------------
+# Format 8: the turn ends at the policy's entry
+
+DESIGN_7: dict[str, Any] = {**DESIGN, "format": 7, "helpers": 3}
+SETTINGS_7: dict[str, Any] = {**SETTINGS, "grounded": {}, "sets": {}}
+CONTEXT: dict[str, Any] = {"item": "context", "context": None}
+UNSURE: dict[str, Any] = {"kind": "Unsure", "cause": {"code": "abstained", "refs": []}}
+
+
+ENTRY_REFS: dict[str, list[str]] = {
+    "raised": ["codec"],
+    "invalid-return": ["t:state"],
+    "design-changed": [],
+}
+"""The refs decide gives each entry cause."""
+
+
+def entry_marker(code: str, refs: list[str] | None = None) -> dict[str, Any]:
+    """An ``Unavailable`` of ``code`` with the refs decide gives it, or ``refs``."""
+    named = ENTRY_REFS.get(code, ["codec"]) if refs is None else refs
+    return {"kind": "Unavailable", "cause": {"code": code, "refs": named}}
+
+
+@pytest.mark.parametrize("name", ["normal-8", "broken-8", "cancelled-8"])
+def test_a_format_8_log_is_kept(name: str) -> None:
+    log = ledger_of(LOGS[name]).close().log
+    assert [{k: v for k, v in i.items() if k != "order"} for i in log] == LOGS[name]
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [
+        {"code": "raised", "refs": ["route"]},
+        {"code": "round-bound", "refs": []},
+        {"code": "cancelled", "refs": ["route"]},
+    ],
+)
+def test_a_format_8_cause_item_other_than_cancelled_is_refused(cause: dict[str, Any]) -> None:
+    refused(NORMAL_8[:7], {"item": "cause", "cause": cause}, "cause is not")
+
+
+@pytest.mark.parametrize("item", [PLAN, BROKEN_PLAN, VERDICT], ids=["plan", "broken", "verdict"])
+def test_a_format_8_record_holds_no_plan_or_verdict_item(item: dict[str, Any]) -> None:
+    refused(NORMAL_8[:12], item, f"a format-8 record holds no {item['item']} item")
+
+
+@pytest.mark.parametrize("fmt", [1, 7, 8])
+def test_a_context_item_is_refused_in_every_format(fmt: int) -> None:
+    prefix = fresh(NORMAL_8 if fmt == 8 else NORMAL[:12])
+    prefix[0]["format"] = fmt
+    if fmt == 7:
+        prefix[0]["helpers"] = 3
+        prefix[1] = fresh([SETTINGS_7])[0]
+        for item in prefix:
+            if item["item"] == "call":
+                del item["snapshot"]
+                item.update(
+                    precision=None,
+                    provider=None,
+                    model_requested=None,
+                    model_reported=None,
+                    revision=None,
+                    runtime=None,
+                    claimed=[],
+                )
+    ledger_of(prefix)
+    refused(prefix, CONTEXT, "of no item kind the ledger knows: 'context'")
+
+
+def test_a_format_8_settings_item_names_the_policy() -> None:
+    refused([DESIGN_8], without(SETTINGS_8, "policy"), "has no 'policy' member")
+
+
+def test_a_settings_item_before_format_8_holds_no_policy() -> None:
+    ledger_of([DESIGN_7, SETTINGS_7])
+    refused(
+        [DESIGN_7],
+        with_member(SETTINGS_7, policy="d:route"),
+        "holds policy, which a format-7 record does not",
+    )
+
+
+@pytest.mark.parametrize("policy", ["d:other", "q:spam", "t:mail/body", "d:route.x", "route"])
+def test_the_policy_is_a_d_key_of_the_providers(policy: str) -> None:
+    refused(
+        [DESIGN_8],
+        with_member(SETTINGS_8, policy=policy),
+        "is not a d: key of its providers",
+    )
+
+
+def test_the_policy_is_no_grounded_declared_ref() -> None:
+    grounded = with_member(
+        SETTINGS_8,
+        providers={**SETTINGS_8["providers"], "d:set": "set"},
+        classes={**SETTINGS_8["classes"], "d:set": "identifier"},
+        sets={"d:set": None},
+        grounded={"d:route": "d:set"},
+    )
+    refused([DESIGN_8], grounded, "policy 'd:route' is a grounded declared ref")
+    ledger_of([DESIGN_8, with_member(grounded, policy="d:tags")])
+
+
+@pytest.mark.parametrize("code", ["raised", "invalid-return", "design-changed"])
+def test_a_format_8_t_state_entry_may_hold_unavailable_with_an_entry_cause(code: str) -> None:
+    marker = entry_marker(code)
+    ledger_of(
+        [
+            DESIGN_8,
+            SETTINGS_8,
+            entry("t:state", 0, None, marker=marker),
+            entry("d:route", 0, None, marker=marker),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "marker", [UNSURE, entry_marker("refused"), entry_marker("required")], ids=str
+)
+def test_a_format_8_t_state_entry_holding_another_marker_is_refused(
+    marker: dict[str, Any],
+) -> None:
+    refused(
+        [DESIGN_8, SETTINGS_8],
+        entry("t:state", 0, None, marker=marker),
+        "holding a marker other than Unavailable with an entry cause",
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "refs"),
+    [
+        ("raised", ["t:state"]),
+        ("raised", []),
+        ("raised", ["codec", "t:state"]),
+        ("invalid-return", ["codec"]),
+        ("invalid-return", []),
+        ("design-changed", ["t:state"]),
+    ],
+    ids=str,
+)
+def test_a_format_8_entry_cause_holding_other_refs_than_decide_gives_it_is_refused(
+    code: str, refs: list[str]
+) -> None:
+    refused(
+        [DESIGN_8, SETTINGS_8],
+        entry("t:state", 0, None, marker=entry_marker(code, refs)),
+        re.escape(f"its {code} cause names {refs!r}; a broken entry's names {ENTRY_REFS[code]!r}"),
+    )
+
+
+def test_a_t_state_entry_holding_a_marker_before_format_8_is_refused() -> None:
+    refused(
+        [DESIGN_7, SETTINGS_7],
+        entry("t:state", 0, None, marker=ENTRY_CAUSE),
+        "is a t:state entry holding a marker; the state is a value",
+    )
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        entry("d:route", 0, None, marker=entry_marker("raised")),
+        entry("d:route", 1, None, marker=ENTRY_CAUSE),
+        entry("d:route", 0, None, "archive"),
+        entry("d:tags", 0, None, marker=ENTRY_CAUSE),
+        call_8(1, "fetch_mail"),
+        CANCEL,
+    ],
+    ids=["another marker", "round 1", "a value", "another ref", "a call", "a cause"],
+)
+def test_after_a_marker_state_comes_the_policys_entry_holding_that_marker(
+    item: dict[str, Any],
+) -> None:
+    refused(
+        LOGS["broken-8"][:3],
+        item,
+        "after a t:state entry holding a marker comes the policy's entry in round 0, with no "
+        "call, holding that marker",
+    )
+
+
+@pytest.mark.parametrize(
+    "item",
+    [round_item(0), entry("d:tags", 0, None, 1), call_8(1, "fetch_mail"), CANCEL],
+    ids=["a round", "an entry", "a call", "a cause"],
+)
+def test_nothing_comes_after_a_broken_entrys_policy_entry(item: dict[str, Any]) -> None:
+    refused(LOGS["broken-8"], item, "nothing comes after a broken entry's policy entry")
+
+
+# ---------------------------------------------------------------------------------------------
+# The decision in a read log
+
+
+def test_a_log_before_format_8_holds_no_decision() -> None:
+    for log in (NORMAL, BROKEN, CANCELLED):
+        assert decision_entry(log) is None
+        assert decision_bytes(log) is None
+
+
+def test_a_cancelled_log_with_no_policy_entry_holds_no_decision() -> None:
+    assert decision_entry(CANCELLED_8) is None
+    assert decision_bytes(CANCELLED_8) is None
+    assert decision_entry([]) is None
+    assert decision_entry([DESIGN_8]) is None
+
+
+def test_a_turn_is_finished_when_it_holds_the_policy_s_entry_and_no_cause_item() -> None:
+    assert finished(NORMAL_8)
+    assert finished(BROKEN_8)  # a broken entry ends at the policy's entry
+    assert not finished(CANCELLED_8)  # a cause item, and no policy's entry
+    assert not finished([*NORMAL_8, CANCEL])  # a cause item after the policy's entry
+    assert not finished(NORMAL_8[:9])  # cut short before the policy's entry
+    assert not finished(BROKEN_8[:3])
+    for log in (NORMAL, BROKEN, CANCELLED, []):  # before format 8: no policy's entry
+        assert not finished(log)
+
+
+def test_the_decision_is_the_entry_at_the_settings_policy() -> None:
+    assert decision_entry(NORMAL_8) is NORMAL_8[9]
+    assert decision_bytes(NORMAL_8) == encode({"value": "archive"})
+    assert decision_entry(BROKEN_8) is BROKEN_8[3]
+    assert decision_bytes(BROKEN_8) == encode({"marker": ENTRY_CAUSE})
+
+
+def test_two_markers_differing_in_their_cause_code_or_refs_are_two_decisions() -> None:
+    def with_marker(marker: dict[str, Any]) -> list[dict[str, Any]]:
+        log = fresh(BROKEN_8)
+        log[3]["marker"] = marker
+        return log
+
+    codes = with_marker(entry_marker("raised"))
+    refs = with_marker(entry_marker("invalid-return", ["codec"]))
+    found = {decision_bytes(log) for log in (BROKEN_8, codes, refs)}
+    assert len(found) == 3
+    same = decision_bytes(with_marker(fresh([ENTRY_CAUSE])[0]))
+    assert same == decision_bytes(BROKEN_8)
+
+
+USAGE_CALL = {"start": "2026-10-20T00:00:00Z", "latency": 0.25, "attempts": None}
+FORMAT_7_RECORD = Path(__file__).parent / "format_9" / "record.json"
+"""A format-7 record: ``format_9`` is named for its design's format."""
+
+
+def with_usage(doc: dict[str, Any], usage: dict[str, Any]) -> bytes:
+    doc = json.loads(json.dumps(doc))  # no object shared between two places
+    key = next(str(i) for i, item in enumerate(doc["log"]) if item["item"] == "call")
+    doc["unhashed"].setdefault("calls", {})[key] = {**USAGE_CALL, "usage": usage}
+    return json.dumps(rehashed(doc)).encode()
+
+
+@pytest.mark.parametrize("key", ["input_tokens", "output_tokens", "passes"])
+def test_a_format_8_usage_key_in_the_closed_set_is_read(key: str) -> None:
+    record = read_record(with_usage({"log": NORMAL_8, "unhashed": {}}, {key: 3}))
+    assert record.unhashed["calls"]["3"]["usage"] == {key: 3}
+
+
+@pytest.mark.parametrize("key", ["tokens", "cache_read_tokens", ""])
+def test_a_format_8_usage_key_outside_the_closed_set_is_refused(key: str) -> None:
+    with pytest.raises(InvalidRecord, match=f"holds the usage key '{key}', which a format-8"):
+        read_record(with_usage({"log": NORMAL_8, "unhashed": {}}, {key: 3}))
+
+
+def test_a_format_7_usage_key_outside_the_closed_set_is_read() -> None:
+    doc = json.loads(FORMAT_7_RECORD.read_bytes())
+    assert doc["log"][0]["format"] == 7
+    record = read_record(with_usage(doc, {"tokens": 12}))
+    assert {"tokens": 12} in [c["usage"] for c in record.unhashed["calls"].values()]
+
+
+# ---------------------------------------------------------------------------------------------
+# A format-7 grounded plan: an execute plan's steps, one copy per candidate, read as written
+
+SET = "d:people"
+ADDR = "d:addr"
+BO: dict[str, Any] = {"name": "Bo", "age": 41}
+ANA: dict[str, Any] = {"name": "Ana", "age": 30}
+PERSON_TREE = {"name": "identifier", "age": "open"}
+
+
+def _sends(who: Any, n: int) -> list[dict[str, Any]]:
+    """One candidate's copy of the steps: a send to its grounded ref with the candidate-value
+    literal of its set, then a log of that send's result."""
+    name = cast(str, cast("dict[str, Any]", who)["name"] if type(who) is dict else who)
+    to = {"ref": grounded_ref(ADDR, name)}
+    return [
+        {
+            "tool": "send",
+            "arguments": {"to": to, "who": {"literal": who, "set": SET}},
+            "requirements": [],
+        },
+        {
+            "tool": "log",
+            "arguments": {"note": {"literal": "sent"}, "sent": {"step": n, "path": None}},
+            "requirements": [],
+        },
+    ]
+
+
+def grounded_plan_log(fmt: int = 7) -> list[dict[str, Any]]:
+    """A format-7 turn whose policy chose a grounded execute plan over ``d:people``, its set of
+    records with the candidate field ``name``, the settings item holding ``sets``; at format 6,
+    which has no ``sets``, a set of names."""
+    members: list[Any] = [BO, ANA] if fmt >= 7 else ["Bo", "Ana"]
+    settings: dict[str, Any] = {
+        "item": "settings",
+        "settings": SETTINGS["settings"],
+        "providers": {ADDR: "addr", SET: "people", "d:ready": "ready"},
+        "classes": {
+            "t:state": {"people": PERSON_TREE, "go": "open"},
+            ADDR: "open",
+            SET: PERSON_TREE if fmt >= 7 else "identifier",
+            "d:ready": "open",
+        },
+        "grounded": {ADDR: SET},
+    }
+    if fmt >= 7:
+        settings["sets"] = {SET: "name"}
+    plan = {
+        "item": "plan",
+        "kind": "execute",
+        "steps": [*_sends(members[0], 1), *_sends(members[1], 3)],
+        "reason": "Mail Bo, Ana",
+        "reply": None,
+        "cause": None,
+        "derivation": [],
+        "context": None,
+    }
+    log = [
+        {**DESIGN, "format": fmt, "helpers": 3},
+        settings,
+        {**STATE, "value": {"people": [BO, ANA], "go": True}},
+        entry(grounded_ref(ADDR, "Ana"), 0, None, "ana@example.org", derivation=[]),
+        entry(grounded_ref(ADDR, "Bo"), 0, None, "bo@example.org", derivation=[]),
+        entry(SET, 0, None, members, derivation=[]),
+        entry("d:ready", 0, None, "yes", derivation=[]),
+        plan,
+        VERDICT,
+    ]
+    return json.loads(json.dumps(log))  # no object shared between two places
+
+
+def plan_of(log: list[dict[str, Any]]) -> dict[str, Any]:
+    return next(i for i in log if i["item"] == "plan")
+
+
+def read_log(log: list[dict[str, Any]]) -> Any:
+    return read_record(rehashed({"log": log, "unhashed": {}}))
+
+
+def refused_read(log: list[dict[str, Any]], says: str) -> None:
+    with pytest.raises(InvalidRecord) as info:
+        read_log(log)
+    assert says in str(info.value)
+
+
+def test_a_format_7_grounded_plan_reads_to_its_own_hash() -> None:
+    record = read_log(grounded_plan_log())
+    assert read_record(record.document).record_hash == record.record_hash
+    assert plan_of(record.log)["steps"][0]["arguments"]["who"] == {"literal": BO, "set": SET}
+
+
+def test_a_format_7_grounded_plan_has_no_view() -> None:
+    record = read_log(grounded_plan_log())
+    assert (escalation(record), transcript(record)) == (None, None)
+
+
+def test_the_ledger_refuses_a_set_naming_no_set() -> None:
+    log = grounded_plan_log()
+    plan_of(log)["steps"][0]["arguments"]["who"]["set"] = "d:ready"
+    refused_read(log, "which is no key of sets")
+
+
+def test_the_ledger_refuses_a_literal_that_does_not_fit_its_sets_tree() -> None:
+    log = grounded_plan_log()
+    plan_of(log)["steps"][0]["arguments"]["who"]["literal"] = {"nick": "x"}
+    refused_read(log, "which its class tree does not list")
+
+
+def test_the_ledger_refuses_a_candidate_origin() -> None:
+    log = grounded_plan_log()
+    plan_of(log)["steps"][0]["arguments"]["who"] = {"candidate": SET}
+    refused_read(log, "is a candidate origin, which a record never holds")
+
+
+def test_the_ledger_refuses_a_field_path_on_a_grounded_step_argument() -> None:
+    log = grounded_plan_log()
+    plan_of(log)["steps"][0]["arguments"]["to"]["ref"] += ".x"
+    refused_read(log, "which it never holds")
+
+
+def test_the_ledger_refuses_a_set_in_a_format_6_record() -> None:
+    log = grounded_plan_log(6)
+    for step in plan_of(log)["steps"]:
+        step["arguments"].pop("to", None)  # a grounded ref, refused before format 7 too
+    refused_read(log, "carries set, which a format-6 record does not")
+
+
+def test_redact_digests_a_set_literal_under_its_sets_tree() -> None:
+    record = read_log(grounded_plan_log())
+    view = json.loads(redact(record, ROOT))
+    step = plan_of(view["log"])["steps"][0]
+    assert step["arguments"]["who"]["set"] == SET
+    assert step["arguments"]["who"]["literal"]["name"] == digest("Bo", record)
+    assert step["arguments"]["who"]["literal"]["age"] == 41
+    assert step["arguments"]["to"]["ref"] == grounded_ref(ADDR, digest("Bo", record))

@@ -1,7 +1,7 @@
 # pyright: reportPrivateUsage=false
 """Decision tables (§decision-tables, §table-notation): a table's notation and tagged form,
 the load checks it adds, its evaluation under each hit policy and the marker contract, the
-policy table and its plan declarations, replay over a table turn, the grid and the lints."""
+policy table, replay over a table turn, the grid and the lint."""
 
 import contextlib
 import dataclasses
@@ -14,7 +14,6 @@ import pytest
 
 from ledger_logs import rehashed
 from ommat import (
-    Binding,
     CallResult,
     Cause,
     CauseCode,
@@ -24,17 +23,12 @@ from ommat import (
     Input,
     InvalidDesign,
     LoadedDesign,
-    Origin,
     Param,
     Parameter,
-    PlanDeclaration,
-    Policy,
-    PolicyTable,
     Question,
     Record,
     Rule,
     Source,
-    Step,
     Table,
     Text,
     Unasked,
@@ -44,12 +38,11 @@ from ommat import (
     decide_sync,
     load,
     read_record,
-    redact,
     replay_sync,
 )
 from ommat import types as t
-from ommat._canonical import encode, sha256_ref
-from ommat.helpers import dead_questions, unsure_to_execute
+from ommat._canonical import encode
+from ommat.helpers import dead_questions
 
 STATE = t.record(
     n=t.integer(),
@@ -84,18 +77,18 @@ LEAVES = {
 
 
 def show(r: Any) -> Any:
-    from ommat import Plan
-
-    return Plan("inform", reply="done")
+    return "done"
 
 
 def design(*tables: tuple[str, Any], reads: tuple[str, ...] = (), **changes: Any) -> Design:
-    fields: dict[str, Any] = {
-        "state": STATE,
-        "rules": dict(tables),
-        "parameters": LEAVES,
-        "policy": Policy(show, version="1", reads=list(reads)),
-    }
+    """The tables as rules; unless ``changes`` names a ``policy``, the policy is ``d:show``, a
+    function rule reading ``reads``."""
+    rules: dict[str, Any] = {**dict(tables), **changes.pop("rules", {})}
+    fields: dict[str, Any] = {"state": STATE, "parameters": LEAVES}
+    if "policy" not in changes:
+        rules["show"] = Rule("d:show", t.string, show, version="1", reads=list(reads))
+        fields["policy"] = "d:show"
+    fields["rules"] = rules
     fields.update(changes)
     return Design(**fields)
 
@@ -247,7 +240,7 @@ def test_a_tables_row_list_is_copied_when_built() -> None:
     assert len(table.rows) == 1
 
 
-def test_a_format_6_document_holding_a_table_loads_to_its_own_hash() -> None:
+def test_a_stored_earlier_format_document_holding_a_table_is_refused_naming_its_format() -> None:
     doc = json.loads((Path(__file__).parent / "format_6" / "design.json").read_bytes())
     doc["rules"]["flag"] = {
         "form": "table",
@@ -256,19 +249,13 @@ def test_a_format_6_document_holding_a_table_loads_to_its_own_hash() -> None:
         "hit": "F",
         "order": None,
         "inputs": [{"read": "t:state.request", "helper": None, "params": {}}],
-        "rows": [{"cells": [{"is": "x"}], "output": {"literal": True}}],
+        "rows": [{"cells": ["-"], "output": {"literal": True}}],
         "candidates": False,
         "grounded": None,
     }
-    data = encode(doc)
-    found = failures(data)
-    # The request is a string: a value cell over it is refused, under format 6 as under 7.
-    assert [c for c, _ in found] == [9]
-    doc["rules"]["flag"]["rows"] = [{"cells": ["-"], "output": {"literal": True}}]
-    data = encode(doc)
-    loaded = load(data)
-    assert loaded.design_hash == sha256_ref(data)
-    assert loaded.document == data
+    found = failures(encode(doc))
+    assert [c for c, _ in found] == [11]
+    assert "format 6 is not 10" in found[0][1]
 
 
 def test_a_document_rows_member_set_differing_fails_load() -> None:
@@ -281,26 +268,12 @@ def test_a_document_rows_member_set_differing_fails_load() -> None:
 # Load
 
 
-def test_check_1_a_one_of_repeat_and_a_plan_name_clash() -> None:
+def test_check_1_a_one_of_repeat() -> None:
     refused(tab("F", ["t:state.word"], [[{"one_of": ["a", "a"]}, 1]]), 1, "twice in a one_of")
-    found = failures(
-        dataclasses.replace(
-            policy_design(), tools=["page", "notify"], plans={**PLANS, "page": PLANS["tell"]}
-        )
-    )
-    assert any(c == 1 and "declared more than once" in m for c, m in found)
 
 
-def test_check_3_an_input_origin_and_slot_need_a_provider() -> None:
+def test_check_3_an_input_needs_a_provider() -> None:
     refused(tab("F", ["d:none"], [["-", 1]]), 3, "no provider")
-    bad = {
-        **PLANS,
-        "tell": PlanDeclaration(
-            "inform", reply=Text("Hi {n}.", [{"name": "n", "origin": {"ref": "d:none"}}])
-        ),
-    }
-    found = failures(dataclasses.replace(policy_design(), plans=bad))
-    assert any(c == 3 and "d:none" in m for c, m in found)
 
 
 @pytest.mark.parametrize(
@@ -325,11 +298,6 @@ def test_check_3_an_input_origin_and_slot_need_a_provider() -> None:
 def test_check_4_a_tables_provides_and_helper_reads(table: Table, says: str) -> None:
     found = failures(asked(("tab", table)))
     assert any(c == 4 and says in m for c, m in found), found
-
-
-def test_check_4_the_policy_table_reads_no_question() -> None:
-    found = failures(asked(policy=PolicyTable(["q:urgent"], [["-", "ask"]]), plans=PLANS))
-    assert any(c == 4 and "not at level d: or t:" in m for c, m in found), found
 
 
 @pytest.mark.parametrize("helper", ["determined", "agree", "pick_each_with_margin", "nope"])
@@ -449,61 +417,6 @@ def test_check_9_a_boundaries_field_a_table_already_covers() -> None:
         "already compares",
         rules={"tab": tab("F", ["t:state.x"], [["> lo", 1], ["-", 2]]), "r": reader},
     )
-
-
-@pytest.mark.parametrize(
-    ("plans", "rows", "says"),
-    [
-        ({"x": PlanDeclaration("broken")}, [["-", "x"]], "kind is broken"),
-        ({"x": PlanDeclaration("inform")}, [["-", "x"]], "which declares a reply"),
-        ({"x": PlanDeclaration("escalate")}, [["-", "x"]], "which declares a reason"),
-        ({"x": PlanDeclaration("execute", reply=Text("Hi."))}, [["-", "x"]], "declares no reply"),
-        (
-            {"x": PlanDeclaration("clarify", [Step("page")], reply=Text("Hi?"))},
-            [["-", "x"]],
-            "holds no steps",
-        ),
-        ({"x": PlanDeclaration("execute", [Step("gone")])}, [["-", "x"]], "not declared"),
-        (
-            {
-                "x": PlanDeclaration(
-                    "execute", [Step("page", {"idempotency_key": Origin(literal=1)})]
-                )
-            },
-            [["-", "x"]],
-            "idempotency_key",
-        ),
-        (
-            {"x": PlanDeclaration("execute", [Step("page", {"a": Binding(1)})])},
-            [["-", "x"]],
-            "binds no earlier step",
-        ),
-        ({"x": PlanDeclaration("execute")}, [["-", "y"]], "not a declared plan"),
-        ({"x": PlanDeclaration("execute")}, [["yes", "x"]], "last row holds a cell"),
-        ({"x": PlanDeclaration("execute")}, [], "has no row"),
-        (
-            {
-                "x": PlanDeclaration(
-                    "inform", reply=Text("{a} {b}", [{"name": "a", "origin": {"param": "bar"}}])
-                )
-            },
-            [["-", "x"]],
-            "names no slot",
-        ),
-    ],
-)
-def test_check_9_a_policy_tables_and_a_plan_declarations_clauses(
-    plans: dict[str, PlanDeclaration], rows: list[Any], says: str
-) -> None:
-    found = failures(asked(policy=PolicyTable(["d:urgent"], rows), plans=plans, tools=["page"]))
-    assert any(c == 9 and says in m for c, m in found), found
-
-
-def test_check_9_the_last_rows_plan_reads_no_board() -> None:
-    found = failures(
-        dataclasses.replace(policy_design(), policy=PolicyTable(["d:urgent"], [["-", "tell"]]))
-    )
-    assert any(c == 9 and "whose plan reads the board" in m for c, m in found), found
 
 
 def test_check_10_a_tables_outputs_and_order() -> None:
@@ -718,20 +631,13 @@ URGENT = Table(
     [Helper("pick_with_margin", "q:urgent", bar="bar", margin="margin")],
     [["-", Input("q:urgent")]],
 )
-PLANS = {
-    "page": PlanDeclaration("execute", [Step("notify", {"who": Origin(ref="t:state.name")})]),
-    "tell": PlanDeclaration(
-        "inform",
-        reply=Text(
-            "Nothing urgent for {n}; bar {b}.",
-            [
-                {"name": "n", "origin": {"ref": "t:state.name"}},
-                {"name": "b", "origin": {"param": "bar"}},
-            ],
-        ),
-    ),
-    "ask": PlanDeclaration("escalate", reason=Text("Unsure if urgent.")),
-}
+ACT = Table(
+    "d:act",
+    t.label("page", "tell", "ask"),
+    "F",
+    ["d:urgent"],
+    [["yes", "page"], ["no", "tell"], ["-", "ask"]],
+)
 
 
 def asked(*tables: tuple[str, Any], **changes: Any) -> Design:
@@ -740,12 +646,9 @@ def asked(*tables: tuple[str, Any], **changes: Any) -> Design:
     return design(*({"urgent": URGENT, **rules}).items(), **fields)
 
 
-def policy_design() -> Design:
-    return asked(
-        policy=PolicyTable(["d:urgent"], [["yes", "page"], ["no", "tell"], ["-", "ask"]]),
-        plans=PLANS,
-        tools=["notify"],
-    )
+def policy_design(act: Table = ACT) -> Design:
+    """The design whose policy, ``d:act``, is a decision table over ``d:urgent``."""
+    return asked(("act", act), policy="d:act")
 
 
 def answering(p_yes: float | None) -> Callable[..., Any]:
@@ -774,93 +677,45 @@ def test_a_data_rule_picks_and_passes_the_pick_through() -> None:
     assert marker == {"kind": "Unsure", "cause": {"code": "required", "refs": ["q:urgent"]}}
 
 
-def test_the_policy_table_gives_each_plan_its_rows_and_slots() -> None:
+def test_a_policy_table_is_a_rule_whose_entry_is_the_decision() -> None:
     loaded = load(policy_design())
-    executed = run(loaded, 0.9)
-    plan = item(executed, "plan")
-    assert plan["kind"] == "execute"
-    assert plan["rows"] == [1, 3]
-    assert plan["steps"] == [
-        {"tool": "notify", "arguments": {"who": {"ref": "t:state.name"}}, "requirements": []}
-    ]
-    assert "slots" not in plan
-    assert "derivation" not in plan
-    told = item(run(loaded, 0.1), "plan")
-    assert told["kind"] == "inform"
-    assert told["reply"] == "Nothing urgent for Ada; bar 0.6."
-    assert told["slots"] == {
-        "reply": [
-            {"name": "n", "origin": {"ref": "t:state.name"}},
-            {"name": "b", "origin": {"param": "bar"}},
-        ]
-    }
-    asked_ = item(run(loaded, 0.55), "plan")
-    assert asked_["kind"] == "escalate"
-    assert asked_["reason"] == "Unsure if urgent."
-    assert asked_["rows"] == [3]
-    assert asked_["cause"] is None
-    decision = decide_sync(loaded, BASE, {"default": answering(0.1)})
-    assert decision.plan.slots["reply"][0]["name"] == "n"
+    for p_yes, expected, rows in ((0.9, "page", [1, 3]), (0.1, "tell", [2, 3]), (0.55, "ask", [3])):
+        decision = decide_sync(loaded, BASE, {"default": answering(p_yes)})
+        entry = item(decision.record, "entry", "d:act")
+        assert entry["value"] == expected
+        assert entry["rows"] == rows
+        assert decision.estimate == expected
+        assert "derivation" not in entry
 
 
-def test_rule_2_in_the_policy_table_escalates_naming_its_input() -> None:
-    plan = item(run(load(policy_design()), None), "plan")
-    assert plan["kind"] == "escalate"
-    assert plan["rows"] == [3]
-    assert plan["cause"] == {"code": "required", "refs": ["d:urgent"]}
+def test_the_policy_table_names_the_marker_its_input_gave() -> None:
+    decision = decide_sync(load(policy_design()), BASE, {"default": answering(None)})
+    entry = item(decision.record, "entry", "d:act")
+    assert entry["marker"]["cause"] == {"code": "required", "refs": ["d:urgent"]}
+    assert isinstance(decision.estimate, Unavailable)
 
 
-def test_a_row_whose_plan_reads_a_marker_is_skipped_and_names_it() -> None:
-    plans = {
-        **PLANS,
-        "page": PlanDeclaration("execute", [Step("notify", {"who": Origin(ref="d:s0")})]),
-    }
-    design_ = dataclasses.replace(
-        policy_design(),
-        rules={**policy_design().rules, **srcs("Unavailable")},
-        plans=plans,
-    )
-    plan = item(run(load(design_), 0.9), "plan")
-    assert plan["kind"] == "escalate"
-    assert plan["cause"]["refs"] == ["d:s0"]
-    design_ = dataclasses.replace(design_, rules={**policy_design().rules, **srcs("Unsure")})
-    plan = item(run(load(design_), 0.9), "plan")
-    assert plan["kind"] == "escalate"
-    assert plan["cause"] is None
-    assert plan["rows"] == [3]
-
-
-def test_a_raising_helper_in_the_policy_table_is_broken(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_raising_helper_in_the_policy_table_is_the_policys_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from ommat.helpers import _choice
 
     def boom(r: Any, ref: str) -> int:
         raise RuntimeError("no")
 
     monkeypatch.setattr(_choice, "size", boom)
-    policy = PolicyTable([Helper("size", "t:state.items")], [[">= 1", "page"], ["-", "ask"]])
-    design_ = dataclasses.replace(policy_design(), policy=policy)
-    record = run(load(design_), 0.9)
-    plan = item(record, "plan")
-    assert plan["kind"] == "broken"
-    assert plan["cause"] == {"code": "raised", "refs": ["policy"]}
-    assert plan["rows"] == []
-
-
-def test_a_declared_plan_breaking_a_plan_rule_is_broken_with_its_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Load holds a declaration to every plan rule it can; a break here is past load's reach.
-    from ommat import _compile
-
-    def never(step: object, n: int) -> bool:
-        return False
-
-    monkeypatch.setattr(_compile, "_rule_2", never)
-    record = run(load(policy_design()), 0.9)
-    plan = item(record, "plan")
-    assert plan["kind"] == "broken"
-    assert plan["cause"]["refs"] == ["rule:2", "step:1"]
-    assert plan["rows"] == [1, 3]
+    act = Table(
+        "d:act",
+        t.label("page", "ask"),
+        "F",
+        [Helper("size", "t:state.items")],
+        [[">= 1", "page"], ["-", "ask"]],
+    )
+    decision = decide_sync(load(policy_design(act)), BASE, {"default": answering(0.9)})
+    entry = item(decision.record, "entry", "d:act")
+    assert entry["marker"]["cause"] == {"code": "raised", "refs": ["act"]}
+    assert entry["rows"] == []
+    assert isinstance(decision.estimate, Unavailable)
 
 
 def test_replay_reproduces_a_table_turn_and_finds_a_changed_rows() -> None:
@@ -869,19 +724,14 @@ def test_replay_reproduces_a_table_turn_and_finds_a_changed_rows() -> None:
         record = run(loaded, p)
         assert replay_sync(record, loaded)[1] == []
     record = run(loaded, 0.1)
+    for ref in ("d:urgent", "d:act"):
 
-    def bump(doc: dict[str, Any]) -> None:
-        next(i for i in doc["log"] if i["item"] == "entry" and i["ref"] == "d:urgent")["rows"] = []
+        def bump(doc: dict[str, Any], ref: str = ref) -> None:
+            next(i for i in doc["log"] if i["item"] == "entry" and i["ref"] == ref)["rows"] = []
 
-    copy = read_record(rehashed(edited(record, bump)))
-    found = replay_sync(copy, loaded)[1]
-    assert [(f["kind"], f.get("ref")) for f in found] == [(FindingKind.entry, "d:urgent")]
-
-    def plan_rows(doc: dict[str, Any]) -> None:
-        next(i for i in doc["log"] if i["item"] == "plan")["rows"] = [3]
-
-    found = replay_sync(read_record(rehashed(edited(record, plan_rows))), loaded)[1]
-    assert [f["kind"] for f in found] == [FindingKind.plan]
+        copy = read_record(rehashed(edited(record, bump)))
+        found = replay_sync(copy, loaded)[1]
+        assert [(f["kind"], f.get("ref")) for f in found] == [(FindingKind.entry, ref)]
 
 
 def edited(record: Record, change: Callable[[dict[str, Any]], object]) -> dict[str, Any]:
@@ -890,17 +740,8 @@ def edited(record: Record, change: Callable[[dict[str, Any]], object]) -> dict[s
     return doc
 
 
-def test_redact_digests_a_plans_rendered_text_and_keeps_its_slots() -> None:
-    record = run(load(policy_design()), 0.1)
-    view = json.loads(redact(record, b"k" * 32))
-    plan = next(i for i in view["log"] if i["item"] == "plan")
-    assert plan["reply"].startswith("hmac-sha256:")
-    assert plan["slots"]["reply"][0] == {"name": "n", "origin": {"ref": "t:state.name"}}
-    assert plan["rows"] == [2, 3]
-
-
-GOLDEN_DESIGN = "sha256:e316993246df5e97c63f56f26adab593072fb85bc21c66bd98714a9f701b9a22"
-GOLDEN_RECORD = "sha256:329010b11a575d43f5785b838dd279e9ede9a098dd146ea492450eb670bd309a"
+GOLDEN_DESIGN = "sha256:2ea189ff88ad7dbdbcb28ecd9fab4d4bcfdc0e7c8c54037cb4ee95b92b479515"
+GOLDEN_RECORD = "sha256:01e6a4b16429eca001a5a8435b0e9b77b51f2365cb3a0270788f433b394ff6b1"
 
 
 def test_a_golden_table_turn() -> None:
@@ -951,49 +792,11 @@ def test_the_grid_takes_a_tables_cells_and_bindings() -> None:
 def test_an_integer_literal_is_probed_on_both_sides() -> None:
     table = Table("d:tab", "boolean", "F", ["t:state.n"], [[">= 2", True], ["-", False]])
 
-    def pol(r: Any) -> Any:
-        from ommat import Plan
-
-        return Plan("inform", reply=str(r.read("d:tab")))
-
-    loaded = load(
-        design(("tab", table), policy=Policy(pol, version="1", reads=["d:tab", "t:state.n"]))
-    )
-    report = unsure_to_execute(loaded, values={})
-    assert report["execute"] == []
+    loaded = load(design(("tab", table), reads=("d:tab", "t:state.n")))
     from ommat.helpers._points import fill
 
     points = [p.live for p in fill(loaded, ["t:state.n"], {})["t:state.n"]]
     assert points == [1, 2, 3]
-
-
-def test_the_abstention_search_reports_a_pick_inside_a_data_rule() -> None:
-    def pol(r: Any) -> Any:
-        from ommat import Plan, Step
-
-        return Plan("execute", [Step("notify")])
-
-    def keep(r: Any) -> Any:
-        urgent = r.read("d:urgent")
-        return "yes" if isinstance(urgent, Unsure) else urgent
-
-    keeper = Rule("d:keep", t.label("no", "yes"), keep, version="1", reads=["d:urgent"])
-    loaded = load(
-        asked(
-            ("keep", keeper),
-            policy=Policy(pol, version="1", reads=["d:keep"]),
-            tools=["notify"],
-            state=t.record(name=t.string),
-        )
-    )
-    report = unsure_to_execute(loaded, values={"t:state.name": ["Ada"]})
-    assert [i["read"] for i in report["execute"]] == ["d:keep", "q:urgent"]
-
-
-def test_the_lints_run_over_a_policy_table() -> None:
-    loaded = load(dataclasses.replace(policy_design(), state=t.record(name=t.string)))
-    report = unsure_to_execute(loaded, values={"t:state.name": ["Ada"]})
-    assert report["execute"] == []
 
 
 def test_a_count_table_is_probed_over_the_values_given() -> None:
@@ -1001,17 +804,8 @@ def test_a_count_table_is_probed_over_the_values_given() -> None:
         "d:tab", "boolean", "F", [Helper("size", "t:state.items")], [[">= 2", True], ["-", False]]
     )
 
-    def pol(r: Any) -> Any:
-        from ommat import Plan
-
-        return Plan("inform", reply="x")
-
     loaded = load(
-        design(
-            ("tab", table),
-            policy=Policy(pol, version="1", reads=["d:tab"]),
-            state=t.record(items=t.list_(t.integer())),
-        )
+        design(("tab", table), reads=("d:tab",), state=t.record(items=t.list_(t.integer())))
     )
     assert "t:state.items" not in loaded._grid
     with pytest.raises(ValueError, match="unfilled"):
@@ -1023,60 +817,13 @@ def test_a_count_table_is_probed_over_the_values_given() -> None:
 # Further cases
 
 
-def test_a_design_and_its_document_give_one_record_whatever_the_argument_order() -> None:
-    literal = Origin(literal={"z": 1, "a": [2, {"y": 3, "b": 4}]})
-    plans = {
-        **PLANS,
-        "page": PlanDeclaration(
-            "execute",
-            [
-                Step("notify", {"who": Origin(ref="t:state.name"), "extra": literal}),
-                Step("notify", {"z": Binding(1, "id"), "a": Origin(literal=1.0)}),
-            ],
-        ),
-    }
-    built = load(dataclasses.replace(policy_design(), plans=plans))
+def test_a_design_and_its_document_give_one_record() -> None:
+    built = load(policy_design())
     stored = load(built.document)
     assert stored.design_hash == built.design_hash
     a, b = run(built, 0.9), run(stored, 0.9)
     assert a.record_hash == b.record_hash
     assert replay_sync(a, stored)[1] == []
-    step = item(a, "plan")["steps"][0]
-    assert list(step["arguments"]) == ["extra", "who"]
-    assert step["arguments"]["extra"] == {"literal": {"a": [2, {"b": 4, "y": 3}], "z": 1}}
-
-
-def test_a_clarify_plan_renders_its_reason_and_reply_slots() -> None:
-    plans = {
-        **PLANS,
-        "tell": PlanDeclaration(
-            "clarify",
-            reason=Text("Checked {n}.", [{"name": "n", "origin": {"ref": "t:state.name"}}]),
-            reply=Text("Which {{one}} for {n}?", [{"name": "n", "origin": {"ref": "t:state.n"}}]),
-        ),
-    }
-    plan = item(run(load(dataclasses.replace(policy_design(), plans=plans)), 0.1), "plan")
-    assert plan["kind"] == "clarify"
-    assert plan["reason"] == "Checked Ada."
-    assert plan["reply"] == "Which {one} for 3?"
-    assert list(plan["slots"]) == ["reason", "reply"]
-
-
-def test_a_row_whose_plans_slot_holds_a_marker_is_skipped() -> None:
-    plans = {
-        **PLANS,
-        "tell": PlanDeclaration(
-            "inform", reply=Text("Said {s}.", [{"name": "s", "origin": {"ref": "d:s0"}}])
-        ),
-    }
-    for kind, cause in (("Unsure", None), ("Unavailable", {"code": "required", "refs": ["d:s0"]})):
-        design_ = dataclasses.replace(
-            policy_design(), rules={**policy_design().rules, **srcs(kind)}, plans=plans
-        )
-        plan = item(run(load(design_), 0.1), "plan")
-        assert plan["kind"] == "escalate"
-        assert plan["cause"] == cause
-        assert plan["rows"] == [3]
 
 
 CHOOSE = Source(
@@ -1089,12 +836,6 @@ CHOOSE = Source(
             text={"ref": "t:state.name"},
         ),
     },
-    needs=["t:state"],
-)
-
-
-DESK = Source(
-    {"q:desk": Question("choice", Text("Which desk?"), labels=("hotel", "flight", "other"))},
     needs=["t:state"],
 )
 
@@ -1193,29 +934,9 @@ def test_a_collect_sum_is_exact_over_the_decimals() -> None:
     assert item(record, "entry", "d:tab")["value"] == 0.3
 
 
-def test_rule_2_names_inputs_then_origins_then_slots_and_the_first_input_of_a_cell() -> None:
-    plans = {
-        **PLANS,
-        "page": PlanDeclaration(
-            "execute",
-            [Step("notify", {"who": Origin(ref="d:s1")})],
-            reason=Text("Paging {s}.", [{"name": "s", "origin": {"ref": "d:s2"}}]),
-        ),
-    }
-    policy = PolicyTable(["d:s0"], [[{"one_of": [1, 2]}, "page"], ["-", "ask"]])
-    for kinds, named in (
-        (("Unavailable", "Unavailable", "Unavailable"), "d:s0"),
-        (("value", "Unavailable", "Unavailable"), "d:s1"),
-        (("value", "value", "Unavailable"), "d:s2"),
-    ):
-        design_ = dataclasses.replace(
-            policy_design(),
-            rules={**policy_design().rules, **srcs(*kinds)},
-            plans=plans,
-            policy=policy,
-        )
-        plan = item(run(load(design_), 0.9), "plan")
-        assert plan["cause"] == {"code": "required", "refs": [named]}
+def test_rule_2_names_the_first_input_of_a_cell() -> None:
+    listed = tab("F", ["d:s0"], [[{"one_of": [1, 2]}, 1], ["-", 2]])
+    assert value(listed, rules=srcs("Unavailable"))["cause"]["refs"] == ["d:s0"]
     both = tab("F", ["d:s0", "d:s1"], [["-", ">= d:s0", 1], ["-", "-", 2]])
     assert value(both, rules=srcs("Unavailable", "Unavailable"))["cause"]["refs"] == ["d:s0"]
     one_side = tab("F", ["d:s0", "d:s1"], [[">= d:s1", "-", 1], ["-", "-", 2]])
@@ -1236,16 +957,6 @@ def test_a_comparison_against_a_marker_and_an_in_over_a_marker_do_not_match() ->
     )
     table = tab("F", ["t:state.n", "d:s0"], [["in d:s0", "-", 1], ["-", "-", 2]])
     assert value(table, rules={"s0": listed}) == 2
-
-
-def test_the_abstention_lint_finds_an_execute_on_a_policy_tables_catch_all() -> None:
-    plans = {"go": PlanDeclaration("execute", [Step("notify")]), "tell": PLANS["tell"]}
-    policy = PolicyTable(["d:urgent"], [["no", "tell"], ["-", "go"]])
-    design_ = dataclasses.replace(
-        policy_design(), plans=plans, policy=policy, state=t.record(name=t.string)
-    )
-    report = unsure_to_execute(load(design_), values={"t:state.name": ["Ada"]})
-    assert [i["read"] for i in report["execute"]] == ["d:urgent", "q:urgent"]
 
 
 def test_the_dead_question_lint_finds_a_question_a_policy_table_rests_on_live() -> None:
@@ -1343,36 +1054,8 @@ def test_further_clauses(table: Table, check: int, says: str) -> None:
     refused(table, check, says)
 
 
-def test_a_policy_input_outside_the_domain_and_a_step_requirement_ref_fail_check_10() -> None:
-    from ommat import Requirement
-
-    found = failures(
-        dataclasses.replace(policy_design(), policy=PolicyTable(["\ud800"], [["-", "ask"]]))
-    )
-    assert any(c == 10 and "value domain" in m for c, m in found)
-    bad = Requirement(3, "x")  # type: ignore[arg-type]
-    plans = {**PLANS, "page": PlanDeclaration("execute", [Step("notify", {}, [bad])])}
-    found = failures(dataclasses.replace(policy_design(), plans=plans))
-    assert any(c == 10 and "ref is not a string" in m for c, m in found)
-
-
-def test_more_plan_clauses_at_load() -> None:
-    from ommat import Requirement
-
-    plans = {
-        **PLANS,
-        "page": PlanDeclaration("execute", [Step("notify", {"who": Origin(ref="d:none")})]),
-    }
-    found = failures(dataclasses.replace(policy_design(), plans=plans))
-    assert any(c == 3 and "d:none" in m for c, m in found)
-    plans = {
-        **PLANS,
-        "page": PlanDeclaration(
-            "execute", [Step("notify", {}, [Requirement("d:urgent", "maybe")])]
-        ),
-    }
-    found = failures(dataclasses.replace(policy_design(), plans=plans))
-    assert any(c == 9 and "can never hold" in m for c, m in found)
+def test_a_tables_input_outside_the_domain_fails_check_10() -> None:
+    refused(tab("F", ["\ud800"], [["-", 1]]), 10, "value domain")
 
 
 def test_a_mass_or_thresholds_leaf_names_labels_of_its_read_once() -> None:
@@ -1424,12 +1107,6 @@ def test_a_hand_edited_input_missing_a_member_fails_check_11() -> None:
     assert {c for c, _ in failures(doc)} == {11}
 
 
-def test_a_declared_plans_slots_are_read_only() -> None:
-    decision = decide_sync(load(policy_design()), BASE, {"default": answering(0.1)})
-    with pytest.raises(TypeError):
-        decision.plan.slots["reply"][0]["name"] = "x"  # type: ignore[index]
-
-
 @pytest.mark.parametrize(
     ("cell", "n", "expected"),
     [(3, 3, 1), (3, 4, 0), ({"one_of": [2, 3]}, 3, 1), ({"one_of": [2, 4]}, 3, 0)],
@@ -1450,8 +1127,10 @@ def test_the_grid_takes_intervals_extract_values_and_the_policy_tables_cells() -
     loaded = load(design(("tab", table)))
     assert loaded._grid["t:state.n"] == (2, 5)
     assert loaded._grid["t:state.x"] == ("hi", "lo")
-    policy = PolicyTable(["t:state.n"], [[">= 2", "page"], ["-", "ask"]])
-    loaded = load(dataclasses.replace(policy_design(), policy=policy))
+    act = Table(
+        "d:act", t.label("page", "ask"), "F", ["t:state.n"], [[">= 2", "page"], ["-", "ask"]]
+    )
+    loaded = load(design(("act", act), policy="d:act"))
     assert loaded._grid["t:state.n"] == (2,)
     leaves = {**LEAVES, "null": Parameter(t.number(0, 1), 0.5), "big": Parameter(t.number(), 9)}
     number_ref = Source(
@@ -1475,47 +1154,6 @@ def test_a_boolean_cell_and_a_value_cell_over_a_size_input_are_no_boundary() -> 
     assert "t:state.items" not in load(design(("tab", count)))._grid
 
 
-def test_the_abstention_search_through_each_table_helper() -> None:
-    plans = {"go": PlanDeclaration("execute", [Step("notify")]), "tell": PLANS["tell"]}
-
-    def search(table: Table, **changes: Any) -> list[str]:
-        policy = PolicyTable(["d:share"], [[True, "tell"], ["-", "go"]])
-        design_ = asked(
-            ("share", table),
-            plans=plans,
-            policy=policy,
-            tools=["notify"],
-            state=t.record(name=t.string),
-            **changes,
-        )
-        report = unsure_to_execute(load(design_), values={"t:state.name": ["Ada"]})
-        return [i["read"] for i in report["execute"]]
-
-    leaves = {
-        **LEAVES,
-        "th": Parameter(t.mapping(t.number(0, 1)), {"hotel": 0.6}),
-        "labels": Parameter(t.list_(t.string), ["yes"]),
-    }
-    picked = Table(
-        "d:share",
-        "boolean",
-        "F",
-        [Helper("pick_with_thresholds", "q:desk", thresholds="th", margin="margin")],
-        [["hotel", True], ["-", False]],
-    )
-    # d:share always matches a row, so the first search leaves it; the pick it rests on
-    # abstains through the turn.
-    assert search(picked, parameters=leaves, sources={"s": ASK, "c": DESK}) == ["q:desk"]
-    massed = Table(
-        "d:share",
-        "boolean",
-        "F",
-        [Helper("mass", "q:urgent", labels="labels")],
-        [[">= hi", True], ["-", False]],
-    )
-    assert search(massed, parameters=leaves) == []
-
-
 def test_a_marker_row_under_u_stands_over_an_outage() -> None:
     table = tab("U", ["d:s0"], [[1, 1], ["Unavailable", 2]])
     assert value(table, rules=srcs("Unavailable")) == 2
@@ -1532,8 +1170,8 @@ def test_hostile_and_deep_rows_fail_load_cleanly() -> None:
         deep: Any = 1
         for _ in range(depth):
             deep = [deep]
-        doc = json.loads(load(policy_design()).document)
-        doc["plans"]["page"]["steps"][0]["arguments"] = {"who": {"literal": deep}}
+        doc = table_doc()
+        row_of(doc)["output"] = deep
         with contextlib.suppress(InvalidDesign):  # loads, or is refused; never raises else
             load(doc)
     doc = table_doc()
@@ -1621,24 +1259,6 @@ def test_rows_split_at_a_shared_bound_never_both_match(table: Table) -> None:
     load(design(("tab", table)))
 
 
-def test_rule_2_orders_a_steps_origins_by_argument_name() -> None:
-    plans = {
-        **PLANS,
-        "page": PlanDeclaration(
-            "execute",
-            [Step("notify", {"zz": Origin(ref="d:s1"), "aa": Origin(ref="d:s2")})],
-        ),
-    }
-    policy = PolicyTable(["d:s0"], [["-", "page"], ["-", "ask"]])
-    design_ = dataclasses.replace(
-        policy_design(),
-        rules={**policy_design().rules, **srcs("value", "Unavailable", "Unavailable")},
-        plans=plans,
-        policy=policy,
-    )
-    assert item(run(load(design_), 0.9), "plan")["cause"]["refs"] == ["d:s2"]
-
-
 def test_a_cell_comparing_an_input_with_itself_fails_check_9() -> None:
     refused(tab("F", ["t:state.n"], [[">= t:state.n", 1]]), 9, "with itself")
 
@@ -1720,34 +1340,6 @@ def test_markers_cells_overlap_by_their_kinds() -> None:
     refused(tab("U", ["t:state.n"], [["Unsure or Unavailable", 1], ["Unsure", 2]]), 9, "overlap")
 
 
-def test_the_lint_skips_a_table_that_cannot_write_unsure() -> None:
-    def pol(r: Any) -> Any:
-        from ommat import Plan, Step
-
-        return Plan("execute", [Step("notify")])
-
-    gate = Table("d:gate", "boolean", "F", ["t:state.n"], [[">= 2", True], ["-", False]])
-    loaded = load(
-        design(("gate", gate), policy=Policy(pol, version="1", reads=["d:gate"]), tools=["notify"])
-    )
-    assert unsure_to_execute(loaded)["execute"] == []
-    abstains = Table("d:gate", "boolean", "F", ["t:state.n"], [[">= 2", True], ["-", Unsure]])
-    loaded = load(
-        design(
-            ("gate", abstains), policy=Policy(pol, version="1", reads=["d:gate"]), tools=["notify"]
-        )
-    )
-    assert [i["read"] for i in unsure_to_execute(loaded)["execute"]] == ["d:gate"]
-    passing = Table("d:gate", "integer", "F", ["t:state.n"], [["-", Input("t:state.n")]])
-    loaded = load(
-        design(
-            ("gate", passing), policy=Policy(pol, version="1", reads=["d:gate"]), tools=["notify"]
-        )
-    )
-    report = unsure_to_execute(loaded, values={"d:gate": [1]})
-    assert [i["read"] for i in report["execute"]] == ["d:gate"]
-
-
 # ---------------------------------------------------------------------------------------------
 # The Known cell
 
@@ -1791,34 +1383,26 @@ def test_a_value_row_after_a_known_cell_over_an_outage_does_not_meet_rule_2() ->
     assert value(tab("F", ["d:s0"], [["Known", 1], ["-", 2]]), rules=rules) == 2
 
 
-def test_a_known_cell_lets_a_policy_row_whose_plan_reads_an_outage_give_way() -> None:
-    plans = {
-        **PLANS,
-        "page": PlanDeclaration("execute", [Step("notify", {"who": Origin(ref="d:s0")})]),
-    }
+def test_a_known_cell_lets_a_policy_row_over_an_outage_give_way() -> None:
+    def decided(rows: list[Any]) -> tuple[Any, Record]:
+        act = Table("d:act", t.label("page", "tell", "ask"), "F", ["d:urgent", "d:s0"], rows)
+        design_ = dataclasses.replace(
+            policy_design(act), rules={**policy_design(act).rules, **srcs("Unavailable")}
+        )
+        decision = decide_sync(load(design_), BASE, {"default": answering(0.9)})
+        return decision, decision.record
+
     rows = [["yes", "Known", "page"], ["yes", "-", "tell"], ["-", "-", "ask"]]
-    design_ = dataclasses.replace(
-        policy_design(),
-        rules={**policy_design().rules, **srcs("Unavailable")},
-        plans=plans,
-        policy=PolicyTable(["d:urgent", "d:s0"], rows),
-    )
-    record = run(load(design_), 0.9)
-    plan = item(record, "plan")
-    assert plan["kind"] == "inform"
-    assert plan["cause"] is None
-    assert plan["rows"] == [2, 3]
+    decision, record = decided(rows)
+    assert decision.estimate == "tell"
+    assert item(record, "entry", "d:act")["rows"] == [2, 3]
     assert item(record, "entry", "d:s0")["marker"]["kind"] == "Unavailable"
-    # With no Known cell the same outage escalates, naming the origin.
-    rows = [["yes", "-", "page"], ["yes", "-", "tell"], ["-", "-", "ask"]]
-    escalated = item(
-        run(
-            load(dataclasses.replace(design_, policy=PolicyTable(["d:urgent", "d:s0"], rows))), 0.9
-        ),
-        "plan",
-    )
-    assert escalated["kind"] == "escalate"
-    assert escalated["cause"] == {"code": "required", "refs": ["d:s0"]}
+    # With a value cell over the same outage the policy is Unavailable, naming the input.
+    rows = [["yes", 1, "page"], ["yes", "-", "tell"], ["-", "-", "ask"]]
+    decision, record = decided(rows)
+    assert isinstance(decision.estimate, Unavailable)
+    cause = item(record, "entry", "d:act")["marker"]["cause"]
+    assert cause == {"code": "required", "refs": ["d:s0"]}
 
 
 def test_a_known_cell_stands_over_a_bare_question_and_a_record() -> None:
@@ -1831,7 +1415,7 @@ def test_a_known_cell_stands_over_a_bare_question_and_a_record() -> None:
 def test_a_known_cell_is_written_tagged_and_round_trips() -> None:
     loaded = load(design(("tab", tab("F", ["t:state.n"], [["Known", 1], ["-", 0]]))))
     doc = json.loads(loaded.document)
-    assert doc["format"] == 9
+    assert doc["format"] == 10
     assert doc["rules"]["tab"]["rows"][0]["cells"][0] == {"known": True}
     assert load(loaded.document).design_hash == loaded.design_hash
 

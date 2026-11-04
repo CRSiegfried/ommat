@@ -12,12 +12,11 @@ Include what you found, how to reproduce it, and the versions affected. You can 
 
 ## What counts
 
-ommat runs code you supply (oracle bindings, function `when`s, rules, the policy, the codec, the observer, and the `functions` mapping given to `load`) in your process; it does not sandbox it. The engine runs no step of a plan: you run the plan, with your own workflow engine or with the reference runner, which calls the tools you pass it. Reports in scope include ways ommat itself breaks a guarantee it documents, for example:
+ommat runs code you supply (oracle bindings, function `when`s, rules, the policy, the codec, the observer, and the `functions` mapping given to `load`) in your process; it does not sandbox it. The engine stops at decide: it names no tool, step or action, and the caller acts on the decision. Reports in scope include ways ommat itself breaks a guarantee it documents, for example:
 
-- the guard passing a requirement whose estimate is unknown (`Unsure`, `Unavailable` or `Unasked`)
+- decide returning anything but the policy's entry as the decision, or a marker entry not read as undecided
 - the model being consulted after decide returns
 - a rule reading something it did not declare
-- the reference runner calling any tool for a decision it must refuse (a refused verdict, a plan that is not `execute`, or a step whose tool it was not given), calling a step outside the decision's steps, or calling a step twice
 - a redacted view showing a non-null `identifier` or `content` value instead of its keyed digest
 
 The record holds every value of a turn and is as sensitive as the turn's inputs; redaction is a separate view of it. The core makes no network calls and has no runtime dependencies. Issues in optional extras' third-party SDKs belong with those projects.

@@ -7,39 +7,34 @@ with its own needs: ``details``, when the problem was first noticed, against the
 where it is; and ``timing``, the time of day it was seen. A registry, called through its own
 oracle, lists the places that already have an open work order.
 
-Every label is described but ``other``, so a binding meets both forms. The policy is one table,
-read top to bottom; the first row that matches decides:
+Every label is described but ``other``, so a binding meets both forms. The policy is ``d:route``,
+an ordinary rule read top to bottom; the first row that matches decides:
 
 ====================  ==============================  ==========================================
-``d:hazard``          the other reads                 plan
+``d:hazard``          the other reads                 decision
 ====================  ==============================  ==========================================
-``yes``               anything                        escalate: a hazard to people
-a marker              anything                        escalate, naming the ref and its cause
-``no``                a marker on any                 escalate, naming the ref and its cause
-``no``                ``d:asset`` is ``other``        inform: not a public-works asset
-``no``                a place has an open order       inform: an order is already open there
-``no``                all settled                     execute ``open_work_order``
+``yes``               anything                        ``send_crew``: a hazard to people
+a marker              anything                        that marker: undecided
+``no``                a marker on any                 that marker: undecided
+``no``                ``d:asset`` is ``other``        ``front_desk``: not a public-works asset
+``no``                a place has an open order       ``already_open``: an order is open there
+``no``                all settled                     ``open_work_order``
 ====================  ==============================  ==========================================
 
-A rule that cannot settle abstains with ``Unsure`` naming the answer that fell short, so the
-escalation says which answer stopped the order. ``d:noticed`` and ``d:seen_at`` are where
-``p_null`` matters: at or above its bar the report gives no date or time and the order goes out
-without one; below it, a missing value abstains.
+A rule that cannot settle abstains with ``Unsure`` naming the answer that fell short, and the
+policy hands that marker on, so the undecided turn says which answer stopped the order.
+``d:noticed`` and ``d:seen_at`` are where ``p_null`` matters: at or above its bar the report
+gives no date or time and the order goes out without one; below it, a missing value abstains.
 """
 
 from ommat import (
     Cause,
     Design,
-    Origin,
     Parameter,
-    Plan,
-    Policy,
     Question,
     ReadView,
-    Requirement,
     Rule,
     Source,
-    Step,
     Text,
     Unasked,
     Unavailable,
@@ -236,41 +231,31 @@ RULES = {
 SETTLED = ("d:asset", "d:severity", "d:noticed", "d:seen_at", "d:places", "t:open_orders")
 
 
-def unsettled(ref: str, marker: Unsure | Unavailable | Unasked) -> Plan:
-    """Escalate naming the ref, the marker's kind and code, and the refs of its cause."""
-    on = ", ".join(sorted(marker.cause.refs))
-    return Plan("escalate", reason=f"{ref} {marker.kind}: {marker.cause.code} on {on}")
-
-
-def route(r: ReadView) -> Plan:
+def route(r: ReadView) -> object:
     """The table in the module docstring, row by row."""
     danger = r.read("d:hazard")
     if danger == "yes":
-        return Plan("escalate", reason="a hazard to people: send a crew now")
+        return "send_crew"
     if isinstance(danger, MARKERS):
-        return unsettled("d:hazard", danger)
+        return danger
     for ref in SETTLED:
         value = r.read(ref)
         if isinstance(value, MARKERS):
-            return unsettled(ref, value)
+            return value
     if r.read("d:asset") == "other":
-        return Plan("inform", reply="Not a public-works asset; passed to the front desk.")
-    already = sorted(set(r.read("d:places")) & set(r.read("t:open_orders")))
-    if already:
-        return Plan("inform", reply=f"A work order is already open at {', '.join(already)}.")
-    order = Step(
-        "open_work_order",
-        {
-            "asset": Origin(ref="d:asset"),
-            "severity": Origin(ref="d:severity"),
-            "noticed": Origin(ref="d:noticed"),
-            "seen_at": Origin(ref="d:seen_at"),
-            "places": Origin(ref="d:places"),
-        },
-        [Requirement("d:hazard", "no")],
-    )
-    return Plan("execute", [order])
+        return "front_desk"
+    if set(r.read("d:places")) & set(r.read("t:open_orders")):
+        return "already_open"
+    return "open_work_order"
 
+
+RULES["route"] = Rule(
+    "d:route",
+    t.label("already_open", "front_desk", "open_work_order", "send_crew"),
+    route,
+    version="1",
+    reads=["d:hazard", *SETTLED],
+)
 
 DESIGN = Design(
     name="street-reports",
@@ -278,10 +263,5 @@ DESIGN = Design(
     sources=SOURCES,
     rules=RULES,
     parameters=PARAMETERS,
-    policy=Policy(
-        route,
-        version="1",
-        reads=["d:hazard", *SETTLED],
-    ),
-    tools=["open_work_order"],
+    policy="d:route",
 )

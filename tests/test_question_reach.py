@@ -22,13 +22,11 @@ from ommat import (
     EntryRefusal,
     InvalidRecord,
     Parameter,
-    Plan,
-    Policy,
     Question,
     Record,
-    Requirement,
     Rule,
     Source,
+    Table,
     Text,
     Unavailable,
     Undetermined,
@@ -48,7 +46,7 @@ from ommat.evaluation import (
 from scripted import Scripted, returns
 from test_deciding_inputs import records_in
 from test_replay import edited, entry
-from test_use_answers import live
+from test_use_answers import format_7, live
 
 R = RefusalReason
 
@@ -60,10 +58,16 @@ def go(r: Any) -> object:
     return picked if isinstance(picked, Undetermined) else picked == "yes"
 
 
-def by_go(r: Any) -> Plan:
-    if r.read("d:go") is True:
-        return Plan("execute")
-    return Plan("escalate", reason="not sure")
+ACT = t.label("proceed", "hold")
+
+
+def act(function: Any, *reads: str) -> Rule:
+    """The policy's rule, ``d:act``, of ``function`` over ``reads``."""
+    return Rule("d:act", ACT, function, version="p", reads=list(reads))
+
+
+def by_go(r: Any) -> str:
+    return "proceed" if r.read("d:go") is True else "hold"
 
 
 def never(r: Any) -> bool:
@@ -79,10 +83,8 @@ def known(r: Any) -> bool:
     return not isinstance(r.read("q:tone"), Undetermined)
 
 
-def by_known(r: Any) -> Plan:
-    if r.read("d:known") is True:
-        return Plan("execute")
-    return Plan("escalate", reason="no tone")
+def by_known(r: Any) -> str:
+    return "proceed" if r.read("d:known") is True else "hold"
 
 
 GO = Rule(
@@ -107,12 +109,15 @@ LATE = Source(
 MORE = Source({"t:more": t.boolean}, needs=["q:tone"], when=When(cold, version="1"))
 
 
-def design(**changes: Any) -> Design:
+def design(policy: Rule | Table | None = None, **changes: Any) -> Design:
+    """The design, its policy ``d:act``: ``policy`` or ``by_go``'s rule, beside the ``rules``
+    given or ``go``."""
+    rules = changes.pop("rules", {"go": GO})
     fields: dict[str, Any] = {
         "state": t.record(),
-        "policy": Policy(by_go, version="p", reads=["d:go"]),
+        "policy": "d:act",
         "sources": {"ask": ASK, "late": LATE},
-        "rules": {"go": GO},
+        "rules": {**rules, "act": act(by_go, "d:go") if policy is None else policy},
         "parameters": {
             "go/bar": Parameter(t.number(0, 1), 0.8),
             "go/margin": Parameter(t.number(0, 1), 0.2),
@@ -124,11 +129,7 @@ def design(**changes: Any) -> Design:
 
 LOADED = load(design())
 GATED = load(design(sources={"ask": ASK, "late": LATE, "more": MORE}))
-MARKED = load(
-    design(
-        policy=Policy(by_known, version="p", reads=["d:known"]), rules={"go": GO, "known": KNOWN}
-    )
-)
+MARKED = load(design(policy=act(by_known, "d:known"), rules={"go": GO, "known": KNOWN}))
 
 WARMISH = {"warm": 0.6, "cold": 0.4}
 
@@ -152,13 +153,18 @@ def answer(kind: str, labels: list[str], **probabilities: float) -> dict[str, An
 
 @pytest.fixture
 def tried(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any, list[str]]]:
-    """Each trial run: its entry's ref, the value set and its findings' kinds."""
+    """Each trial run: its entry's ref, the value set and its findings' kinds, an entry
+    finding's with its ref."""
     seen: list[tuple[str, Any, list[str]]] = []
     real = _reach._applied
 
     async def spy(read: Any, log: Any, loaded: Any, edits: Any, f: Any) -> Any:
         out = await real(read, log, loaded, edits, f)
-        seen.append((edits[0].ref, edits[0].value, [str(x["kind"]) for x in out.findings]))
+        kinds = [
+            " ".join([str(x["kind"]), *([x["ref"]] if x["kind"] == "entry" else [])])
+            for x in out.findings
+        ]
+        seen.append((edits[0].ref, edits[0].value, kinds))
         return out
 
     monkeypatch.setattr(_reach, "_applied", spy)
@@ -220,7 +226,7 @@ def test_a_reaching_trial_beats_an_undetermined_one() -> None:
     loaded = load(
         design(
             sources={"ask": ASK, "late": LATE, "more": MORE},
-            policy=Policy(by_known, version="p", reads=["d:known"]),
+            policy=act(by_known, "d:known"),
             rules={"go": GO, "known": KNOWN},
         )
     )
@@ -228,74 +234,64 @@ def test_a_reaching_trial_beats_an_undetermined_one() -> None:
     assert report["questions"]["q:tone"]["status"] == "live"  # the marker reaches
 
 
-def by_cold(r: Any) -> Plan:
-    if r.read("d:cold") is True:
-        return Plan("execute")
-    return Plan("escalate", reason="warm")
+def by_cold(r: Any) -> str:
+    return "proceed" if r.read("d:cold") is True else "hold"
 
 
-def test_a_trial_outside_the_record_is_undetermined_though_its_plan_changes(
+def test_a_trial_outside_the_record_is_undetermined_though_its_decision_changes(
     tried: list[Any],
 ) -> None:
     loaded = load(
         design(
             sources={"ask": ASK, "late": LATE, "more": MORE},
-            policy=Policy(by_cold, version="p", reads=["d:cold"]),
+            policy=act(by_cold, "d:cold"),
             rules={"cold": Rule("d:cold", t.boolean, cold, version="1", reads=["q:tone"])},
         )
     )
     report = question_reach_sync([turn(loaded=loaded)], loaded)
     tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
-    # cold at 1 opens the gate on a source never called and changes the plan
+    # cold at 1 opens the gate on a source never called and changes the decision
     assert "stale-question" in tone[1]
-    assert "plan" in tone[1]
-    assert not any("plan" in kinds or "verdict" in kinds for kinds in (tone[0], tone[2]))
+    assert "entry d:act" in tone[1]
+    assert not any("entry d:act" in kinds for kinds in (tone[0], tone[2]))
     assert report["questions"]["q:tone"] == {"status": "not-determined", "witness": None}
 
 
-def always(r: Any) -> Plan:
-    return Plan("execute")
+def leaning(r: Any) -> bool:
+    answer = r.read("q:go")
+    return not isinstance(answer, Undetermined) and answer.probabilities["yes"] >= 0.5
 
 
-def test_a_trial_changing_the_verdict_alone_reaches(tried: list[Any]) -> None:
-    ok = Rule(
-        "d:ok",
-        t.boolean,
-        go,
-        version="1",
-        reads=["q:go"],
-        params=["go/bar", "go/margin"],
-        boundaries={"q:go": roles(bar=["go/bar"], margin=["go/margin"])},
-    )
-    loaded = load(
-        design(
-            policy=Policy(always, version="p"),
-            rules={"ok": ok},
-            requirements=[Requirement("d:ok", True)],
-            default_deny=False,
-        )
-    )
+def test_a_trial_changing_the_policys_rows_alone_does_not_reach(tried: list[Any]) -> None:
+    """The decision is compared by ``decision_bytes``: the entry's value, not its rows."""
+    table = Table("d:act", ACT, "F", ["d:yes"], [[True, "proceed"], [False, "proceed"]])
+    lean = Rule("d:yes", t.boolean, leaning, version="1", reads=["q:go"])
+    loaded = load(design(policy=table, rules={"go": GO, "yes": lean}))
+    report = question_reach_sync([turn(loaded=loaded)], loaded)
+    go_trials = [kinds for ref, _, kinds in tried if ref == "q:go"]
+    assert any("entry d:act" in kinds for kinds in go_trials)  # its rows changed
+    assert report["questions"]["q:go"] == {"status": "no-change-found", "witness": None}
+
+
+def refs_by_go(r: Any) -> object:
+    return Unavailable(Cause("abstained", ["d:go"] if r.read("d:go") is True else []))
+
+
+def test_a_trial_changing_only_the_policys_marker_refs_is_live() -> None:
+    """The decision is compared by ``decision_bytes``: a marker's cause refs count."""
+    loaded = load(design(policy=act(refs_by_go, "d:go")))
     record = turn(loaded=loaded)
+    assert entry(record.log, "d:act")["marker"]["cause"] == {"code": "abstained", "refs": ["d:go"]}
     report = question_reach_sync([record], loaded)
     assert report["questions"]["q:go"]["status"] == "live"
-    first = next(kinds for ref, _, kinds in tried if ref == "q:go" and "verdict" in kinds)
-    assert "plan" not in first
-    witness = report["questions"]["q:go"]["witness"]
-    assert witness["value"]["probabilities"] == {"yes": 0.0, "no": 1.0}
+    assert report["questions"]["q:tone"]["status"] == "no-change-found"
 
 
-def by_both(r: Any) -> Plan:
-    if r.read("d:go") is True and r.read("d:known") is True:
-        return Plan("execute")
-    return Plan("escalate", reason="not both")
+def by_both(r: Any) -> str:
+    return "proceed" if r.read("d:go") is True and r.read("d:known") is True else "hold"
 
 
-BOTH = load(
-    design(
-        policy=Policy(by_both, version="p", reads=["d:go", "d:known"]),
-        rules={"go": GO, "known": KNOWN},
-    )
-)
+BOTH = load(design(policy=act(by_both, "d:go", "d:known"), rules={"go": GO, "known": KNOWN}))
 
 
 def test_the_witness_is_the_second_record_when_only_it_reaches(tried: list[Any]) -> None:
@@ -303,7 +299,7 @@ def test_the_witness_is_the_second_record_when_only_it_reaches(tried: list[Any])
     report = question_reach_sync([shut, open_], BOTH)
     tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
     assert len(tone) == 6  # three in each record
-    assert not any("plan" in kinds for kinds in tone[:3])  # q:go escalates the first anyway
+    assert not any("entry d:act" in kinds for kinds in tone[:3])  # q:go holds the first
     witness = report["questions"]["q:tone"]["witness"]
     assert witness["record"] == open_.record_hash
     assert witness["value"]["kind"] == "Unavailable"
@@ -385,7 +381,7 @@ def test_the_marker_trial_names_the_entry_and_its_witness_is_the_marker_form() -
 def test_the_witness_is_the_first_reaching_trial_by_record_then_point() -> None:
     low, high = turn(p_yes=0.0), turn(p_yes=0.95)
     first = question_reach_sync([low, high], LOADED)["questions"]["q:go"]["witness"]
-    # from 0.0, escalating, the first point that executes is the bar
+    # from 0.0, holding, the first point that proceeds is the bar
     assert (first["record"], first["value"]["probabilities"]) == (
         low.record_hash,
         {"yes": 0.8, "no": 0.2},
@@ -431,10 +427,8 @@ def who(r: Any) -> str:
     return max(sender.probabilities, key=sender.probabilities.__getitem__)
 
 
-def by_who(r: Any) -> Plan:
-    if r.read("d:who") == "ann":
-        return Plan("inform", reply="from ann")
-    return Plan("inform", reply="ok")
+def by_who(r: Any) -> str:
+    return "from ann" if r.read("d:who") == "ann" else "ok"
 
 
 def test_a_candidate_valued_question_is_tried_at_each_fixed_label_then_the_first_candidate(
@@ -444,8 +438,11 @@ def test_a_candidate_valued_question_is_tried_at_each_fixed_label_then_the_first
 
     d = dataclasses.replace(
         label_sets.design(),
-        rules={"who": Rule("d:who", t.string, who, version="1", reads=["q:sender"])},
-        policy=Policy(by_who, version="1", reads=["d:who"]),
+        rules={
+            "who": Rule("d:who", t.string, who, version="1", reads=["q:sender"]),
+            "reply": Rule("d:reply", t.string, by_who, version="1", reads=["d:who"]),
+        },
+        policy="d:reply",
     )
     loaded = load(d)
     record = label_sets.run(["ann", "bo"], label_sets.Model(top="bo"), d=d)
@@ -551,11 +548,16 @@ def test_values_that_is_not_a_mapping_is_a_type_error() -> None:
 
 
 def unfinished() -> Record:
-    return edited(turn(), lambda doc: doc["log"].pop())  # the verdict item, last
+    def cut(doc: dict[str, Any]) -> None:
+        """The log with its policy's entry dropped."""
+        policy = doc["log"][1]["policy"]
+        doc["log"] = [i for i in doc["log"] if not (i["item"] == "entry" and i["ref"] == policy)]
+
+    return edited(turn(), cut)
 
 
 def broken() -> Record:
-    return turn(state=5)  # a state the encoder refuses: no state entry
+    return turn(state=5)  # a state the codec refuses: a marker at its state entry
 
 
 def drifted() -> Record:
@@ -569,6 +571,7 @@ def drifted() -> Record:
 @pytest.mark.usefixtures("no_trial")
 def test_each_record_is_refused_with_its_turn_before_any_trial() -> None:
     for given, reason in (
+        (format_7(), R.wrong_design),
         (unfinished(), R.unfinished),
         (broken(), R.nothing_to_replay),
         (live(), R.wrong_design),

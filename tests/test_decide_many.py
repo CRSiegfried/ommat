@@ -59,7 +59,7 @@ def test_an_observers_raise_ends_its_turn_alone_with_its_record() -> None:
         pass
 
     def raising(index: int, item: dict[str, Any]) -> None:
-        if item["item"] == "plan":
+        if item["item"] == "round":
             raise Boom
 
     out = run(
@@ -67,14 +67,14 @@ def test_an_observers_raise_ends_its_turn_alone_with_its_record() -> None:
         LOADED,
         binding(),
         concurrency=2,
-        observer_for=lambda i: raising if i == 1 else None,
+        observer_for={1: raising}.get,
     )
     assert type(out[0]) is Decision
     failure = out[1]
     assert type(failure) is TurnFailure
     assert type(failure.error) is Boom
     assert failure.record is not None
-    assert failure.record.log[-1]["item"] == "plan"
+    assert failure.record.log[-1]["item"] == "round"
 
 
 def test_a_turn_cancelled_alone_is_collected_with_its_record() -> None:
@@ -169,7 +169,7 @@ def test_a_turn_cancelled_from_outside_the_run_keeps_its_place() -> None:
         LOADED,
         binding(),
         concurrency=3,
-        observer_for=lambda i: cancelling if i == 1 else None,
+        observer_for={1: cancelling}.get,
     )
     assert [type(r) for r in out] == [Decision, TurnFailure, Decision]
     assert type(out[1].error) is asyncio.CancelledError

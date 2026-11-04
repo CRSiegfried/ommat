@@ -13,15 +13,16 @@ conforming to the question's value type and list flag or ``None``; a label of ``
 withdraws. The refs of one gold key are the turn's refs asking one question for one candidate.
 
 Refused in order, each before any write: ``invalid-record``, each record read in turn;
-``unfinished``, a record with no ``verdict`` item; ``not-found``, then ``invalid-label``, each
-label in ``labels``' order; ``conflicting-labels``, each key in record and log order;
-``empty-copy`` when ``copy_from`` holds none of the keys, whatever its entries' formats; for each
-key given no label, in the same order, ``unknown-entry`` for its old entry of a format other
-than 1 and 2, then ``invalid-label`` for an old value that is not a label of the question,
-checked as a given one; ``held-key`` naming every key to be written that the store already
-holds. A key is written with its given label, or with none given its old one; the job writes
-nothing for a key given ``None`` or left with no label. A candidate-valued set whose entry
-holds a marker leaves its fixed part's names as the labels.
+``wrong-design``, a record before format 8; ``unfinished``, a record holding a ``cause`` item or no
+entry at the policy's ref;
+``not-found``, then ``invalid-label``, each label in ``labels``' order; ``conflicting-labels``,
+each key in record and log order; ``empty-copy`` when ``copy_from`` holds none of the keys,
+whatever its entries' formats; for each key given no label, in the same order, ``unknown-entry``
+for its old entry of a format other than 1 and 2, then ``invalid-label`` for an old value that
+is not a label of the question, checked as a given one; ``held-key`` naming every key to be
+written that the store already holds. A key is written with its given label, or with none given
+its old one; the job writes nothing for a key given ``None`` or left with no label. A
+candidate-valued set whose entry holds a marker leaves its fixed part's names as the labels.
 
 The writes are not atomic across keys: an ``OSError`` or a racing run mid-write leaves the keys
 already written, and the store being write-once, a rerun refuses ``held-key`` naming them. A
@@ -44,8 +45,9 @@ from typing import Any, cast
 from ommat._answer import AnswerKind, ValueType, _typed_member
 from ommat._canonical import encode
 from ommat._design import LoadedDesign
+from ommat._ledger import finished
 from ommat._refs import code_point_sorted, declared_ref, parse_ref
-from ommat._values import guarded_repr, type_name
+from ommat._values import POLICY_FORMAT, guarded_repr, type_name
 from ommat.evaluation._diff import _read, _run_sync
 from ommat.evaluation._edit import _NAMES, _applied, _Edit, _labels, _name, _SetEntry
 from ommat.evaluation._edit import _checked as _checked_record
@@ -78,9 +80,18 @@ def write_gold_answers(
         read = _read(document, f"records[{i}]")
         logs.setdefault(read.record_hash, read.log)  # read once: every read decodes afresh
     for turn, log in logs.items():
-        if not any(item["item"] == "verdict" for item in log):
+        if log[0]["format"] < POLICY_FORMAT:
             raise EvaluationRefusal(
-                f"turn {turn} has no verdict item", reason=_R.unfinished, turn=turn
+                f"turn {turn} is a format-{log[0]['format']} record, before format {POLICY_FORMAT}",
+                reason=_R.wrong_design,
+                turn=turn,
+            )
+    for turn, log in logs.items():
+        if not finished(log):
+            raise EvaluationRefusal(
+                f"turn {turn} is unfinished: it holds a cause item or no entry at the policy's ref",
+                reason=_R.unfinished,
+                turn=turn,
             )
     asked = {turn: _asked(log) for turn, log in logs.items()}
     formed: dict[tuple[str, str], object] = {}  # each given label as written, None withdrawing

@@ -10,7 +10,7 @@ import pytest
 
 import designs
 from designs import bounded, full, roles
-from ommat import Design, DesignFailure, InvalidDesign, Parameter, Policy, load
+from ommat import Design, DesignFailure, InvalidDesign, Parameter, load
 from ommat import types as t
 from ommat._canonical import decode
 
@@ -62,7 +62,7 @@ def test_a_q_read_takes_every_role_and_d_and_t_reads_take_leaf_paths() -> None:
         },
         "t:profile.age": ["age/limit"],
     }
-    assert doc["policy"]["boundaries"] == {"d:score": ["score/cut", "score/low"]}
+    assert doc["rules"]["act"]["boundaries"] == {"d:score": ["score/cut", "score/low"]}
     assert doc["rules"]["score"]["boundaries"]["q:intent/tone"]["mass"] == [
         {"bounds": ["unit/mass"], "labels": ["cold", "warm"]}
     ]
@@ -139,7 +139,7 @@ def test_the_grid_holds_each_reads_boundaries_by_role() -> None:
 
 
 def test_a_read_two_components_name_takes_the_union_without_repeats() -> None:
-    # The route rule names score/cut; the policy names score/low and score/cut.
+    # The route rule names score/cut; the act rule names score/low and score/cut.
     assert load(bounded())._grid["d:score"] == ("score/cut", "score/low")
 
 
@@ -350,19 +350,13 @@ def test_check_10_a_boundaries_field_of_the_wrong_form(boundaries: Any) -> None:
     only(route_with(boundaries), 10)
 
 
-def test_check_10_the_policys_boundaries_field() -> None:
-    design = full(policy=Policy(designs.policy, version="1", boundaries=["d:route"]))  # type: ignore[arg-type]
-    (failure,) = only(design, 10)
-    assert failure.names == ("policy",)
-
-
 def test_a_read_whose_boundaries_name_no_leaf_has_no_grid_entry() -> None:
     empty_mass = roles(mass=[{"labels": ["yes"], "bounds": []}])
     design = route_with({"t:profile.age": [], EMAIL: roles(), "d:score": []})
     grid = load(design)._grid
     assert "t:profile.age" not in grid
     assert EMAIL not in grid
-    assert grid["d:score"] == ("score/cut", "score/low")  # the policy's leaves still count
+    assert grid["d:score"] == ("score/cut", "score/low")  # the act rule's leaves still count
     assert EMAIL not in load(route_with({EMAIL: empty_mass}))._grid
     doc = decode(load(design).document)["rules"]["route"]["boundaries"]
     assert doc == {"d:score": [], EMAIL: roles(), "t:profile.age": []}

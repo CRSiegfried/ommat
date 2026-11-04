@@ -9,8 +9,8 @@ provenance unless a test scripts otherwise; a scripted snapshot, elicitation, pr
 attempts stands in for a live binding's.
 
 ``turn`` closes each record and checks it round-trips: no stored copy drifted, and
-``read_record`` of its ``document`` gives the same bytes. ``compiled`` runs interpret and then
-compile on the open ledger, as decide will, and checks the record so too.
+``read_record`` of its ``document`` gives the same bytes. ``decided`` runs interpret on the open
+ledger, as decide does, and checks the record so too.
 """
 
 import asyncio
@@ -25,20 +25,16 @@ from ommat import (
     Cause,
     CauseCode,
     LoadedDesign,
-    Plan,
     Record,
     SourceCall,
     Unavailable,
-    Verdict,
     read_record,
 )
 from ommat._binding import OracleBinding
-from ommat._compile import compile_turn
+from ommat._decide import _opening
 from ommat._interpret import interpret
 from ommat._ledger import Ledger, Observer
 from ommat._read_view import Access, UndeclaredRead, _UndeclaredStop
-from ommat._values import RECORD_FORMAT
-from ommat.helpers import HELPERS
 
 Batch = tuple[SourceCall, ...]
 Reply = OracleBinding
@@ -138,19 +134,8 @@ def open_ledger(
     """A ledger opened as decide opens it: the design and settings items and the state entry.
     ``state`` is in the record's form."""
     ledger = Ledger(observer)
-    ledger.append(
-        {"item": "design", "hash": loaded.design_hash, "format": RECORD_FORMAT, "helpers": HELPERS}
-    )
-    ledger.append(
-        {
-            "item": "settings",
-            "settings": dict(run),
-            "providers": dict(loaded._providers),
-            "classes": loaded._classes,
-            "grounded": dict(loaded._grounded),
-            "sets": dict(loaded._candidate_sets),
-        }
-    )
+    for item in _opening(loaded, dict(run)):
+        ledger.append(item)
     ledger.append({"item": "entry", "ref": "t:state", "round": 0, "call": None, "value": state})
     return ledger
 
@@ -221,21 +206,19 @@ def closed(ledger: Ledger) -> Record:
     return record
 
 
-def compiled(
+def decided(
     loaded: LoadedDesign,
     bindings: Mapping[str, object],
     state: object,
     *,
     observer: Observer | None = None,
     **run: Any,
-) -> tuple[Record, Plan, Verdict]:
-    """Open the ledger, run interpret and then compile over the live board it leaves, and
-    close the ledger."""
+) -> Record:
+    """Open the ledger, run interpret, as decide does, and close the ledger."""
     full = settings(**run)
     ledger = open_ledger(loaded, state, full, observer)
-    board = asyncio.run(interpret_on(ledger, loaded, state, bindings, full))
-    plan, verdict = compile_turn(ledger, loaded, board)
-    return closed(ledger), plan, verdict
+    asyncio.run(interpret_on(ledger, loaded, state, bindings, full))
+    return closed(ledger)
 
 
 # ---------------------------------------------------------------------------------------------

@@ -2,15 +2,17 @@
 """Replay: rerun decide's body over a recorded turn under a given loaded design, with the
 record as the only fixture, and report every way the rerun differs.
 
-``replay`` refuses a wrong argument before it reads the record. A record
-with no ``verdict`` item is ``unfinished``, and one with a ``verdict`` item and no state entry
-is ``nothing-to-replay``: either returns ``None`` with that finding alone. Otherwise the record's
-run settings go through decide's bounds check, and decide's body runs through its internal
-entry: the recorded state entry typed by the given design in place of the codec, the fixture
-binding under every declared oracle name and ``default``, the observer, and the record's cut in
-place of a clock reading; a scenario instead binds the fixture over the caller's bindings and
-runs on the loop's clock with no cut. A cancellation or the observer's exception
-propagates as decide lets it out, with the replay record so far and no findings.
+``replay`` refuses a wrong argument before it reads the record. Then, in order: a record before
+format 8 is ``wrong-design``, since it holds no policy's entry; one that is not finished, holding
+a ``cause`` item or no entry at the policy's ref, is ``unfinished``; and one whose ``t:state``
+entry is a marker (a broken entry, §broken-entry) or is missing is ``nothing-to-replay``: each
+returns ``None`` with that finding alone. Otherwise the record's run settings go through decide's
+bounds check, and decide's body runs through its internal entry: the recorded state entry typed
+by the given design in place of the codec, the fixture binding under every declared oracle name
+and ``default``, the observer, and the record's cut in place of a clock reading; a scenario
+instead binds the fixture over the caller's bindings and runs on the loop's clock with no cut. A
+cancellation or the observer's exception propagates as decide lets it out, with the replay record
+so far and no findings.
 
 ``_replay_with`` is the rerun itself, its fixture built from a given log's calls while the
 state entry, the settings, the cut and the compared log are the record's; ``replay`` gives the
@@ -33,11 +35,10 @@ from ommat._canonical import decode, encode
 from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings
 from ommat._design import LoadedDesign
 from ommat._fixture import Base, FixtureBinding, Keyed, RecordedCalls
-from ommat._interpret import SORTED_TEXT
-from ommat._ledger import _ITEM_DEPTH, Observer, Record
+from ommat._ledger import _ITEM_DEPTH, Observer, Record, finished
 from ommat._refs import code_point_sorted
 from ommat._typed import decoded
-from ommat._values import CONTEXT_FORMAT, KEY_ORDER_FORMAT, type_name
+from ommat._values import POLICY_FORMAT, type_name
 from ommat.helpers import HELPERS
 
 _STATE = "t:state"
@@ -54,9 +55,8 @@ class FindingKind(enum.StrEnum):
     nothing_to_replay = "nothing-to-replay"
     stale_question = "stale-question"
     unfinished = "unfinished"
+    wrong_design = "wrong-design"
     entry = "entry"
-    plan = "plan"
-    verdict = "verdict"
 
 
 _K = FindingKind
@@ -73,9 +73,12 @@ async def replay(
         raise EntryRefusal(f"record is a {type_name(record)}, not exactly a Record")
     observer_or_none(observer)
     log = record.log  # read once: every read decodes afresh
-    if not any(item["item"] == "verdict" for item in log):
+    if log[0]["format"] < POLICY_FORMAT:
+        return None, [{"kind": _K.wrong_design}]
+    if not finished(log):
         return None, [{"kind": _K.unfinished}]
-    if not any(item["item"] == "entry" and item["ref"] == _STATE for item in log):
+    state = next((i for i in log if i["item"] == "entry" and i["ref"] == _STATE), None)
+    if state is None or "marker" in state:
         return None, [{"kind": _K.nothing_to_replay}]
     rerun, found, _ = await _replay_with(log, loaded, log, observer=observer)
     return rerun, found
@@ -96,15 +99,15 @@ async def _replay_with(
     note: str = "",
     unpinned: frozenset[str] = frozenset(),
 ) -> tuple[Record, list[Finding], FixtureBinding]:
-    """Rerun the finished turn ``log`` holds, with a state entry, under ``loaded``, the fixture
-    built from the call items and entries of ``answers``, each source checked against ``base``,
-    ``answers`` when ``None``, and against ``design``, the base's design, the refs in
-    ``pinned`` and the sources in ``failed`` never, the sources in ``asked`` stale; the state
-    entry, the run settings, the cut and the log every finding compares against are ``log``'s;
-    the refs in ``unpinned`` are stale, given no answer. With ``live``, the caller's bindings
-    by oracle name, a stale source is asked of them, on the running loop's clock with no cut,
-    ``note`` naming the base record in their warnings."""
-    # Both callers checked that the log holds a state entry.
+    """Rerun the finished turn ``log`` holds, of format 8 or later with a value at its state
+    entry, under ``loaded``, the fixture built from the call items and entries of ``answers``,
+    each source checked against ``base``, ``answers`` when ``None``, and against ``design``, the
+    base's design, the refs in ``pinned`` and the sources in ``failed`` never, the sources in
+    ``asked`` stale; the state entry, the run settings, the cut and the log every finding
+    compares against are ``log``'s; the refs in ``unpinned`` are stale, given no answer. With
+    ``live``, the caller's bindings by oracle name, a stale source is asked of them, on the
+    running loop's clock with no cut, ``note`` naming the base record in their warnings."""
+    # Every caller checked that the log holds a value at its state entry.
     state = next(item for item in log if item["item"] == "entry" and item["ref"] == _STATE)
     # The settings item is second in every record from the design item on.
     recorded = cast("dict[str, Any]", log[1]["settings"])
@@ -133,14 +136,9 @@ async def _replay_with(
         bindings = {key: cast(OracleBinding, Keyed(fixture, b)) for key, b in live.items()}
         clock, cut = asyncio.get_running_loop().time(), None
     value = decoded(state["value"], loaded._types[_STATE])
-    # A record before format 6 rendered slot text sorted; its rerun renders it so too.
-    token = SORTED_TEXT.set(log[0]["format"] < KEY_ORDER_FORMAT)
-    try:
-        decision = await _turn(
-            loaded, value, bindings, run, codec=None, clock=clock, cut=cut, observer=observer
-        )
-    finally:
-        SORTED_TEXT.reset(token)
+    decision = await _turn(
+        loaded, value, bindings, run, codec=None, clock=clock, cut=cut, observer=observer
+    )
     rerun = decision.record
     return rerun, _findings(log, rerun.log, loaded, fixture), fixture
 
@@ -193,13 +191,6 @@ def _findings(
         sid, why = fixture.stale[ref]
         found.append({"kind": _K.stale_question, "ref": ref, "source": sid, "clause": why.clause})
     found += _entry_findings(log, rerun, loaded)
-    for kind in (_K.plan, _K.verdict):
-        mine, theirs = _first(log, kind.value), _first(rerun, kind.value)
-        compared = mine
-        if kind is _K.plan and mine is not None and design["format"] < CONTEXT_FORMAT:
-            compared = {**mine, "context": None}  # a record before format 5 holds no block
-        if _differ(compared, theirs):
-            found.append({"kind": kind, "recorded": mine, "replayed": theirs})
     return found
 
 
@@ -238,22 +229,8 @@ def _rule(ref: str, loaded: LoadedDesign, rules: dict[str, Any]) -> dict[str, An
     return {k: declared[k] for k in ("module", "qualname", "version", "source")}
 
 
-def _first(log: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
-    return next((item for item in log if item["item"] == kind), None)
-
-
-_LATER_MEMBERS = ("order", "grounded", "sets")
-"""The members formats 6 and 7 add to an item, which a record before them does not hold."""
-
-
 def _differ(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
-    """Two items, or a side holding none, compared by canonical bytes, ``order`` and a settings
-    item's ``grounded`` and ``sets`` included; an item of a record before the format adding
-    one does not hold it, and is compared without the other side's."""
+    """Two items, or a side holding none, compared by canonical bytes, ``order`` included."""
     if a is None or b is None:
         return a is not b
-    for member in _LATER_MEMBERS:
-        if (member in a) != (member in b):
-            a = {k: v for k, v in a.items() if k != member}
-            b = {k: v for k, v in b.items() if k != member}
     return encode(a, _ITEM_DEPTH) != encode(b, _ITEM_DEPTH)

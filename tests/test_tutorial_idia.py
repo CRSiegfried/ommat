@@ -15,7 +15,7 @@ pytest.importorskip("httpx2")
 
 import decide_live
 import idia_e2e as e2e
-from ommat import PlanKind
+from ommat import Unsure
 from ommat.bindings.idia import oracle_binding
 
 TUTORIAL = Path(__file__).parent.parent / "docs" / "tutorials" / "decide-with-idia.md"
@@ -36,12 +36,15 @@ def test_the_run_replays_from_its_logs_to_what_the_live_run_printed() -> None:
 def test_each_turn_decides_and_replays_with_no_finding() -> None:
     _, results = replayed()
     first, second, again = results
-    for plan, findings, replays in (first, second):
-        assert plan.kind is PlanKind.escalate
+    decided, findings, replays = first
+    assert isinstance(decided, Unsure)
+    assert decided.cause.refs == ("q:triage/hazard",)
+    assert second[0] == "send_crew"
+    for _, findings, replays in (first, second):
         assert findings == []
         assert replays
-    plan, record = again
-    assert plan == first[0]
+    decided, record = again
+    assert decided == first[0]
     registry = next(i for i in record.log if i.get("ref") == "t:open_orders")
     assert registry["marker"]["cause"]["code"] == "unsupported"
 

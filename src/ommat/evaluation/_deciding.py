@@ -2,23 +2,24 @@
 """The deciding inputs of an entry: each declared read of the rule providing it, classed by
 whether some do-and-diff intervention on the read changes the entry (§do-and-diff).
 
-Each intervention is a list of one for ``_edit``'s one procedure, so its checks, its copy and
-its replay are ``intervene``'s. A ``q:`` or ``t:`` read is tried through its entry, a grounded
-declared ref's through each of its entries: an entry set at each marker a binding may return
-and the record's format holds, a ``q:`` answer at ``Unavailable`` with ``refused`` only, and a
-``t:`` entry at each value of a finite type; then a call failed at each structural code, once
-per call, when every entry the call wrote is of the read's declared ref. A ``t:state`` field is
-tried by a state field set at each value of a finite type, and a ``d:`` read by a rule made
-constant at ``Unsure`` and each value of a finite type. A field-path read of a ``t:`` or ``d:``
-entry is tried through the whole entry or rule, at its declared type's values, since an entry
-set and a constant rule set it whole; a ``t:state`` field is set alone. A finite type is
-``boolean``, a label, or either nullable.
+Each intervention is a list of one for ``_edit``'s one procedure, so its checks, its copy and its
+replay are ``intervene``'s. A ``q:`` or ``t:`` read is tried through its entry, a grounded declared
+ref's through each of its entries: an entry set at each marker a binding may return, a ``q:`` answer
+at ``Unavailable`` with ``refused`` only, and a ``t:`` entry at each value of a finite type; then a
+call failed at each structural code, once per call, when every entry the call wrote is of the read's
+declared ref. A ``t:state`` field is tried by a state field set at each value of a finite type, and
+a ``d:`` read by a rule made constant at ``Unsure`` and each value of a finite type. A field-path
+read of a ``t:`` or ``d:`` entry is tried through the whole entry or rule, at its declared type's
+values, since an entry set and a constant rule set it whole; a ``t:state`` field is set alone. A
+finite type is ``boolean``, a label, or either nullable.
 
 A trial the form refuses at its target, ``null-call``, ``failed-call``, ``not-found`` or
 ``candidate-rule``, is not run; any other refusal propagates. A run trial whose replay gives
 ``stale-question`` is undetermined, whatever else it finds. A run trial changes the entry when
 replay gives an ``entry`` finding at its ref whose value, or marker kind and cause code, differ;
-``rows``, ``derivation``, ``round`` or a cause's refs alone are no change.
+``rows``, ``derivation``, ``round`` or a cause's refs alone are no change. The policy's entry is
+the decision, which a trial changes when its ``decision_bytes``, a marker's cause refs included,
+differ (§decide-output).
 
 A read is ``deciding`` when a run trial, not undetermined, changes the entry; else
 ``not-determined`` when no trial ran, as for a ``candidate`` read, which no form reaches, or one
@@ -38,15 +39,16 @@ from typing import Any, cast
 
 from ommat._design import LoadedDesign
 from ommat._interpret import _BINDING_MARKERS, _STRUCTURAL
-from ommat._ledger import Record, held_marker_code
+from ommat._ledger import Record
 from ommat._markers import Cause, Unavailable, Unsure
 from ommat._read_view import is_candidate_read
 from ommat._refs import parse_ref
 from ommat._replay import FindingKind
 from ommat._types import Label, Nullable, RecordOf, Scalar, Type
-from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, changed
+from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, changed, decided
 from ommat.evaluation._edit import (
     _STATE,
+    _Applied,
     _applied,
     _checked,
     _Constant,
@@ -117,19 +119,27 @@ async def _classed(
     ran = undetermined = False
     for edits in trials:
         try:
-            found = (await _applied(read, log, loaded, edits, functions)).findings
+            found = await _applied(read, log, loaded, edits, functions)
         except EvaluationRefusal as exc:
             if exc.reason not in _UNREACHED:
                 raise
             continue
         ran = True
-        if any(f["kind"] in OUTSIDE for f in found):
+        if any(f["kind"] in OUTSIDE for f in found.findings):
             undetermined = True  # it asked a stale question: no finding of it counts
-        elif any(f["kind"] is _K.entry and f["ref"] == ref and changed(f) for f in found):
+        elif _changes(ref, found, log, loaded):
             return "deciding"
     if not ran or undetermined:
         return "not-determined"
     return "not-deciding" if exhaustive else "markers-only"
+
+
+def _changes(ref: str, applied: _Applied, log: _Log, loaded: LoadedDesign) -> bool:
+    """Whether a run trial changes the entry at ``ref``: the policy's by ``decided``, any other
+    by an ``entry`` finding at it that ``changed`` counts."""
+    if ref == loaded._design.policy:
+        return decided(log, applied.record.log)
+    return any(f["kind"] is _K.entry and f["ref"] == ref and changed(f) for f in applied.findings)
 
 
 def _trials(r: str, log: _Log, loaded: LoadedDesign) -> tuple[list[_Trial], bool]:
@@ -147,9 +157,8 @@ def _trials(r: str, log: _Log, loaded: LoadedDesign) -> tuple[list[_Trial], bool
         values = _values(loaded._types[declared])
         outputs = [Unsure, *(values or ())]
         return [[_Constant(declared, o)] for o in outputs], values is not None
-    fmt = log[0]["format"]
     codes = ["refused"] if parsed.level == "q" else sorted(_BINDING_MARKERS)
-    markers = [Unavailable(Cause(c)) for c in codes if held_marker_code(c, fmt)]
+    markers = [Unavailable(Cause(c)) for c in codes]
     values = None if parsed.level == "q" else _values(loaded._types[declared])
     trials: list[_Trial] = []
     calls: dict[int, None] = {}  # each sole writer once, in log order, after every entry's

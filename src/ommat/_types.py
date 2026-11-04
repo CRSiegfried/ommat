@@ -450,12 +450,10 @@ def _build(node: _Raw) -> Type:
     return Named(cast(str, node[1]))
 
 
-def parse_type(text: str, *, nullable: bool, sorted_fields: bool = False) -> Type | TypeFailure:
+def parse_type(text: str, *, nullable: bool) -> Type | TypeFailure:
     """Parse a type string strictly; ``nullable`` says whether ``T or null`` may stand whole.
 
-    A record's fields stand in the order written, which is the order declared. With
-    ``sorted_fields``, as for a design document before format 6, a record whose fields are not
-    in code-point order is not canonical, its canonical spelling the sorted one.
+    A record's fields stand in the order written, which is the order declared.
 
     ``T or null`` may be the whole of a ``t:`` ref's type, an ``outputs`` type, a record
     field's type or a type definition's body; the caller says which position
@@ -475,7 +473,7 @@ def parse_type(text: str, *, nullable: bool, sorted_fields: bool = False) -> Typ
         return TypeFailure(
             FailureKind.ill_formed, f"type {quote(text)} admits null where null is not allowed"
         )
-    canonical = render(_sorted_fields(built) if sorted_fields else built)
+    canonical = render(built)
     if canonical != text:
         return TypeFailure(
             FailureKind.not_canonical,
@@ -483,19 +481,6 @@ def parse_type(text: str, *, nullable: bool, sorted_fields: bool = False) -> Typ
             canonical=canonical,
         )
     return built
-
-
-def _sorted_fields(t: Type) -> Type:
-    """``t`` with every record's fields in code-point order, at every depth."""
-    if isinstance(t, RecordOf):
-        return RecordOf(tuple(sorted(((n, _sorted_fields(ft)) for n, ft in t.fields))))
-    if isinstance(t, ListOf):
-        return ListOf(_sorted_fields(t.item))
-    if isinstance(t, MappingOf):
-        return MappingOf(_sorted_fields(t.value))
-    if isinstance(t, Nullable):
-        return Nullable(_sorted_fields(t.inner))
-    return t
 
 
 # --- rendering ----------------------------------------------------------------------------
@@ -894,11 +879,10 @@ def _value(value: object, t: Type, definitions: Mapping[str, Type], form: Form) 
 
 
 def hold_failure(value: object, t: Type, definitions: Mapping[str, Type]) -> str | None:
-    """Why a requirement declaring ``value`` on a ref of type ``t`` can never hold, or ``None``
-    when it can: ``t`` holds ``bytes`` at some depth, ``value`` does not
-    conform to it, or ``value`` holds a field ``t`` does not declare. Load check 9 and plan
-    rule 6 ask this. The walk follows ``t``, a type that passed check 10, so a cyclic value
-    ends at its depth."""
+    """Why a source requirement declaring ``value`` on a ref of type ``t`` can never hold, or
+    ``None`` when it can: ``t`` holds ``bytes`` at some depth, ``value`` does not conform to it,
+    or ``value`` holds a field ``t`` does not declare. Load check 9 asks this. The walk follows
+    ``t``, a type that passed check 10, so a cyclic value ends at its depth."""
     if _holds_bytes(t, definitions):
         return "its ref's type holds bytes"
     if not _value(value, t, definitions, "live"):

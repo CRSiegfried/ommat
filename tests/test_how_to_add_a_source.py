@@ -15,10 +15,10 @@ import reports_run
 from ommat import (
     AnswerKind,
     Cause,
-    PlanKind,
     RenderedQuestion,
     SourceCall,
     Unavailable,
+    Unsure,
     ValueType,
 )
 from span_binding import SpanBinding
@@ -62,10 +62,10 @@ def _contiguous(block: str, text: str) -> bool:
 def test_the_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixture[str]) -> None:
     results = reports_run.main()
     assert capsys.readouterr().out == _output("own batches: []")
-    assert [plan.kind for plan, _ in results] == [
-        PlanKind.inform,
-        PlanKind.inform,
-        PlanKind.escalate,
+    assert [decision for decision, _ in results] == [
+        {"log": ["Quay Street"]},
+        {"log": ["Elm Row", "Mill Lane"]},
+        Unsure(Cause("abstained", ["d:streets"])),
     ]
     assert [calls for _, calls in results] == [0, 0, 0]
 
@@ -74,7 +74,10 @@ def test_the_idia_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixtu
     pytest.importorskip("idia")
     import idia_run
 
-    assert idia_run.main() == [PlanKind.inform, PlanKind.escalate]
+    assert idia_run.main() == [
+        {"log": ["Elm Row", "Mill Lane"]},
+        Unsure(Cause("abstained", ["d:streets"])),
+    ]
     assert capsys.readouterr().out == _output("leaf calls: 0")
 
 

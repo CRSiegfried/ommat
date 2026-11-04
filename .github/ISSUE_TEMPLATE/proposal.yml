@@ -19,4 +19,4 @@ body:
     id: guarantees
     attributes:
       label: Effect on the spec's guarantees
-      description: Does this touch the markers for unknowns, declared reads, the guard, the record and its replay, or redaction? If so, how?
+      description: Does this touch the markers for unknowns, declared reads, the policy and its decision, the record and its replay, or redaction? If so, how?

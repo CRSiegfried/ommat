@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 
 from designs import roles
-from ommat import Answer, Design, Parameter, Plan, Policy, Question, Rule, Source, Text, load
+from ommat import Answer, Design, Parameter, Question, Rule, Source, Text, load
 from ommat import types as t
 from ommat.helpers import dead_questions
 
@@ -53,8 +53,8 @@ def heeds_nothing(r: Any) -> bool:
     return False
 
 
-def by_new(r: Any) -> Plan:
-    return Plan("execute") if r.read("d:new") is True else Plan("escalate", reason="r")
+def by_new(r: Any) -> str:
+    return "send" if r.read("d:new") is True else "hold"
 
 
 def folders(r: Any) -> list[str]:
@@ -73,7 +73,12 @@ def design(fn: Any = b_is_new, *, d_set: bool = False) -> Design:
         params=["role/bar"],
         boundaries={"q:role": roles(bar=["role/bar"])},
     )
-    rules = {"new": new}
+    rules = {
+        "new": new,
+        "decision": Rule(
+            "d:decision", t.label("send", "hold"), by_new, version="p", reads=["d:new"]
+        ),
+    }
     sources = {"ask": asking(set_ref)}
     state = t.record()
     if d_set:
@@ -87,7 +92,7 @@ def design(fn: Any = b_is_new, *, d_set: bool = False) -> Design:
         state=state,
         sources=sources,
         rules=rules,
-        policy=Policy(by_new, version="p", reads=["d:new"]),
+        policy="d:decision",
         parameters={"role/bar": Parameter(t.number(0, 1), BAR)},
     )
 
@@ -191,8 +196,8 @@ def second_set(r: Any) -> list[str]:
     return ["x"] if isinstance(a, Answer) and a.probabilities["yes"] >= BAR else []
 
 
-def by_two(r: Any) -> Plan:
-    return Plan("escalate", reason="r")
+def by_two(r: Any) -> str:
+    return "hold"
 
 
 def test_a_d_set_that_changes_within_an_assignment_is_refused() -> None:
@@ -213,8 +218,9 @@ def test_a_d_set_that_changes_within_an_assignment_is_refused() -> None:
                 reads=["q:one"],
                 candidates=True,
             ),
+            "decision": Rule("d:decision", t.string, by_two, version="1"),
         },
-        policy=Policy(by_two, version="1"),
+        policy="d:decision",
     )
     with pytest.raises(ValueError, match="'d:s2' changes within one assignment"):
         dead_questions(load(design), values={"t:s1": [["a"]]})
@@ -224,7 +230,7 @@ def test_a_question_that_decides_a_candidate_set_is_live() -> None:
     """Runs whose other reads agree compare at their grounded entries' first points, whatever
     entries each grounds, so a gate that empties the set is live."""
     from designs import slot as _slot
-    from ommat import Answer, Design, Plan, Policy, Question, ReadView, Rule, Source, Text
+    from ommat import Answer, Design, Question, ReadView, Rule, Source, Text
     from ommat import load as _load
     from ommat import types as _t
     from ommat.helpers import dead_questions as _dead
@@ -240,8 +246,8 @@ def test_a_question_that_decides_a_candidate_set_is_live() -> None:
         found: object = r.read("d:s")
         return f"n={len(cast('list[object]', found))}" if isinstance(found, list) else "m"
 
-    def plan(r: ReadView) -> Plan:
-        return Plan("clarify", reply=str(r.read("d:n")))
+    def decision(r: ReadView) -> str:
+        return str(r.read("d:n"))
 
     design = Design(
         name="gate",
@@ -258,8 +264,9 @@ def test_a_question_that_decides_a_candidate_set_is_live() -> None:
                 "d:s", _t.list_(person), finder, version="1", reads=["q:gate"], candidates="name"
             ),
             "n": Rule("d:n", _t.string, count, version="1", reads=["d:s"]),
+            "decision": Rule("d:decision", _t.string, decision, version="1", reads=["d:n"]),
         },
-        policy=Policy(plan, version="1", reads=["d:n"]),
+        policy="d:decision",
     )
     report = _dead(_load(design))
     assert report["questions"]["q:gate"]["status"] == "live"

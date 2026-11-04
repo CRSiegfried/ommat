@@ -10,23 +10,23 @@ asking a source afresh, and under a changed design when given; it returns the re
 replay's findings, the changes downstream, and the stale refs. ``scenario`` is ``intervene`` with
 the stale questions asked live of the caller's bindings and every other answer pinned from the
 record. ``use_answers`` reruns one record's turn with another record's calls answering.
-``deciding_inputs`` classes each declared read of the rule providing an entry by whether some
-single intervention on it changes that entry: ``deciding``, ``not-deciding``, ``markers-only`` or
+``deciding_inputs`` classes each declared read of the rule providing an entry by whether some single
+intervention on it changes that entry: ``deciding``, ``not-deciding``, ``markers-only`` or
 ``not-determined``. ``switching_values`` replays a record under each value of one parameter leaf,
 probed at the values the turn compares it against and the gap and end values between and beyond
-them, and writes, per entry and for the plan, the switching values, slacks and classes, or a
+them, and writes, per entry, the policy's among them, the switching values, slacks and classes, or a
 ``boolean`` or ``label`` leaf's partition, to the evaluation store. ``write_gold_answers``, sync,
-writes a labeller's labels for the questions finished turns asked under a named gold set, copying
-an old set's for the questions given none. ``gold_record`` replays a turn with every question it
-asked set to its gold answer, so its plan is what correct answers lead to. ``answers``, sync, gives
+writes a labeller's labels for the questions finished turns asked under a named gold set, copying an
+old set's for the questions given none. ``gold_record`` replays a turn with every question it asked
+set to its gold answer, so its decision is what correct answers lead to. ``answers``, sync, gives
 the answers table, one row per question a call answered in each record, with its gold answer and
 whether it erred when a gold set is given. ``question_reach`` tries each question's answer, changed
-alone at each of its read points by an entry set, in every ``q:`` entry a returned call wrote in
-the records given, and reports a question ``live`` with its first witness when some trial changes
-the plan or the verdict, else ``not-determined``, ``no-change-found`` or ``never-asked``.
-``DesignStore`` keeps a loaded design's document under its design hash and fetches it back through
-``load``; ``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses
-with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
+alone at each of its read points by an entry set, in every ``q:`` entry a returned call wrote in the
+records given, and reports a question ``live`` with its first witness when some trial changes the
+decision, else ``not-determined``, ``no-change-found`` or ``never-asked``. ``DesignStore`` keeps a
+loaded design's document under its design hash and fetches it back through ``load``;
+``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses with
+``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
 
 ``intervene`` and ``scenario`` are in ``_edit``, the answers table in ``_answers``, the deciding
 inputs, tried through it, in ``_deciding``, the switching-value job in ``_switching``, the

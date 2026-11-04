@@ -11,7 +11,9 @@ answer, found as ``write_gold_answers`` keys it, and whether the answer erred ag
 probability answer errs when its top label, a tie for the top none, is not the gold label; an
 extraction answer when ``{"value": v}``, ``v`` its value, differs from the gold answer by
 canonical bytes. A row with no gold answer, or holding a marker, has ``erred`` null; no row is
-dropped. Counts, rates and comparisons over the rows are the caller's.
+dropped. Counts, rates and comparisons over the rows are the caller's. Every record is read,
+``invalid-record`` for one that does not read, before any is checked; then each record before
+format 8, then each of another design hash, in list order, is refused ``wrong-design``.
 """
 
 from collections.abc import Iterable, Mapping
@@ -22,7 +24,7 @@ from ommat._canonical import decode, encode
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
 from ommat._refs import declared_ref, parse_ref
-from ommat._values import type_name
+from ommat._values import POLICY_FORMAT, type_name
 from ommat.evaluation._diff import _read
 from ommat.evaluation._edit import _labels, _name
 from ommat.evaluation._gold import KIND, conforming, known
@@ -41,7 +43,8 @@ def answers(
     results: EvaluationStore | None = None,
 ) -> list[dict[str, Any]]:
     """The answers table of ``records`` under ``loaded``, with each row's gold answer under
-    ``gold_set`` when given."""
+    ``gold_set`` when given. Refuses only ``invalid-record`` and ``wrong-design``: a cancelled
+    record's answered calls are rows, and a broken entry gives none."""
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     if not isinstance(records, Iterable) or isinstance(records, str | bytes | Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -54,9 +57,17 @@ def answers(
         raise TypeError(f"results is a {type_name(results)}, not an EvaluationStore")
     sources = cast("dict[str, Any]", decode(loaded.document))["sources"]
     groups = {name: list(loaded._group_reasons[name]) for name in loaded._groups}
-    rows: list[dict[str, Any]] = []
-    for i, document in enumerate(records):
-        record = _read(document, f"records[{i}]")
+    read = [_read(document, f"records[{i}]") for i, document in enumerate(records)]
+    logs = [record.log for record in read]  # read once: every read decodes afresh
+    for i, (record, log) in enumerate(zip(read, logs, strict=True)):
+        if log[0]["format"] < POLICY_FORMAT:
+            raise EvaluationRefusal(
+                f"records[{i}] is a format-{log[0]['format']} record, before format "
+                f"{POLICY_FORMAT}",
+                reason=_R.wrong_design,
+                turn=record.record_hash,
+            )
+    for i, record in enumerate(read):
         if record.design_hash != loaded.design_hash:
             raise EvaluationRefusal(
                 f"records[{i}]'s design hash is {record.design_hash}, not the loaded design's "
@@ -64,7 +75,8 @@ def answers(
                 reason=_R.wrong_design,
                 turn=record.record_hash,
             )
-        log = record.log  # read once: every read decodes afresh
+    rows: list[dict[str, Any]] = []
+    for record, log in zip(read, logs, strict=True):
         for entry in log:
             if entry["item"] != "entry" or entry["call"] is None:
                 continue

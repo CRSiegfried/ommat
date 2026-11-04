@@ -1,41 +1,40 @@
 # pyright: reportPrivateUsage=false
-"""Do-and-diff's scenarios: ``intervene`` replays a copy of a recorded turn
-once under a list of interventions, each changing one input, and under ``rerun_design``, a
-design the caller built, when given; ``recorded_design`` is the design the record was decided
-under.
+"""Do-and-diff's scenarios: ``intervene`` replays a copy of a recorded turn once under a list of
+interventions, each changing one input, and under ``rerun_design``, a design the caller built, when
+given; ``recorded_design`` is the design the record was decided under.
 
 An intervention sets a ``q:`` or ``t:`` entry a returned call wrote to a value or to a marker a
-binding may return and the record's format holds (``{"ref", "value"}``); sets a returned call
-to ``Failed`` with a structural code, every entry it wrote ``Unavailable`` with that cause
-(``{"source", "code"}``); sets a ``t:state`` field to a value (``{"path", "value"}``);
-replaces a rule's declaration by a one-row table of ``-`` cells over its reads, outputting the
-set value or ``Unsure`` (``{"rule", "output"}``); or asks a source afresh (``{"ask"}``). Their
-targets are disjoint, so the list's order changes neither the copy nor the findings.
+binding may return (``{"ref", "value"}``); sets a returned call to ``Failed`` with a structural
+code, every entry it wrote ``Unavailable`` with that cause (``{"source", "code"}``); sets a
+``t:state`` field to a value (``{"path", "value"}``); replaces a rule's declaration by a one-row
+table of ``-`` cells over its reads, outputting the set value or ``Unsure`` (``{"rule",
+"output"}``); or asks a source afresh (``{"ask"}``). Their targets are disjoint, so the list's order
+changes neither the copy nor the findings.
 
 A ``recorded_design``, or a ``rerun_design`` other than ``None``, that is not exactly a
 ``LoadedDesign`` is an ``EntryRefusal`` before the record is read; the record is then read and
-refused ``invalid-record``, ``unfinished``, ``nothing-to-replay`` and ``wrong-design``, as
-``use_answers`` refuses it, ``recorded_design`` being its design; then ``invalid-edit``,
-``no-edit``, ``duplicate-target`` and ``conflicting-edits``. Then each intervention's target is
-checked, in list order, a record edit's against the record as read and a rule's or an asked
-source's against the design run, ``rerun_design`` or ``recorded_design``; then each value
-against its declared type in ``recorded_design`` alone, in list order; then every edit is
+refused ``invalid-record``, then ``wrong-design``, ``unfinished``, ``nothing-to-replay`` and
+``wrong-design`` again, as ``use_answers`` refuses it, ``recorded_design`` being its design; then
+``invalid-edit``, ``no-edit``, ``duplicate-target`` and ``conflicting-edits``. Then each
+intervention's target is checked, in list order, a record edit's against the record as read and a
+rule's or an asked source's against the design run, ``rerun_design`` or ``recorded_design``; then
+each value against its declared type in ``recorded_design`` alone, in list order; then every edit is
 applied to one copy and each answer checked against it, its labels from a candidate set and its
-spans against its text as edited; then the design run with its rules made constant is loaded,
-with ``functions``, or when ``None`` with its own callables. A record edit is made on a copy:
-its log edited, its ``hash`` set from format 3 to the edited log's record hash, and read back
-through ``read_record`` (§record-hash-member). Replay reruns the copy, its state entry, calls
-and cut, under the design run, so the findings are what the interventions changed downstream;
-an edited entry itself, answered as set, is none. Each source is checked against the record as
-read and ``recorded_design``, so a question asked over an edited entry, as a need or a wording
-slot, or under another payload, ``oracle`` key or question, is ``stale-question`` and not
-answered, as is an asked source; an entry an edit set is never checked, nor are a failed call's
-needs, though its failure comes back only for the call asked whole, as for a recorded one. A
-plan is compared without its ``context``. Neither the record nor either design is changed; the
-replay record is returned, and the edited copy is not.
+spans against its text as edited; then the design run with its rules made constant is loaded, with
+``functions``, or when ``None`` with its own callables. A record edit is made on a copy: its log
+edited, its ``hash`` set to the edited log's record hash, and read back through ``read_record``
+(§record-hash-member). Replay reruns the copy, its state entry, calls and cut, under the design run,
+so the findings are what the interventions changed downstream; an edited entry itself, answered as
+set, is none. Each source is checked
+against the record as read and ``recorded_design``, so a question asked over an edited entry, as a
+need or a wording slot, or under another payload, ``oracle`` key or question, is ``stale-question``
+and not answered, as is an asked source; an entry an edit set is never checked, nor are a failed
+call's needs, though its failure comes back only for the call asked whole, as for a recorded one.
+Neither the record nor either design is changed; the replay record is returned, and the edited copy
+is not.
 
-``scenario`` is ``intervene`` with each stale source asked of the caller's bindings, checked
-as decide checks them before the record is read, on the running loop's clock with no cut.
+``scenario`` is ``intervene`` with each stale source asked of the caller's bindings, checked as
+decide checks them before the record is read, on the running loop's clock with no cut.
 """
 
 import sys
@@ -62,7 +61,6 @@ from ommat._ledger import (
     Record,
     _copy,
     _with_held_order,
-    held_marker_code,
 )
 from ommat._load import load
 from ommat._markers import Cause, Unavailable, Undetermined, Unsure
@@ -77,7 +75,7 @@ from ommat._refs import (
 )
 from ommat._replay import FindingKind
 from ommat._typed import decoded, is_a, typed
-from ommat._values import HASH_FORMAT, KEY_ORDER_FORMAT, in_domain, type_name
+from ommat._values import in_domain, type_name
 from ommat.evaluation._diff import _read, _refuse_unfit, _replayed, _run_sync, own_functions
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 
@@ -534,8 +532,7 @@ def _not_found(what: str, given: object, member: Literal["ref", "source", "path"
 
 def _entry_target(edit: _SetEntry, log: _Log) -> _EntryAt:
     """The entry and its call item; refused ``not-found``, ``null-call``, ``failed-call``,
-    then ``marker`` for a marker no binding may return or the record's format does not hold
-    under a returned call."""
+    then ``marker`` for a marker no binding may return."""
     ref = edit.ref
     found = _entry(ref, log) if type(ref) is str else None
     if found is None:
@@ -548,17 +545,10 @@ def _entry_target(edit: _SetEntry, log: _Log) -> _EntryAt:
     if call["outcome"] != "returned":
         raise EvaluationRefusal(f"entry {ref}'s call is Failed", reason=_R.failed_call, ref=ref)
     value = edit.value
-    if _is_marker(value):
-        code = _code(value)
-        fmt = cast(int, log[0]["format"])
-        if type(value) is not Unavailable or code not in _BINDING_MARKERS:
-            _refuse_marker(f"entry {ref} may be set to a marker a binding may return only", ref)
-        if not held_marker_code(cast(str, code), fmt):
-            _refuse_marker(
-                f"entry {ref} may not be set to {code}, which a format-{fmt} record does not "
-                "hold under a returned call",
-                ref,
-            )
+    if _is_marker(value) and (
+        type(value) is not Unavailable or _code(value) not in _BINDING_MARKERS
+    ):
+        _refuse_marker(f"entry {ref} may be set to a marker a binding may return only", ref)
     return _EntryAt(edit, ref, index, entry, call)
 
 
@@ -907,19 +897,15 @@ def _declared(read: str) -> str:
 
 def _record_copy(log: _Log, unhashed: dict[str, Any]) -> Record:
     """The record copy of an edited log: each ordered item's ``order`` derived afresh, its
-    ``unhashed`` kept, ``hash`` from format 3 the log's record hash, read back through
-    ``read_record``."""
-    fmt = cast(int, log[0]["format"])
+    ``unhashed`` kept, ``hash`` the log's record hash, read back through ``read_record``."""
     held = [
         _with_held_order({k: v for k, v in item.items() if k != "order"})
-        if fmt >= KEY_ORDER_FORMAT and item["item"] in _ORDERED
+        if item["item"] in _ORDERED
         else item
         for item in log
     ]
-    copy: dict[str, Any] = {"log": held, "unhashed": unhashed}
-    if fmt >= HASH_FORMAT:
-        copy["hash"] = record_hash([encode(item, _ITEM_DEPTH) for item in held])
-    return _read(copy, "the copy")
+    hashed = record_hash([encode(item, _ITEM_DEPTH) for item in held])
+    return _read({"log": held, "unhashed": unhashed, "hash": hashed}, "the copy")
 
 
 def _rewritten(entry: dict[str, Any], **written: object) -> dict[str, Any]:

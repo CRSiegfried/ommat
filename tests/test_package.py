@@ -28,9 +28,6 @@ def test_core_imports_only_the_standard_library(module: str) -> None:
 
 # The public API names.
 PUBLIC = {
-    "Context",
-    "ContextEntry",
-    "handoff",
     "transcript",
     "Design",
     "DesignFailure",
@@ -41,11 +38,7 @@ PUBLIC = {
     "LoadedDesign",
     "Param",
     "Parameter",
-    "PlanDeclaration",
-    "Policy",
-    "PolicyTable",
     "Question",
-    "Requirement",
     "Rule",
     "Source",
     "SourceRequirement",
@@ -64,24 +57,16 @@ PUBLIC = {
     "CauseCode",
     "Failed",
     "InvalidRecord",
-    "PlanKind",
     "Record",
     "Unasked",
     "Unavailable",
     "Undetermined",
     "Unsure",
-    "VerdictKind",
     "read_record",
     "CallResult",
     "SourceCall",
     "RenderedQuestion",
-    "Plan",
-    "Step",
-    "Origin",
-    "Binding",
     "ReadView",
-    "Verdict",
-    "GuardFailure",
     "RunSettings",
     "Decision",
     "EntryRefusal",
@@ -166,7 +151,6 @@ def test_ommat_conversation_exports_exactly_its_renderers() -> None:
     assert "conversation" not in ommat.__all__
     assert ommat.conversation.__all__ == [
         "drop_earlier_bookkeeping",
-        "handoff_text",
         "is_bookkeeping",
         "to_chat_completions",
     ]
@@ -243,8 +227,39 @@ def test_ommat_types_exports_exactly_the_constructors() -> None:
 def test_plain_literals_and_lambdas_build_the_public_types() -> None:
     import typing_strict
 
-    assert typing_strict.step.arguments == typing_strict.args
     assert typing_strict.source.needs == ("t:state",)
+    assert typing_strict.design.policy == "d:act"
+
+
+GONE = {
+    "Binding",
+    "Context",
+    "ContextEntry",
+    "GuardFailure",
+    "Origin",
+    "Plan",
+    "PlanDeclaration",
+    "PlanKind",
+    "Policy",
+    "PolicyTable",
+    "Requirement",
+    "Step",
+    "Verdict",
+    "VerdictKind",
+    "handoff",
+}
+"""Names no public module holds."""
+
+
+def test_no_public_module_holds_a_plan_guard_or_context_name() -> None:
+    import ommat.conversation
+    import ommat.helpers
+
+    assert not GONE & {n for n in vars(ommat) if not n.startswith("_")}
+    assert "handoff_text" not in vars(ommat.conversation)
+    assert not {"BindingNotFound", "RunRefusal", "run_plan", "unsure_to_execute"} & set(
+        vars(ommat.helpers)
+    )
 
 
 @pytest.mark.parametrize(

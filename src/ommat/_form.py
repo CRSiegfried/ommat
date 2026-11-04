@@ -19,17 +19,11 @@ from typing import Any, NamedTuple, cast
 from ommat._answer import AnswerKind, ValueType
 from ommat._canonical import decode, encode, ordered
 from ommat._design import (
-    Context,
-    ContextEntry,
     Design,
     DesignFailure,
     Group,
     Parameter,
-    PlanDeclaration,
-    Policy,
-    PolicyTable,
     Question,
-    Requirement,
     Rule,
     Source,
     SourceRequirement,
@@ -41,7 +35,6 @@ from ommat._design import (
     When,
     new_failure,
 )
-from ommat._plan import Step
 from ommat._refs import code_point_sorted, is_segment, parse_ref
 from ommat._table import NotationError, input_form, row_form
 from ommat._values import (
@@ -171,17 +164,6 @@ class _Form:
             built = self.rule(rid, v)
             if built is not None:
                 rules[rid] = built
-        requirements: list[Requirement] = []
-        if isinstance(d.requirements, Sequence):
-            for r in cast("Sequence[object]", d.requirements):
-                if not isinstance(r, Requirement):
-                    self.fail((), "requirements holds a member that is not a Requirement")
-                elif not is_scalar_string(r.ref):
-                    self.fail((), "a requirement's ref is not a string")
-                else:
-                    requirements.append(r)
-        else:
-            self.fail((), "requirements is not a list")
         parameters = self.members(d.parameters, "parameters", Parameter, dropped=self.leaves)
         groups = {
             g: Group(
@@ -202,65 +184,23 @@ class _Form:
             )
             for tid, v in self.members(d.targets, "targets", Target).items()
         }
-        plans = {
-            name: self.plan(name, plan)
-            for name, plan in self.members(d.plans, "plans", PlanDeclaration).items()
-        }
-        policy: object = d.policy
-        if isinstance(policy, Policy):
-            policy = self.policy(policy)
-        elif isinstance(policy, PolicyTable):
-            policy = self.policy_table(policy)
+        policy: str | None = None
+        if isinstance(d.policy, str) and is_scalar_string(d.policy):
+            policy = string_data(d.policy)
         else:
-            self.fail(("policy",), "the policy is not a Policy or a PolicyTable")
+            self.fail(("policy",), "the policy is not a string")
         return Design(
             state=d.state,
-            policy=cast(Policy, policy),
+            # None after a failure, so no later check reads it.
+            policy=cast(str, policy),
             sources=sources,
             rules=rules,
-            requirements=requirements,
-            default_deny=self.boolean(d.default_deny, True, "default_deny", ()),
-            tools=self.strings(d.tools, "tools", ()),
             parameters=parameters,
             types=self.mapping(d.types, "types", ()),
-            plans=plans,
             groups=groups,
             classes=self.classes(d.classes),
             name=self.string(d.name, "the design's name", ()),
-            context=self.context(d.context),
             targets=targets,
-        )
-
-    def context(self, c: object) -> Context | None:
-        """The context block: ``None``, or a ``Context`` whose entries are each a
-        ``ContextEntry`` of a string ref and a ``Text``, and whose switches are booleans; an
-        entry of another form is dropped."""
-        if c is None:
-            return None
-        where = "the context block"
-        if not isinstance(c, Context):
-            self.fail((), f"{where} is not a Context")
-            return None
-        entries: list[ContextEntry] = []
-        if isinstance(c.entries, str | bytes | bytearray) or not isinstance(c.entries, Sequence):
-            self.fail((), f"{where}'s entries are not a list")
-        else:
-            for entry in cast("Sequence[object]", c.entries):
-                if not isinstance(entry, ContextEntry):
-                    self.fail((), f"{where} holds an entry that is not a ContextEntry")
-                    continue
-                ref = self.string(entry.ref, f"{where}'s entry ref", (), optional=False)
-                if ref is None:
-                    continue
-                shown = f"the context entry for {quote(ref)}"
-                text = self.text(entry.text, f"{shown}'s text", (ref,))
-                if text is not None:
-                    entries.append(ContextEntry(ref, text))
-        return Context(
-            entries,
-            plan=self.boolean(c.plan, True, f"{where}'s plan switch", ()),
-            steps=self.boolean(c.steps, True, f"{where}'s steps switch", ()),
-            record=self.boolean(c.record, True, f"{where}'s record switch", ()),
         )
 
     def members(
@@ -654,17 +594,6 @@ class _Form:
             target=self.string(r.target, f"{where}'s target", names),
         )
 
-    def policy(self, p: Policy) -> Policy:
-        names = ("policy",)
-        self.function(p.function, "the policy's function", names, "policy")
-        return Policy(
-            function=p.function,
-            version=p.version,
-            reads=self.strings(p.reads, "the policy's reads", names),
-            params=self.strings(p.params, "the policy's params", names),
-            boundaries=self.boundaries(p.boundaries, "the policy", names),
-        )
-
     # --- boundaries --------------------------------------------------------------------------
 
     def boundaries(self, value: object, where: str, names: tuple[str, ...]) -> Any:
@@ -691,7 +620,7 @@ class _Form:
                 out[key] = cleaned
         return out
 
-    # --- tables and plan declarations (§table-notation) -----------------------------------
+    # --- tables (§table-notation) ---------------------------------------------------------
 
     def table(self, rid: str, r: Table) -> Table | None:
         """A rule table with its members in the tagged form; ``None`` when ``provides`` is not
@@ -712,7 +641,7 @@ class _Form:
                 order = list(cast("Sequence[object]", r.order))
                 if not in_domain(order):
                     self.fail(names, f"{where}'s order holds a value outside the value domain")
-        inputs, rows = self.tagged(r.inputs, r.rows, hit, where, names, policy=False)
+        inputs, rows = self.tagged(r.inputs, r.rows, hit, where, names)
         return Table(
             provides=provides,
             outputs=r.outputs,
@@ -725,12 +654,6 @@ class _Form:
             target=self.string(r.target, f"{where}'s target", names),
         )
 
-    def policy_table(self, p: PolicyTable) -> PolicyTable:
-        inputs, rows = self.tagged(
-            p.inputs, p.rows, "F", "the policy table", ("policy",), policy=True
-        )
-        return PolicyTable(inputs, rows)
-
     def tagged(
         self,
         inputs: object,
@@ -738,8 +661,6 @@ class _Form:
         hit: str,
         where: str,
         names: tuple[str, ...],
-        *,
-        policy: bool,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """A table's inputs and rows in the tagged form, each that the form cannot read left
         out, and failing."""
@@ -757,7 +678,7 @@ class _Form:
                             raise NotationError("it holds a value outside the value domain")
                         out_inputs.append(form)
                     else:
-                        row = row_form(item, hit=hit, policy=policy)
+                        row = row_form(item, hit=hit)
                         if not in_domain(row):
                             raise NotationError("it holds a value outside the value domain")
                         out_rows.append(row)
@@ -768,36 +689,6 @@ class _Form:
                     shown = "input" if member == "inputs" else "row"
                     self.fail(names, f"{where}'s {shown} {n} cannot be read")
         return out_inputs, out_rows
-
-    def plan(self, name: str, p: PlanDeclaration) -> PlanDeclaration:
-        """A plan declaration with its members of their form, each step a ``Step``; a member of
-        another form is left out, and fails."""
-        where, names = f"plan declaration {quote(name)}", (name,)
-        kind = self.string(p.kind, f"{where}'s kind", names, optional=False)
-        steps: list[Any] = []
-        if isinstance(p.steps, str | bytes | bytearray) or not isinstance(p.steps, Sequence):
-            self.fail(names, f"{where}'s steps are not a list")
-        else:
-            for step in cast("Sequence[object]", p.steps):
-                if type(step) is not Step:
-                    self.fail(names, f"{where} holds a step that is not a Step")
-                elif not all(
-                    isinstance(r, Requirement) and is_scalar_string(r.ref)
-                    for r in step.requirements
-                ):
-                    self.fail(names, f"{where} holds a step requirement whose ref is not a string")
-                else:
-                    steps.append(step)
-        texts: dict[str, Text | None] = {}
-        for member, text in (("reason", p.reason), ("reply", p.reply)):
-            texts[member] = None if text is None else self.text(text, f"{where}'s {member}", names)
-        return PlanDeclaration(
-            "execute" if kind is None else kind,
-            steps,
-            texts["reason"],
-            texts["reply"],
-            self.string(p.grounded, f"{where}'s grounding ref", names),
-        )
 
     def paths(self, value: object, where: str, names: tuple[str, ...]) -> list[str] | None:
         """A list of strings, as load's own list, or ``None`` after a failure."""

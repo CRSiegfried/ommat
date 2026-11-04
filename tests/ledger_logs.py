@@ -1,7 +1,9 @@
-"""Synthetic record logs for the ledger, record and view tests: a normal turn, a broken entry,
-a cancelled turn, a turn whose codec raised a cancellation, a format-2 extraction turn and a
-format-3 turn with a described label, a call's precision and warnings and an ``unsupported``
-marker, built item by item so a test can take any prefix or swap one item."""
+"""Synthetic record logs for the ledger, record and view tests: a format-1 normal turn, broken
+entry, cancelled turn and turn whose codec raised a cancellation, a format-2 extraction turn and
+a format-3 turn with a described label, a call's precision and warnings and an ``unsupported``
+marker; and the format-8 normal turn, broken entry and cancelled turn, a finished one ending
+with interpret's last item. Each is built item by item so a test can take any prefix or
+swap one item."""
 
 import copy
 from typing import Any, cast
@@ -216,6 +218,52 @@ DESCRIBED: list[dict[str, Any]] = [
     VERDICT,
 ]
 
+# Format 8: the settings item names the policy, ``d:route``.
+DESIGN_8: dict[str, Any] = {**DESIGN, "format": 8, "helpers": 3}
+SETTINGS_8: dict[str, Any] = {**SETTINGS, "grounded": {}, "sets": {}, "policy": "d:route"}
+_PROFILE: dict[str, Any] = {
+    "precision": None,
+    "provider": None,
+    "model_requested": None,
+    "model_reported": None,
+    "revision": None,
+    "runtime": None,
+    "claimed": [],
+}
+
+
+def call_8(round_: int, source: str, **members: Any) -> dict[str, Any]:
+    """A format-8 call item: the profile's members in place of ``snapshot``."""
+    item = {k: v for k, v in call(round_, source, **members).items() if k != "snapshot"}
+    return {**item, **{k: v for k, v in _PROFILE.items() if k not in members}}
+
+
+# Indices as NORMAL's.
+NORMAL_8: list[dict[str, Any]] = [
+    DESIGN_8,
+    SETTINGS_8,
+    STATE,
+    call_8(1, "fetch_mail"),
+    entry("t:mail/body", 1, 3, "text of the mail"),
+    entry("t:mail/subject", 1, 3, "hello"),
+    round_item(1, 2.5),
+    call_8(2, "ask_spam", questions=QUESTIONS, prompt="Is this spam?"),
+    entry("q:spam", 2, 7, ANSWER),
+    entry("d:route", 2, None, "archive", derivation=[]),
+    entry("d:tags", 2, None, [{"a": "x"}, None]),
+    round_item(2, 1),
+]
+
+ENTRY_CAUSE = {"kind": "Unavailable", "cause": {"code": "invalid-return", "refs": ["t:state"]}}
+# A broken entry: t:state and the policy's ref Unavailable in round 0, and nothing after.
+BROKEN_8: list[dict[str, Any]] = [
+    DESIGN_8,
+    SETTINGS_8,
+    entry("t:state", 0, None, marker=ENTRY_CAUSE),
+    entry("d:route", 0, None, marker=copy.deepcopy(ENTRY_CAUSE)),
+]
+CANCELLED_8: list[dict[str, Any]] = [*NORMAL_8[:7], CANCEL]
+
 LOGS = {
     "normal": NORMAL,
     "broken": BROKEN,
@@ -223,6 +271,9 @@ LOGS = {
     "codec-cancelled": CODEC_CANCELLED,
     "extraction": EXTRACTION,
     "described": DESCRIBED,
+    "normal-8": NORMAL_8,
+    "broken-8": BROKEN_8,
+    "cancelled-8": CANCELLED_8,
 }
 
 # Each log's unhashed members by log-index key, written once the keyed item is in a prefix.
@@ -317,7 +368,8 @@ def rehashed(doc: dict[str, Any], *, reorder: bool = True) -> dict[str, Any]:
 
 def before_key_order(doc: dict[str, Any], fmt: int = KEY_ORDER_FORMAT - 1) -> dict[str, Any]:
     """A current record document made format ``fmt``, before format 6: the format number set,
-    each item's ``order`` and the settings item's ``grounded`` and ``sets`` dropped, its objects
+    each item's ``order`` and the settings item's ``grounded``, ``sets`` and ``policy`` dropped,
+    its objects
     left in the order they hold. Its ``hash`` is left to recompute."""
     doc["log"][0]["format"] = fmt
     for item in doc["log"]:
@@ -325,6 +377,7 @@ def before_key_order(doc: dict[str, Any], fmt: int = KEY_ORDER_FORMAT - 1) -> di
         if item["item"] == "settings":
             item.pop("grounded", None)
             item.pop("sets", None)
+            item.pop("policy", None)
     return doc
 
 

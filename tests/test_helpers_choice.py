@@ -48,7 +48,7 @@ BOARD: dict[str, object] = {
 
 
 def view(kind: ComponentKind = ComponentKind.rule) -> ReadView:
-    name = {"rule": "route", "policy": "policy", "when": "mail"}[kind]
+    name = {"rule": "route", "when": "mail"}[kind]
     reads = (*BOARD, "t:order.lines")
     return ReadView(Role(kind, name), reads, (), BOARD, {})
 

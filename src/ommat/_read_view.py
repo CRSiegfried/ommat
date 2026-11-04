@@ -1,11 +1,10 @@
-"""The read view: what a function ``when``, a rule or the policy reads, and nothing else.
+"""The read view: what a function ``when`` or a rule reads, and nothing else.
 
-One type for the three. The component gets ``read``, ``require`` and ``param``.
-Interpret, compile and the ``Unsure``-to-execute lint build the view and read back its
-``role``, its ``stops`` and ``deciding_stop()``, and its ``helper_log()``; the helper library
-writes the log through ``open_call`` and ``close_call``. The outcome a stop record gives,
-weighed against a raise, an invalid return and the returned value, is interpret's and
-compile's, not the view's.
+One type for both. The component gets ``read``, ``require`` and ``param``.
+Interpret and the lint build the view and read back its ``role``, its ``stops`` and
+``deciding_stop()``, and its ``helper_log()``; the helper library writes the log through
+``open_call`` and ``close_call``. The outcome a stop record gives, weighed against a raise, an
+invalid return and the returned value, is interpret's, not the view's.
 
 A ``when``'s view is given the state's type, its definitions resolved at every depth, and
 reads ``t:state`` by any field path that type gives: one naming a record field at each depth.
@@ -43,13 +42,12 @@ class ComponentKind(enum.StrEnum):
 
     when = "when"
     rule = "rule"
-    policy = "policy"
 
 
 @dataclass(frozen=True, slots=True, init=False)
 class Role:
-    """The component a view serves: its kind and its declared name, ``policy``, or for a
-    ``when`` its source's id."""
+    """The component a view serves: its kind and its declared name, or for a ``when`` its
+    source's id."""
 
     kind: ComponentKind
     name: str
@@ -62,9 +60,7 @@ class Role:
                 raise ValueError
             member = ComponentKind(string_data(kind))
         except ValueError:
-            raise ValueError(
-                f"component kind {described(kind)} is not when, rule or policy"
-            ) from None
+            raise ValueError(f"component kind {described(kind)} is not when or rule") from None
         if not issubclass(type(name), str):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"a role's name {described(name)} is not a string")
         object.__setattr__(self, "kind", member)
@@ -147,7 +143,7 @@ class ViewClosed(Exception):
 def walk(value: object, fields: Sequence[str], ref: str) -> object:
     """A read through ``fields`` from the entry ``value``: a marker at the base is returned, a
     null on the path makes the read null; an entry that does not hold its
-    path is a ``_ViewError``. The one path walk, for the view and for compile's board read."""
+    path is a ``_ViewError``. The one path walk, for the view and for the fixture."""
     if isinstance(value, Undetermined):
         return value
     for name in fields:
@@ -394,7 +390,7 @@ class ReadView:
     def deciding_stop(self) -> Stop | None:
         """The first undeclared read, else the first ``require`` stop, else ``None``. The
         full order of outcomes, weighing this against a raise, an invalid return and the
-        returned value, is interpret's and compile's."""
+        returned value, is interpret's."""
         for stop in self._stops:
             if isinstance(stop, UndeclaredRead):
                 return stop

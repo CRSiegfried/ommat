@@ -126,7 +126,7 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .stub { order: 8; font: 500 12px var(--body); color: var(--muted); background: none; border: 1px dashed var(--line); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
 .stub:hover { border-color: var(--accent); color: var(--ink); }
 /* Compact: the selected card in full; every other card keeps its value on one line, its bars,
-   a call's outcome, the verdict and its boundary notes; direct links keep their meta. */
+   a call's outcome and its boundary notes; direct links keep their meta. */
 #cols.compact .card:not(.sel) .val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: none; }
 #cols.compact .card:not(.sel) .meta.labels { display: none; }
 #cols.compact .card:not(.sel):not(.near) .meta:not(.notes) { display: none; }
@@ -162,7 +162,7 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
     <label class="k" for="pasteRec">Record document (the record's <code>document</code> bytes, or its <code>log</code>)</label>
     <textarea id="pasteRec" spellcheck="false" placeholder='{"hash": "sha256:…", "log": [ … ], "unhashed": { … }}'></textarea>
     <label class="k" for="pasteDes">Design document, optional (the loaded design's <code>document</code>)</label>
-    <textarea id="pasteDes" spellcheck="false" placeholder='{"format": 6, "sources": { … }, "rules": { … }, "policy": { … }}'></textarea>
+    <textarea id="pasteDes" spellcheck="false" placeholder='{"format": 10, "sources": { … }, "rules": { … }, "policy": "d:…"}'></textarea>
     <div class="row"><button id="pasteGo" type="button">Show this record</button><span class="err" id="pasteErr"></span></div>
   </div>
 
@@ -204,29 +204,14 @@ const pct = (p) => (typeof p === "number" ? (p * 100).toFixed(p * 100 >= 99.95 |
 const arr = (x) => (Array.isArray(x) ? x : []);
 const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
 // A component's declared reads and leaves: a function's reads and params; a table's inputs'
-// reads and the leaves its bindings, cells and outputs name, and for the policy table its rows'
-// plans' board refs and slot leaves, as load adds them.
-const planOrigins = (c, plans, tag) => {
-  const out = [];
-  for (const row of arr(obj(c).rows)) {
-    const plan = obj(obj(plans)[obj(row).plan]);
-    // A grounded plan reads its set, whose card a candidate origin links to as well.
-    if (tag === "ref" && str(plan.grounded)) out.push(plan.grounded);
-    for (const step of arr(plan.steps)) for (const o of Object.values(obj(obj(step).arguments))) {
-      if (tag === "ref" && str(obj(o).ref)) out.push(o.ref);
-      if (tag === "ref" && str(obj(o).candidate)) out.push(o.candidate);
-    }
-    for (const text of [plan.reason, plan.reply]) for (const slot of arr(obj(text).slots)) if (str(obj(obj(slot).origin)[tag])) out.push(slot.origin[tag]);
-  }
-  return out;
-};
+// reads and the leaves its bindings, cells and outputs name.
 // A grounded component's candidate read links to its set's card (§candidate-sets).
 const isCandidateRead = (r) => r === "candidate" || (str(r) && r.startsWith("candidate."));
-const readsOf = (c, plans) => (obj(c).form === "table"
-  ? [...new Set([...arr(obj(c).inputs).map((i) => obj(i).read), ...planOrigins(c, plans, "ref")])]
+const readsOf = (c) => (obj(c).form === "table"
+  ? [...new Set(arr(obj(c).inputs).map((i) => obj(i).read))]
   : arr(obj(c).reads)).map((r) => (isCandidateRead(r) && str(obj(c).grounded) ? c.grounded : r))
   .filter((r, i, all) => all.indexOf(r) === i);
-const paramsOf = (c, plans) => {
+const paramsOf = (c) => {
   if (obj(c).form !== "table") return obj(c).params;
   const out = arr(obj(c).inputs).flatMap((i) => Object.values(obj(obj(i).params)));
   for (const row of arr(obj(c).rows)) {
@@ -235,7 +220,7 @@ const paramsOf = (c, plans) => {
     }
     if (str(obj(obj(row).output).param)) out.push(row.output.param);
   }
-  return [...new Set([...out, ...planOrigins(c, plans, "param")])];
+  return [...new Set(out)];
 };
 const str = (x) => typeof x === "string";
 
@@ -274,18 +259,17 @@ function build(record, design) {
   const providers = obj(settings.providers);
   const grounded = obj(settings.grounded);
   const entries = new Map(), calls = new Map(), rounds = new Map();
-  let plan = null, verdict = null;
+  const policy = str(settings.policy) ? settings.policy : null; // the decision's ref, from format 8
   const col = (n) => { const k = Number.isInteger(n) ? n : "?"; if (!rounds.has(k)) rounds.set(k, { calls: [], entries: [] }); return rounds.get(k); };
   for (const [idx, it] of items) {
-    if (it.item === "entry" && str(it.ref) && !entries.has(it.ref)) { entries.set(it.ref, { ...it, idx }); col(it.round).entries.push(it.ref); }
+    if (it.item === "entry" && str(it.ref) && !entries.has(it.ref)) { entries.set(it.ref, { ...it, idx }); if (it.ref !== policy) col(it.round).entries.push(it.ref); }
     else if (it.item === "call") { calls.set(idx, { ...it, idx }); col(it.round).calls.push(idx); }
-    else if (it.item === "plan") plan = { ...it, idx };
-    else if (it.item === "verdict") verdict = it;
   }
+  const decision = policy ? entries.get(policy) || null : null; // the policy's entry
   const byBase = new Map();
   for (const r of entries.keys()) { const b = parseRef(r).base; if (!byBase.has(b)) byBase.set(b, []); byBase.get(b).push(r); }
 
-  // Node ids: "e:<ref>" for an entry, "c:<index>" for a call, "plan".
+  // Node ids: "e:<ref>" for an entry, the decision's too, "c:<index>" for a call.
   const inputs = new Map(); // node -> Map(from -> {node, how, src})
   const add = (node, from, how, src) => {
     if (!from || from === node) return;
@@ -341,45 +325,28 @@ function build(record, design) {
       link("c:" + idx, [obj(obj(sources[sid]).requirement).ref], "source " + sid + " is gated on it", "design");
     }
   }
-  if (plan) {
-    for (const d of arr(plan.derivation)) link("plan", obj(d).refs, "helper " + obj(d).helper, "record");
-    link("plan", obj(plan.cause).refs, "named in the plan's cause", "record");
-    for (const step of arr(plan.steps)) {
-      for (const o of Object.values(obj(obj(step).arguments))) link("plan", [obj(o).ref, obj(o).set], "a step's argument", "record");
-      for (const q of arr(obj(step).requirements)) link("plan", [obj(q).ref], "a step's requirement", "record");
-    }
-    for (const c of arr(obj(plan.context).entries)) link("plan", [obj(c).ref], "a context entry", "record");
-    for (const f of arr(obj(verdict).failures)) link("plan", [obj(f).ref, obj(obj(f).requirement).ref], "the guard refused on it", "record");
-    if (design) link("plan", readsOf(design.policy, design.plans), "the policy reads it", "design");
-    for (const c of arr(obj(design && design.context).entries)) {
-      link("plan", [obj(c).ref], "a context entry", "design");
-      link("plan", arr(obj(obj(c).text).slots).map((sl) => obj(obj(sl).origin).ref), "a context entry's wording", "design");
-    }
-  }
   const outputs = new Map();
   for (const [node, ins] of inputs) for (const i of ins.values()) {
     if (!outputs.has(i.node)) outputs.set(i.node, []);
     outputs.get(i.node).push({ node, how: i.how, src: i.src });
   }
   const flat = new Map([...inputs].map(([k, v]) => [k, [...v.values()]]));
-  const label = (node) => node === "plan" ? "plan" : node.startsWith("c:") ? "call · " + arr(obj(calls.get(+node.slice(2))).sources).join(", ") : node.slice(2);
-  return { kind: "turn", log, unhashed, settings, providers, grounded, entries, calls, plan, verdict, rounds, inputs: flat, outputs, design, record, byBase, label };
+  const label = (node) => node.startsWith("c:") ? "call · " + arr(obj(calls.get(+node.slice(2))).sources).join(", ") : node.slice(2);
+  return { kind: "turn", log, unhashed, settings, providers, grounded, entries, calls, policy, decision, rounds, inputs: flat, outputs, design, record, byBase, label };
 }
 
 // A design document alone, as a graph of declared links. Node ids: "e:<ref>" for a ref a source or
-// rule provides and for t:state, "g:<id>" a target, "p:<path>" a parameter, "req:<n>" a plan-level
-// requirement, "plan" the policy. An "e:" or "plan" id is the Turn view's id for the same thing.
+// rule provides and for t:state, "g:<id>" a target, "p:<path>" a parameter. An "e:" id is the Turn
+// view's id for the same thing; the policy is its rule's.
 function buildDesign(doc) {
   const design = obj(doc);
-  const sources = obj(design.sources), rules = obj(design.rules), policy = obj(design.policy);
+  const sources = obj(design.sources), rules = obj(design.rules);
   const params = obj(design.parameters), targets = obj(design.targets);
   const nodes = new Map([["e:t:state", { kind: "state" }]]);
   for (const [sid, s] of Object.entries(sources)) for (const [ref, q] of Object.entries(obj(obj(s).provides))) nodes.set("e:" + ref, { kind: ref.startsWith("q:") ? "question" : "tool", sid, q: obj(q) });
   for (const [rid, r] of Object.entries(rules)) if (str(obj(r).provides)) nodes.set("e:" + r.provides, { kind: "rule", rid, r: obj(r) });
   for (const [id, tg] of Object.entries(targets)) nodes.set("g:" + id, { kind: "target", id, t: obj(tg) });
   for (const [path, p] of Object.entries(params)) nodes.set("p:" + path, { kind: "param", path, p: obj(p) });
-  arr(design.requirements).forEach((q, i) => nodes.set("req:" + i, { kind: "req", q: obj(q) }));
-  nodes.set("plan", { kind: "policy" });
 
   const inputs = new Map();
   const add = (node, from, how) => {
@@ -417,26 +384,13 @@ function buildDesign(doc) {
     linkParams(node, boundaryPaths(r.boundaries), "a declared boundary");
     if (str(r.grounded)) link(node, [r.grounded], "its candidate set");
   }
-  link("plan", readsOf(policy, design.plans), "the policy reads it");
-  linkParams("plan", paramsOf(policy, design.plans), "the policy reads it");
-  linkParams("plan", boundaryPaths(policy.boundaries), "a declared boundary");
-  arr(design.requirements).forEach((q, i) => { link("req:" + i, [obj(q).ref], "it names this ref"); add("plan", "req:" + i, "guards every execute plan"); });
-  for (const c of arr(obj(design.context).entries)) {
-    link("plan", [obj(c).ref], "a context entry");
-    for (const slot of arr(obj(obj(c).text).slots)) {
-      const o = obj(obj(slot).origin);
-      if (str(o.ref)) link("plan", [o.ref], "a context entry's wording");
-      if (str(o.param)) linkParams("plan", [o.param], "a context entry's wording");
-    }
-  }
 
   const outputs = new Map();
   for (const [node, ins] of inputs) for (const i of ins.values()) {
     if (!outputs.has(i.node)) outputs.set(i.node, []);
     outputs.get(i.node).push({ node, how: i.how, src: "design" });
   }
-  const label = (node) => node === "plan" ? "policy" : node.startsWith("g:") ? node.slice(2) : node.startsWith("p:") ? "parameter " + node.slice(2)
-    : node.startsWith("req:") ? "requirement " + text(obj(obj(nodes.get(node)).q).ref) : node.slice(2);
+  const label = (node) => node.startsWith("g:") ? node.slice(2) : node.startsWith("p:") ? "parameter " + node.slice(2) : node.slice(2);
   return { kind: "design", design, nodes, inputs: new Map([...inputs].map(([k, v]) => [k, [...v.values()]])), outputs, label, links: targetLinks(design) };
 }
 
@@ -484,7 +438,7 @@ function boundsOf(design, base) {
   const seen = new Set();
   const put = (role, p, key) => { if (str(p) && !seen.has(role + " " + key + " " + p)) { seen.add(role + " " + key + " " + p); out[role].push([p, Object.hasOwn(params, p) ? obj(params[p]).value : undefined, key]); } };
   let any = false;
-  const fields = [...Object.values(obj(obj(design).rules)).map((r) => obj(r).boundaries), obj(obj(design).policy).boundaries];
+  const fields = Object.values(obj(obj(design).rules)).map((r) => obj(r).boundaries);
   for (const f of fields) for (const [key, entry] of Object.entries(obj(f))) {
     if (parseRef(key).base !== base) continue;
     any = true;
@@ -586,13 +540,20 @@ function valueOnly(e, b) {
   return `<div class="val">${esc(JSON.stringify(v, null, 1))}</div>`;
 }
 
-const failureText = (f) => { const x = obj(f); return "step " + (x.step ?? "?") + (str(x.ref) ? " · " + x.ref : ""); };
+// A marker as its kind and cause code, or a value as JSON: the decision in one line.
+const decisionText = (e) => (e.marker ? `${text(obj(e.marker).kind ?? "marker")} (${text(obj(obj(e.marker).cause).code ?? "")})` : text(JSON.stringify(e.value) ?? "–"));
 
 function render() {
   const s = state;
+  const entryCard = (ref) => {
+    const e = s.entries.get(ref);
+    const { base, candidate } = parseRef(ref);
+    const who = (Object.hasOwn(s.providers, base) && s.providers[base]) || (ref === "t:state" ? "the state" : "");
+    return `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="e:${esc(ref)}"><span class="ref">${esc(ref)}</span>
+        <span class="meta">${who ? `<span>from ${esc(who)}</span>` : ""}${candidate != null ? `<span>candidate ${esc(candidate)}</span>` : ""}${s.design ? targetHtml(targetsOf(s.design, base)) : ""}</span>${valueHtml(e, s.design ? boundsOf(s.design, base) : null, !!s.design)}</div>`;
+  };
   const design = obj((s.log.find((i) => obj(i).item === "design")));
-  const plan = s.plan, verdict = s.verdict ? obj(s.verdict) : null;
-  const vtone = !verdict || !str(verdict.kind) ? "warn" : verdict.kind === "passed" ? "good" : "bad";
+  const decision = s.decision;
   const designName = s.design && s.design.name;
   const hash = (h) => (str(h) ? esc(h.slice(0, 19)) + "…" : "–");
   $("summary").innerHTML = [
@@ -600,9 +561,7 @@ function render() {
     `<div class="kv"><span class="k">Design hash</span><span class="v">${hash(design.hash)}</span></div>`,
     s.record && str(s.record.hash) ? `<div class="kv"><span class="k">Record</span><span class="v">${hash(s.record.hash)}</span></div>` : "",
     `<div class="kv"><span class="k">Format</span><span class="v">${esc(design.format ?? "?")}</span></div>`,
-    plan ? `<div class="kv"><span class="k">Plan</span><span class="chip info">${esc(plan.kind ?? "?")}</span></div>` : "",
-    `<div class="kv"><span class="k">Verdict</span><span class="chip ${vtone}">${esc(verdict ? verdict.kind ?? "?" : "none")}</span></div>`,
-    plan && (plan.reason || plan.reply) ? `<div class="kv"><span class="k">${plan.reason ? "Reason" : "Reply"}</span><span>${esc(plan.reason || plan.reply)}</span></div>` : "",
+    decision ? `<div class="kv"><span class="k">Decision</span><span class="v">${esc(decisionText(decision))}</span></div>` : "",
     s.design ? "" : `<div class="notice">No design loaded: lineage shows only what the record holds. Open the design to see what each rule and source read.</div>`,
   ].join("");
 
@@ -619,23 +578,11 @@ function render() {
         <span class="meta notes">${failed ? `<span class="chip bad">failed ${esc(obj(failed).code ?? "")}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
         <span class="meta">${foldList(Object.entries(obj(c.questions)).map(([r, q]) => `<span title="question identity ${esc(obj(q).identity ?? "none")}">${esc(r)}${str(obj(q).identity) ? " · " + esc(q.identity.slice(7, 15)) + "…" : ""}</span>`), 4)}</span></div>`;
     }
-    for (const ref of r.entries) {
-      const e = s.entries.get(ref);
-      const { base, candidate } = parseRef(ref);
-      const who = (Object.hasOwn(s.providers, base) && s.providers[base]) || (ref === "t:state" ? "the state" : "");
-      html += `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="e:${esc(ref)}"><span class="ref">${esc(ref)}</span>
-        <span class="meta">${who ? `<span>from ${esc(who)}</span>` : ""}${candidate != null ? `<span>candidate ${esc(candidate)}</span>` : ""}${s.design ? targetHtml(targetsOf(s.design, base)) : ""}</span>${valueHtml(e, s.design ? boundsOf(s.design, base) : null, !!s.design)}</div>`;
-    }
+    for (const ref of r.entries) html += entryCard(ref);
     html += `</section>`;
   }
-  if (plan) {
-    const steps = arr(plan.steps).map((st, i) => `<div class="val">${i + 1}. ${esc(obj(st).tool ?? "?")} ${esc(JSON.stringify(obj(st).arguments ?? {}))}</div>`).join("");
-    const fails = verdict && arr(verdict.failures).length ? `<div class="meta notes">${arr(verdict.failures).map((f) => esc(failureText(f))).join(" · ")}</div>` : "";
-    html += `<section class="col"><div class="colhead"><span>Decision</span><span></span></div>
-      <div role="button" tabindex="0" aria-pressed="false" class="card" data-node="plan"><span class="ref">plan · ${esc(plan.kind ?? "?")}</span>
-      ${plan.reason ? `<span>${esc(plan.reason)}</span>` : ""}${plan.reply ? `<span>${esc(plan.reply)}</span>` : ""}
-      ${plan.cause ? `<div class="marker"><span class="chip warn">cause</span><span class="v">${esc(obj(plan.cause).code ?? "")}</span></div>` : ""}${steps}
-      <span class="meta notes"><span class="chip ${vtone}">${esc(verdict ? verdict.kind ?? "?" : "no verdict")}</span></span>${fails}</div></section>`;
+  if (decision) {
+    html += `<section class="col"><div class="colhead"><span>Decision</span><span></span></div>${entryCard(s.policy)}</section>`;
   }
   $("cols").classList.toggle("design", false);
   $("cols").innerHTML = html;
@@ -655,7 +602,7 @@ function renderDesign() {
     `<div class="kv"><span class="k">Targets</span><span class="v">${count("target")}</span></div>`,
     `<div class="kv"><span class="k">Questions</span><span class="v">${count("question")}</span></div>`,
     `<div class="kv"><span class="k">Rules</span><span class="v">${count("rule")}</span></div>`,
-    `<div class="kv"><span class="k">Policy</span><span class="v">${esc(obj(d.policy).form ?? "?")}</span></div>`,
+    `<div class="kv"><span class="k">Policy</span><span class="v">${str(d.policy) ? esc(d.policy) : "?"}</span></div>`,
     state && state.guess && key && known.get(key).doc === state.design ? `<div class="notice">${GUESSES[state.guess]}</div>` : "",
   ].join("");
   const card = (node, body) => `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="${esc(node)}">${body}</div>`;
@@ -678,17 +625,15 @@ function renderDesign() {
       return card(node, `${head}${str(obj(n.q.wording).template) ? `<div class="val">${esc(n.q.wording.template)}</div>` : ""}
         ${labels.length ? `<span class="meta labels"><span>${foldList(labels.map(esc), 6, " · ")}</span></span>` : ""}<span class="meta">${targetHtml(targetsOf(d, ref))}</span>`);
     })];
-  const ruleCards = of("rule").map(([node, n]) => card(node, `<span class="ref">${esc(node.slice(2))}</span>
-    <span class="meta"><span>rule ${esc(n.rid)}</span><span>${esc(n.r.form ?? "?")}</span>${n.r.outputs != null ? `<span>${esc(n.r.outputs)}</span>` : ""}</span>
+  const ruleCard = ([node, n]) => card(node, `<span class="ref">${esc(node.slice(2))}</span>
+    <span class="meta"><span>rule ${esc(n.rid)}</span><span>${esc(n.r.form ?? "?")}</span>${n.r.outputs != null ? `<span>${esc(n.r.outputs)}</span>` : ""}${node.slice(2) === d.policy ? `<span>the policy</span>` : ""}</span>
     <span class="meta">reads ${arr(readsOf(n.r)).map(esc).join(", ") || "nothing"}</span>
-    <span class="meta">${targetHtml(targetsOf(d, node.slice(2)))}${n.r.boundaries ? `<span>boundaries declared</span>` : `<span class="none">no boundaries declared</span>`}</span>`));
-  const policy = obj(d.policy);
-  const decide = [card("plan", `<span class="ref">policy · ${esc(policy.form ?? "?")}</span><span class="meta">reads ${arr(readsOf(policy, d.plans)).map(esc).join(", ") || "nothing"}</span>
-      ${policy.boundaries ? `<span class="meta">boundaries declared</span>` : ""}<span class="meta">plans: ${Object.keys(obj(d.plans)).map(esc).join(", ") || "none declared"}</span>`),
-    ...of("req").map(([node, n]) => card(node, `<span class="ref">requires ${esc(n.q.ref)}</span><span class="meta">= ${esc(JSON.stringify(n.q.value ?? null))} · every execute plan</span>`))];
+    <span class="meta">${targetHtml(targetsOf(d, node.slice(2)))}${n.r.boundaries ? `<span>boundaries declared</span>` : `<span class="none">no boundaries declared</span>`}</span>`);
+  const ruleCards = of("rule").filter(([node]) => node.slice(2) !== d.policy).map(ruleCard);
+  const decide = of("rule").filter(([node]) => node.slice(2) === d.policy).map(ruleCard);
   const paramCards = of("param").map(([node, n]) => card(node, `<span class="ref">${esc(n.path)}</span><span class="meta">${esc(n.p.type ?? "")}</span><div class="val">${esc(JSON.stringify(n.p.value ?? null))}</div>`));
   $("cols").classList.toggle("design", true);
-  $("cols").innerHTML = column("Targets", targets) + column("State and sources", asked) + column("Rules", ruleCards) + column("Policy", decide) + column("Parameters", paramCards);
+  $("cols").innerHTML = column("Targets", targets) + column("State and sources", asked) + column("Rules", ruleCards) + column("Decision", decide) + column("Parameters", paramCards);
 }
 
 const graph = () => (tab === "design" ? dstate : state);
@@ -788,12 +733,12 @@ function select(node) {
   const dimmed = node && (mode === "dim" || openCols.size) ? `<span><span class="sw" style="background:var(--line)"></span>dimmed: ${dimWord}</span>` : "";
   const legend = `<div class="legend"><span><span class="sw" style="background:var(--accent)"></span>${tlinks ? "linked" : "came from"}</span><span><span class="sw" style="background:var(--down)"></span>fed into</span>${dimmed}</div>`;
   let jump = "";
-  if (node && g.kind === "turn" && g.design && (node === "plan" || node.startsWith("e:"))) jump = `<button type="button" class="jump" data-jump="design">Open in Design</button>`;
+  if (node && g.kind === "turn" && g.design && node.startsWith("e:")) jump = `<button type="button" class="jump" data-jump="design">Open in Design</button>`;
   if (node && g.kind === "design" && state && turnNode(node)) jump = `<button type="button" class="jump" data-jump="turn">Show in this turn</button>`;
   const asked = node && g.kind === "turn" && node.startsWith("e:q:") ? identityOf(g, node.slice(2)) : null;
   if (asked && deck.length > 1) jump += `${jump ? " " : ""}<button type="button" class="jump" data-compare="${esc(asked)}">Compare across turns</button>`;
   let body;
-  if (!node) body = `<p class="meta">Select a card to see what it came from and what it fed.${g && g.kind === "design" ? " Select a target to see every question and rule declared against it." : " The plan is the last column."}</p>`;
+  if (!node) body = `<p class="meta">Select a card to see what it came from and what it fed.${g && g.kind === "design" ? " Select a target to see every question and rule declared against it." : " The decision is the last column."}</p>`;
   else if (tlinks) {
     const all = [...g.nodes.values()];
     const untargeted = all.filter((n) => n.kind === "question" && !str(n.q.target) && !arr(n.q.latent_targets).length).length
@@ -832,13 +777,11 @@ function applyDensity() {
 // The same thing's node in the other view: a turn's grounded entry is its declared ref's card in
 // the design, and a declared ref is its first grounded entry in the turn.
 function designNode(node) {
-  if (node === "plan") return "plan";
   if (!str(node) || !node.startsWith("e:")) return null;
   return "e:" + parseRef(node.slice(2)).base; // showDesign drops one its design lacks
 }
 function turnNode(node) {
   if (!state) return null;
-  if (node === "plan") return state.plan ? "plan" : null;
   if (!str(node) || !node.startsWith("e:")) return null;
   const ref = node.slice(2);
   if (state.entries.has(ref)) return node;
@@ -924,18 +867,18 @@ function renderTurns() {
   if (!turnsBy) {
     const groups = new Map();
     for (const r of rows) { const k = str(r.hash) ? r.hash : ""; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-    html = `<table><thead><tr><th>File</th><th>Plan</th><th>Verdict</th><th>Rounds</th><th>Failed calls</th><th>Markers by cause</th><th>Reason or reply</th></tr></thead><tbody>`;
+    html = `<table><thead><tr><th>File</th><th>Decision</th><th>Rounds</th><th>Failed calls</th><th>Markers by cause</th></tr></thead><tbody>`;
     for (const [k, rs] of groups) {
       const name = known.has(k) ? esc(known.get(k).name) : "design not loaded";
-      html += `<tr class="group"><td colspan="7">${short(k)} · ${name} · ${rs.length} turn${rs.length === 1 ? "" : "s"}</td></tr>`;
+      html += `<tr class="group"><td colspan="5">${short(k)} · ${name} · ${rs.length} turn${rs.length === 1 ? "" : "s"}</td></tr>`;
       for (const r of rs) {
-        if (!r.g) { html += `<tr data-row="${r.i}"><td>${esc(r.d.name)}</td><td colspan="6" class="err">unreadable record</td></tr>`; continue; }
+        if (!r.g) { html += `<tr data-row="${r.i}"><td>${esc(r.d.name)}</td><td colspan="4" class="err">unreadable record</td></tr>`; continue; }
         const g = r.g, marks = new Map();
         for (const e of g.entries.values()) if (e.marker) { const m = markOf(e); marks.set(m, (marks.get(m) || 0) + 1); }
         const failed = [...g.calls.values()].filter((c) => obj(c.outcome).failed).length;
         const rounds = [...g.rounds.keys()].filter((n) => Number.isInteger(n) && n > 0).length;
-        html += `<tr data-row="${r.i}"><td>${esc(r.d.name)}</td><td>${esc(obj(g.plan).kind ?? "none")}</td><td>${esc(obj(g.verdict).kind ?? "none")}</td>
-          <td class="num">${rounds}</td><td class="num">${failed}</td><td>${[...marks].map(([m, n]) => `${m}${n > 1 ? " ×" + n : ""}`).join("<br>") || "–"}</td><td>${esc(obj(g.plan).reason || obj(g.plan).reply || "")}</td></tr>`;
+        html += `<tr data-row="${r.i}"><td>${esc(r.d.name)}</td><td>${g.decision ? esc(decisionText(g.decision)) : "none"}</td>
+          <td class="num">${rounds}</td><td class="num">${failed}</td><td>${[...marks].map(([m, n]) => `${m}${n > 1 ? " ×" + n : ""}`).join("<br>") || "–"}</td></tr>`;
       }
     }
   } else {

@@ -1,7 +1,7 @@
 # pyright: reportPrivateUsage=false
 """Key order (§key-order): a JSON object a model reads keeps the order it was declared or
 returned in. A state record's fields reach a binding's needs, the board and a slot's text in
-declared order; a record holds each entry, plan and verdict item's ``order``, reads it back and
+declared order; a record holds each entry item's ``order``, reads it back and
 replays it; the ordered encoding and the order object; design format 6's payload, parameter
 and structured-template orders; the redacted view's ``order``; and ``from_record``'s need
 comparison."""
@@ -12,7 +12,6 @@ from typing import Any, cast
 
 import pytest
 
-from designs import document_before_key_order
 from ledger_logs import before_key_order, rehashed, reordered
 from ommat import (
     CallResult,
@@ -22,8 +21,6 @@ from ommat import (
     InvalidRecord,
     LoadedDesign,
     Parameter,
-    Plan,
-    Policy,
     Question,
     Record,
     Rule,
@@ -57,8 +54,11 @@ STATE = {"zeta": "z", "alpha": 1, "mid": {"y": "why", "x": "ex"}}
 DECLARED = ["zeta", "alpha", "mid"]
 
 
-def inform(r: Any) -> Plan:
-    return Plan("inform", reply="ok")
+def inform(r: Any) -> str:
+    return "ok"
+
+
+ACT = Rule("d:act", t.string, inform, version="1")
 
 
 def state_keys(r: Any) -> list[str]:
@@ -76,9 +76,6 @@ def param_keyed(r: Any) -> dict[str, int]:
     return dict.fromkeys(r.param("keys"), 1)
 
 
-FUNCTIONS = {"policy": inform, "state_keys": state_keys, "weight_keys": weight_keys}
-
-
 def state_design() -> Design:
     ask = Question("noul", Text("Is {s} fine?", [{"name": "s", "origin": {"ref": "t:state"}}]))
     return Design(
@@ -88,9 +85,10 @@ def state_design() -> Design:
         rules={
             "state_keys": Rule(
                 "d:state_keys", t.list_(t.string), state_keys, version="1", reads=["t:state"]
-            )
+            ),
+            "act": ACT,
         },
-        policy=Policy(inform, version="1"),
+        policy="d:act",
     )
 
 
@@ -111,6 +109,11 @@ class Seen:
             for ref in call.refs:
                 found[ref] = self.values[ref]
         return CallResult(found)
+
+
+def format_5(doc: dict[str, Any]) -> dict[str, Any]:
+    """A current record document made format 5. Its ``hash`` is left to recompute."""
+    return before_key_order(doc)
 
 
 def entry(record: Record, ref: str) -> dict[str, Any]:
@@ -163,9 +166,10 @@ def weights_design() -> Design:
         rules={
             "weight_keys": Rule(
                 "d:weight_keys", t.list_(t.string), weight_keys, version="1", reads=["t:weights"]
-            )
+            ),
+            "act": ACT,
         },
-        policy=Policy(inform, version="1"),
+        policy="d:act",
     )
 
 
@@ -204,7 +208,8 @@ def test_use_answers_refuses_a_state_held_in_another_order_as_another_turn() -> 
     design = Design(
         name="mapped state",
         state=t.record(tags=t.mapping(t.integer())),
-        policy=Policy(inform, version="1"),
+        rules={"act": ACT},
+        policy="d:act",
     )
     loaded = load(design)
     one = decide_sync(loaded, {"tags": {"b": 1, "a": 2}}, {}).record
@@ -256,10 +261,11 @@ def test_a_replay_that_rebuilds_another_order_is_a_finding() -> None:
                         param_keyed,
                         version="1",
                         params=["keys"],
-                    )
+                    ),
+                    "act": ACT,
                 },
                 parameters={"keys": Parameter(t.list_(t.string), keys)},
-                policy=Policy(inform, version="1"),
+                policy="d:act",
             )
         )
 
@@ -286,27 +292,26 @@ def built(r: Any) -> dict[str, int]:
     return {"b": 1, "a": 2}
 
 
-def test_a_format_5_record_replays_with_no_finding_though_the_replay_holds_order() -> None:
+def test_a_format_5_record_reads_in_canonical_order_and_is_refused_by_replay() -> None:
     loaded = load(
         Design(
             name="built",
             state=t.record(),
             sources={"look": Source({"t:weights": t.mapping(t.number())})},
-            rules={"built": Rule("d:built", t.mapping(t.integer()), built, version="1")},
-            policy=Policy(inform, version="1"),
+            rules={
+                "built": Rule("d:built", t.mapping(t.integer()), built, version="1"),
+                "act": ACT,
+            },
+            policy="d:act",
         )
     )
     record = decide_sync(loaded, {}, {"default": Seen({"t:weights": dict(RETURNED)})}).record
-    old = read_record(rehashed(before_key_order({"log": record.log, "unhashed": record.unhashed})))
+    old = read_record(rehashed(format_5({"log": record.log, "unhashed": record.unhashed})))
     assert old.log[0]["format"] == 5
     assert all("order" not in i for i in old.log)
     # A record before format 6 holds its objects in canonical order.
     assert list(entry(old, "d:built")["value"]) == ["a", "b"]
-    again, findings = replay_sync(old, loaded)
-    assert findings == []
-    assert again is not None
-    assert again.log[0]["format"] == 7
-    assert entry(again, "d:built")["order"] == {"1": [1, 0]}
+    assert replay_sync(old, loaded) == (None, [{"kind": FindingKind.wrong_design}])
 
 
 def test_read_record_refuses_an_order_that_does_not_fit() -> None:
@@ -366,7 +371,7 @@ def test_read_record_runs_no_code_of_a_str_subclass_key() -> None:
 
 def test_read_record_refuses_an_order_in_a_format_5_record() -> None:
     record = weights_record(load(weights_design()))
-    doc = before_key_order({"log": record.log, "unhashed": record.unhashed})
+    doc = format_5({"log": record.log, "unhashed": record.unhashed})
     index, item = next((n, i) for n, i in enumerate(doc["log"]) if i.get("ref") == "t:weights")
     item["order"] = {}
     with pytest.raises(
@@ -501,21 +506,22 @@ def ordered_design(template: Any = TEMPLATE) -> Design:
         rules={
             "param_keys": Rule(
                 "d:param_keys", t.list_(t.string), check_param, version="1", params=["weights"]
-            )
+            ),
+            "act": ACT,
         },
         parameters={"weights": Parameter(t.mapping(t.number()), WEIGHTS)},
-        policy=Policy(inform, version="1"),
+        policy="d:act",
     )
 
 
 def check_param_functions() -> dict[str, Any]:
-    return {"policy": inform, "param_keys": check_param}
+    return {"act": inform, "param_keys": check_param}
 
 
 def test_a_document_from_format_6_writes_each_order_and_loads_back_to_its_own_hash() -> None:
     loaded = load(ordered_design())
     doc = decode(loaded.document)
-    assert doc["format"] == 9
+    assert doc["format"] == 10
     assert doc["sources"]["ask"]["payload_order"] == {"0": [1, 2, 0], "1": [1, 0]}
     assert doc["parameters"]["weights"]["order"] == {"0": [1, 0]}
     assert doc["sources"]["ask"]["provides"]["q:it"]["wording"]["order"] == {"0": [2, 1, 0]}
@@ -558,11 +564,12 @@ def test_a_mapping_leaf_of_any_scalar_keeps_its_order_through_its_document(
         name="leaf",
         state=t.record(),
         parameters={"weights": Parameter(leaf_type, value)},
-        policy=Policy(inform, version="1"),
+        rules={"act": ACT},
+        policy="d:act",
     )
     loaded = load(design)
     assert decode(loaded.document)["parameters"]["weights"]["order"] == {"0": [1, 0]}
-    again = load(loaded.document, functions={"policy": inform})
+    again = load(loaded.document, functions={"act": inform})
     assert again.design_hash == loaded.design_hash
     assert list(again._leaf_value("weights")) == ["zeta", "alpha"]  # pyright: ignore[reportPrivateUsage]
 
@@ -573,10 +580,11 @@ def test_a_template_of_a_list_of_objects_keeps_each_objects_order() -> None:
         name="list",
         state=t.record(),
         sources={"ask": Source({"q:it": Question("noul", Structured(template))})},
-        policy=Policy(inform, version="1"),
+        rules={"act": ACT},
+        policy="d:act",
     )
     loaded = load(design)
-    again = load(loaded.document, functions={"policy": inform})
+    again = load(loaded.document, functions={"act": inform})
     assert again.design_hash == loaded.design_hash
     seen = Seen()
     decide_sync(again, {}, {"default": seen})
@@ -615,32 +623,6 @@ def test_a_documents_order_that_does_not_fit_is_refused_at_check_11() -> None:
     assert 'parameter "weights"\'s order does not fit its value' in message
 
 
-def test_check_11_refuses_a_format_5_document_holding_payload_order() -> None:
-    doc = document_before_key_order(decode(load(ordered_design(IN_ORDER)).document))
-    load(doc, functions=check_param_functions())  # without it, it loads at format 5
-    doc["sources"]["ask"]["payload_order"] = {}
-    with pytest.raises(InvalidDesign) as raised:
-        load(doc, functions=check_param_functions())
-    assert [(f.check, f.message) for f in raised.value.failures] == [
-        (11, 'source "ask" has the member "payload_order", which its form does not have')
-    ]
-
-
-def test_check_10_refuses_a_format_5_document_whose_record_type_is_out_of_order() -> None:
-    doc = decode(load(state_design()).document)
-    assert doc["state"] == "record{zeta: string, alpha: integer, mid: record{y: string, x: string}}"
-    old = document_before_key_order(json.loads(json.dumps(doc)))
-    assert old["state"] == "record{alpha: integer, mid: record{x: string, y: string}, zeta: string}"
-    functions = {**FUNCTIONS}
-    load(old, functions=functions)  # in code-point order it loads at format 5
-    old["state"] = doc["state"]
-    with pytest.raises(InvalidDesign) as raised:
-        load(old, functions=functions)
-    ((check, message),) = [(f.check, f.message) for f in raised.value.failures]
-    assert check == 10
-    assert "the state declaration" in message
-
-
 # ---------------------------------------------------------------------------------------------
 # The redacted view's order
 
@@ -648,7 +630,7 @@ def test_check_10_refuses_a_format_5_document_whose_record_type_is_out_of_order(
 def test_a_redacted_views_order_fits_its_own_items() -> None:
     record = weights_record(load(weights_design()))
     view = json.loads(redact(record, b"\x07" * 32))
-    held = [i for i in view["log"] if i["item"] in ("entry", "plan", "verdict")]
+    held = [i for i in view["log"] if i["item"] in ("entry",)]
     assert held
     for item in held:
         rest = {k: v for k, v in item.items() if k != "order"}
@@ -666,10 +648,6 @@ def test_a_redacted_views_order_fits_its_own_items() -> None:
 # from_record compares a need by the order it holds from format 6
 
 
-def asked(r: Any) -> Plan:
-    return Plan("inform", reply="asked")
-
-
 def needing_design() -> LoadedDesign:
     return load(
         Design(
@@ -681,7 +659,8 @@ def needing_design() -> LoadedDesign:
                     {"q:fine": Question("noul", Text("Fine?"))}, needs=["t:weights"], oracle="ask"
                 ),
             },
-            policy=Policy(asked, version="1"),
+            rules={"act": ACT},
+            policy="d:act",
         )
     )
 
@@ -723,7 +702,7 @@ def test_from_record_refuses_a_need_whose_key_order_differs_from_format_6() -> N
 def test_from_record_compares_a_need_by_canonical_bytes_before_format_6() -> None:
     loaded = needing_design()
     record = needing_record(loaded)
-    old = rehashed(before_key_order({"log": record.log, "unhashed": record.unhashed}))
+    old = rehashed(format_5({"log": record.log, "unhashed": record.unhashed}))
     for weights in ({"a": 2, "b": 1, "c": 3}, dict(RETURNED)):
         assert marker_code(answered_from(old, loaded, weights), "q:fine") is None
     assert marker_code(answered_from(old, loaded, {"a": 2, "b": 1, "c": 4}), "q:fine") == (
@@ -739,65 +718,40 @@ def built_mapping(r: Any) -> dict[str, int]:
     return {"b": 1, "a": 2}
 
 
-def informed(r: Any) -> Plan:
-    return Plan("inform", reply="ok")
-
-
-def context_design() -> LoadedDesign:
-    from ommat import Context, ContextEntry
-
+def built_design() -> LoadedDesign:
     slot = [{"name": "m", "origin": {"ref": "d:built"}}]
     return load(
         Design(
-            name="context",
             state=t.record(),
             sources={
                 "ask": Source(
                     {"q:fine": Question("noul", Text("Is {m} fine?", slot))}, needs=["d:built"]
                 )
             },
-            rules={"built": Rule("d:built", t.mapping(t.integer()), built_mapping, version="1")},
-            policy=Policy(informed, version="1"),
-            context=Context([ContextEntry("d:built", Text("M={m}", slot))]),
+            rules={
+                "built": Rule("d:built", t.mapping(t.integer()), built_mapping, version="1"),
+                "act": ACT,
+            },
+            policy="d:act",
         )
     )
 
 
 def test_slot_text_renders_a_mapping_in_the_order_the_rule_built_it() -> None:
-    record = decide_sync(context_design(), {}, {"default": Seen()}).record
-    plan = next(i for i in record.log if i["item"] == "plan")
-    assert plan["context"]["entries"][0]["text"] == 'M={"b":1,"a":2}'
+    seen = Seen()
+    decide_sync(built_design(), {}, {"default": seen})
+    (call,) = seen.batches[0]
+    assert call.questions["q:fine"].wording == 'Is {"b":1,"a":2} fine?'
 
 
-def test_a_format_5_record_whose_slot_text_was_sorted_replays_with_no_finding() -> None:
-    loaded = context_design()
-    record = decide_sync(loaded, {}, {"default": Seen()}).record
-    doc = before_key_order({"log": record.log, "unhashed": record.unhashed})
-    for item in doc["log"]:  # as the format-5 engine rendered it: sorted
-        if item["item"] == "plan":
-            item["context"]["entries"][0]["text"] = 'M={"a":2,"b":1}'
-    old = read_record(rehashed(doc))
-    rerun, findings = replay_sync(old, loaded)
-    assert findings == []
-    assert rerun is not None
-    plan = next(i for i in rerun.log if i["item"] == "plan")
-    assert plan["context"]["entries"][0]["text"] == 'M={"a":2,"b":1}'
-    # The flag is the replay's alone: a live turn after it renders in held order again.
-    again = decide_sync(loaded, {}, {"default": Seen()}).record
-    assert (
-        next(i for i in again.log if i["item"] == "plan")["context"]["entries"][0]["text"]
-        == 'M={"b":1,"a":2}'
-    )
-
-
-def test_use_answers_takes_a_format_5_and_a_format_6_record_of_one_turn() -> None:
-    from ommat.evaluation import use_answers_sync
+def test_use_answers_refuses_a_format_5_record_as_the_wrong_design() -> None:
+    from ommat.evaluation import EvaluationRefusal, RefusalReason, use_answers_sync
 
     loaded = load(weights_design())
     six = weights_record(loaded)
-    five = read_record(rehashed(before_key_order({"log": six.log, "unhashed": six.unhashed})))
-    # No pairing is refused as another turn: an item before format 6 is compared without the
-    # other's order. Findings may follow, since a format-5 record holds its mappings sorted.
-    for record, other in ((five, six), (six, five), (five, five), (six, six)):
-        use_answers_sync(record, loaded, other)
+    five = read_record(rehashed(format_5({"log": six.log, "unhashed": six.unhashed})))
+    for record, other in ((five, six), (six, five), (five, five)):
+        with pytest.raises(EvaluationRefusal) as refused:
+            use_answers_sync(record, loaded, other)
+        assert refused.value.reason is RefusalReason.wrong_design
     assert use_answers_sync(six, loaded, six)["findings"] == []

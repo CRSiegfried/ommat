@@ -1,10 +1,20 @@
-"""The how-to's driver: decide two turns of the support design with a stand-in binding, and
-print what each hands the next model and the turn as Chat Completions messages."""
+"""The how-to's driver: decide three turns of the support design with a stand-in binding, and
+print the first turn's calls as Chat Completions messages and the note each turn hands on."""
 
 from collections.abc import Awaitable, Callable
 
-from ommat import CallResult, SourceCall, decide_sync, handoff, load, transcript
-from ommat.conversation import handoff_text, to_chat_completions
+from ommat import (
+    CallResult,
+    Cause,
+    Decision,
+    SourceCall,
+    Unavailable,
+    decide_sync,
+    escalation,
+    load,
+    transcript,
+)
+from ommat.conversation import to_chat_completions
 from support_design import DESIGN
 
 Binding = Callable[..., Awaitable[CallResult]]
@@ -25,11 +35,23 @@ def answering(yes: float) -> Binding:
     return binding
 
 
+async def failing(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+    """A stand-in for a model that cannot answer: the refund question comes back unavailable."""
+    return CallResult({"q:refund": Unavailable(Cause("unsupported"))})
+
+
+def next_model_note(decision: Decision) -> str:
+    """The caller's own words for what the turn settled."""
+    escalated = escalation(decision.record)
+    if escalated is not None:
+        return f"The turn is undecided: {escalated['root_cause']['code']}."
+    return f"The turn decided {decision.estimate}."
+
+
 def main() -> None:
     loaded = load(DESIGN)
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
-    print(handoff_text(handoff(decision.record)))
-
+    print(next_model_note(decision))
     for message in to_chat_completions(transcript(decision.record)):
         if message["role"] == "assistant":
             for call in message["tool_calls"]:
@@ -38,7 +60,10 @@ def main() -> None:
             print("result", message["tool_call_id"], len(message["content"]), "bytes")
 
     unsure = decide_sync(loaded, STATE, {"default": answering(0.6)})
-    print(handoff_text(handoff(unsure.record)))
+    print(next_model_note(unsure))
+
+    broken = decide_sync(loaded, STATE, {"default": failing})
+    print(next_model_note(broken))
 
 
 if __name__ == "__main__":

@@ -1,20 +1,21 @@
 # pyright: reportPrivateUsage=false
 """Replay: round trips asserting no finding,
 an edited copy asserting exactly its entry's finding, each finding kind in its
-fixed order, the entry refusals, the cut and the budget, ``replay_sync``, and the observer's
-exception and a cancellation carrying the replay record."""
+fixed order, the early returns, the entry refusals, the cut and the budget, ``replay_sync``,
+and the observer's exception and a cancellation carrying the replay record."""
 
 import asyncio
 import copy
 import json
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from designs import roles
-from ledger_logs import before_profile, rehashed
+from ledger_logs import BROKEN_8, CANCEL, CANCELLED, rehashed
 from ommat import (
     Cause,
     EntryRefusal,
@@ -23,10 +24,8 @@ from ommat import (
     InvalidRecord,
     LoadedDesign,
     Parameter,
-    Policy,
     Question,
     Record,
-    Requirement,
     Rule,
     RunSettings,
     Source,
@@ -44,6 +43,7 @@ from ommat._canonical import decode
 from ommat.helpers import HELPERS, pick_with_margin
 from scripted import Scripted, raising, returns
 from test_decide import (
+    ACT,
     ASK,
     BODY,
     GOLDEN_BROKEN,
@@ -55,22 +55,25 @@ from test_decide import (
     SPAM,
     Counting,
     Seen,
+    act_rule,
     archive_policy,
     bound,
     caught,
     deciding,
     echo,
-    escalate_policy,
     go,
-    golden_escalate,
-    golden_refused,
+    golden_undecided,
     ok_policy,
     record_of,
     route,
     slice_design,
+    undecided_policy,
 )
 
 K = FindingKind
+CHANGED = slice_design(name="changed")
+"""The slice design under another name: another design hash, the same turn."""
+UNDECIDED = slice_design(act=act_rule(undecided_policy))
 
 
 def run(record: Record, loaded: LoadedDesign = LOADED) -> tuple[Record | None, list[Any]]:
@@ -96,7 +99,7 @@ def entry(log: list[dict[str, Any]], ref: str) -> dict[str, Any]:
 
 
 def entries(record: Record) -> list[dict[str, Any]]:
-    return [i for i in record.log if i["item"] in ("entry", "plan", "verdict")]
+    return [i for i in record.log if i["item"] == "entry"]
 
 
 def rule_of(loaded: LoadedDesign, rid: str) -> dict[str, Any]:
@@ -123,7 +126,7 @@ def test_a_record_read_back_replays_with_no_finding() -> None:
 
 
 def test_the_replay_record_is_a_record_of_the_given_design_with_the_records_settings() -> None:
-    changed = slice_design(tools=["archive", "send"])
+    changed = CHANGED
     record = live(settings=RunSettings(round_bound=3, timeout=7))
     rerun, _ = run(record, changed)
     assert rerun is not None
@@ -175,9 +178,9 @@ SCENARIOS: dict[str, Callable[[], tuple[Record, LoadedDesign]]] = {
         CHAINED,
     ),
     "round bound": lambda: (live(CHAINED, RunSettings(round_bound=1)), CHAINED),
-    "refused plan": lambda: (
-        live(slice_design(requirements=[Requirement("d:route", "no")])),
-        slice_design(requirements=[Requirement("d:route", "no")]),
+    "an undecided policy": lambda: (
+        live(UNDECIDED, ask=returns({**SPAM, "q:spam": {"yes": 0.52, "no": 0.48}})),
+        UNDECIDED,
     ),
     "a deadline with no cut": lambda: (
         edited(go().record, lambda d: d["log"][1]["settings"].update(deadline=5)),
@@ -243,12 +246,12 @@ def hashed(record: Record | None) -> list[dict[str, Any]]:
 
 
 def test_replay_reads_nothing_from_unhashed() -> None:
-    record = live(ask=returns(SPAM, usage={"tokens": 5}, attempts=2, revision="m-1"))
+    record = live(ask=returns(SPAM, usage={"input_tokens": 5}, attempts=2, revision="m-1"))
 
     def change(doc: dict[str, Any]) -> None:
         calls = doc["unhashed"]["calls"]
         calls["3"].update(
-            usage={"tokens": 99},
+            usage={"input_tokens": 99},
             attempts=7,
             unexpected=["t:x"],
             invalid={"prompt": "'p'"},
@@ -314,13 +317,13 @@ def test_a_copy_with_one_d_entry_changed_gives_exactly_that_entrys_finding() -> 
 def test_a_finding_is_plain_data_holding_no_record() -> None:
     record = go().record
     copy_ = edited(record, lambda d: entry(d["log"], "d:echo").update(value="changed"))
-    found = findings(copy_, slice_design(tools=["archive", "send"]))
+    found = findings(copy_, CHANGED)
     assert json.loads(json.dumps(found)) == found
     assert copy.deepcopy(found) == found
     assert all(type(f) is dict and type(f["kind"]) is FindingKind for f in found)
 
 
-def test_an_entry_finding_names_no_rule_for_a_d_ref_the_given_design_no_longer_provides() -> None:
+def test_an_entry_finding_names_no_rule_for_a_d_ref_the_given_design_does_not_provide() -> None:
     record = go().record
     changed = slice_design(rules={"route": RULES["route"]})
     found = findings(record, changed)
@@ -344,7 +347,7 @@ def test_an_entry_finding_names_no_rule_for_a_d_ref_the_given_design_no_longer_p
 # The early returns
 
 
-def test_a_record_with_no_verdict_is_unfinished_and_runs_nothing() -> None:
+def test_a_record_cut_short_before_the_policy_s_entry_is_unfinished_and_runs_nothing() -> None:
     record = record_of(caught(deciding(observer=Seen(5))))
     seen = Seen()
     assert asyncio.run(replay(record, LOADED, observer=seen)) == (None, [{"kind": K.unfinished}])
@@ -353,15 +356,76 @@ def test_a_record_with_no_verdict_is_unfinished_and_runs_nothing() -> None:
 
 def test_a_cancelled_record_is_unfinished_whatever_the_design() -> None:
     record = record_of(caught(deciding(observer=Seen(0))))
-    assert run(record, slice_design(tools=["send"])) == (None, [{"kind": K.unfinished}])
+    assert run(record, CHANGED) == (None, [{"kind": K.unfinished}])
 
 
 def test_a_broken_entry_has_nothing_to_replay_and_no_design_mismatch() -> None:
     broken = go(state={"subject": "no other field"}).record
     assert broken.record_hash == GOLDEN_BROKEN
-    assert run(broken, slice_design(tools=["send"])) == (None, [{"kind": K.nothing_to_replay}])
+    assert run(broken, CHANGED) == (None, [{"kind": K.nothing_to_replay}])
     raised = go(codec=Counting(raises=ValueError("x"))).record
-    assert run(raised) == (None, [{"kind": K.nothing_to_replay}])
+    assert entry(raised.log, "t:state")["marker"]["kind"] == "Unavailable"
+    seen = Seen()
+    assert asyncio.run(replay(raised, LOADED, observer=seen)) == (
+        None,
+        [{"kind": K.nothing_to_replay}],
+    )
+    assert seen.items == []
+    built = read_record(rehashed({"log": json.loads(json.dumps(BROKEN_8)), "unhashed": {}}))
+    assert run(built) == (None, [{"kind": K.nothing_to_replay}])
+
+
+FORMAT_7_RECORDS = [
+    Path(__file__).parent / "format_9" / "record.json",
+    Path(__file__).parent / "format_7_record" / "turn.record.json",
+]
+"""Two record-format-7 turns: the format-9 design's, and the idia design's."""
+
+
+@pytest.mark.parametrize("path", FORMAT_7_RECORDS, ids=["format-9 design's turn", "idia turn"])
+def test_a_format_7_record_is_wrong_design_whatever_the_design(path: Path) -> None:
+    record = read_record(path.read_bytes())
+    assert record.log[0]["format"] == 7
+    seen = Seen()
+    assert asyncio.run(replay(record, LOADED, observer=seen)) == (
+        None,
+        [{"kind": K.wrong_design}],
+    )
+    assert seen.items == []
+
+
+def test_a_cancelled_record_before_format_8_is_wrong_design_before_unfinished() -> None:
+    log = read_record(FORMAT_7_RECORDS[0].read_bytes()).log
+    assert log[0]["format"] == 7
+    cancelled_7 = [*log[:3], CANCEL]
+    for cancelled in (cancelled_7, CANCELLED):
+        record = read_record(rehashed({"log": json.loads(json.dumps(cancelled)), "unhashed": {}}))
+        assert record.cause == CANCEL["cause"]
+        assert run(record, CHANGED) == (None, [{"kind": K.wrong_design}])
+
+
+@pytest.mark.parametrize(
+    ("at", "kind"),
+    [(2, K.unfinished), (3, K.nothing_to_replay)],
+    ids=["at the state entry", "at the policy's entry"],
+)
+def test_a_broken_entry_cut_short_is_unfinished_until_its_policy_entry(at: int, kind: K) -> None:
+    """The ledger refuses a ``cause`` item after a marker state, so the closest record is a
+    broken entry the observer cut short: before the policy's entry it is unfinished; at it,
+    the entry is kept and the turn is finished."""
+    exc = caught(deciding(observer=Seen(at), codec=Counting(raises=ValueError("bad"))))
+    record = record_of(exc)
+    assert entry(record.log, "t:state")["marker"]["kind"] == "Unavailable"
+    assert len(record.log) == at + 1
+    assert run(record) == (None, [{"kind": kind}])
+
+
+def test_a_finished_record_with_its_policy_s_entry_dropped_is_unfinished() -> None:
+    record = go().record
+    policy = entry(record.log, "d:act")
+    copy_ = edited(record, lambda d: d["log"].remove(entry(d["log"], "d:act")))
+    assert policy not in copy_.log
+    assert run(copy_) == (None, [{"kind": K.unfinished}])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -369,7 +433,7 @@ def test_a_broken_entry_has_nothing_to_replay_and_no_design_mismatch() -> None:
 
 
 def test_a_changed_design_is_design_mismatch_and_replay_proceeds() -> None:
-    changed = slice_design(tools=["archive", "send"])
+    changed = CHANGED
     rerun, found = run(go().record, changed)
     assert found == [
         {"kind": K.design_mismatch, "recorded": LOADED.design_hash, "replayed": changed.design_hash}
@@ -382,7 +446,7 @@ def test_an_edited_helper_version_is_helpers_mismatch_after_design_mismatch() ->
     assert findings(copy_) == [
         {"kind": K.helpers_mismatch, "recorded": HELPERS + 1, "replayed": HELPERS}
     ]
-    changed = slice_design(tools=["send", "archive", "x"])
+    changed = slice_design(name="other")
     assert [f["kind"] for f in findings(copy_, changed)] == [K.design_mismatch, K.helpers_mismatch]
 
 
@@ -507,7 +571,7 @@ def test_a_failed_call_beside_a_stale_batchmate_is_stale_whole() -> None:
     assert entry(rerun.log, "q:spam")["marker"]["cause"]["code"] == "not-returned"
 
 
-def test_a_failed_call_asked_now_in_two_batches_is_stale() -> None:
+def test_a_failed_call_asked_in_two_batches_under_the_given_design_is_stale() -> None:
     record = live(ask=raising(ValueError("down")))
     body = Source(BODY.provides, needs=BODY.needs, oracle="post")
     changed = slice_design(sources={"ask": ASK, "body": body, "look": LOOK})
@@ -573,47 +637,69 @@ def test_every_kind_together_is_in_the_fixed_order() -> None:
         (K.stale_question, "q:spam"),
         (K.stale_question, "t:more"),
         (K.stale_question, "t:new"),
+        (K.entry, "d:act"),
         (K.entry, "d:echo"),
         (K.entry, "d:route"),
         (K.entry, "q:spam"),
         (K.entry, "t:more"),
         (K.entry, "t:new"),
-        (K.plan, None),
     ]
 
 
-def test_a_changed_plan_and_verdict_are_their_findings_last() -> None:
+def keep_all(r: Any) -> str:
+    return "keep"
+
+
+def test_a_changed_policy_is_the_entry_finding_at_its_ref() -> None:
     record = go().record
-    changed = slice_design(requirements=[Requirement("d:route", "no")])
+    assert entry(record.log, "d:act")["value"] == "archive"
+    changed = slice_design(act=act_rule(keep_all))
     rerun, found = run(record, changed)
     assert rerun is not None
-    kinds = [f["kind"] for f in found]
-    assert kinds == [K.design_mismatch, K.verdict]
-    assert found[-1]["recorded"] == record.log[-1]
-    assert found[-1]["replayed"] == rerun.log[-1]
-    copy_ = edited(record, lambda d: d["log"][-2].update(reason="edited"))
-    assert [f["kind"] for f in findings(copy_)] == [K.plan]
+    assert found == [
+        {
+            "kind": K.design_mismatch,
+            "recorded": LOADED.design_hash,
+            "replayed": changed.design_hash,
+        },
+        {
+            "kind": K.entry,
+            "ref": "d:act",
+            "recorded": entry(record.log, "d:act"),
+            "replayed": entry(rerun.log, "d:act"),
+            "rule": rule_of(changed, "act"),
+        },
+    ]
+    assert entry(rerun.log, "d:act")["value"] == "keep"
 
 
-def test_a_state_that_no_longer_conforms_replays_as_a_broken_entry() -> None:
+def test_a_state_the_given_design_refuses_replays_as_a_broken_entry() -> None:
     changed = slice_design(state=t.record(subject=t.integer()))
     rerun, found = run(go().record, changed)
     assert rerun is not None
     assert rerun.cause == {"code": "invalid-return", "refs": ["t:state"]}
+    # The broken entry writes the policy's ref Unavailable and no other rule's entry.
     assert found[1] == {
+        "kind": K.entry,
+        "ref": "d:act",
+        "recorded": entry(go().record.log, "d:act"),
+        "replayed": entry(rerun.log, "d:act"),
+        "rule": rule_of(changed, "act"),
+    }
+    assert entry(rerun.log, "d:act")["marker"]["cause"] == rerun.cause
+    assert found[2] == {
         "kind": K.entry,
         "ref": "d:echo",
         "recorded": entry(go().record.log, "d:echo"),
         "replayed": None,
         "rule": rule_of(changed, "echo"),
     }
-    assert found[-1]["kind"] is K.plan  # both verdicts passed: no verdict finding
 
 
 def marked_state(doc: dict[str, Any]) -> None:
     state = entry(doc["log"], "t:state")
     del state["value"]
-    state["marker"] = {"kind": "Unavailable", "cause": {"code": "raised", "refs": ["t:state"]}}
+    state["marker"] = {"kind": "Unavailable", "cause": {"code": "raised", "refs": ["codec"]}}
 
 
 def look_also_lists_ask(doc: dict[str, Any]) -> None:
@@ -693,7 +779,9 @@ def test_a_recorded_round_bound_of_0_is_refused_at_the_read_or_with_no_findings(
     # one with no round reads, and replay refuses its setting.
     with pytest.raises(InvalidRecord, match="above the round bound"):
         edited(go().record, lambda d: d["log"][1]["settings"].update(round_bound=0))
-    roundless = slice_design(sources={}, rules={}, policy=Policy(ok_policy, version="1"))
+    roundless = slice_design(
+        sources={}, rules={}, act=Rule("d:act", ACT, ok_policy, version="1", reads=[])
+    )
     record = go(roundless, binds={}).record
     copy_ = edited(record, lambda d: d["log"][1]["settings"].update(round_bound=0))
     seen = Seen()
@@ -725,7 +813,7 @@ def test_the_observer_sees_the_replay_records_items() -> None:
     assert [item for _, item in seen.items] == rerun.log
 
 
-@pytest.mark.parametrize("at", [0, 2, 5, 12])
+@pytest.mark.parametrize("at", [0, 2, 5, 11])
 def test_the_observers_exception_propagates_with_the_replay_record_so_far(at: int) -> None:
     record = go().record
     seen = Seen(at)
@@ -763,7 +851,10 @@ def test_a_copy_clearing_a_refused_answer_replays_the_value() -> None:
     assert entry(rerun.log, "q:spam")["value"] == value
     # The cleared fault holds: q:spam matches, and only what reads it changes downstream.
     assert "q:spam" not in [f.get("ref") for f in found]
-    assert (found[0]["kind"], found[0].get("ref")) == (K.entry, "d:route")
+    assert [(f["kind"], f.get("ref")) for f in found[:2]] == [
+        (K.entry, "d:act"),
+        (K.entry, "d:route"),
+    ]
 
 
 def test_a_dropped_t_ref_is_never_asked_so_it_is_no_stale_question() -> None:
@@ -991,7 +1082,7 @@ BOUNDED = slice_design(
     parameters=SPAM_BAR,
 )
 FROM_DOCUMENT = load(
-    LOADED.document, functions={"route": route, "echo": echo, "policy": archive_policy}
+    LOADED.document, functions={"route": route, "echo": echo, "act": archive_policy}
 )
 
 
@@ -1015,14 +1106,7 @@ FEATURES: dict[str, Callable[[], tuple[Record, LoadedDesign]]] = {
     "boundaries": lambda: (live(BOUNDED), BOUNDED),
     "a design loaded from its document": lambda: (go().record, FROM_DOCUMENT),
     "a turn under a design loaded from its document": lambda: (live(FROM_DOCUMENT), LOADED),
-    "a refused verdict": lambda: (
-        golden_refused(),
-        slice_design(requirements=[Requirement("d:route", "no")]),
-    ),
-    "an escalate plan": lambda: (
-        golden_escalate(),
-        slice_design(policy=Policy(escalate_policy, version="1", reads=["d:route"])),
-    ),
+    "an undecided policy": lambda: (golden_undecided(), UNDECIDED),
 }
 
 
@@ -1137,19 +1221,3 @@ def test_a_regrouped_batch_is_answered_by_source_in_its_new_batch(
             "rule": None,
         },
     ]
-
-
-def test_a_format_2_record_whose_question_is_now_described_is_mismatch_and_stale() -> None:
-    import test_format_3 as f3
-
-    undescribed = load(f3.described(f3.tone_question(["warm", "cold"])))
-    doc = json.loads(f3.ran(loaded=undescribed).document)
-    del doc["hash"]
-    before_profile(doc, 2)  # as a format-2 engine wrote it
-    for item in doc["log"]:
-        if item["item"] == "call":
-            del item["precision"]
-    _, found = run(read_record(doc), load(f3.described()))
-    kinds = [f["kind"] for f in found[:2]]
-    assert kinds == [FindingKind.design_mismatch, FindingKind.stale_question]
-    assert (found[1]["ref"], found[1]["clause"]) == ("q:tone", "question")

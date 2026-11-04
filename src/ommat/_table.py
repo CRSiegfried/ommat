@@ -2,8 +2,8 @@
 gives; a table's evaluation over its input values under its hit policy and the marker
 contract; and the overlap test load runs for ``U`` and ``A``.
 
-The tagged form is §table-notation's. An input is ``{"read", "helper", "params"}``; a rule
-table's row ``{"cells", "output"}`` and a policy table's ``{"cells", "plan"}``; a cell ``"-"``
+The tagged form is §table-notation's. An input is ``{"read", "helper", "params"}``; a row
+``{"cells", "output"}``; a cell ``"-"``
 or a one-member object tagged ``is``, ``one_of``, ``marker``, ``markers``, ``known``, ``>=``,
 ``>``, ``<=``, ``<``, ``between`` or ``in``; an operand or an output entry an object tagged
 ``literal``, ``param`` or ``ref``, or an output ``{"marker": "Unsure"}``. A cell given as a
@@ -23,9 +23,8 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, cast
 
-from ommat._design import Helper, Input, Param, PlanDeclaration
+from ommat._design import Helper, Input, Param
 from ommat._markers import Cause, CauseCode, Unasked, Unavailable, Undetermined, Unsure
-from ommat._plan import Origin, Step
 from ommat._read_view import ReadView
 from ommat._refs import is_declared_name, is_ref
 from ommat._values import in_domain, string_data
@@ -41,8 +40,6 @@ _KIND_NAMES = {v: k for k, v in MARKERS.items()}
 COMPARISONS = (">=", ">", "<=", "<")
 CELL_TAGS = frozenset({"is", "one_of", "marker", "markers", "known", *COMPARISONS, "between", "in"})
 ANY_MARKER = "Undetermined"
-OPERAND_TAGS = frozenset({"literal", "param", "ref"})
-OUTPUT_TAGS = frozenset({"literal", "param", "ref", "marker"})
 HELPERS: dict[str, tuple[str, ...]] = {
     "pick_with_margin": ("bar", "margin"),
     "pick_with_thresholds": ("thresholds", "margin"),
@@ -51,20 +48,6 @@ HELPERS: dict[str, tuple[str, ...]] = {
     "extract": ("null_bar",),
 }
 """The helpers a table's input may call, each with its arguments after the read, in order."""
-REFUSED_HELPERS = frozenset(
-    {
-        "pick_each_with_margin",
-        "pick_each_with_thresholds",
-        "determined",
-        "agree",
-        "collect",
-        "first",
-        "priority",
-        "unique",
-    }
-)
-"""Names of the library a table's input may not call: the per-candidate picks and
-``determined`` (check 6), and the combinators, which a hit policy stands for."""
 _INTEGER = re.compile(r"-?(0|[1-9][0-9]*)")
 _IN = re.compile(r"in +([qtd]:\S*)")
 _IN_START = re.compile(r"in +[qtd]:")
@@ -280,18 +263,14 @@ def output_form(value: object) -> dict[str, Any]:
     return {"literal": value}
 
 
-def row_form(row: object, *, hit: object, policy: bool) -> dict[str, Any]:
-    """A row in the tagged form: its cells, then its output entry or its plan's name, the
-    cells alone under ``C#``."""
+def row_form(row: object, *, hit: object) -> dict[str, Any]:
+    """A row in the tagged form: its cells, then its output entry, the cells alone under
+    ``C#``."""
     if isinstance(row, NotationError):
         raise row
     if isinstance(row, str | bytes | bytearray) or not isinstance(row, Sequence):
         raise NotationError("a row is not a list")
     members = list(cast("Sequence[object]", row))
-    if policy:
-        if not members or not isinstance(members[-1], str):
-            raise NotationError("a policy table's row does not end with a plan's name")
-        return {"cells": [cell_form(c) for c in members[:-1]], "plan": string_data(members[-1])}
     if hit == "C#":
         return {"cells": [cell_form(c) for c in members], "output": None}
     if not members:
@@ -299,22 +278,17 @@ def row_form(row: object, *, hit: object, policy: bool) -> dict[str, Any]:
     return {"cells": [cell_form(c) for c in members[:-1]], "output": output_form(members[-1])}
 
 
-def python_row(row: Mapping[str, Any], *, policy: bool, hit: object = None) -> Any:
+def python_row(row: Mapping[str, Any], *, hit: object = None) -> Any:
     """A document row as a design written in Python holds it: its tagged cells, then its
-    output entry or its plan's name. A row not of the tagged form gives a ``NotationError``,
-    which check 10 reports: a cell that is neither ``"-"`` nor a tagged object, a plan's name
-    that is not a string, or an output that is not one tag, null only under ``C#``."""
+    output entry. A row not of the tagged form gives a ``NotationError``, which check 10
+    reports: a cell that is neither ``"-"`` nor a tagged object, or an output that is not one
+    tag, null only under ``C#``."""
     cells = row.get("cells")
     if not isinstance(cells, list) or not all(
         c == ANY or isinstance(c, dict) for c in cast("list[object]", cells)
     ):
         return NotationError("a row's cells are not a list of tagged cells")
     out = list(cast("list[Any]", cells))
-    if policy:
-        plan = row.get("plan")
-        if not isinstance(plan, str):
-            return NotationError("a row's plan is not a name")
-        return [*out, plan]
     output = row.get("output")
     if (output is None) != (hit == "C#"):
         return NotationError("a row's output is null where the hit policy is not C#, or not")
@@ -372,29 +346,10 @@ def read_inputs(
     return out
 
 
-def plan_conditions(plan: PlanDeclaration) -> list[tuple[str, tuple[int, int]]]:
-    """A plan declaration's board refs a row naming it needs held, each with its order key
-    for rule 2's naming: its steps' board-ref origins, by step and then by argument name in
-    code-point order, then the slots of ``reason`` and of ``reply``, in slot-list order."""
-    out: list[tuple[str, tuple[int, int]]] = []
-    for step in plan.steps:
-        arguments = cast(Step, step).arguments
-        for name in sorted(arguments):
-            origin = arguments[name]
-            if isinstance(origin, Origin) and origin.ref is not None:
-                out.append((origin.ref, (1, len(out))))
-    for text in (plan.reason, plan.reply):
-        for slot in () if text is None else text.slots:
-            tag, value = next(iter(slot["origin"].items()))
-            if tag == "ref":
-                out.append((cast(str, value), (2, len(out))))
-    return out
-
-
 @dataclass(frozen=True, slots=True)
 class Condition:
-    """A value a row needs held besides its cells: a pass-through's input, or in the policy
-    table a plan's board-ref origin or slot. ``at`` orders it for rule 2's naming."""
+    """A value a row needs held besides its cells: a pass-through's input. ``at`` orders it
+    for rule 2's naming."""
 
     ref: str
     value: object
@@ -403,12 +358,10 @@ class Condition:
 
 @dataclass(frozen=True, slots=True)
 class Outcome:
-    """A table's result: ``value``, a value or a marker for a rule table; ``plan``, the
-    winning row's plan's name for the policy table, or ``None`` with ``value`` the marker;
-    ``rows``, every matching row's position from 1."""
+    """A table's result: ``value``, a value or a marker; ``rows``, every matching row's
+    position from 1."""
 
     value: object
-    plan: str | None
     rows: list[int]
 
 
@@ -573,22 +526,19 @@ def evaluate(
     reads: Sequence[str],
     values: Sequence[object],
     leaves: Mapping[str, Any],
-    conditions: Mapping[int, Sequence[Condition]] | None = None,
     fields: Mapping[str, str | None] | None = None,
 ) -> Outcome:
     """A table over its inputs' ``values``, in input order, each read once: its result under
-    ``hit`` and the marker contract. ``conditions`` gives the policy table's plan origins and
-    slots by row position from 0; a rule table's pass-through is a condition of its own row.
+    ``hit`` and the marker contract. A pass-through is a condition of its own row.
     ``fields`` gives each candidate set's candidate field, by which an ``in`` cell over a set
     of records tests each member. Raises ``Incomparable``."""
     t = _Table(reads, values, leaves, {} if fields is None else fields)
-    policy = conditions is not None
     matched: list[int] = []
     failed: list[tuple[int, str]] = []  # rows that failed only on Unavailable, with the ref
     for k, row in enumerate(rows):
-        held = list(conditions.get(k, ())) if conditions is not None else []
+        held: list[Condition] = []
         output = row.get("output")
-        if not policy and isinstance(output, dict) and "ref" in output:
+        if isinstance(output, dict) and "ref" in output:
             ref = cast(str, output["ref"])
             j = t.reads.index(ref)
             held.append(Condition(ref, t.values[j], (0, j)))
@@ -601,24 +551,24 @@ def evaluate(
     positions = [k + 1 for k in matched]
 
     def unavailable(ref: str) -> Outcome:
-        return Outcome(Unavailable(Cause(CauseCode.required, [ref])), None, positions)
+        return Outcome(Unavailable(Cause(CauseCode.required, [ref])), positions)
 
     if hit.startswith("C"):
         if failed:
             return unavailable(failed[0][1])
         if not matched:
             if hit in ("C+", "C#"):
-                return Outcome(0, None, positions)
-            return Outcome(t.no_match(), None, positions)
+                return Outcome(0, positions)
+            return Outcome(t.no_match(), positions)
         if hit == "C#":
-            return Outcome(len(matched), None, positions)
+            return Outcome(len(matched), positions)
         outs = [t.output(rows[k]["output"]) for k in matched]
         if hit == "C+":
-            return Outcome(_sum(cast("list[int | float]", outs)), None, positions)
+            return Outcome(_sum(cast("list[int | float]", outs)), positions)
         pick = min if hit == "C<" else max
-        return Outcome(pick(cast("list[float]", outs)), None, positions)
+        return Outcome(pick(cast("list[float]", outs)), positions)
     if not matched:
-        return Outcome(t.no_match(), None, positions)
+        return Outcome(t.no_match(), positions)
     if hit == "P":
         assert order is not None
         ranks = [_rank(order, rows[k]["output"]) for k in matched]
@@ -633,9 +583,7 @@ def evaluate(
             before = [(k, r) for k, r in failed if k < winner]
             if before:
                 return unavailable(before[0][1])
-    if policy:
-        return Outcome(None, cast(str, rows[winner]["plan"]), positions)
-    return Outcome(t.output(rows[winner]["output"]), None, positions)
+    return Outcome(t.output(rows[winner]["output"]), positions)
 
 
 def _sum(outs: list[int | float]) -> int | float:

@@ -19,7 +19,7 @@ from typing import Any, cast
 import pytest
 
 from counting import SmallBounds, bound, counted
-from designs import minimal, slot
+from designs import DECISION, minimal, slot
 from ommat import (
     Answer,
     AnswerKind,
@@ -232,13 +232,22 @@ def test_a_design_with_no_source_stops_after_round_0_with_no_round_item() -> Non
     assert body(record) == [
         {
             "item": "entry",
+            "ref": "d:decision",
+            "round": 0,
+            "call": None,
+            "value": True,
+            "derivation": [],
+            "order": {},
+        },
+        {
+            "item": "entry",
             "ref": "d:size",
             "round": 0,
             "call": None,
             "value": 5,
             "derivation": [],
             "order": {},
-        }
+        },
     ]
 
 
@@ -249,7 +258,12 @@ def test_round_0_fires_rule_wavefronts_each_sorted_by_id() -> None:
         "mid": rule("mid", lambda r: False, "t:state"),
     }
     record, _ = run(make(rules=rules), {})
-    assert kinds(record) == [("entry", "d:mid"), ("entry", "d:zed"), ("entry", "d:alpha")]
+    assert kinds(record) == [
+        ("entry", "d:decision"),
+        ("entry", "d:mid"),
+        ("entry", "d:zed"),
+        ("entry", "d:alpha"),
+    ]
     assert {i["round"] for i in body(record)} == {0}
 
 
@@ -266,6 +280,15 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
         },
     }
     assert body(record) == [
+        {
+            "item": "entry",
+            "ref": "d:decision",
+            "round": 0,
+            "call": None,
+            "value": True,
+            "derivation": [],
+            "order": {},
+        },
         {
             "item": "call",
             "round": 1,
@@ -286,7 +309,7 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
             "item": "entry",
             "ref": "q:spam",
             "round": 1,
-            "call": 3,
+            "call": 4,
             "value": answer("noul", ["yes", "no"], NOUL),
             "order": {"2": [1, 0]},
         },
@@ -294,11 +317,11 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
             "item": "entry",
             "ref": "q:tone",
             "round": 1,
-            "call": 3,
+            "call": 4,
             "value": answer("choice", ["warm", "cold"], TONE),
             "order": {"2": [1, 0]},
         },
-        {"item": "entry", "ref": "t:body", "round": 1, "call": 3, "value": "text", "order": {}},
+        {"item": "entry", "ref": "t:body", "round": 1, "call": 4, "value": "text", "order": {}},
         {
             "item": "entry",
             "ref": "d:route",
@@ -313,11 +336,11 @@ def test_one_working_round_is_round_1_with_its_call_entries_rules_and_round_item
         {"item": "round", "round": 1, "cost": 2, "deadline": False},
     ]
     calls = record.unhashed["calls"]
-    assert list(calls) == ["3"]
-    assert type(calls["3"]["start"]) is str
-    assert calls["3"]["start"].endswith("Z")
-    assert calls["3"]["latency"] >= 0
-    assert (calls["3"]["usage"], calls["3"]["attempts"]) == (None, None)
+    assert list(calls) == ["4"]
+    assert type(calls["4"]["start"]) is str
+    assert calls["4"]["start"].endswith("Z")
+    assert calls["4"]["latency"] >= 0
+    assert (calls["4"]["usage"], calls["4"]["attempts"]) == (None, None)
     assert "exceptions" not in record.unhashed
     assert "reads" not in record.unhashed
 
@@ -352,7 +375,7 @@ def test_rounds_are_numbered_from_1_without_a_gap() -> None:
 
 def test_a_call_passes_each_source_call_with_its_payload_needs_refs_and_questions() -> None:
     record, binding = run(make(asking()), {"ask": ok()})
-    assert record.log[3]["outcome"] == "returned"
+    assert record.log[4]["outcome"] == "returned"
     ((call, told),) = binding.batches
     assert call.id == "ask"
     assert call.payload == {"model": "m", "tags": ["a", "b"]}
@@ -373,14 +396,14 @@ def test_a_wording_renders_its_escapes_and_its_identity_hashes_the_template_as_w
     source = ask(provides={"q:spam": Question("noul", Text("Is {{it}} spam?}}"))})
     record, binding = run(make({"ask": source}), {"ask": returns({"q:spam": NOUL})})
     assert binding.batches[0][0].questions["q:spam"].wording == "Is {it} spam?}"
-    assert record.log[3]["questions"]["q:spam"]["identity"] == identity("Is {{it}} spam?}}")
+    assert record.log[4]["questions"]["q:spam"]["identity"] == identity("Is {{it}} spam?}}")
 
 
 def test_the_identity_does_not_hash_the_source_id_or_the_ref() -> None:
     def ident(sid: str, ref: str, template: str) -> str:
         source = Source({ref: Question("noul", Text(template))})
         record, _ = run(make({sid: source}), {sid: returns({ref: NOUL})})
-        return record.log[3]["questions"][ref]["identity"]
+        return record.log[4]["questions"][ref]["identity"]
 
     assert ident("ask", "q:spam", "Is it?") == ident("other", "q:junk", "Is it?")
     assert ident("ask", "q:spam", "Is it?") != ident("ask", "q:spam", "Is it so?")
@@ -401,16 +424,17 @@ def test_each_source_with_no_oracle_is_its_own_call_through_default_run_concurre
     record, binding = run(make(sources), {"zeta": reply, "alpha": reply})
     assert [len(b) for b in binding.batches] == [1, 1]
     assert kinds(record) == [
+        ("entry", "d:decision"),
         ("call", 1),
         ("call", 1),
         ("entry", "t:alpha"),
         ("entry", "t:zeta"),
         ("round", 1),
     ]
-    assert [i["sources"] for i in body(record)[:2]] == [["alpha"], ["zeta"]]
-    assert [i["outcome"] for i in body(record)[:2]] == ["returned", "returned"]
-    assert entry(record, "t:alpha")["call"] == 3
-    assert entry(record, "t:zeta")["call"] == 4
+    assert [i["sources"] for i in body(record)[1:3]] == [["alpha"], ["zeta"]]
+    assert [i["outcome"] for i in body(record)[1:3]] == ["returned", "returned"]
+    assert entry(record, "t:alpha")["call"] == 4
+    assert entry(record, "t:zeta")["call"] == 5
 
 
 def test_a_round_writes_asked_and_marked_sources_interleaved_by_source_id() -> None:
@@ -496,24 +520,24 @@ def test_a_q_need_is_passed_as_the_answer_a_rule_reads() -> None:
 
 
 def failed(record: Record, code: str, refs: list[str] = ASKED) -> None:
-    """The call item at index 3 is `Failed` with ``code`` naming the batch's refs, every ref
+    """The call item at index 4 is `Failed` with ``code`` naming the batch's refs, every ref
     of the batch `Unavailable` with it, naming the call."""
-    call = record.log[3]
+    call = record.log[4]
     assert call["outcome"] == {"failed": {"code": code, "refs": refs}}
     assert (call["revision"], call["elicitation"], call["prompt"]) == (None, None, None)
     for ref in refs:
         assert entry(record, ref)["marker"] == mark(code, *refs)
-        assert entry(record, ref)["call"] == 3
+        assert entry(record, ref)["call"] == 4
 
 
 def test_a_binding_that_raises_fails_the_call_with_raised_and_its_text_in_unhashed() -> None:
     record, _ = run(make(asking(), {"route": ROUTE}), {"ask": raising(RuntimeError("down"))})
     failed(record, "raised")
-    assert set(record.log[3]["questions"]) == {"q:spam", "q:tone"}  # on a Failed call too
-    exc = record.unhashed["exceptions"]["3"]
+    assert set(record.log[4]["questions"]) == {"q:spam", "q:tone"}  # on a Failed call too
+    exc = record.unhashed["exceptions"]["4"]
     assert (exc["type"], exc["message"]) == ("RuntimeError", "down")
     assert "RuntimeError: down" in exc["traceback"]
-    assert (record.unhashed["calls"]["3"]["usage"], record.unhashed["calls"]["3"]["attempts"]) == (
+    assert (record.unhashed["calls"]["4"]["usage"], record.unhashed["calls"]["4"]["attempts"]) == (
         None,
         None,
     )
@@ -545,7 +569,7 @@ def test_a_late_result_after_a_swallowed_cancellation_is_discarded_as_timed_out(
 def test_a_raise_after_the_timeout_is_timed_out_with_its_text_kept() -> None:
     record, _ = run(make(asking(timeout=0.02)), {"ask": raising_on_cancel(5, KeyError("late"))})
     failed(record, "timed-out")
-    assert record.unhashed["exceptions"]["3"]["type"] == "KeyError"
+    assert record.unhashed["exceptions"]["4"]["type"] == "KeyError"
 
 
 class Sub(CallResult):
@@ -573,21 +597,21 @@ def test_a_return_that_is_not_exactly_a_call_result_or_failed_is_invalid_return(
 ) -> None:
     record, _ = run(make(asking()), {"ask": reply})
     failed(record, "invalid-return")
-    assert "invalid" not in record.unhashed["calls"]["3"]
+    assert "invalid" not in record.unhashed["calls"]["4"]
 
 
 @pytest.mark.parametrize("code", ["raised", "timed-out", "invalid-return", "unexpected-ref"])
 def test_a_returned_failed_names_every_ref_of_the_batch_whatever_it_listed(code: str) -> None:
     record, _ = run(make(asking()), {"ask": Failed(Cause(code, ["t:other", "q:spam"]))})
     failed(record, code)
-    assert "invalid" not in record.unhashed["calls"]["3"]
+    assert "invalid" not in record.unhashed["calls"]["4"]
 
 
 def test_a_returned_failed_with_another_code_is_invalid_return_its_code_in_unhashed() -> None:
     record, _ = run(make(asking()), {"ask": Failed(Cause("refused"))})
     failed(record, "invalid-return")
     # The engine's own code is shown by its string.
-    assert record.unhashed["calls"]["3"]["invalid"] == {"code": "'refused'"}
+    assert record.unhashed["calls"]["4"]["invalid"] == {"code": "'refused'"}
 
 
 def test_a_failed_whose_cause_holds_a_foreign_code_shows_its_type() -> None:
@@ -599,7 +623,7 @@ def test_a_failed_whose_cause_holds_a_foreign_code_shows_its_type() -> None:
     object.__setattr__(outcome.cause, "code", Code("refused"))
     record, _ = run(make(asking()), {"ask": outcome})
     failed(record, "invalid-return")
-    shown = record.unhashed["calls"]["3"]["invalid"]["code"]
+    shown = record.unhashed["calls"]["4"]["invalid"]["code"]
     assert shown.startswith("<test_interpret.")
     assert shown.endswith(".Code>")
 
@@ -615,24 +639,24 @@ def test_a_call_result_or_failed_built_without_init_is_invalid_return(
 
 def test_a_failed_whose_cause_was_tampered_with_is_invalid_return() -> None:
     outcome = Failed(Cause("raised"))
-    object.__setattr__(outcome.cause, "code", "raised")  # a str, no longer the member
+    object.__setattr__(outcome.cause, "code", "raised")  # a str, not the member
     record, _ = run(make(asking()), {"ask": outcome})
     failed(record, "invalid-return")
-    assert record.unhashed["calls"]["3"]["invalid"] == {"code": "'raised'"}
+    assert record.unhashed["calls"]["4"]["invalid"] == {"code": "'raised'"}
 
 
 def test_an_unexpected_key_fails_the_call_and_is_kept_in_unhashed() -> None:
     values: dict[Any, Any] = {**OK, "t:nope": 1, 7: "x"}
     record, _ = run(make(asking()), {"ask": returns(values)})
     failed(record, "unexpected-ref")
-    assert record.unhashed["calls"]["3"]["unexpected"] == ["t:nope", "7"]
+    assert record.unhashed["calls"]["4"]["unexpected"] == ["t:nope", "7"]
 
 
 def test_an_unexpected_key_outranks_a_bad_provenance_member() -> None:
     values: dict[Any, Any] = {**OK, "t:nope": 1}
     record, _ = run(make(asking()), {"ask": returns(values, revision=3)})
     failed(record, "unexpected-ref")
-    assert record.unhashed["calls"]["3"]["invalid"] == {"revision": "3"}
+    assert record.unhashed["calls"]["4"]["invalid"] == {"revision": "3"}
 
 
 @pytest.mark.parametrize(
@@ -644,7 +668,7 @@ def test_a_provenance_member_not_null_or_a_domain_string_is_invalid_return(
 ) -> None:
     record, _ = run(make(asking()), {"ask": ok(**{member: value})})
     failed(record, "invalid-return")
-    assert record.unhashed["calls"]["3"]["invalid"] == {member: repr(value)}
+    assert record.unhashed["calls"]["4"]["invalid"] == {member: repr(value)}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -659,15 +683,15 @@ def test_a_call_items_provenance_is_the_call_results() -> None:
                 revision="m-1",
                 elicitation="e-2",
                 prompt="the prompt",
-                usage={"in": 3, "out": 1.5},
+                usage={"input_tokens": 3, "output_tokens": 2},
                 attempts=2,
             )
         },
     )
-    call = record.log[3]
+    call = record.log[4]
     assert (call["revision"], call["elicitation"], call["prompt"]) == ("m-1", "e-2", "the prompt")
-    assert record.unhashed["calls"]["3"]["usage"] == {"in": 3, "out": 1.5}
-    assert record.unhashed["calls"]["3"]["attempts"] == 2
+    assert record.unhashed["calls"]["4"]["usage"] == {"input_tokens": 3, "output_tokens": 2}
+    assert record.unhashed["calls"]["4"]["attempts"] == 2
 
 
 class Mood(enum.StrEnum):
@@ -678,9 +702,11 @@ class Mood(enum.StrEnum):
     ("member", "value"),
     [
         ("usage", "many"),
-        ("usage", {"in": float("nan")}),
-        ("usage", {"in": True}),
+        ("usage", {"input_tokens": float("nan")}),
+        ("usage", {"input_tokens": True}),
         ("usage", {3: 1}),
+        ("usage", {"cost": 1}),
+        ("usage", {"input_tokens": 1, "tokens": 2}),
         ("attempts", True),
         ("attempts", 1.0),
         ("attempts", 2**60),
@@ -690,9 +716,9 @@ def test_a_bad_usage_or_attempts_fails_nothing_and_is_recorded_null(
     member: str, value: object
 ) -> None:
     record, _ = run(make(asking()), {"ask": ok(**{member: value})})
-    assert record.log[3]["outcome"] == "returned"
-    assert record.unhashed["calls"]["3"][member] is None
-    assert record.unhashed["calls"]["3"]["invalid"] == {member: repr(value)}
+    assert record.log[4]["outcome"] == "returned"
+    assert record.unhashed["calls"]["4"][member] is None
+    assert record.unhashed["calls"]["4"]["invalid"] == {member: repr(value)}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -700,7 +726,7 @@ def test_a_bad_usage_or_attempts_fails_nothing_and_is_recorded_null(
 
 
 def stands(record: Record, *refs: str) -> None:
-    assert record.log[3]["outcome"] == "returned"
+    assert record.log[4]["outcome"] == "returned"
     for ref in refs:
         assert "value" in entry(record, ref)
 
@@ -708,7 +734,7 @@ def stands(record: Record, *refs: str) -> None:
 def test_a_t_value_that_does_not_conform_fails_that_ref_alone() -> None:
     record, _ = run(make(asking()), {"ask": with_values(t_body=3)})
     assert entry(record, "t:body")["marker"] == mark("invalid-return", "t:body")
-    assert entry(record, "t:body")["call"] == 3
+    assert entry(record, "t:body")["call"] == 4
     stands(record, "q:spam", "q:tone")
 
 
@@ -743,7 +769,7 @@ def test_an_answer_near_one_is_recorded_as_returned_and_not_flagged() -> None:
     near = {"yes": 0.4999999, "no": 0.5}
     record, _ = run(make(asking()), {"ask": with_values(q_spam=near)})
     assert entry(record, "q:spam")["value"] == answer("noul", ["yes", "no"], near)
-    assert "sums" not in record.unhashed["calls"]["3"]
+    assert "sums" not in record.unhashed["calls"]["4"]
 
 
 def test_an_answer_off_one_is_recorded_as_returned_and_its_sum_flagged() -> None:
@@ -751,7 +777,7 @@ def test_an_answer_off_one_is_recorded_as_returned_and_its_sum_flagged() -> None
     loaded = make(asking(), {"route": ROUTE})
     record, _ = run(loaded, {"ask": with_values(q_spam=off)})
     assert entry(record, "q:spam")["value"] == answer("noul", ["yes", "no"], off)
-    assert record.unhashed["calls"]["3"]["sums"] == {"q:spam": 0.9}
+    assert record.unhashed["calls"]["4"]["sums"] == {"q:spam": 0.9}
     # The flag changes no outcome: the rule reads the values as returned.
     assert entry(record, "d:route")["value"] == "yes"
     flat, _ = run(loaded, {"ask": with_values(q_spam={"yes": 0.8, "no": 0.2})})
@@ -778,7 +804,7 @@ def test_each_answer_off_the_band_is_flagged_under_its_ref(
 ) -> None:
     record, _ = run(make(asking()), {"ask": with_values(q_spam=spam, q_tone=tone)})
     stands(record, "q:spam", "q:tone", "t:body")
-    call = record.unhashed["calls"]["3"]
+    call = record.unhashed["calls"]["4"]
     if sums is None:
         assert "sums" not in call
     else:
@@ -796,7 +822,7 @@ def test_an_invalid_answer_or_a_marker_is_never_flagged() -> None:
     )
     assert entry(record, "q:spam")["marker"] == mark("invalid-answer", "q:spam")
     assert entry(record, "q:tone")["marker"] == mark("refused", "q:tone")
-    assert "sums" not in record.unhashed["calls"]["3"]
+    assert "sums" not in record.unhashed["calls"]["4"]
 
 
 def test_a_flagged_answer_reads_back_with_its_sums() -> None:
@@ -804,13 +830,13 @@ def test_a_flagged_answer_reads_back_with_its_sums() -> None:
     record, _ = run(loaded, {"ask": with_values(q_spam={"yes": 0.9, "no": 0.9})})
     back = read_record(record.document)
     assert back.document == record.document
-    assert back.unhashed["calls"]["3"]["sums"] == {"q:spam": 1.8}
+    assert back.unhashed["calls"]["4"]["sums"] == {"q:spam": 1.8}
 
 
 def test_an_omitted_ref_is_not_returned_naming_that_ref() -> None:
     record, _ = run(make(asking()), {"ask": with_values(q_tone=DROP)})
     assert entry(record, "q:tone")["marker"] == mark("not-returned", "q:tone")
-    assert entry(record, "q:tone")["call"] == 3
+    assert entry(record, "q:tone")["call"] == 4
     stands(record, "q:spam", "t:body")
 
 
@@ -930,7 +956,7 @@ def test_a_rule_that_raises_is_unavailable_raised_naming_the_rule() -> None:
     record = one_rule(fails("bad rule"), "t:state")
     assert entry(record, "d:r")["marker"] == mark("raised", "r")
     assert entry(record, "d:r")["derivation"] == []
-    exc = record.unhashed["exceptions"]["3"]
+    exc = record.unhashed["exceptions"]["4"]
     assert (exc["type"], exc["message"]) == ("ValueError", "bad rule")
 
 
@@ -951,13 +977,16 @@ def coroutine_rule(r: Any) -> Any:
 
 @pytest.fixture
 def untyped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Interpret's type test of a rule's return fails if reached: an awaitable is refused
-    before it."""
+    """Interpret's type test of a rule's return fails if reached by any rule's but the
+    policy's: an awaitable is refused before it."""
+    real = _interpret._Turn.typed_value
 
-    def never(value: object, type_: object) -> object:
-        raise AssertionError("the return reached the type test")
+    def never(turn: _interpret._Turn, provides: str, returned: object) -> object:
+        if provides != DECISION.provides:
+            raise AssertionError(f"{provides}'s return reached the type test")
+        return real(turn, provides, returned)
 
-    monkeypatch.setattr(_interpret, "typed", never)
+    monkeypatch.setattr(_interpret._Turn, "typed_value", never)
 
 
 @pytest.mark.usefixtures("untyped")
@@ -1034,7 +1063,7 @@ def test_an_engine_defect_in_the_awaitable_test_or_the_close_propagates(
 def test_a_rule_return_whose_awaitable_test_raises_is_the_rules_raise() -> None:
     record = one_rule(lambda r: clashing(), "t:state")
     assert entry(record, "d:r")["marker"] == mark("raised", "r")
-    exc = record.unhashed["exceptions"]["3"]
+    exc = record.unhashed["exceptions"]["4"]
     assert (exc["type"], exc["message"]) == ("ValueError", "the type test raised")
 
 
@@ -1050,13 +1079,13 @@ def test_a_rules_coroutine_is_closed_when_an_undeclared_read_wins() -> None:
     record = one_rule(fn, "t:state")
     assert entry(record, "d:r")["marker"] == mark("undeclared-read", "r")
     assert inspect.getcoroutinestate(returned[0]) == inspect.CORO_CLOSED
-    assert record.unhashed["reads"] == {"3": "t:junk"}
+    assert record.unhashed["reads"] == {"4": "t:junk"}
 
 
 def test_a_rules_coroutine_raising_on_close_keeps_the_outcome_and_its_text() -> None:
     record = one_rule(lambda r: started_raising_on_close("on close"), "t:state")
     assert entry(record, "d:r")["marker"] == mark("invalid-return", "r")
-    exc = record.unhashed["exceptions"]["3"]
+    exc = record.unhashed["exceptions"]["4"]
     assert (exc["type"], exc["message"]) == ("ValueError", "on close")
 
 
@@ -1068,8 +1097,8 @@ def test_a_close_raise_is_kept_beside_the_undeclared_read_that_wins() -> None:
 
     record = one_rule(fn, "t:state")
     assert entry(record, "d:r")["marker"] == mark("undeclared-read", "r")
-    assert record.unhashed["exceptions"]["3"]["message"] == "on close"
-    assert record.unhashed["reads"] == {"3": "t:junk"}
+    assert record.unhashed["exceptions"]["4"]["message"] == "on close"
+    assert record.unhashed["reads"] == {"4": "t:junk"}
 
 
 def test_a_coroutine_whose_close_raises_a_base_exception_propagates_it() -> None:
@@ -1107,7 +1136,7 @@ def test_a_rule_returning_what_is_not_an_estimate_is_invalid_return(value: objec
 
 
 def test_a_rules_returned_marker_is_written_with_whatever_cause_code_it_carries() -> None:
-    refs = ["t:state", "r", "policy", "rule:1", "step:2"]
+    refs = ["t:state", "r"]
     record = one_rule(lambda r: Unasked(Cause("refused", refs)), "t:state")
     assert entry(record, "d:r")["marker"] == mark("refused", *refs, kind="Unasked")
 
@@ -1121,15 +1150,14 @@ def test_a_rules_returned_marker_with_a_ref_of_no_declared_form_is_invalid_retur
     assert entry(record, "d:r")["marker"] == mark("invalid-return", "r")
 
 
-@pytest.mark.parametrize(("ref", "kept"), [("bar", True), ("archive", True), ("verdict", False)])
-def test_a_cause_names_a_parameter_or_a_tool_but_no_type_definition(ref: str, kept: bool) -> None:
+@pytest.mark.parametrize(("ref", "kept"), [("bar", True), ("verdict", False)])
+def test_a_cause_names_a_parameter_but_no_type_definition(ref: str, kept: bool) -> None:
     def returning(r: Any) -> Any:
         return Unsure(Cause("conflict", [ref]))
 
     loaded = make(
         rules={"r": rule("r", returning, "t:state")},
         parameters={"bar": Parameter(t.number(), 0.5)},
-        tools=["archive"],
         types={"verdict": t.label("no", "yes")},
     )
     record, _ = run(loaded, {})
@@ -1210,13 +1238,13 @@ def test_an_undeclared_read_names_the_read_only_when_the_design_provides_it(
     record = one_rule(lambda r: r.read(read))
     refs = ["r", read] if named else ["r"]
     assert entry(record, "d:r")["marker"] == mark("undeclared-read", *refs)
-    assert record.unhashed.get("reads", {}) == ({} if named else {"3": read})
+    assert record.unhashed.get("reads", {}) == ({} if named else {"4": read})
 
 
 def test_an_undeclared_read_of_a_non_string_puts_its_repr_in_reads() -> None:
     record = one_rule(lambda r: r.read(42))
     assert entry(record, "d:r")["marker"] == mark("undeclared-read", "r")
-    assert record.unhashed["reads"] == {"3": "42"}
+    assert record.unhashed["reads"] == {"4": "42"}
 
 
 @pytest.mark.parametrize(("path", "named"), [("bar", True), ("nope", False)])
@@ -1247,7 +1275,7 @@ def swallow(*reads: str) -> Callable[[Any], Any]:
 def test_a_caught_undeclared_read_still_decides_and_only_the_first_counts() -> None:
     record = one_rule(swallow("t:junk", "t:state"))
     assert entry(record, "d:r")["marker"] == mark("undeclared-read", "r")
-    assert record.unhashed["reads"] == {"3": "t:junk"}
+    assert record.unhashed["reads"] == {"4": "t:junk"}
 
 
 def abstains(r: Any) -> Any:
@@ -1334,7 +1362,7 @@ def test_a_base_exception_from_a_rule_propagates_with_no_item_for_it() -> None:
     ledger = open_ledger(loaded, STATE, run_)
     with pytest.raises(Interrupt):
         asyncio.run(interpret_on(ledger, loaded, STATE, {"default": Scripted({})}, run_))
-    assert len(ledger.close().log) == 3
+    assert len(ledger.close().log) == 4
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1419,6 +1447,7 @@ def test_at_the_bound_pending_sources_are_unasked_and_the_drain_fires_the_rules_
     record, binding = run(chain(), CHAIN, round_bound=1)
     assert [b[0].id for b in binding.batches] == ["s1"]
     assert kinds(record) == [
+        ("entry", "d:decision"),
         ("call", 1),
         ("entry", "t:a"),
         ("entry", "d:r1"),
@@ -1484,7 +1513,10 @@ def test_a_task_that_cancels_itself_is_re_raised_before_its_rounds_first_append(
     log = cancelling_turn(
         {"alpha": raising(asyncio.CancelledError()), "zeta": returns({"t:z": "z"})}
     )
-    assert [(i["item"], i.get("ref")) for i in log] == [("entry", "d:zero")]
+    assert [(i["item"], i.get("ref")) for i in log] == [
+        ("entry", "d:decision"),
+        ("entry", "d:zero"),
+    ]
 
 
 def test_a_cancellation_of_interpret_cancels_the_frontier_and_appends_nothing_of_its_round() -> (
@@ -1520,7 +1552,7 @@ def test_a_cancellation_of_interpret_cancels_the_frontier_and_appends_nothing_of
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(main())
     assert sorted(cancelled) == ["alpha", "zeta"]
-    assert len(ledger.close().log) == 3
+    assert len(ledger.close().log) == 4
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1663,10 +1695,10 @@ def test_a_tuple_in_the_live_state_is_passed_as_a_fresh_tuple() -> None:
 
 
 def test_a_duplicate_usage_key_is_recorded_null() -> None:
-    usage = {Twin("in"): 1, Twin("in"): 2}
+    usage = {Twin("input_tokens"): 1, Twin("input_tokens"): 2}
     record, _ = run(make(asking()), {"ask": ok(usage=usage)})
-    assert record.unhashed["calls"]["3"]["usage"] is None
-    assert "usage" in record.unhashed["calls"]["3"]["invalid"]
+    assert record.unhashed["calls"]["4"]["usage"] is None
+    assert "usage" in record.unhashed["calls"]["4"]["invalid"]
 
 
 def test_a_marker_whose_cause_was_replaced_is_invalid_return() -> None:
@@ -1692,7 +1724,7 @@ def raises_it(exc: Exception) -> dict[str, str]:
     def fn(r: Any) -> Any:
         raise exc
 
-    return one_rule(fn, "t:state").unhashed["exceptions"]["3"]
+    return one_rule(fn, "t:state").unhashed["exceptions"]["4"]
 
 
 def test_an_exception_whose_str_raises_has_an_unrepresentable_message() -> None:
@@ -1730,7 +1762,7 @@ def test_the_drain_refuses_to_spin_on_a_returned_node_never_done() -> None:
     loaded = make({"ask": ask()})
     ledger = open_ledger(loaded, STATE, settings())
     walk = _Turn(ledger, loaded, STATE, {}, 8, 60, frozenset(), _Limits(None, None, None))
-    assert walk.sorter.get_ready() == {"ask"}  # returned and never done
+    assert set(walk.sorter.get_ready()) == {"ask", "decision"}  # returned and never done
     with pytest.raises(_InterpretError, match=r"^the drain found no node ready"):
         walk.drain(1)
 
@@ -1781,7 +1813,7 @@ def test_a_values_key_whose_class_raises_is_unexpected() -> None:
     values: dict[Any, Any] = {**OK, Masked(): 1}
     record, _ = run(make(asking()), {"ask": returns(values)})
     failed(record, "unexpected-ref")
-    assert len(record.unhashed["calls"]["3"]["unexpected"]) == 1
+    assert len(record.unhashed["calls"]["4"]["unexpected"]) == 1
 
 
 def test_a_t_value_whose_class_raises_is_invalid_return() -> None:
@@ -1803,25 +1835,27 @@ def test_a_bindings_base_exception_propagates_bare_with_no_item_of_its_round() -
     replies = {"alpha": returns({"t:a": "a"}), "zeta": raising(Interrupt())}
     with pytest.raises(Interrupt):
         asyncio.run(interpret_on(ledger, loaded, STATE, {"default": Scripted(replies)}, run_))
-    assert len(ledger.close().log) == 3
+    assert len(ledger.close().log) == 4
 
 
 def test_a_late_call_results_usage_and_attempts_are_null_and_nothing_else_is_kept() -> None:
-    late = ok(usage={"in": 3}, attempts=2, revision=5)
+    late = ok(usage={"input_tokens": 3}, attempts=2, revision=5)
     record, _ = run(make(asking(timeout=0.02)), {"ask": ignoring_cancel(5, late)})
     failed(record, "timed-out")
-    call = record.unhashed["calls"]["3"]
+    call = record.unhashed["calls"]["4"]
     assert (call["usage"], call["attempts"]) == (None, None)
     assert "invalid" not in call
     assert "unexpected" not in call
 
 
-@pytest.mark.parametrize("usage", [{Mood.calm: 1}, {"in": 2**60}, {"in": -(2**60)}])
+@pytest.mark.parametrize(
+    "usage", [{Mood.calm: 1}, {"input_tokens": 2**60}, {"input_tokens": -(2**60)}]
+)
 def test_a_usage_outside_the_value_domain_is_recorded_null(usage: object) -> None:
     record, _ = run(make(asking()), {"ask": ok(usage=usage)})
-    assert record.unhashed["calls"]["3"]["usage"] is None
+    assert record.unhashed["calls"]["4"]["usage"] is None
     shown = "<builtins.dict>" if Mood.calm in usage else repr(usage)  # type: ignore[operator]
-    assert record.unhashed["calls"]["3"]["invalid"] == {"usage": shown}
+    assert record.unhashed["calls"]["4"]["invalid"] == {"usage": shown}
 
 
 def test_a_failed_whose_cause_is_not_exactly_a_cause_is_invalid_return() -> None:
@@ -1876,7 +1910,7 @@ def test_a_score_question_is_passed_its_levels_and_recorded_with_them() -> None:
     assert binding.batches[0][0].questions["q:urgency"] == RenderedQuestion(
         AnswerKind.score, "How urgent?", levels, descriptions=(None,) * len(levels)
     )
-    assert record.log[3]["questions"]["q:urgency"] == {
+    assert record.log[4]["questions"]["q:urgency"] == {
         "identity": identity("How urgent?", "score", list(levels)),
         "kind": "score",
         "labels": list(levels),
@@ -1888,7 +1922,7 @@ def test_two_values_keys_of_one_string_data_fail_the_call_ahead_of_an_unexpected
     values: dict[Any, Any] = {**OK, Twin("t:body"): "again", "t:nope": 1}
     record, _ = run(make(asking()), {"ask": returns(values)})
     failed(record, "invalid-return")
-    assert "unexpected" not in record.unhashed["calls"]["3"]
+    assert "unexpected" not in record.unhashed["calls"]["4"]
 
 
 def test_a_rounds_cost_is_the_exact_sum_of_its_calls_tags_rounded_once() -> None:
@@ -2191,7 +2225,7 @@ def test_a_when_reading_a_ref_nesting_past_the_recursion_limit_names_its_source_
 def test_a_rule_reading_a_ref_nesting_past_the_recursion_limit_names_the_rule_alone() -> None:
     record = one_rule(lambda r: r.read(DEEP_BRACKET), "t:state")
     assert entry(record, "d:r")["marker"] == mark("undeclared-read", "r")
-    assert record.unhashed["reads"] == {"3": DEEP_BRACKET}
+    assert record.unhashed["reads"] == {"4": DEEP_BRACKET}
 
 
 def param_nope(r: Any) -> Any:
@@ -2422,6 +2456,7 @@ def test_a_when_raising_a_cancellation_in_round_2_keeps_round_1_whole_and_none_o
         asyncio.run(interpret_on(ledger, loaded, GATE_STATE, {"default": binding}, run_))
     log = ledger.close().log[3:]
     assert [(i["item"], i.get("ref"), i["round"]) for i in log] == [
+        ("entry", "d:decision", 0),
         ("call", None, 1),
         ("entry", "t:alt_f", 1),
         ("entry", "t:out_f", 1),
@@ -2441,7 +2476,7 @@ def test_a_when_raising_a_base_exception_propagates_bare_with_no_item_appended()
     binding = Scripted({"s": answers})
     with pytest.raises(Interrupt):
         asyncio.run(interpret_on(ledger, loaded, GATE_STATE, {"default": binding}, run_))
-    assert len(ledger.close().log) == 3
+    assert len(ledger.close().log) == 4
     assert binding.batches == []
 
 
@@ -2455,7 +2490,7 @@ def test_a_truth_test_raising_a_base_exception_propagates_bare() -> None:
     ledger = open_ledger(loaded, GATE_STATE, run_)
     with pytest.raises(Interrupt):
         asyncio.run(interpret_on(ledger, loaded, GATE_STATE, {"default": Scripted({})}, run_))
-    assert len(ledger.close().log) == 3
+    assert len(ledger.close().log) == 4
 
 
 def reads_v0(r: Any) -> bool:
@@ -2545,7 +2580,7 @@ def test_a_returned_value_whose_truth_test_cancels_keeps_the_items_appended_befo
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(interpret_on(ledger, loaded, GATE_STATE, {"default": binding}, run_))
     log = ledger.close().log[3:]
-    assert [i["item"] for i in log] == ["call", "entry", "entry", "round"]
+    assert [i["item"] for i in log] == ["entry", "call", "entry", "entry", "round"]
     assert asked(binding) == ["first"]
 
 
@@ -2740,7 +2775,7 @@ def slotted_identity(bar: object = 0.9) -> str:
 
 def recorded_identity(loaded: LoadedDesign, state: object = STATE) -> str:
     record, _ = asked_with(loaded, state)
-    return record.log[3]["questions"]["q:spam"]["identity"]
+    return record.log[4]["questions"]["q:spam"]["identity"]
 
 
 def test_the_identity_hashes_each_parameter_origin_with_its_value_and_no_board_value() -> None:
@@ -2764,7 +2799,7 @@ def test_a_bytes_parameters_identity_value_is_its_record_form() -> None:
     loaded = with_params(sources, blob=Parameter(t.bytes_, b"\x00\x01"))
     record, call = asked_with(loaded)
     assert call.questions["q:spam"].wording == 'Blob "AAE"'
-    assert record.log[3]["questions"]["q:spam"]["identity"] == hash_value(
+    assert record.log[4]["questions"]["q:spam"]["identity"] == hash_value(
         {
             "kind": "noul",
             "wording": {
@@ -2872,7 +2907,7 @@ def test_a_keyed_batch_is_one_call_through_its_keys_binding_in_source_id_order()
     assert item["sources"] == ["a", "at", "b", "bt", "c", "ct"]
     assert list(item["questions"]) == ["q:a", "q:b", "q:c"]
     for ref in ("q:a", "t:a", "q:b", "t:b", "q:c", "t:c"):
-        assert entry(record, ref)["call"] == 3
+        assert entry(record, ref)["call"] == 4
     assert entry(record, "t:b")["value"] == "bt"
     assert body(record)[-1] == {"item": "round", "round": 1, "cost": 3.5, "deadline": False}
 
@@ -2895,9 +2930,9 @@ def test_call_items_go_by_first_source_id_sources_with_no_oracle_alone_through_d
     assert [[c.id for c in b] for b in binds["j"].batches] == [["d", "dt"]]
     # Entries by source id after every call item, not batch by batch.
     assert [i.get("ref") for i in body(record) if i["item"] == "entry"] == [
-        "q:a", "t:a", "q:b", "t:b", "q:c", "t:c", "q:d", "t:d", "q:e", "t:e",
+        "d:decision", "q:a", "t:a", "q:b", "t:b", "q:c", "t:c", "q:d", "t:d", "q:e", "t:e",
     ]  # fmt: skip
-    assert [entry(record, f"t:{s}")["call"] for s in "abcde"] == [4, 5, 5, 6, 8]
+    assert [entry(record, f"t:{s}")["call"] for s in "abcde"] == [5, 6, 6, 7, 9]
 
 
 def test_a_keyed_source_that_is_not_ready_is_left_out_of_its_batch() -> None:
@@ -2949,7 +2984,7 @@ def test_a_structural_fault_fails_every_ref_of_the_batch_in_code_point_order(
     assert item["outcome"] == {"failed": {"code": code, "refs": KEYED_REFS}}
     for ref in KEYED_REFS:
         assert entry(record, ref)["marker"] == mark(code, *KEYED_REFS)
-        assert entry(record, ref)["call"] == 3
+        assert entry(record, ref)["call"] == 4
 
 
 def test_a_keyed_batch_past_its_timeout_fails_every_ref_timed_out() -> None:
@@ -2989,7 +3024,7 @@ def test_a_value_fault_or_an_omitted_ref_in_a_batch_hits_that_ref_alone() -> Non
     assert entry(record, "q:a")["marker"] == mark("invalid-answer", "q:a")
     assert entry(record, "t:a")["value"] == "at"
     assert entry(record, "q:b")["value"]["probabilities"] == NOUL
-    assert {entry(record, r)["call"] for r in KEYED_REFS} == {3}
+    assert {entry(record, r)["call"] for r in KEYED_REFS} == {4}
 
 
 def test_a_mixed_batch_takes_the_largest_declared_timeout_never_the_run_setting() -> None:
@@ -3082,6 +3117,7 @@ def test_a_frontier_over_budget_in_round_1_is_not_asked_and_the_drain_fires_behi
     record, binding = run(budgeted(), CHAIN, budget=0.5)
     assert binding.batches == []
     assert kinds(record) == [
+        ("entry", "d:decision"),
         ("entry", "t:a"),
         ("entry", "t:b"),
         ("entry", "t:c"),
@@ -3096,6 +3132,34 @@ def test_a_frontier_over_budget_in_round_1_is_not_asked_and_the_drain_fires_behi
         assert entry(record, ref)["round"] == 1
     assert entry(record, "d:r2")["marker"] == mark("required", "t:b", kind="Unasked")
     assert rounds(record) == [{"item": "round", "round": 1, "cost": 0, "deadline": False}]
+
+
+@pytest.mark.parametrize(
+    ("limits", "replies", "code"),
+    [
+        ({"round_bound": 1}, {"first": returns({"t:a": "a"})}, "round-bound"),
+        ({"budget": 0.5}, {}, "over-budget"),
+        ({"deadline": 0.05}, {"first": sleeping(10, None)}, "deadline"),
+    ],
+    ids=["round bound", "budget", "deadline"],
+)
+def test_the_drain_fires_the_policy_once_at_the_round_bound_the_budget_and_the_deadline(
+    limits: dict[str, Any], replies: dict[str, object], code: str
+) -> None:
+    sources = {
+        "first": Source({"t:a": t.string}, cost=1),
+        "second": Source({"t:b": t.string}, needs=["t:a"], cost=1),
+    }
+    act = rule("act", lambda r: r.require("t:b"), "t:b", outputs=t.string)
+    loaded = make(sources, {"act": act}, policy="d:act")
+    binding = Scripted(replies)
+    record = turn(loaded, {"default": binding}, STATE, **limits)
+    (policy,) = [i for i in record.log if i["item"] == "entry" and i["ref"] == "d:act"]
+    assert policy["round"] == 1
+    assert policy["marker"]["kind"] == "Unasked"
+    assert policy["marker"]["cause"]["code"] == "required"
+    assert entry(record, "t:b")["marker"]["cause"]["code"] == code
+    assert [i["round"] for i in body(record) if i["item"] == "round"] == [1]
 
 
 def test_a_frontier_over_budget_after_a_charged_round_is_cut_in_round_2() -> None:
@@ -3138,8 +3202,8 @@ def test_the_budget_compares_the_exact_sum_of_its_tags() -> None:
 
 def test_usage_never_feeds_the_budget() -> None:
     replies = {
-        "s1": returns({"t:a": "a"}, usage={"cost": 1e9}),
-        "s2": returns({"t:b": "b"}, usage={"cost": 1e9}),
+        "s1": returns({"t:a": "a"}, usage={"input_tokens": 10**9}),
+        "s2": returns({"t:b": "b"}, usage={"input_tokens": 10**9}),
         "s3": returns({"t:c": "c", "t:d": "d"}),
     }
     _, binding = run(budgeted(), replies, budget=4)
@@ -3222,6 +3286,7 @@ def test_a_call_the_deadline_cuts_is_timed_out_and_charged_and_the_rest_stand() 
     assert entry(record, "t:f")["value"] == "f"
     assert entry(record, "t:n")["marker"] == mark("deadline", kind="Unasked")
     assert kinds(record) == [
+        ("entry", "d:decision"),
         ("call", 1),
         ("call", 1),
         ("entry", "t:f"),
@@ -3531,16 +3596,16 @@ def test_a_revision_over_the_size_bounds_is_invalid_return_and_unrepresentable(
     small_bounds: SmallBounds,
 ) -> None:
     record, _ = run(make(asking()), {"ask": ok(revision=_BIG)})
-    assert record.log[3]["outcome"] == {"failed": {"code": "invalid-return", "refs": ASKED}}
-    assert record.log[3]["revision"] is None
-    assert record.unhashed["calls"]["3"]["invalid"] == {"revision": "<unrepresentable>"}
+    assert record.log[4]["outcome"] == {"failed": {"code": "invalid-return", "refs": ASKED}}
+    assert record.log[4]["revision"] is None
+    assert record.unhashed["calls"]["4"]["invalid"] == {"revision": "<unrepresentable>"}
 
 
 def test_a_usage_over_the_size_bounds_is_recorded_null(small_bounds: SmallBounds) -> None:
     record, _ = run(make(asking()), {"ask": ok(usage={_BIG: 1})})
-    assert record.log[3]["outcome"] == "returned"
-    assert record.unhashed["calls"]["3"]["usage"] is None
-    assert record.unhashed["calls"]["3"]["invalid"] == {"usage": "<unrepresentable>"}
+    assert record.log[4]["outcome"] == "returned"
+    assert record.unhashed["calls"]["4"]["usage"] is None
+    assert record.unhashed["calls"]["4"]["invalid"] == {"usage": "<unrepresentable>"}
 
 
 def test_an_exception_whose_arguments_are_too_large_has_no_text(small_bounds: SmallBounds) -> None:
@@ -3554,7 +3619,7 @@ def test_a_long_wording_is_held_to_no_size_bound(small_bounds: SmallBounds) -> N
     wording = "Is it spam? " + "Consider every word of it. " * 20  # past the 2^8 code points set
     loaded = make(asking(provides={"q:spam": Question("noul", Text(wording))}))
     record, binding = run(loaded, {"ask": returns({"q:spam": NOUL})})
-    assert record.log[3]["outcome"] == "returned"
+    assert record.log[4]["outcome"] == "returned"
     assert binding.batches[0][0].questions["q:spam"].wording == wording
     assert entry(record, "q:spam")["value"]["probabilities"] == NOUL
 

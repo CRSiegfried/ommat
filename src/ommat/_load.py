@@ -38,19 +38,13 @@ from ommat._canonical import (
 )
 from ommat._design import (
     _BUILT_BY_LOAD,
-    Context,
-    ContextEntry,
     Design,
     DesignFailure,
     Group,
     InvalidDesign,
     LoadedDesign,
     Parameter,
-    PlanDeclaration,
-    Policy,
-    PolicyTable,
     Question,
-    Requirement,
     Rule,
     Source,
     SourceRequirement,
@@ -65,14 +59,11 @@ from ommat._design import (
     new_failure,
 )
 from ommat._form import X_ROLES, check_form
-from ommat._markers import PlanKind
-from ommat._plan import Binding, Origin, Step, step_document
 from ommat._read_view import is_candidate_read
 from ommat._refs import (
     _ParsedRef,
     code_point_sorted,
     is_declared_name,
-    is_field_path,
     is_segment,
     parse_ref,
 )
@@ -83,7 +74,6 @@ from ommat._table import (
     Axis,
     NotationError,
     overlap,
-    plan_conditions,
     python_input,
     python_row,
 )
@@ -113,22 +103,10 @@ from ommat._types import (
     value_conforms,
 )
 from ommat._values import (
-    CANDIDATE_FIELD_FORMAT,
-    CANDIDATE_FORMAT,
-    CONTEXT_FORMAT,
-    DESCRIPTION_FORMAT,
     DESIGN_FORMAT,
-    DESIGN_FORMATS,
-    EXTRACTION_FORMAT,
-    GROUP_REASON_FORMAT,
     GROUP_REASONS,
-    KEY_ORDER_FORMAT,
-    KNOWN_FORMAT,
     MAX_DOCUMENT_DEPTH,
     MISSING,
-    NOUL_DESCRIPTION_FORMAT,
-    STRUCTURED_WORDING_FORMAT,
-    TARGETS_FORMAT,
     domain_error,
     in_domain,
     member_named,
@@ -142,7 +120,7 @@ from ommat._values import (
 
 _STATE = "t:state"
 _NOUL_LABELS = ("yes", "no")
-_ROLES = frozenset({"policy", "codec"})
+_ROLES = frozenset({"codec"})
 _WORDS = frozenset(
     {
         "number",
@@ -225,7 +203,6 @@ def _load_document(given: bytes | Mapping[str, Any], functions: Mapping[str, Any
         check_form(_build(parsed, resolved), unresolved),
         parsed=parsed,
         given=given if isinstance(given, bytes) else None,
-        fmt=cast(int, parsed["format"]),
     )
     loader.failures += failures
     return loader.run()
@@ -239,10 +216,10 @@ _NO_TABLE = "\0"  # no table owns the use
 class _Use:
     """A ref a declaration reads: the declaration, its role and the parsed ref."""
 
-    owner: str  # the declared name, or "policy" for the policy and "" for the plan
+    owner: str  # the declared name, or "" for the policy or a classes key
     where: str
-    role: str  # need, slot, candidate, label-set, text, read, boundary, policy, requirement,
-    # source-requirement, group
+    role: str  # need, slot, candidate, label-set, text, read, helper, boundary, grounding,
+    # policy, source-requirement, group
     ref: str
     parsed: _ParsedRef
 
@@ -258,13 +235,10 @@ class _Loader:
         *,
         parsed: dict[str, Any] | None = None,
         given: bytes | None = None,
-        fmt: int = DESIGN_FORMAT,
     ) -> None:
         # From a document: the parsed document and, given as bytes, the bytes.
         self.parsed = parsed
         self.given = given
-        # The format the document is written under: a document's own, read under its rules.
-        self.format = fmt
         self.d: Design = checked.design
         self.failures: list[DesignFailure] = list(checked.failures)
         # What a member check 10's form test refused still provides or declares.
@@ -272,7 +246,6 @@ class _Loader:
         self.leaves: frozenset[str] = frozenset(self.d.parameters) | frozenset(checked.leaves)
         self.refused_sources: set[str] = set()
         self.refused_rules: set[str] = set()
-        self.refused_plans: set[str] = set()
         self.grounded: set[str] = set()
         self.providers: dict[str, list[str | None]] = {}
         self.uses: list[_Use] = []
@@ -280,8 +253,6 @@ class _Loader:
         # Each candidate read, which no ref spells: its owner, where it is, the read and its
         # role, a read or a boundary's key.
         self.candidate_reads: list[tuple[str, str, str, str]] = []
-        # Each plan declaration's text holding a candidate slot, which no text holds.
-        self.candidate_slots: list[tuple[str, str]] = []
         self.defs: dict[str, Type] = {}
         self.tainted: set[str] = set()
         # Each definition's size, and each provided ref's and the state's, once it passes.
@@ -294,8 +265,6 @@ class _Loader:
         self.leaf_written: dict[str, Type] = {}  # each leaf's type as declared, for messages
         self.state_type: Type | None = None
         self.class_keys: list[tuple[str, _ParsedRef]] = []  # each classes key check 7 passed
-        # Each context entry's candidate slot, by its flagged ref, refused at check 4.
-        self.context_candidates: list[tuple[str, str]] = []
         # Each leaf check 8 refuses under a boundaries field, left out of check 9's boundaries
         # clauses.
         self.refused_leaves: set[str] = set()
@@ -333,28 +302,6 @@ class _Loader:
         for rid, rule in self.d.rules.items():
             if rid not in self.refused_rules:
                 yield rid, rule
-
-    def policy(self) -> Policy | None:
-        return self.d.policy if isinstance(self.d.policy, Policy) else None
-
-    def policy_table(self) -> PolicyTable | None:
-        return self.d.policy if isinstance(self.d.policy, PolicyTable) else None
-
-    def plans(self) -> Iterator[tuple[str, PlanDeclaration]]:
-        """Each plan declaration check 12 lets through."""
-        for name, plan in self.d.plans.items():
-            if name not in self.refused_plans:
-                yield name, plan
-
-    def named_plans(self) -> list[str]:
-        """The declared plans the policy table's rows name, in first-named order."""
-        table = self.policy_table()
-        if table is None:
-            return []
-        names = [cast(str, row["plan"]) for row in table.rows]
-        return [
-            n for n in dict.fromkeys(names) if n in self.d.plans and n not in self.refused_plans
-        ]
 
     # --- the run ---------------------------------------------------------------------------
 
@@ -521,46 +468,6 @@ class _Loader:
                 role = "read" if i["helper"] is None else "helper"
                 self.read_use(rid, f"rule {_q(rid)}'s input {n}", role, i["read"])
             self.table_refs(rid, f"rule {_q(rid)}", table.inputs, table.rows)
-        policy = self.policy()
-        if policy is not None:
-            for ref in policy.reads:
-                self.read_use("policy", "the policy", "policy", ref)
-        policy_table = self.policy_table()
-        if policy_table is not None:
-            for n, i in enumerate(policy_table.inputs, 1):
-                self.read_use("policy", f"the policy table's input {n}", "policy", i["read"])
-            self.table_refs("policy", "the policy table", policy_table.inputs, policy_table.rows)
-        for name, plan in self.plans():
-            where = f"plan declaration {_q(name)}"
-            if plan.grounded is not None:
-                self.use(name, f"{where}'s grounding", "plan-grounding", plan.grounded)
-            for n, step in enumerate(plan.steps, 1):
-                for arg, origin in cast(Step, step).arguments.items():
-                    shown = f"{where}'s step {n} argument {_q(arg)}"
-                    if isinstance(origin, Origin) and origin.candidate is not None:
-                        self.use(name, shown, "plan-candidate", origin.candidate)
-                    elif isinstance(origin, Origin) and origin.ref is not None:
-                        self.use(name, shown, "origin", origin.ref)
-                for requirement in cast(Step, step).requirements:
-                    shown = f"{where}'s step {n} requirement"
-                    parsed = self.ref(requirement.ref, shown, name)
-                    if parsed is not None and parsed.fields:
-                        self.fail(
-                            7,
-                            (name, requirement.ref),
-                            f"{shown} names {_q(requirement.ref)}, which has a field path",
-                        )
-                    elif parsed is not None:
-                        self.uses.append(_Use(name, shown, "requirement", requirement.ref, parsed))
-            for member, text in (("reason", plan.reason), ("reply", plan.reply)):
-                if text is None:
-                    continue
-                for slot in text.slots:
-                    tag, value = next(iter(slot["origin"].items()))
-                    if tag == "ref":
-                        self.use(name, f"{where}'s {member}", "plan-slot", value)
-                    elif tag == "candidate":
-                        self.candidate_slots.append((name, f"{where}'s {member}"))
         for owner, where, boundaries, _ in self.boundary_fields():
             for key in boundaries:
                 # Check 3 finds each key's provider and check 7 its form; check 4 gives a
@@ -569,20 +476,6 @@ class _Loader:
                     self.candidate_reads.append((owner, f"{where}'s boundaries", key, "boundary"))
                 else:
                     self.use(owner, f"{where}'s boundaries", "boundary", key)
-        for requirement in self.d.requirements:
-            # A requirement names a whole estimate: a field path fails check 7
-            # and, refused, the ref is left out of every other check.
-            parsed = self.ref(requirement.ref, "a plan-level requirement", "")
-            if parsed is not None and parsed.fields:
-                self.fail(
-                    7,
-                    (requirement.ref,),
-                    f"a plan-level requirement names {_q(requirement.ref)}, which has a field path",
-                )
-            elif parsed is not None:
-                self.uses.append(
-                    _Use("", "a plan-level requirement", "requirement", requirement.ref, parsed)
-                )
         for gname, group in self.d.groups.items():
             for ref in group.refs:
                 self.use(gname, f"group {_q(gname)}", "group", ref)
@@ -591,25 +484,24 @@ class _Loader:
                 continue
             where = f"source {_q(sid)}'s requirement"
             ref = source.requirement.ref
-            # A requirement names a whole estimate, on a source as on the plan.
+            # A source requirement names a whole estimate.
             parsed = self.ref(ref, where, sid)
             if parsed is not None and parsed.fields:
                 self.fail(7, (sid, ref), f"{where} names {_q(ref)}, which has a field path")
             elif parsed is not None:
                 self.uses.append(_Use(sid, where, "source-requirement", ref, parsed))
+        if isinstance(cast(object, self.d.policy), str):
+            # The policy names a whole estimate, which check 4 holds to a declared d: ref.
+            policy = self.d.policy
+            parsed = self.ref(policy, "the policy", "")
+            if parsed is not None and parsed.fields:
+                self.fail(7, (policy,), f"the policy names {_q(policy)}, which has a field path")
+            elif parsed is not None:
+                self.uses.append(_Use("", "the policy", "policy", policy, parsed))
         for key in self.d.classes:
             parsed = self.ref(key, "the classes block", "")
             if parsed is not None:
                 self.class_keys.append((key, parsed))
-        for entry in self.context_entries():
-            where = f"the context entry for {_q(entry.ref)}"
-            self.use("", where, "flagged", entry.ref)
-            for slot in entry.text.slots:
-                tag, value = next(iter(slot["origin"].items()))
-                if tag == "ref":
-                    self.use(entry.ref, f"{where}'s text", "context-slot", value)
-                elif tag == "candidate":
-                    self.context_candidates.append((entry.ref, where))
 
     def table_refs(
         self, owner: str, where: str, inputs: Sequence[Any], rows: Sequence[Any]
@@ -624,11 +516,6 @@ class _Loader:
             for ref in named:
                 if not is_candidate_read(ref):  # a candidate read is no ref (check 7)
                     self.ref(ref, f"{where}'s row {k}", owner)
-
-    def context_entries(self) -> tuple[ContextEntry, ...]:
-        """The context block's entries check 10's form test kept, none with no block."""
-        context = self.d.context
-        return () if context is None else tuple(context.entries)
 
     # --- checks 2, 3 and 4 -----------------------------------------------------------------
 
@@ -653,24 +540,11 @@ class _Loader:
                         f"grounding set {_q(grounding)}",
                     )
                 continue
-            if u.role == "plan-candidate":
-                grounding = self.d.plans[u.owner].grounded
-                if grounding is not None and grounding != u.ref:
-                    self.fail(
-                        3,
-                        (u.owner, u.ref),
-                        f"{u.where} is a candidate origin naming {_q(u.ref)}, not its plan's "
-                        f"grounding set {_q(grounding)}",
-                    )
-                continue
             found = u.base in self.providers
             if not found:
                 names = (u.owner, u.ref) if u.owner else (u.ref,)
                 self.fail(3, names, f"{u.where} names {_q(u.ref)}, which has no provider")
-            elif u.role in ("label-set", "grounding", "plan-grounding") and u.parsed.level in (
-                "t",
-                "d",
-            ):
+            elif u.role in ("label-set", "grounding") and u.parsed.level in ("t", "d"):
                 if u.parsed.candidate is not None or u.parsed.fields or not self.is_set(u.ref):
                     self.fail(
                         3,
@@ -801,22 +675,11 @@ class _Loader:
                 self.fail(4, (rid, rule.provides), message)
         allowed = {
             "grounding": ("d", "t"),
-            "plan-grounding": ("d", "t"),
             "slot": ("d", "t"),
             "label-set": ("d", "t"),
             "text": ("d", "t"),
-            "policy": ("d", "t"),
-            "requirement": ("d",),
             "source-requirement": ("d",),
-            "flagged": ("d", "t"),
-            "context-slot": ("d", "t"),
-            "origin": ("d", "t"),
-            "plan-slot": ("d", "t"),
         }
-        for flagged, where in self.context_candidates:
-            self.fail(
-                4, (flagged,), f"{where} has a candidate slot; a context entry's slots hold none"
-            )
         # The clause is on the slot list, so it stands whether or not the slot's ref passes
         # check 7.
         for sid, where, _ in self.candidates:
@@ -838,17 +701,15 @@ class _Loader:
                     f"source {_q(sid)} is grounded, but no question of it holds a candidate slot",
                 )
         for u in self.uses:
-            if u.role in ("candidate", "plan-candidate"):
+            if u.role == "candidate":
                 continue
             levels = allowed.get(u.role)
             names = (u.owner, u.ref) if u.owner else (u.ref,)
-            if levels is not None and u.parsed.level not in levels:
+            if u.role == "policy" and u.parsed.level != "d":
+                self.fail(4, names, f"the policy names {_q(u.ref)}, which is not a d: ref")
+            elif levels is not None and u.parsed.level not in levels:
                 shown = " or ".join(f"{level}:" for level in levels)
                 self.fail(4, names, f"{u.where} reads {_q(u.ref)}, which is not at level {shown}")
-            elif u.role == "flagged" and u.parsed.level == "t" and u.base != _STATE:
-                self.fail(
-                    4, names, f"{u.where} flags {_q(u.ref)}, which is not t:state or a d: ref"
-                )
             elif u.parsed.candidate is not None:
                 self.fail(4, names, f"{u.where} names {_q(u.ref)}, a grounded ref")
         self.check_4_helpers()
@@ -883,7 +744,8 @@ class _Loader:
 
     def check_4_grounded(self) -> None:
         """Only a grounded rule or table reads ``candidate`` or ``candidate.f``; a table reads a
-        grounded declared ref only when grounded over the same set, and the policy table none."""
+        grounded declared ref only when grounded over the same set; the policy names no grounded
+        declared ref."""
         for owner, where, read, role in self.candidate_reads:
             if role == "boundary":
                 continue  # check 9's
@@ -896,36 +758,19 @@ class _Loader:
                 )
         per_candidate = _per_candidate_refs(self.d)
         for u in self.uses:
-            if u.role == "plan-candidate" and self.d.plans[u.owner].grounded is None:
+            names = (u.owner, u.ref) if u.owner else (u.ref,)
+            if u.base not in per_candidate:
+                continue
+            if u.role == "source-requirement":
                 self.fail(
                     4,
-                    (u.owner,),
-                    f"{u.where} is a candidate origin, which only a grounded plan declaration "
-                    "holds",
-                )
-            elif u.base in per_candidate and u.role in ("requirement", "source-requirement"):
-                self.fail(
-                    4,
-                    (u.owner, u.ref) if u.owner else (u.ref,),
+                    names,
                     f"{u.where} names {_q(u.ref)}, a grounded declared ref, which no requirement "
                     "names",
                 )
-            elif u.base in per_candidate and (
-                u.role == "context-slot"
-                or (u.role in ("origin", "plan-slot") and self.d.plans[u.owner].grounded is None)
-            ):
-                self.fail(
-                    4,
-                    (u.owner, u.ref) if u.owner else (u.ref,),
-                    f"{u.where} names {_q(u.ref)}, a grounded declared ref, which only a grounded "
-                    "plan's origin names",
-                )
-        for owner, where in self.candidate_slots:
-            if self.d.plans[owner].grounded is None:
-                self.fail(4, (owner,), f"{where} has a candidate slot, which no plan text holds")
+            elif u.role == "policy":
+                self.fail(4, names, f"the policy names {_q(u.ref)}, a grounded declared ref")
         tables: list[tuple[str, str | None]] = [(r, t.grounded) for r, t in self.tables()]
-        if self.policy_table() is not None:
-            tables.append(("policy", None))
         for u in self.uses:
             grounding = next((g for owner, g in tables if owner == u.owner), _NO_TABLE)
             if grounding is _NO_TABLE or u.role in ("grounding", "boundary"):
@@ -945,11 +790,6 @@ class _Loader:
             for n, i in enumerate(table.inputs, 1):
                 if i["helper"] is not None:
                     yield rid, f"rule {_q(rid)}'s input {n}", n, i
-        policy_table = self.policy_table()
-        if policy_table is not None:
-            for n, i in enumerate(policy_table.inputs, 1):
-                if i["helper"] is not None:
-                    yield "policy", f"the policy table's input {n}", n, i
 
     def check_4_helpers(self) -> None:
         """A helper input's read conforms to its signature's ``ref``: a pick helper's or
@@ -1008,9 +848,7 @@ class _Loader:
         blocks: list[tuple[str, list[str]]] = [
             ("source", [s for s, _ in self.sources()]),
             ("rule", [r for r, _ in self.components()]),
-            ("plan declaration", [n for n, _ in self.plans()]),
             ("parameter", list(self.leaves)),
-            ("tool", list(d.tools)),
             ("type definition", list(d.types)),
             ("group", list(d.groups)),
         ]
@@ -1030,9 +868,6 @@ class _Loader:
         for name, used in kinds.items():
             if len(used) > 1:
                 self.fail(1, (name,), f"{_q(name)} is declared more than once: {', '.join(used)}")
-        flagged = Counter(entry.ref for entry in self.context_entries())
-        for ref in code_point_sorted({r for r, n in flagged.items() if n > 1}):
-            self.fail(1, (ref,), f"two context entries flag {_q(ref)}")
         for sid, source in self.sources():
             if source.oracle == "default":
                 self.fail(1, (sid,), f'source {_q(sid)} has the oracle name "default"')
@@ -1113,36 +948,23 @@ class _Loader:
         for rid, rule in self.rules():
             yield rid, f"rule {_q(rid)}", "reads", rule.reads, True
             yield rid, f"rule {_q(rid)}", "params", rule.params, False
-        policy = self.policy()
-        if policy is not None:
-            yield "policy", "the policy", "reads", policy.reads, True
-            yield "policy", "the policy", "params", policy.params, False
 
     def table_rows(self) -> Iterator[tuple[str, str, Sequence[Any]]]:
         """Each table's owner, where it is and its rows."""
         for rid, table in self.tables():
             yield rid, f"rule {_q(rid)}", table.rows
-        policy_table = self.policy_table()
-        if policy_table is not None:
-            yield "policy", "the policy table", policy_table.rows
 
     def table_inputs(self) -> Iterator[tuple[str, str, Sequence[Any]]]:
         """Each table's owner, where it is and its inputs."""
         for rid, table in self.tables():
             yield rid, f"rule {_q(rid)}", table.inputs
-        policy_table = self.policy_table()
-        if policy_table is not None:
-            yield "policy", "the policy table", policy_table.inputs
 
     def boundary_fields(self) -> Iterator[tuple[str, str, Mapping[str, Any], Sequence[str]]]:
-        """Each declared ``boundaries`` field of a rule check 12 lets through and of the
-        function policy: its owner, where it is, the field and its owner's reads."""
+        """Each declared ``boundaries`` field of a rule check 12 lets through: its owner, where
+        it is, the field and its owner's reads."""
         for rid, rule in self.rules():
             if rule.boundaries is not None:
                 yield rid, f"rule {_q(rid)}", rule.boundaries, rule.reads
-        policy = self.policy()
-        if policy is not None and policy.boundaries is not None:
-            yield "policy", "the policy", policy.boundaries, policy.reads
 
     def boundary_entries(self) -> Iterator[tuple[str, str, str, Any]]:
         """Each entry of a ``boundaries`` field whose key check 7 passed: its owner, its key,
@@ -1190,7 +1012,7 @@ class _Loader:
         if not isinstance(text, str):
             self.fail(10, names, f"{where} declares no type string")
             return None
-        parsed = parse_type(text, nullable=nullable, sorted_fields=self.format < KEY_ORDER_FORMAT)
+        parsed = parse_type(text, nullable=nullable)
         if isinstance(parsed, TypeFailure):
             self.fail(10, names, f"{where}: {parsed.message}")
             return None
@@ -1377,39 +1199,6 @@ class _Loader:
                 self.fail(
                     10, (rid,), f"rule {_q(rid)}'s inputs or rows are outside the value domain"
                 )
-        for name, plan in self.plans():
-            for n, step in enumerate(plan.steps, 1):
-                for arg, origin in cast(Step, step).arguments.items():
-                    if (
-                        isinstance(origin, Origin)
-                        and origin.ref is None
-                        and not in_domain(origin.literal)
-                    ):
-                        self.fail(
-                            10,
-                            (name,),
-                            f"plan declaration {_q(name)}'s step {n} argument {_q(arg)} is a "
-                            "literal outside the value domain",
-                        )
-                for r in cast(Step, step).requirements:
-                    if not in_domain(r.value):
-                        self.fail(
-                            10,
-                            (name, r.ref),
-                            f"plan declaration {_q(name)}'s step {n} requirement holds a value "
-                            "outside the value domain",
-                        )
-        policy = self.policy()
-        if policy is not None:
-            self.version(policy.version, "the policy", "policy")
-        for requirement in d.requirements:
-            if not in_domain(requirement.value):
-                self.fail(
-                    10,
-                    (requirement.ref,),
-                    f"the requirement on {_q(requirement.ref)} holds a value outside the value "
-                    "domain",
-                )
         if sum(self.ref_sizes.values()) > _TYPE_SIZE:
             # Every record's settings item writes each of these refs' class trees in full.
             self.fail(
@@ -1476,28 +1265,12 @@ class _Loader:
         named_params: list[tuple[str, str, str]] = []
         for rid, rule in self.rules():
             named_params += [(rid, f"rule {_q(rid)}", p) for p in rule.params]
-        policy = self.policy()
-        if policy is not None:
-            named_params += [("policy", "the policy", p) for p in policy.params]
         for sid, source in self.sources():
             for ref, slot in _slots(source):
                 tag, value = next(iter(slot["origin"].items()))
                 if tag == "param":
                     named_params.append((sid, f"source {_q(sid)}'s question {_q(ref)}", value))
-        for entry in self.context_entries():
-            for slot in entry.text.slots:
-                tag, value = next(iter(slot["origin"].items()))
-                if tag == "param":
-                    shown = f"the context entry for {_q(entry.ref)}"
-                    named_params.append((entry.ref, shown, value))
         named_params += self.table_params()
-        for name, plan in self.plans():
-            for member, text in (("reason", plan.reason), ("reply", plan.reply)):
-                for slot in () if text is None else text.slots:
-                    tag, value = next(iter(slot["origin"].items()))
-                    if tag == "param":
-                        shown = f"plan declaration {_q(name)}'s {member}"
-                        named_params.append((name, shown, value))
         for owner, where, path in named_params:
             if path not in declared:
                 self.fail(8, (owner, path), f"{where} names {_q(path)}, which is not a leaf")
@@ -1577,7 +1350,6 @@ class _Loader:
             for ref, question in _questions(source):
                 where = f"source {_q(sid)}'s question {_q(ref)}"
                 self.text(question.wording, where, (sid, ref))
-        self.check_9_context()
         self.check_9_groups()
         for u in self.uses:
             if u.role == "boundary":
@@ -1592,23 +1364,6 @@ class _Loader:
                     names,
                     f"{u.where} names {_q(u.ref)}, whose type is {render(t)}, not exactly "
                     "string, not nullable",
-                )
-        # Every requirement on the plan can hold. A step's requirements are
-        # in plan declarations, which check 12 refuses, so this engine applies the clause to
-        # none of them; nor the clause on a declaration's binding paths.
-        for requirement in self.d.requirements:
-            parsed = _parsed(requirement.ref)
-            if parsed is None or parsed.fields:
-                continue  # check 7 refused it, so no other check reads it
-            t = self.types[f"{parsed.level}:{parsed.name}"]
-            value = requirement.value
-            # Check 10 refused a value outside the domain, and it gates this check.
-            reason = hold_failure(value, t, self.defs)
-            if reason is not None:
-                self.fail(
-                    9,
-                    (requirement.ref,),
-                    f"a plan-level requirement on {_q(requirement.ref)} can never hold: {reason}",
                 )
         # A source requirement can hold when each of its values can.
         for u in self.uses:
@@ -1650,8 +1405,7 @@ class _Loader:
         per_candidate = _per_candidate_refs(self.d)
         for u in self.uses:
             set_ref = per_candidate.get(u.base)
-            plan_role = u.role in ("origin", "plan-slot")  # the plan check's, and check 4's
-            if set_ref is None or not u.parsed.fields or u.role == "grounding" or plan_role:
+            if set_ref is None or not u.parsed.fields or u.role == "grounding":
                 continue
             owner = self.d.rules.get(u.owner) or self.d.sources.get(u.owner)
             if owner is None or owner.grounded != set_ref:
@@ -1683,7 +1437,7 @@ class _Loader:
             return None
         return dict(item.fields).get(path[0])
 
-    # --- check 9 over tables and plan declarations (§decision-tables) ----------------------
+    # --- check 9 over tables (§decision-tables) --------------------------------------------
 
     def input_type(self, owner: str, where: str, i: Mapping[str, Any]) -> Type | None:
         """A table input's type: a bare read's, ``answer`` for a ``q:`` one; a helper's
@@ -1731,14 +1485,6 @@ class _Loader:
     def check_9_tables(self) -> None:
         for rid, table in self.tables():
             self.check_9_table(rid, f"rule {_q(rid)}", table.inputs, table.rows, table)
-        policy_table = self.policy_table()
-        if policy_table is not None:
-            self.check_9_table(
-                "policy", "the policy table", policy_table.inputs, policy_table.rows, None
-            )
-            self.check_9_policy_table(policy_table)
-        for name, plan in self.plans():
-            self.check_9_plan(name, plan)
         self.check_9_covered()
 
     def check_9_table(
@@ -1747,7 +1493,7 @@ class _Loader:
         where: str,
         inputs: Sequence[dict[str, Any]],
         rows: Sequence[dict[str, Any]],
-        table: Table | None,
+        table: Table,
     ) -> None:
         names = (owner,)
         reads = [cast(str, i["read"]) for i in inputs]
@@ -1772,9 +1518,9 @@ class _Loader:
             return None
 
         outputs = None
-        if table is not None and _declared(table.provides) is not None:
+        if _declared(table.provides) is not None:
             outputs = self.types.get(table.provides)
-        hit = "F" if table is None else table.hit
+        hit = table.hit
         for k, row in enumerate(rows, 1):
             shown = f"{where}'s row {k}"
             cells = row["cells"]
@@ -1785,10 +1531,7 @@ class _Loader:
                 self.check_9_cell(
                     owner, f"{shown}'s cell {n + 1}", cell, n, reads, types, fixed, named
                 )
-            if table is not None:
-                self.check_9_output(owner, shown, row["output"], hit, outputs, reads, types, named)
-        if table is None:
-            return
+            self.check_9_output(owner, shown, row["output"], hit, outputs, reads, types, named)
         self.check_9_hit(owner, where, table, outputs)
         own = any(f.check in (6, 8, 9) and owner in f.names for f in self.failures)
         if hit in ("U", "A") and not own:
@@ -2154,34 +1897,6 @@ class _Loader:
             return Axis(inner.base == "integer", _exact(inner.lo), _exact(inner.hi))
         return Axis(isinstance(inner, Scalar) and inner.name == "integer")
 
-    def check_9_policy_table(self, table: PolicyTable) -> None:
-        names = ("policy",)
-        for k, row in enumerate(table.rows, 1):
-            plan = cast(str, row["plan"])
-            if plan not in self.d.plans:
-                self.fail(
-                    9,
-                    ("policy", plan),
-                    f"the policy table's row {k} names {_q(plan)}, which is not a declared plan",
-                )
-        if not table.rows:
-            self.fail(9, names, "the policy table has no row")
-            return
-        last = table.rows[-1]
-        if any(cell != ANY for cell in last["cells"]):
-            self.fail(9, names, "the policy table's last row holds a cell that is not -")
-        plan = self.d.plans.get(cast(str, last["plan"]))
-        if plan is not None and plan.grounded is not None:
-            self.fail(
-                9, names, f"the policy table's last row names {_q(last['plan'])}, a grounded plan"
-            )
-        elif plan is not None and _board_refs(plan):
-            self.fail(
-                9,
-                names,
-                f"the policy table's last row names {_q(last['plan'])}, whose plan reads the board",
-            )
-
     def check_9_groups(self) -> None:
         """Each group gives at least one reason, each one of the five, none twice."""
         for gname, group in self.d.groups.items():
@@ -2197,107 +1912,6 @@ class _Loader:
                     )
             for reason in code_point_sorted({r for r in group.reason if group.reason.count(r) > 1}):
                 self.fail(9, names, f"{where} gives the reason {_q(reason)} more than once")
-
-    def check_9_plan(self, name: str, plan: PlanDeclaration) -> None:
-        where, names = f"plan declaration {_q(name)}", (name,)
-        try:
-            kind = PlanKind(plan.kind)
-        except ValueError:
-            self.fail(
-                9,
-                names,
-                f"{where}'s kind {_q(plan.kind)} is not execute, clarify, inform or escalate",
-            )
-            return
-        if kind is PlanKind.broken:
-            self.fail(9, names, f"{where}'s kind is broken, which only the engine writes")
-        if plan.grounded is not None:
-            self.check_9_grounded_plan(name, plan, kind)
-        if kind is not PlanKind.execute and plan.steps:
-            self.fail(9, names, f"{where} is {kind.value}, which holds no steps")
-        if kind in (PlanKind.clarify, PlanKind.inform) and plan.reply is None:
-            self.fail(9, names, f"{where} is {kind.value}, which declares a reply")
-        if kind in (PlanKind.execute, PlanKind.escalate) and plan.reply is not None:
-            self.fail(9, names, f"{where} is {kind.value}, which declares no reply")
-        if kind is PlanKind.escalate and plan.reason is None:
-            self.fail(9, names, f"{where} is escalate, which declares a reason")
-        for member, text in (("reason", plan.reason), ("reply", plan.reply)):
-            if text is not None:
-                self.text(text, f"{where}'s {member}", names)
-        for n, step in enumerate(cast("Sequence[Step]", plan.steps), 1):
-            shown = f"{where}'s step {n}"
-            if step.tool not in self.d.tools:
-                self.fail(
-                    9, names, f"{shown} names the tool {_q(step.tool)}, which is not declared"
-                )
-            for arg, origin in step.arguments.items():
-                if arg == "idempotency_key":
-                    self.fail(9, names, f"{shown} has an argument named idempotency_key")
-                if isinstance(origin, Binding) and not (
-                    1 <= origin.step < n and (origin.path is None or is_field_path(origin.path))
-                ):
-                    self.fail(
-                        9,
-                        names,
-                        f"{shown}'s argument {_q(arg)} binds no earlier step by a path in the "
-                        "grammar",
-                    )
-            for r in step.requirements:
-                parsed = _parsed(r.ref)
-                if parsed is None or parsed.fields or r.ref not in self.types:
-                    continue
-                reason = hold_failure(r.value, self.types[r.ref], self.defs)
-                if reason is not None:
-                    self.fail(
-                        9,
-                        (name, r.ref),
-                        f"{shown}'s requirement on {_q(r.ref)} can never hold: {reason}",
-                    )
-
-    def check_9_grounded_plan(self, name: str, plan: PlanDeclaration, kind: PlanKind) -> None:
-        """A grounded plan declaration is ``execute``; its board-ref origin naming a grounded
-        declared ref names one grounded over its own set, with no field path; no slot names
-        the candidate value, a grounded entry or a grounded declared ref."""
-        where, names = f"plan declaration {_q(name)}", (name,)
-        if kind is not PlanKind.execute:
-            self.fail(9, names, f"{where} is grounded, so of kind execute, not {kind.value}")
-        per_candidate = _per_candidate_refs(self.d)
-        for n, step in enumerate(cast("Sequence[Step]", plan.steps), 1):
-            for arg, origin in step.arguments.items():
-                if not isinstance(origin, Origin) or origin.ref is None:
-                    continue
-                parsed = _parsed(origin.ref)
-                if parsed is None:
-                    continue
-                set_ref = per_candidate.get(f"{parsed.level}:{parsed.name}")
-                if set_ref is None:
-                    continue
-                shown = f"{where}'s step {n} argument {_q(arg)}"
-                if set_ref != plan.grounded:
-                    self.fail(
-                        3,
-                        (name, origin.ref),
-                        f"{shown} names {_q(origin.ref)}, grounded over {_q(set_ref)}, not its "
-                        "plan's set",
-                    )
-                elif parsed.fields:
-                    self.fail(
-                        9,
-                        (name, origin.ref),
-                        f"{shown} names {_q(origin.ref)}, a grounded declared ref by a field path",
-                    )
-        for member, text in (("reason", plan.reason), ("reply", plan.reply)):
-            for slot in () if text is None else text.slots:
-                tag, value = next(iter(slot["origin"].items()))
-                shown = f"{where}'s {member}"
-                if tag == "candidate":
-                    self.fail(9, names, f"{shown} has a candidate slot, which no plan text holds")
-                elif tag == "ref" and (_declared_base(cast(str, value)) or "") in per_candidate:
-                    self.fail(
-                        9,
-                        (name, cast(str, value)),
-                        f"{shown} has a slot on {_q(value)}, a grounded declared ref",
-                    )
 
     def table_compares(self) -> set[tuple[str, str]]:
         """Each read a table compares against a leaf, with the leaf: a comparison cell's read,
@@ -2315,9 +1929,6 @@ class _Loader:
     def all_tables(self) -> Iterator[tuple[str, str, Sequence[Any], Sequence[Any]]]:
         for rid, table in self.tables():
             yield rid, f"rule {_q(rid)}", table.inputs, table.rows
-        policy_table = self.policy_table()
-        if policy_table is not None:
-            yield "policy", "the policy table", policy_table.inputs, policy_table.rows
 
     def check_9_covered(self) -> None:
         """No ``boundaries`` field pairs a read with a leaf a table already compares that read
@@ -2332,44 +1943,6 @@ class _Loader:
                         f"{where} names {_q(path)}, which a table already compares {_q(key)} "
                         "against",
                     )
-
-    def check_9_context(self) -> None:
-        """Each context entry's text: its template and slots, a slot naming the flagged ref
-        as spelled, and no slot or flagged ref whose class tree holds ``identifier``."""
-        for entry in self.context_entries():
-            where = f"the context entry for {_q(entry.ref)}"
-            self.text(entry.text, where, (entry.ref,))
-            refs = [
-                cast(str, slot["origin"]["ref"])
-                for slot in entry.text.slots
-                if "ref" in slot["origin"]
-            ]
-            if entry.ref not in refs:
-                self.fail(9, (entry.ref,), f"{where} has no slot naming {_q(entry.ref)}")
-        for u in self.uses:
-            if u.role not in ("flagged", "context-slot"):
-                continue
-            tree = self.tree_at(u)
-            if tree is not None and _holds_identifier(tree):
-                names = (u.owner, u.ref) if u.owner else (u.ref,)
-                self.fail(
-                    9, names, f"{u.where} names {_q(u.ref)}, whose class tree holds identifier"
-                )
-
-    def tree_at(self, u: _Use) -> Any:
-        """The full class tree at a read's field path, or ``None`` when its path names no field,
-        which the read's typing reports."""
-        if u.parsed.level == "q":
-            return None
-        t = self.state_type if u.base == _STATE else self.types.get(u.base)
-        if t is None:
-            return None
-        tree: Any = _tree(t, self.defs, self.d.classes.get(u.base))
-        for field_name in u.parsed.fields:
-            if type(tree) is not dict or field_name not in tree:
-                return None
-            tree = cast("dict[str, Any]", tree)[field_name]
-        return tree
 
     def check_9_boundaries(self) -> None:
         """Check 9's ``boundaries`` clauses. A leaf check 8 refused is left out. No table compares a
@@ -2586,17 +2159,8 @@ class _Loader:
 
     # --- the document and the loaded design ------------------------------------------------
 
-    def _group(self, group: Group) -> object:
-        """A group as the document holds it: its refs and reasons in code-point order, or before
-        format 9 its refs alone."""
-        refs = code_point_sorted(group.refs)
-        if self.format < GROUP_REASON_FORMAT:
-            return refs
-        return {"refs": refs, "reason": code_point_sorted(group.reason)}
-
     def document(self) -> dict[str, Any]:
         d = self.d
-        policy = d.policy
         parameters: dict[str, Any] = {}
         for path, leaf in d.parameters.items():
             t = self.leaf_types.get(path)
@@ -2605,49 +2169,28 @@ class _Loader:
                 value = document_value(value, t)
             else:
                 value = leaf.value
-            parameters[path] = {"type": leaf.type, "value": value}
-            if self.format >= KEY_ORDER_FORMAT:
-                parameters[path]["order"] = order_of(value)
+            parameters[path] = {"type": leaf.type, "value": value, "order": order_of(value)}
         return {
-            "format": self.format,
+            "format": DESIGN_FORMAT,
             "name": d.name,
             "state": d.state,
-            "sources": {sid: _source(s, self.format) for sid, s in d.sources.items()},
-            "rules": {rid: _rule(r, self.format) for rid, r in d.rules.items()},
-            "policy": (
-                {
-                    "form": "function",
-                    "reads": _unordered(policy.reads),
-                    "params": _unordered(policy.params),
-                    "boundaries": _boundaries(policy.boundaries),
-                    **_function(policy.function, policy.version),
-                }
-                if isinstance(policy, Policy)
-                else {
-                    "form": "table",
-                    "inputs": [_input(i) for i in policy.inputs],
-                    "rows": [_row(r) for r in policy.rows],
-                }
-            ),
-            "requirements": [{"ref": r.ref, "value": r.value} for r in d.requirements],
-            "default_deny": d.default_deny,
-            "tools": {name: {} for name in d.tools},
+            "policy": d.policy,
+            "sources": {sid: _source(s) for sid, s in d.sources.items()},
+            "rules": {rid: _rule(r) for rid, r in d.rules.items()},
             "parameters": parameters,
             "types": dict(d.types),
-            "plans": {name: _plan(plan) for name, plan in d.plans.items()},
-            "groups": {g: self._group(group) for g, group in d.groups.items()},
-            "classes": dict(d.classes),  # each tree plain data, from check 10's form test
-            **({"context": _context(d.context)} if self.format >= CONTEXT_FORMAT else {}),
-            **(
-                {
-                    "targets": {
-                        tid: {"statement": target.statement, "values": target.values}
-                        for tid, target in d.targets.items()
-                    }
+            "groups": {
+                g: {
+                    "refs": code_point_sorted(group.refs),
+                    "reason": code_point_sorted(group.reason),
                 }
-                if self.format >= TARGETS_FORMAT
-                else {}
-            ),
+                for g, group in d.groups.items()
+            },
+            "classes": dict(d.classes),  # each tree plain data, from check 10's form test
+            "targets": {
+                tid: {"statement": target.statement, "values": target.values}
+                for tid, target in d.targets.items()
+            },
         }
 
     # --- check 11's comparison -------------------------------------------------------------
@@ -2672,9 +2215,7 @@ class _Loader:
             if _same(a, b):
                 continue
             kind = _KINDS.get(member)
-            if member == "policy" and isinstance(b, dict):
-                self.component("the policy", ("policy",), a, cast("dict[str, Any]", b))
-            elif kind is not None and isinstance(b, dict):
+            if kind is not None and isinstance(b, dict):
                 block = cast("dict[str, Any]", b)
                 for name in code_point_sorted(a):
                     x, y = a[name], block[name]
@@ -2769,9 +2310,6 @@ class _Loader:
             if source.when is not None:
                 # The key a field function takes: the id, a dot, the field.
                 callables[f"{sid}.when"] = source.when.function
-        policy = self.policy()
-        if policy is not None:
-            callables["policy"] = policy.function
         return LoadedDesign(
             _BUILT_BY_LOAD,
             design=self.d,
@@ -2830,73 +2368,30 @@ class _Loader:
                     if v["requirement"] is not None
                 }
             ),
-            # A holder standing in the design document; each value it holds was tested.
-            requirements_bytes=encode(decoded["requirements"], MAX_DOCUMENT_DEPTH - 1),
             document=document,
             hash=sha256_ref(document),
-            # Load's own copy of the block, from the document; none before format 5.
-            context_bytes=encode(decoded.get("context"), MAX_DOCUMENT_DEPTH - 1),
             reads=MappingProxyType(self.component_reads()),
             params=MappingProxyType(self.component_params()),
             table_bytes=MappingProxyType(
-                {
-                    **{
-                        rid: encode(decoded["rules"][rid], MAX_DOCUMENT_DEPTH)
-                        for rid, _ in self.tables()
-                    },
-                    **(
-                        {"policy": encode(decoded["policy"], MAX_DOCUMENT_DEPTH)}
-                        if self.policy_table() is not None
-                        else {}
-                    ),
-                }
-            ),
-            plan_bytes=MappingProxyType(
-                {name: encode(plan, MAX_DOCUMENT_DEPTH) for name, plan in decoded["plans"].items()}
+                {rid: encode(decoded["rules"][rid], MAX_DOCUMENT_DEPTH) for rid, _ in self.tables()}
             ),
         )
 
     def component_reads(self) -> dict[str, tuple[str, ...]]:
-        """Each rule's and the policy's declared reads: a table's its inputs' reads, each once
-        in input order, the policy table's then each named plan's board refs."""
+        """Each rule's declared reads: a table's its inputs' reads, each once in input order."""
         out: dict[str, tuple[str, ...]] = {rid: tuple(r.reads) for rid, r in self.rules()}
         for rid, table in self.tables():
             out[rid] = tuple(dict.fromkeys(i["read"] for i in table.inputs))
-        policy, policy_table = self.policy(), self.policy_table()
-        if policy is not None:
-            out["policy"] = tuple(policy.reads)
-        elif policy_table is not None:
-            refs = [i["read"] for i in policy_table.inputs]
-            for name in self.named_plans():
-                plan = self.d.plans[name]
-                if plan.grounded is not None:  # the set, whose value the expansion walks
-                    refs.append(plan.grounded)
-                refs += [ref for ref, _ in plan_conditions(plan)]
-            out["policy"] = tuple(dict.fromkeys(refs))
         return out
 
     def component_params(self) -> dict[str, tuple[str, ...]]:
-        """Each rule's and the policy's leaf paths, a table's those it names, the policy
-        table's with its named plans' slot leaves."""
+        """Each rule's leaf paths, a table's those it names."""
         out: dict[str, tuple[str, ...]] = {rid: tuple(r.params) for rid, r in self.rules()}
         named: dict[str, list[str]] = {}
         for owner, _, path in self.table_params():
             named.setdefault(owner, []).append(path)
         for rid, _ in self.tables():
             out[rid] = tuple(dict.fromkeys(named.get(rid, [])))
-        policy = self.policy()
-        if policy is not None:
-            out["policy"] = tuple(policy.params)
-        elif self.policy_table() is not None:
-            paths = named.get("policy", [])
-            for name in self.named_plans():
-                plan = self.d.plans[name]
-                for text in (plan.reason, plan.reply):
-                    for slot in () if text is None else text.slots:
-                        tag, value = next(iter(slot["origin"].items()))
-                        if tag == "param":
-                            paths.append(cast(str, value))
-            out["policy"] = tuple(dict.fromkeys(paths))
         return out
 
 
@@ -2957,11 +2452,6 @@ def _number_value(value: object) -> bool:
 
 def _exact(x: int | float) -> Fraction:
     return Fraction(x) if type(x) is int else Fraction(repr(x))
-
-
-def _board_refs(plan: PlanDeclaration) -> list[str]:
-    """A plan declaration's board-ref origins and slots, in rule 2's naming order."""
-    return [ref for ref, _ in plan_conditions(plan)]
 
 
 def _cell_refs(cells: Sequence[Any]) -> Iterator[str]:
@@ -3148,13 +2638,9 @@ def _grid(document: Mapping[str, Any]) -> Mapping[str, Any]:
     every component has no entry. Read-only at every depth. A table gives its fields as
     ``_table_boundaries`` derives them."""
     rules = list(cast("dict[str, Any]", document["rules"]).values())
-    policy = cast("dict[str, Any]", document["policy"])
     fields = [r.get("boundaries") for r in rules]
-    fields.append(policy.get("boundaries"))
     leaves = cast("dict[str, Any]", document["parameters"])
-    for table in [r for r in rules if r["form"] == "table"] + (
-        [policy] if policy["form"] == "table" else []
-    ):
+    for table in [r for r in rules if r["form"] == "table"]:
         fields.append(_table_boundaries(table, leaves))
     entries: dict[str, Any] = {}
     for field in fields:
@@ -3325,35 +2811,12 @@ def _structured_template(template: object, at: str = "") -> tuple[list[str], boo
     return names, has_text
 
 
-def _context(context: Context | None) -> dict[str, Any] | None:
-    """The context block's document object, or ``None`` for none."""
-    if context is None:
-        return None
-    return {
-        "entries": [{"ref": e.ref, "text": _text(e.text)} for e in context.entries],
-        "plan": context.plan,
-        "steps": context.steps,
-        "record": context.record,
-    }
-
-
-def _holds_identifier(tree: object) -> bool:
-    """Whether a full class tree holds ``identifier`` at its root or beneath."""
-    if type(tree) is str:
-        return tree == "identifier"
-    if type(tree) is dict:
-        return any(_holds_identifier(v) for v in cast("dict[str, object]", tree).values())
-    if type(tree) is list:
-        return any(_holds_identifier(v) for v in cast("list[object]", tree))
-    return False
-
-
-def _text(text: Text | Structured, fmt: int = 0) -> dict[str, Any]:
+def _text(text: Text | Structured) -> dict[str, Any]:
     written: dict[str, Any] = {
         "template": text.template,
         "slots": [{"name": s["name"], "origin": dict(s["origin"])} for s in text.slots],
     }
-    order = order_of(text.template) if fmt >= KEY_ORDER_FORMAT else {}
+    order = order_of(text.template)
     if order:  # written only when the template is out of canonical order, so its identity holds
         written["order"] = order
     return written
@@ -3381,14 +2844,14 @@ def _declared_labels(labels: object) -> Any:
     return [_label(v) for v in cast("tuple[object, ...]", labels)]
 
 
-def _source(source: Source, fmt: int) -> dict[str, Any]:
+def _source(source: Source) -> dict[str, Any]:
     provides: dict[str, Any] = {}
     for ref, provided in source.provides.items():
         if isinstance(provided, Question):
             labels = provided.labels
             provides[ref] = {
                 "kind": str(provided.kind),
-                "wording": _text(provided.wording, fmt),
+                "wording": _text(provided.wording),
                 # As declared: a described label is its object of name and description.
                 "labels": None if labels is None else _declared_labels(labels),
             }
@@ -3400,16 +2863,15 @@ def _source(source: Source, fmt: int) -> dict[str, Any]:
                     text=dict(cast("Mapping[str, str]", provided.text)),
                     reference_date=None if date is None else dict(date),
                 )
-            if fmt >= TARGETS_FORMAT:
-                provides[ref].update(
-                    target=provided.target,
-                    latent_targets=_unordered(
-                        [
-                            {"target": latent["target"], "role": str(latent["role"])}
-                            for latent in provided.latent_targets
-                        ]
-                    ),
-                )
+            provides[ref].update(
+                target=provided.target,
+                latent_targets=_unordered(
+                    [
+                        {"target": latent["target"], "role": str(latent["role"])}
+                        for latent in provided.latent_targets
+                    ]
+                ),
+            )
         else:
             provides[ref] = dict(cast("Mapping[str, Any]", provided))
     w, r = source.when, source.requirement
@@ -3424,11 +2886,11 @@ def _source(source: Source, fmt: int) -> dict[str, Any]:
         "cost": source.cost,
         "feedback": source.feedback,
         "grounded": source.grounded,
-        **({"payload_order": order_of(source.payload)} if fmt >= KEY_ORDER_FORMAT else {}),
+        "payload_order": order_of(source.payload),
     }
 
 
-def _rule(rule: Rule | Table, fmt: int) -> dict[str, Any]:
+def _rule(rule: Rule | Table) -> dict[str, Any]:
     if isinstance(rule, Table):
         return {
             "form": "table",
@@ -3440,7 +2902,7 @@ def _rule(rule: Rule | Table, fmt: int) -> dict[str, Any]:
             "rows": [_row(r) for r in rule.rows],
             "candidates": rule.candidates,
             "grounded": rule.grounded,
-            **({"target": rule.target} if fmt >= TARGETS_FORMAT else {}),
+            "target": rule.target,
         }
     return {
         "form": "function",
@@ -3451,7 +2913,7 @@ def _rule(rule: Rule | Table, fmt: int) -> dict[str, Any]:
         "boundaries": _boundaries(rule.boundaries),
         "candidates": rule.candidates,
         "grounded": rule.grounded,
-        **({"target": rule.target} if fmt >= TARGETS_FORMAT else {}),
+        "target": rule.target,
         **_function(rule.function, rule.version),
     }
 
@@ -3472,16 +2934,6 @@ def _row(row: Mapping[str, Any]) -> dict[str, Any]:
         else:
             cells.append(c)
     return {**row, "cells": cells}
-
-
-def _plan(plan: PlanDeclaration) -> dict[str, Any]:
-    return {
-        "kind": plan.kind,
-        "steps": [s if isinstance(s, Mapping) else step_document(s) for s in plan.steps],
-        "reason": None if plan.reason is None else _text(plan.reason),
-        "reply": None if plan.reply is None else _text(plan.reply),
-        "grounded": plan.grounded,
-    }
 
 
 def _template(template: str) -> tuple[list[str], bool] | str:
@@ -3667,20 +3119,16 @@ _DOCUMENT = frozenset(
         "format",
         "name",
         "state",
+        "policy",
         "sources",
         "rules",
-        "policy",
-        "requirements",
-        "default_deny",
-        "tools",
         "parameters",
         "types",
-        "plans",
         "groups",
         "classes",
+        "targets",
     }
 )
-_CONTEXT = frozenset({"entries", "plan", "steps", "record"})
 _TARGET = frozenset({"statement", "values"})
 _GROUP = frozenset({"refs", "reason"})
 _LATENT = frozenset({"target", "role"})
@@ -3697,36 +3145,44 @@ _SOURCE = frozenset(
         "cost",
         "feedback",
         "grounded",
+        "payload_order",
     }
 )
 _RULE = (
     frozenset(
-        {"form", "provides", "outputs", "reads", "params", "boundaries", "candidates", "grounded"}
+        {
+            "form",
+            "provides",
+            "outputs",
+            "reads",
+            "params",
+            "boundaries",
+            "candidates",
+            "grounded",
+            "target",
+        }
     )
     | _FUNCTION
 )
 _TABLE = frozenset(
-    {"form", "provides", "outputs", "candidates", "grounded", "hit", "order", "inputs", "rows"}
-)
-_POLICY = frozenset({"form", "reads", "params", "boundaries"}) | _FUNCTION
-_POLICY_TABLE = frozenset({"form", "inputs", "rows"})
-_PLAN = frozenset({"kind", "steps", "reason", "reply", "grounded"})
-_STEP = frozenset({"tool", "arguments", "requirements"})
-_ORIGINS = frozenset(
     {
-        frozenset({"literal"}),
-        frozenset({"ref"}),
-        frozenset({"step", "path"}),
-        frozenset({"candidate"}),
+        "form",
+        "provides",
+        "outputs",
+        "candidates",
+        "grounded",
+        "target",
+        "hit",
+        "order",
+        "inputs",
+        "rows",
     }
 )
 _KINDS = {
     "sources": "source",
     "rules": "rule",
     "parameters": "parameter",
-    "plans": "plan declaration",
     "groups": "group",
-    "tools": "tool",
     "types": "type definition",
     "classes": "the classes block's key",
 }
@@ -3763,16 +3219,20 @@ def _gate(given: bytes | Mapping[str, Any]) -> tuple[dict[str, Any] | None, Any]
     found = member_named(members, "format")  # no code of a caller's key runs
     if found is MISSING:
         return None, ((), "the document has no format")
-    if type(found) is not int or found not in DESIGN_FORMATS:
-        known = ", ".join(str(f) for f in sorted(DESIGN_FORMATS))
-        return None, ((), f"the document's format is not one this engine reads: {known}")
+    if type(found) is not int:
+        return None, ((), "the document's format is not an integer")
+    if found != DESIGN_FORMAT:
+        return None, (
+            (),
+            f"the document's format {found} is not {DESIGN_FORMAT}, the one this engine reads",
+        )
     # The document as a holder, then each value it holds to the size bounds too; it shares
     # no container, so the holder's walk is linear in it.
     if domain_error(members, MAX_DOCUMENT_DEPTH) is not None or any(
         domain_error(value) is not None for value in _value_places(members)
     ):
         return None, ((), "the document holds a value outside the value domain")
-    return members, next(_member_failures(members, found), None)
+    return members, next(_member_failures(members), None)
 
 
 def _value_places(doc: dict[str, Any]) -> Iterator[object]:
@@ -3826,121 +3286,38 @@ def _items(value: object) -> list[dict[str, Any]]:
     return [m for m in cast("list[Any]", value) if isinstance(m, dict)]
 
 
-def _member_failures(doc: dict[str, Any], fmt: int) -> Iterator[tuple[tuple[str, ...], str]]:
+def _member_failures(doc: dict[str, Any]) -> Iterator[tuple[tuple[str, ...], str]]:
     """Every object's missing or extra member, in one traversal order: the document's members,
     then each block's in code-point order of its name, each declaration's in code-point order
-    of its own. A step is the ``plan`` item's, each
-    argument one origin as a declaration writes it. A table's inputs and rows are objects of
-    §table-notation's members; their values' forms are check 10's."""
-    members = _DOCUMENT | {"context"} if fmt >= CONTEXT_FORMAT else _DOCUMENT
-    if fmt >= TARGETS_FORMAT:
-        members |= {"targets"}
-    yield from _missing_or_extra(doc, members, "the document", ())
+    of its own. A table's inputs and rows are objects of §table-notation's members; their
+    values' forms are check 10's, the policy's among them."""
+    yield from _missing_or_extra(doc, _DOCUMENT, "the document", ())
     for tid, target in _objects(doc.get("targets")):
         yield from _missing_or_extra(target, _TARGET, f"target {_q(tid)}", (tid,))
-    context = doc.get("context")
-    if isinstance(context, dict):
-        block = cast("dict[str, Any]", context)
-        where = "the context block"
-        yield from _missing_or_extra(block, _CONTEXT, where, ())
-        for entry in _items(block.get("entries")):
-            yield from _missing_or_extra(entry, frozenset({"ref", "text"}), f"{where}'s entry", ())
-            if isinstance(entry.get("text"), dict):
-                yield from _text_failures(entry["text"], f"{where}'s entry text", ())
-    leaf_members = frozenset({"type", "value"})
-    if fmt >= KEY_ORDER_FORMAT:
-        leaf_members |= {"order"}
+    leaf_members = frozenset({"type", "value", "order"})
     for path, leaf in _objects(doc["parameters"]):
         yield from _missing_or_extra(leaf, leaf_members, f"parameter {_q(path)}", (path,))
-        if "order" in leaf_members and "order" in leaf:
+        if "order" in leaf:
             yield from _order_failures(
                 leaf.get("value"), leaf["order"], f"parameter {_q(path)}", (path,)
             )
-    for name, plan in _objects(doc["plans"]):
-        where = f"plan declaration {_q(name)}"
-        yield from _missing_or_extra(plan, _PLAN, where, (name,))
-        for member in ("reason", "reply"):
-            if isinstance(plan.get(member), dict):
-                yield from _text_failures(plan[member], f"{where}'s {member}", (name,))
-        for step in _items(plan.get("steps")):
-            yield from _missing_or_extra(step, _STEP, f"{where}'s step", (name,))
-            for _, origin in _objects(step.get("arguments")):
-                if frozenset(origin) not in _ORIGINS:
-                    yield (name,), f"{where} has a step argument that is not one origin"
-            for r in _items(step.get("requirements")):
-                required = frozenset({"ref", "value"})
-                yield from _missing_or_extra(r, required, f"{where}'s step requirement", (name,))
-    yield from _function_failures(
-        doc["policy"], "the policy", ("policy",), _POLICY, _POLICY_TABLE, fmt
-    )
-    for r in _items(doc["requirements"]):
-        yield from _missing_or_extra(r, frozenset({"ref", "value"}), "a plan-level requirement", ())
-    policy_doc = _object(doc["policy"])
-    if policy_doc is not None and policy_doc.get("form") == "table":
-        yield from _table_member_failures(policy_doc, "the policy table", ("policy",), _POLICY_ROW)
-    targeted: frozenset[str] = frozenset({"target"} if fmt >= TARGETS_FORMAT else ())
     for rid, rule in _objects(doc["rules"]):
         if rule.get("form") == "table":
             yield from _table_member_failures(rule, f"rule {_q(rid)}", (rid,), _RULE_ROW)
-        yield from _function_failures(
-            rule, f"rule {_q(rid)}", (rid,), _RULE | targeted, _TABLE | targeted, fmt
-        )
-        if fmt < CANDIDATE_FORMAT and rule.get("candidates") is True:
-            yield (rid,), f"rule {_q(rid)} is a candidate set, which format {fmt} does not have"
-        if fmt < CANDIDATE_FIELD_FORMAT and type(rule.get("candidates")) is str:
-            yield (
-                (rid,),
-                f"rule {_q(rid)} names a candidate field, which format {fmt} does not have",
+        yield from _function_failures(rule, f"rule {_q(rid)}", (rid,))
+    groups = cast("dict[str, Any]", doc["groups"]) if isinstance(doc["groups"], dict) else {}
+    for gname in code_point_sorted(groups):
+        group: object = groups[gname]
+        if isinstance(group, dict):  # a group of another form is check 10's
+            yield from _missing_or_extra(
+                cast("dict[str, Any]", group), _GROUP, f"group {_q(gname)}", (gname,)
             )
-    if fmt >= GROUP_REASON_FORMAT:
-        groups = cast("dict[str, Any]", doc["groups"]) if isinstance(doc["groups"], dict) else {}
-        for gname in code_point_sorted(groups):
-            group: object = groups[gname]
-            if isinstance(group, dict):  # a group of another form is check 10's
-                yield from _missing_or_extra(
-                    cast("dict[str, Any]", group), _GROUP, f"group {_q(gname)}", (gname,)
-                )
-    if fmt < KNOWN_FORMAT:
-        tables = [(f"rule {_q(rid)}", (rid,), r) for rid, r in _objects(doc["rules"])]
-        if policy_doc is not None:
-            tables.append(("the policy table", ("policy",), policy_doc))
-        for where, names, table in tables:
-            if any(
-                "known" in cell
-                for row in _items(table.get("rows"))
-                for cell in _items(row.get("cells"))
-            ):
-                yield names, f"{where} holds a Known cell, which format {fmt} does not have"
-    if fmt < CANDIDATE_FIELD_FORMAT:
-        components = [(f"rule {_q(rid)}", (rid,), r) for rid, r in _objects(doc["rules"])]
-        policy = _object(doc["policy"])
-        if policy is not None:
-            components.append(("the policy", ("policy",), policy))
-        for where, names, component in components:
-            if any(is_candidate_read(read) for read in _component_reads(component)):
-                yield names, f"{where} reads candidate, which format {fmt} does not have"
     for sid, source in _objects(doc["sources"]):
-        yield from _source_failures(sid, source, fmt)
-    for name, tool in _objects(doc["tools"]):
-        yield from _missing_or_extra(tool, frozenset(), f"tool {_q(name)}", (name,))
-
-
-def _component_reads(component: Mapping[str, Any]) -> Iterator[str]:
-    """Each read a document's function rule, table or policy spells: its ``reads``, or each
-    input's ``read``; anything of another form skipped, as check 11's member test reports."""
-    reads: object = component.get("reads")
-    if isinstance(reads, list):
-        yield from (r for r in cast("list[object]", reads) if isinstance(r, str))
-    inputs: object = component.get("inputs")
-    if isinstance(inputs, list):
-        for i in cast("list[object]", inputs):
-            if isinstance(i, dict) and isinstance(cast("dict[str, Any]", i).get("read"), str):
-                yield cast("dict[str, str]", i)["read"]
+        yield from _source_failures(sid, source)
 
 
 _INPUT = frozenset({"read", "helper", "params"})
 _RULE_ROW = frozenset({"cells", "output"})
-_POLICY_ROW = frozenset({"cells", "plan"})
 
 
 def _table_member_failures(
@@ -3954,15 +3331,9 @@ def _table_member_failures(
 
 
 def _function_failures(
-    obj: object,
-    where: str,
-    names: tuple[str, ...],
-    function: frozenset[str],
-    table: frozenset[str],
-    fmt: int,
+    obj: object, where: str, names: tuple[str, ...]
 ) -> Iterator[tuple[tuple[str, ...], str]]:
-    """A rule's or the policy's members by its ``form``, and a function's boundaries; the
-    extraction roles are a form from format ``EXTRACTION_FORMAT`` on."""
+    """A rule's members by its ``form``, and a function's boundaries."""
     if not isinstance(obj, dict):
         return
     members = cast("dict[str, Any]", obj)
@@ -3972,16 +3343,14 @@ def _function_failures(
     elif form not in ("function", "table"):
         yield names, f"{where}'s form is neither function nor table"
     else:
-        yield from _missing_or_extra(
-            members, function if form == "function" else table, where, names
-        )
+        yield from _missing_or_extra(members, _RULE if form == "function" else _TABLE, where, names)
     if form == "function":
         for key, entry in _objects(members.get("boundaries")):
             parsed = _parsed(key)
             if parsed is None or parsed.level != "q":
                 continue
             shown = f"{where}'s boundaries for {_q(key)}"
-            if fmt >= EXTRACTION_FORMAT and "null" in entry:  # an extraction read's roles
+            if "null" in entry:  # an extraction read's roles
                 yield from _missing_or_extra(entry, frozenset(X_ROLES), shown, (*names, key))
                 continue
             roles = frozenset({"bar", "thresholds", "margin", "mass"})
@@ -3996,62 +3365,32 @@ _LABEL = frozenset({"name", "description"})
 _EXTRACTION = _QUESTION | {"value_type", "is_list", "text", "reference_date"}
 
 
-def _source_failures(
-    sid: str, source: dict[str, Any], fmt: int
-) -> Iterator[tuple[tuple[str, ...], str]]:
+def _source_failures(sid: str, source: dict[str, Any]) -> Iterator[tuple[tuple[str, ...], str]]:
     where, names = f"source {_q(sid)}", (sid,)
-    members = _SOURCE | {"payload_order"} if fmt >= KEY_ORDER_FORMAT else _SOURCE
-    yield from _missing_or_extra(source, members, where, names)
-    if "payload_order" in members and "payload_order" in source:
+    yield from _missing_or_extra(source, _SOURCE, where, names)
+    if "payload_order" in source:
         yield from _order_failures(source.get("payload"), source["payload_order"], where, names)
     for ref, provided in _objects(source.get("provides")):
         at, shown = (sid, ref), f"{where}'s {_q(ref)}"
         if not ref.startswith("q:"):
             yield from _missing_or_extra(provided, frozenset({"type", "candidates"}), shown, at)
-            if fmt < CANDIDATE_FORMAT and provided.get("candidates") is True:
-                yield at, f"{shown} is a candidate set, which format {fmt} does not have"
-            if fmt < CANDIDATE_FIELD_FORMAT and type(provided.get("candidates")) is str:
-                yield at, f"{shown} names a candidate field, which format {fmt} does not have"
             continue
         extraction = provided.get("kind") == AnswerKind.extraction
-        if extraction and fmt < EXTRACTION_FORMAT:
-            yield at, f"{shown} is an extraction question, which format {fmt} does not have"
-        else:
-            members = _EXTRACTION if extraction else _QUESTION
-            if fmt >= TARGETS_FORMAT:
-                members |= {"target", "latent_targets"}
-            yield from _missing_or_extra(provided, members, shown, at)
-        if fmt >= TARGETS_FORMAT:
-            for latent in _items(provided.get("latent_targets")):
-                yield from _missing_or_extra(latent, _LATENT, f"{shown}'s latent target", at)
+        members = (_EXTRACTION if extraction else _QUESTION) | {"target", "latent_targets"}
+        yield from _missing_or_extra(provided, members, shown, at)
+        for latent in _items(provided.get("latent_targets")):
+            yield from _missing_or_extra(latent, _LATENT, f"{shown}'s latent target", at)
         if isinstance(provided.get("wording"), dict):
-            yield from _text_failures(
-                provided["wording"], f"{shown}'s wording", at, held=fmt >= KEY_ORDER_FORMAT
-            )
+            yield from _text_failures(provided["wording"], f"{shown}'s wording", at, held=True)
         declared: object = provided.get("labels")
         listed = declared
-        template = _object(provided.get("wording"))
-        structured = template is not None and type(template.get("template")) in (dict, list)
-        if structured and fmt < STRUCTURED_WORDING_FORMAT:
-            yield at, f"{shown} has a structured wording, which format {fmt} does not have"
-            continue
-        noul = provided.get("kind") == AnswerKind.noul
-        if noul and declared is not None and fmt < NOUL_DESCRIPTION_FORMAT:
-            yield at, f"{shown} is a noul question with labels, which format {fmt} does not have"
-            continue
-        if isinstance(declared, dict) and fmt < CANDIDATE_FORMAT:
-            yield at, f"{shown} is a candidate-valued label set, which format {fmt} does not have"
         if isinstance(declared, dict):
             label_set = cast("dict[str, Any]", declared)
             labels = frozenset({"fixed", "candidates", "at"})
             yield from _missing_or_extra(label_set, labels, f"{shown}'s labels", at)
             listed = label_set.get("fixed")
-        described = _items(cast(object, listed))
-        if described and fmt < DESCRIPTION_FORMAT:
-            yield at, f"{shown} has a described label, which format {fmt} does not have"
-        else:
-            for label in described:
-                yield from _missing_or_extra(label, _LABEL, f"{shown}'s described label", at)
+        for label in _items(cast(object, listed)):
+            yield from _missing_or_extra(label, _LABEL, f"{shown}'s described label", at)
     if isinstance(source.get("when"), dict):
         yield from _missing_or_extra(source["when"], _FUNCTION, f"{where}'s when", names)
     if isinstance(source.get("requirement"), dict):
@@ -4125,9 +3464,6 @@ def _components(doc: dict[str, Any]) -> list[tuple[str, str, tuple[str, ...], di
         when = _object(source["when"])
         if when is not None:
             out.append((f"{sid}.when", f"source {_q(sid)}'s when", (sid,), when))
-    policy = _object(doc["policy"])
-    if policy is not None and policy["form"] == "function":
-        out.append(("policy", "the policy", ("policy",), policy))
     return out
 
 
@@ -4272,11 +3608,11 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
                 r["outputs"],
                 r["hit"],
                 _listed(r["inputs"], python_input),
-                _rows(r["rows"], policy=False, hit=r["hit"]),
+                _rows(r["rows"], hit=r["hit"]),
                 order=r["order"],
                 candidates=r["candidates"],
                 grounded=r["grounded"],
-                target=r.get("target"),
+                target=r["target"],
             )
         return Rule(
             r["provides"],
@@ -4288,76 +3624,36 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
             boundaries=r["boundaries"],
             candidates=r["candidates"],
             grounded=r["grounded"],
-            target=r.get("target"),
+            target=r["target"],
         )
 
-    policy: Any = doc["policy"]
-    if isinstance(policy, dict):
-        p = cast("dict[str, Any]", policy)
-        if p["form"] == "table":
-            policy = PolicyTable(_listed(p["inputs"], python_input), _rows(p["rows"], policy=True))
-        else:
-            policy = Policy(
-                resolved["policy"],
-                version=p["version"],
-                reads=p["reads"],
-                params=p["params"],
-                boundaries=p["boundaries"],
-            )
-    requirements: Any = doc["requirements"]
-    if isinstance(requirements, list | tuple):
-        requirements = [
-            m if (o := _object(m)) is None else Requirement(o["ref"], o["value"])
-            for m in cast("list[Any]", requirements)
-        ]
-    tools: Any = doc["tools"]
     return Design(
         state=doc["state"],
-        policy=policy,
+        policy=doc["policy"],
         sources=block(doc["sources"], source),
         rules=block(doc["rules"], rule),
-        requirements=requirements,
-        default_deny=doc["default_deny"],
-        tools=list(cast("dict[str, Any]", tools)) if isinstance(tools, dict) else tools,
         parameters=block(
             doc["parameters"],
             lambda _, v: Parameter(v["type"], _ordered_value(v["value"], v.get("order"))),
         ),
         types=doc["types"],
-        plans=block(
-            doc["plans"],
-            lambda _, v: PlanDeclaration(
-                v["kind"],
-                _listed(v["steps"], _step_of),
-                _text_of(v["reason"]),
-                _text_of(v["reply"]),
-                v["grounded"],
-            ),
-        ),
-        groups=_each(doc["groups"], _group_of(doc["format"])),
+        groups=_each(doc["groups"], _group_of),
         classes=doc["classes"],
         name=doc["name"],
-        context=_context_of(doc.get("context")),
-        targets=block(doc.get("targets", {}), lambda _, v: Target(v["statement"], v["values"])),
+        targets=block(doc["targets"], lambda _, v: Target(v["statement"], v["values"])),
     )
 
 
-def _group_of(fmt: int) -> Callable[[Any], Group]:
-    """A document's group as a ``Group``: from format 9 an object of its refs and reasons, one
-    of another form left for check 10; before it its refs alone, with the reason ``convergent``."""
-
-    def build(value: Any) -> Group:
-        if fmt < GROUP_REASON_FORMAT:
-            return Group(value, ("convergent",))
-        if isinstance(value, dict):
-            members = cast("dict[str, Any]", value)
-            return Group(members["refs"], members["reason"])
-        return Group(value, cast(Any, None))  # its reason is not a list: check 10
-
-    return build
+def _group_of(value: Any) -> Group:
+    """A document's group as a ``Group``: an object of its refs and reasons, one of another
+    form left for check 10."""
+    if isinstance(value, dict):
+        members = cast("dict[str, Any]", value)
+        return Group(members["refs"], members["reason"])
+    return Group(value, cast(Any, None))  # its reason is not a list: check 10
 
 
-def _rows(value: object, *, policy: bool, hit: object = None) -> Any:
+def _rows(value: object, *, hit: object = None) -> Any:
     """A document's rows as a design written in Python holds them, one not of the tagged form
     as the ``NotationError`` check 10 reports."""
     return _listed(
@@ -4365,7 +3661,7 @@ def _rows(value: object, *, policy: bool, hit: object = None) -> Any:
         lambda r: (
             NotationError("a row is not an object of the tagged form")
             if (o := _object(r)) is None
-            else python_row(o, policy=policy, hit=hit)
+            else python_row(o, hit=hit)
         ),
     )
 
@@ -4374,59 +3670,6 @@ def _listed(value: object, build: Callable[[Any], Any]) -> Any:
     if not isinstance(value, list):
         return value
     return [build(v) for v in cast("list[Any]", value)]
-
-
-def _step_of(value: object) -> Any:
-    """A document step as a ``Step``; one of another form kept whole, for check 10."""
-    step = _object(value)
-    if step is None or set(step) != {"tool", "arguments", "requirements"}:
-        return value
-    arguments, requirements = _object(step["arguments"]), step["requirements"]
-    if arguments is None or not isinstance(requirements, list):
-        return value
-    origins: dict[str, Origin | Binding] = {}
-    for name, o in arguments.items():
-        origin = _object(o)
-        if origin is None:
-            return value
-        try:
-            if set(origin) == {"step", "path"}:
-                origins[name] = Binding(origin["step"], origin["path"])
-            elif set(origin) == {"ref"}:
-                origins[name] = Origin(ref=origin["ref"])
-            elif set(origin) == {"literal"}:
-                origins[name] = Origin(literal=origin["literal"])
-            elif set(origin) == {"candidate"}:
-                origins[name] = Origin(candidate=origin["candidate"])
-            else:
-                return value
-        except TypeError:  # a member of another form: check 10's
-            return value
-    built: list[Requirement] = []
-    for r in cast("list[Any]", requirements):
-        member = _object(r)
-        if member is None or set(member) != {"ref", "value"}:
-            return value
-        built.append(Requirement(member["ref"], member["value"]))
-    try:
-        return Step(step["tool"], origins, built)
-    except TypeError:  # a member of another form: check 10's
-        return value
-
-
-def _context_of(value: object) -> Any:
-    """The ``Context`` a document's block declares; a member of another form passes through
-    for check 10 to refuse."""
-    block = _object(value)
-    if block is None:
-        return value
-    entries: Any = block["entries"]
-    if isinstance(entries, list):
-        entries = [
-            m if (o := _object(m)) is None else ContextEntry(o["ref"], _text_of(o["text"]))
-            for m in cast("list[Any]", entries)
-        ]
-    return Context(entries, plan=block["plan"], steps=block["steps"], record=block["record"])
 
 
 def _each(value: object, build: Callable[[Any], Any]) -> Any:

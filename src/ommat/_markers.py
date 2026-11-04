@@ -1,8 +1,7 @@
 """Markers, the outcome ``Failed``, causes and the closed sets whose members carry no data.
 
-The public enums are ``CauseCode``, ``PlanKind`` and ``VerdictKind``; a
-marker's kind and an outcome's are named by their classes, so ``MarkerKind`` and
-``OutcomeKind`` have no public name.
+The public enum is ``CauseCode``; a marker's kind and an outcome's are named by their classes,
+so ``MarkerKind`` and ``OutcomeKind`` have no public name.
 """
 
 import enum
@@ -42,16 +41,6 @@ class CauseCode(enum.StrEnum):
     unsupported = "unsupported"
 
 
-class PlanKind(enum.StrEnum):
-    """What a plan is: execute, clarify, inform, escalate or broken."""
-
-    execute = "execute"
-    clarify = "clarify"
-    inform = "inform"
-    escalate = "escalate"
-    broken = "broken"
-
-
 class OutcomeKind(enum.StrEnum):
     returned = "returned"
     failed = "failed"
@@ -61,13 +50,6 @@ class MarkerKind(enum.StrEnum):
     unsure = "Unsure"
     unavailable = "Unavailable"
     unasked = "Unasked"
-
-
-class VerdictKind(enum.StrEnum):
-    """A guard verdict's kind: passed or refused."""
-
-    passed = "passed"
-    refused = "refused"
 
 
 @dataclass(frozen=True, slots=True, init=False)

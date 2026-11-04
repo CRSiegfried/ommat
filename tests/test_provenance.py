@@ -21,12 +21,12 @@ from ommat import (
     Cause,
     Design,
     FindingKind,
+    InvalidDesign,
     InvalidRecord,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Record,
+    Rule,
     Source,
     SourceCall,
     Text,
@@ -47,15 +47,16 @@ from test_views import key_of
 Batch = tuple[SourceCall, ...]
 
 
-def plan(r: ReadView) -> Plan:
-    return Plan("inform", reply="asked")
+def act(r: ReadView) -> str:
+    return "inform"
 
 
 DESIGN = Design(
     name="provenance",
     state=t.record(text=t.string),
     sources={"a": Source({"q:a/yes": Question("noul", Text("Is it so?"))}, oracle="o")},
-    policy=Policy(plan, version="1", reads=[]),
+    rules={"act": Rule("d:act", t.label("inform"), act, version="1", reads=["q:a/yes"])},
+    policy="d:act",
 )
 LOADED = load(DESIGN)
 YES = {"yes": 0.8, "no": 0.2}
@@ -267,13 +268,23 @@ def doc_of(record: Record) -> dict[str, Any]:
     return doc
 
 
+def old_doc_of(record: Record) -> dict[str, Any]:
+    """``doc_of`` a current record made format 7, before the policy: the ``settings`` item's
+    ``policy`` and the ``context`` item dropped."""
+    doc = doc_of(record)
+    doc["log"] = [i for i in doc["log"] if i["item"] != "context"]
+    doc["log"][0]["format"] = 7
+    doc["log"][1].pop("policy")
+    return doc
+
+
 def refused(doc: dict[str, Any], says: str) -> None:
     with pytest.raises(InvalidRecord, match=says):
         read_record(rehashed(doc))
 
 
 def test_a_format_5_call_item_holding_snapshot_or_lacking_a_profile_member_is_refused() -> None:
-    doc = before_key_order(doc_of(turn(**PROFILE)))
+    doc = before_key_order(old_doc_of(turn(**PROFILE)))
     with_snapshot = copy.deepcopy(doc)
     with_snapshot["log"][3]["snapshot"] = None
     refused(with_snapshot, "holds snapshot, which a format-5 record does not")
@@ -284,7 +295,7 @@ def test_a_format_5_call_item_holding_snapshot_or_lacking_a_profile_member_is_re
 
 
 def test_a_format_4_record_holds_snapshot_and_none_of_the_profile() -> None:
-    doc = doc_of(turn(**PROFILE))
+    doc = old_doc_of(turn(**PROFILE))
     old = before_profile(copy.deepcopy(doc), 4)
     assert read_record(rehashed(old)).log[3]["snapshot"] == "7132dc4"
     holding = copy.deepcopy(old)
@@ -300,7 +311,7 @@ def test_a_format_4_record_holds_snapshot_and_none_of_the_profile() -> None:
 
 
 def test_a_format_4_calls_entry_holds_none_of_the_new_members_as_a_key_or_an_invalid_key() -> None:
-    old = before_profile(doc_of(turn(**PROFILE)), 4)
+    old = before_profile(old_doc_of(turn(**PROFILE)), 4)
     for name in ("missing", "request_id", "provider", "runtime"):
         changed = copy.deepcopy(old)
         entry = next(iter(changed["unhashed"]["calls"].values()))
@@ -317,7 +328,7 @@ def test_a_format_4_calls_entry_holds_none_of_the_new_members_as_a_key_or_an_inv
 
 def test_a_format_3_or_4_precision_is_read_by_its_json_kind_alone() -> None:
     for fmt in (3, 4):
-        old = before_profile(doc_of(turn(precision=2)), fmt)
+        old = before_profile(old_doc_of(turn(precision=2)), fmt)
         old["log"][3]["precision"] = 18  # past 17, but an integer as the format-3 rules read
         assert read_record(rehashed(old)).log[3]["precision"] == 18
 
@@ -333,7 +344,7 @@ def test_a_request_id_or_clients_past_the_size_bounds_is_refused_at_the_read(
 
 
 def test_a_calls_entrys_missing_is_read_against_the_profiles_lists() -> None:
-    doc = before_key_order(doc_of(turn(**PROFILE)))
+    doc = before_key_order(old_doc_of(turn(**PROFILE)))
     for missing, says in (
         ({"snapshot": "not-pinned"}, "names no detail"),
         ({"revision": "lost"}, "is not a reason of the provenance profile"),
@@ -424,11 +435,13 @@ def with_calibrated(doc: dict[str, Any], place: str) -> dict[str, Any]:
 
 @pytest.mark.parametrize("place", ["entry", "missing", "invalid", "claimed"])
 def test_a_format_6_record_may_hold_calibrated_and_a_format_7_one_may_not(place: str) -> None:
-    old = with_calibrated(as_format_6(doc_of(turn(**PROFILE))), place)
+    old = with_calibrated(as_format_6(old_doc_of(turn(**PROFILE))), place)
     read_record(rehashed(old))
-    current = with_calibrated(doc_of(turn(**PROFILE)), place)
     verb = "claims" if place == "claimed" else "holds"
-    refused(current, f"{verb} calibrated, which a format-7 record does not")
+    format_7 = with_calibrated(old_doc_of(turn(**PROFILE)), place)
+    refused(format_7, f"{verb} calibrated, which a format-7 record does not")
+    current = with_calibrated(doc_of(turn(**PROFILE)), place)
+    refused(current, f"{verb} calibrated, which a format-8 record does not")
 
 
 def test_a_detail_is_missing_only_when_every_sent_request_lacks_it() -> None:
@@ -561,16 +574,19 @@ def test_the_fold_reads_no_request_whose_attempts_is_not_above_0() -> None:
         assert (result.provider, result.precision, result.attempts) == (None, None, None)
 
 
-def test_a_format_4_record_redacts_with_its_snapshot_open_and_replays_at_format_5() -> None:
-    old = read_record(rehashed(before_profile(doc_of(turn(**PROFILE)), 4)))
+def test_a_format_4_record_redacts_with_its_snapshot_open_and_replays_as_wrong_design() -> None:
+    old = read_record(rehashed(before_profile(old_doc_of(turn(**PROFILE)), 4)))
     view = json.loads(redact(old, ROOT))
     call = next(i for i in view["log"] if i["item"] == "call")
     assert call["snapshot"] == "7132dc4"
-    rerun, findings = replay_sync(old, LOADED)
+    assert replay_sync(old, LOADED) == (None, [{"kind": FindingKind.wrong_design}])
+
+
+def test_a_replay_calls_no_model_and_copies_no_provenance() -> None:
+    rerun, findings = replay_sync(turn(**PROFILE), LOADED)
     assert findings == []
     assert rerun is not None
-    assert rerun.log[0]["format"] == 7
-    assert call_item(rerun)["revision"] is None  # replay calls no model
+    assert call_item(rerun)["revision"] is None
 
 
 def test_from_record_copies_none_of_the_stored_provenance() -> None:
@@ -603,17 +619,12 @@ def test_a_stored_format_4_record_reads_to_its_own_hash_and_keeps_its_snapshot()
     assert call_item_of(view)["snapshot"] == "m-1"
 
 
-def test_a_stored_format_4_design_loads_to_its_own_hash_and_its_record_replays() -> None:
-    data = (FORMAT_4 / "design.json").read_bytes()
-    loaded = load(data)
-    assert loaded.design_hash == FORMAT_4_DESIGN
-    assert loaded.document == data
-    rerun, findings = replay_sync(read_record((FORMAT_4 / "record.json").read_bytes()), loaded)
-    assert findings == [
-        {"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}
-    ]  # a record of an older helper version
-    assert rerun is not None
-    assert rerun.log[0] == {"item": "design", "hash": FORMAT_4_DESIGN, "format": 7, "helpers": 3}
+def test_a_stored_format_4_design_is_refused_and_its_record_replays_as_wrong_design() -> None:
+    with pytest.raises(InvalidDesign, match="the document's format 4 is not 10"):
+        load((FORMAT_4 / "design.json").read_bytes())
+    record = read_record((FORMAT_4 / "record.json").read_bytes())
+    assert record.log[0]["hash"] == FORMAT_4_DESIGN
+    assert replay_sync(record, LOADED) == (None, [{"kind": FindingKind.wrong_design}])
 
 
 def call_item_of(view: dict[str, Any]) -> dict[str, Any]:

@@ -19,8 +19,6 @@ from ommat import (
     EntryRefusal,
     Failed,
     LoadedDesign,
-    Plan,
-    Policy,
     Record,
     Rule,
     RunSettings,
@@ -30,6 +28,7 @@ from ommat import (
     replay_sync,
 )
 from ommat import types as t
+from ommat._ledger import finished
 from ommat.evaluation import (
     EvaluationRefusal,
     RefusalReason,
@@ -121,8 +120,8 @@ def big(r: Any) -> bool:
     return bool(r.read("t:a") > 5)
 
 
-def say(r: Any) -> Plan:
-    return Plan("inform", reply=str(r.read("t:b")))
+def say(r: Any) -> str:
+    return str(r.read("t:b"))
 
 
 CHAIN = load(
@@ -132,8 +131,11 @@ CHAIN = load(
             "a": Source({"t:a": t.integer()}, needs=["t:state"]),
             "b": Source({"t:b": t.string}, needs=["d:big"]),
         },
-        rules={"big": Rule("d:big", t.boolean, big, version="1", reads=["t:a"])},
-        policy=Policy(say, version="1", reads=["t:b"]),
+        rules={
+            "big": Rule("d:big", t.boolean, big, version="1", reads=["t:a"]),
+            "say": Rule("d:say", t.string, say, version="1", reads=["t:b"]),
+        },
+        policy="d:say",
     )
 )
 
@@ -253,7 +255,7 @@ def test_a_pinned_ref_of_a_live_source_keeps_its_set_value() -> None:
 
 def test_the_returned_record_replays_clean_under_the_design_it_ran_under() -> None:
     base = go().record
-    rerun = slice_design(tools=["archive", "send"])
+    rerun = slice_design(name="changed")
     out = scenario_sync(
         base,
         LOADED,
@@ -299,7 +301,7 @@ def test_a_live_binding_is_given_the_calls_seconds() -> None:
         return CallResult({"q:spam": NO})
 
     out = scenario_sync(go().record, LOADED, [{"ask": "ask"}], live(ask=slow))
-    assert any(i["item"] == "verdict" for i in out["record"].log)
+    assert finished(out["record"].log)
 
 
 def test_a_bindings_key_the_design_does_not_declare_is_refused() -> None:
@@ -322,7 +324,7 @@ def test_a_base_cut_by_its_deadline_runs_past_the_cut_live() -> None:
     out = scenario_sync(base, LOADED, [], given, rerun_design=LOADED)
     assert all(r["deadline"] is False for r in rounds(out["record"]))
     assert out["stale"] == ["q:spam", "t:body", "t:size"]
-    assert any(i["item"] == "verdict" for i in out["record"].log)
+    assert finished(out["record"].log)
 
 
 def test_a_live_scenario_enforces_the_bases_deadline() -> None:
@@ -352,7 +354,11 @@ def test_a_recorded_failure_given_back_whole_is_pinned() -> None:
     assert call_of(out["record"], "look")["outcome"]["failed"]["code"] == "raised"
 
 
-@pytest.mark.parametrize("reply", ["not a result", CallResult(["q:spam"])], ids=["str", "list"])
+@pytest.mark.parametrize(
+    "reply",
+    ["not a result", CallResult(["q:spam"])],  # pyright: ignore[reportArgumentType]
+    ids=["str", "list"],
+)
 def test_a_live_result_that_is_not_a_call_result_of_a_dict_is_invalid_return(
     reply: object,
 ) -> None:

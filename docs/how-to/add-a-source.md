@@ -100,8 +100,7 @@ timeout each batch takes.
 ## What a call receives
 
 A binding is an async function, `binding(batch, *, seconds)`. `ommat.bindings.OracleBinding`
-is its type. `ommat.Binding` is another thing: a plan step's argument bound to an earlier
-step's result.
+is its type.
 
 `batch` is a tuple of `SourceCall`s in source id order. Each holds:
 
@@ -337,10 +336,10 @@ report overflows it, and answers through the same street finder. From
 
 ```text
 conformance: []
-inform | Logged for Elm Row, Mill Lane; no one street stands out. | passed
+decision: {'log': ['Elm Row', 'Mill Lane']}
   answers: {'q:places/street': 'Elm Row', 'q:places/streets': ['Elm Row', 'Mill Lane']}
   replay findings: [] | leaf calls: 0
-escalate | the report names no street | passed
+decision: Unsure(kind=<MarkerKind.unsure: 'Unsure'>, cause=Cause(code=<CauseCode.abstained: 'abstained'>, refs=('d:streets',)))
   answers: {'q:places/street': 'unsupported', 'q:places/streets': 'unsupported'}
   warning: places: unsupported: the state alone is estimated at 346 tokens, over the limit of 256
   replay findings: [] | leaf calls: 0
@@ -463,7 +462,7 @@ its inference runs on to its end, holding the lock, and its result is dropped. T
 the lock ends with the call, so a call cut while it waits does not go on to run the model,
 bar a lock freed in the instant between ommat's end and the binding's own deadline. A `None`
 from `_predict` comes at the call's end, when ommat has already timed out the whole call, so
-its `timed-out` marker is a guard that is never read.
+its `timed-out` marker is never read.
 `decide_sync` and `check` wait for such a thread to end: on Python 3.11 for as long as it
 runs, on 3.12 and later for up to 300 seconds, and the process waits for it again at exit.
 
@@ -701,20 +700,21 @@ From `docs/how-to/add_a_source`, run `python reports_run.py`:
 ```text
 conformance: []
 own batches: []
-inform | Logged for Quay Street. | passed
+decision: {'log': ['Quay Street']}
   answers: {'q:places/street': 'Quay Street', 'q:places/streets': ['Quay Street']}
   replay findings: [] | model calls: 0
-inform | Logged for Elm Row, Mill Lane; no one street stands out. | passed
+decision: {'log': ['Elm Row', 'Mill Lane']}
   answers: {'q:places/street': 'Elm Row', 'q:places/streets': ['Elm Row', 'Mill Lane']}
   replay findings: [] | model calls: 0
-escalate | the report names no street | passed
+decision: Unsure(kind=<MarkerKind.unsure: 'Unsure'>, cause=Cause(code=<CauseCode.abstained: 'abstained'>, refs=('d:streets',)))
   answers: {'q:places/street': None, 'q:places/streets': []}
   replay findings: [] | model calls: 0
 ```
 
 In the second report the best street scores 0.7, below the rule's bar of 0.8, so `d:street`
-is `Unsure` and the plan informs with the list. The third names none: the list is `[]` and the
-plan escalates. Each replay rebuilds its plan with no model call.
+is `Unsure` and the decision logs the list. The third names none: the list is `[]`, so the
+policy's estimate is an `Unsure` naming `d:streets`, and the turn is undecided. Each replay
+rebuilds its decision with no model call.
 
 ## Ask a question per candidate
 

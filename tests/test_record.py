@@ -13,13 +13,17 @@ from counting import SmallBounds, bound, counted
 from designs import minimal
 from ledger_logs import (
     BROKEN,
+    BROKEN_8,
     BROKEN_PLAN,
     CANCELLED,
+    CANCELLED_8,
     CODEC_CANCELLED,
     DESIGN,
+    ENTRY_CAUSE,
     HASH,
     LOGS,
     NORMAL,
+    NORMAL_8,
     PLAN,
     SETTINGS,
     STATE,
@@ -28,7 +32,6 @@ from ledger_logs import (
 )
 from ommat import (
     InvalidRecord,
-    Policy,
     Record,
     Rule,
     RunSettings,
@@ -138,7 +141,9 @@ def test_every_prefix_from_design_closes_and_reads_back(name: str) -> None:
     log = LOGS[name]
     for n in range(1, len(log) + 1):
         record = closed(log[:n])
-        assert record.record_hash == hash_value(log[:n])
+        assert record.record_hash == hash_value(record.log)
+        # From format 6 the ledger gives each entry its ``order``; the rest is as appended.
+        assert [{k: v for k, v in i.items() if k != "order"} for i in record.log] == log[:n]
         back = read_record(record.document)
         assert back.document == record.document
         assert back.record_hash == record.record_hash
@@ -171,6 +176,10 @@ NULL_CAUSE_BROKEN = {**BROKEN_PLAN, "cause": None}
         (CANCELLED, {"code": "cancelled", "refs": []}),
         (CANCELLED[:-1], None),
         (CODEC_CANCELLED, {"code": "cancelled", "refs": []}),
+        (NORMAL_8, None),
+        (BROKEN_8, ENTRY_CAUSE["cause"]),  # the marker t:state's cause
+        (BROKEN_8[:3], ENTRY_CAUSE["cause"]),
+        (CANCELLED_8, {"code": "cancelled", "refs": []}),
     ],
 )
 def test_the_derived_cause(log: list[dict[str, Any]], cause: dict[str, Any] | None) -> None:
@@ -275,8 +284,8 @@ def test_bytes_that_are_not_utf8_json_are_refused_with_the_parse_error_chained(
         (document(["design"]), "no design item first"),
         ({"log": {"item": "design"}, "unhashed": {}}, "no design item first"),
         (
-            document([{**DESIGN, "format": 8}]),
-            "format 8 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7",
+            document([{**DESIGN, "format": 9}]),
+            "format 9 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8",
         ),
         (document([{**DESIGN, "format": True}]), "format True is not one"),
         (document([{**DESIGN, "format": 1.0}]), "format 1.0 is not one"),
@@ -368,8 +377,8 @@ def test_a_decided_record_with_a_deadline_cut_reads_back_with_its_hash_and_log()
     def after(r: Any) -> str:
         return "yes"
 
-    def policy(r: Any) -> None:
-        return None
+    def act(r: Any) -> str:
+        return "hold"
 
     design = minimal(
         state=t.record(),
@@ -379,9 +388,12 @@ def test_a_decided_record_with_a_deadline_cut_reads_back_with_its_hash_and_log()
             "next": Source({"t:n": t.string}, needs=["t:f"]),
         },
         rules={
-            "after": Rule("d:after", t.label("no", "yes"), after, version="1", reads=["t:n", "t:s"])
+            "after": Rule(
+                "d:after", t.label("no", "yes"), after, version="1", reads=["t:n", "t:s"]
+            ),
+            "act": Rule("d:act", t.label("hold"), act, version="1", reads=["d:after"]),
         },
-        policy=Policy(policy, version="1", reads=["d:after"]),
+        policy="d:act",
     )
     binding = Scripted(
         {
@@ -673,7 +685,7 @@ def test_a_long_format_string_is_clipped_in_its_message() -> None:
         read_record(document(log))
     assert str(info.value) == (
         f"the record is invalid: the record's format {'f' * 64!r}... (1000000 code points) "
-        "is not one this reader knows: 1, 2, 3, 4, 5, 6, 7"
+        "is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8"
     )
 
 

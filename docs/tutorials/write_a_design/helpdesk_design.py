@@ -6,8 +6,6 @@ decides with it.
 
 from ommat import (
     Design,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Rule,
@@ -80,24 +78,32 @@ RULES = {
 MARKERS = (Unsure, Unavailable, Unasked)
 
 
-def route(r: ReadView) -> Plan:
+def route(r: ReadView) -> object:
     """Escalate what the desk cannot settle or must answer today; inform the rest."""
     topic = r.read("d:topic")
     urgent = r.read("d:urgent")
     order = r.read("d:order")
     if isinstance(topic, MARKERS):
-        return Plan("escalate", reason="the topic is not settled")
+        return topic
     if urgent == "yes":
-        return Plan("escalate", reason=f"an urgent {topic} message")
+        return "answer_today"
     if isinstance(order, MARKERS):
-        return Plan("inform", reply=f"Routed to {topic}; no order number found.")
-    return Plan("inform", reply=f"Routed to {topic} for order {order}.")
+        return f"route_{topic}"
+    return f"route_{topic}_with_order"
 
+
+RULES["route"] = Rule(
+    "d:route",
+    t.string,
+    route,
+    version="1",
+    reads=["d:topic", "d:urgent", "d:order"],
+)
 
 DESIGN = Design(
     name="help-desk",
     state=t.record(message=t.string),
     sources=SOURCES,
     rules=RULES,
-    policy=Policy(route, version="1", reads=["d:topic", "d:urgent", "d:order"]),
+    policy="d:route",
 )

@@ -1,23 +1,30 @@
 # pyright: reportPrivateUsage=false
-"""The record views: the escalation's four
-members and when a record holds none, and the redacted view, its digests recomputed here
-independently with ``hmac`` and the ``rfc8785`` oracle, over records decide wrote and over the
-synthetic logs and every prefix of them."""
+"""The record views: the escalation's four members, the root cause its ``required`` chain
+ends at, and when a record holds none; the transcript of a decided turn; and
+the redacted view, its digests recomputed here independently with ``hmac`` and the
+``rfc8785`` oracle, over records decide wrote and over the synthetic logs and every prefix of
+them."""
 
 import copy
 import hashlib
 import hmac
+import json
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import pytest
 import rfc8785
 
 from designs import minimal
 from ledger_logs import (
+    BROKEN_8,
+    CANCEL,
+    CANCELLED_8,
     DESIGN,
+    ENTRY_CAUSE,
     LOGS,
     NORMAL,
+    NORMAL_8,
     SETTINGS,
     STATE,
     call,
@@ -28,23 +35,24 @@ from ledger_logs import (
     unhashed_of,
 )
 from ommat import (
+    Cause,
+    CauseCode,
     InvalidRecord,
     LoadedDesign,
-    Origin,
-    Plan,
-    Policy,
     Record,
-    Requirement,
+    Rule,
     RunSettings,
-    Step,
+    Unsure,
     decide_sync,
     escalation,
     load,
     read_record,
     redact,
+    transcript,
 )
 from ommat import types as t
 from ommat._canonical import decode, encode
+from ommat._refs import grounded_ref
 from ommat._values import MAX_DOCUMENT_DEPTH
 
 ROOT = bytes(range(32))
@@ -61,7 +69,10 @@ def digest(value: Any, record: Record, root: bytes = ROOT) -> str:
 
 
 def read(log: list[dict[str, Any]], unhashed: dict[str, Any] | None = None) -> Record:
-    return read_record(rehashed({"log": log, "unhashed": unhashed or {}}))
+    """The record of ``log``, which may share a marker between two entries, as a document
+    holding no list or object at two places."""
+    unshared = json.loads(json.dumps(log))
+    return read_record(rehashed({"log": unshared, "unhashed": unhashed or {}}))
 
 
 def view(record: Record, root: bytes = ROOT) -> dict[str, Any]:
@@ -71,29 +82,16 @@ def view(record: Record, root: bytes = ROOT) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------------------------
-# Turns decide wrote
+# Turns decide wrote: the policy ``d:act`` reads ``d:mid``, which reads ``d:gone``
 
 
-def inform(r: Any) -> Plan:
-    return Plan("inform", reply="nothing to do")
+def send(r: Any) -> str:
+    return "send"
 
 
-def escalate(r: Any) -> Plan:
-    return Plan("escalate", reason="a person should look")
-
-
-def archive(r: Any) -> Plan:
-    return Plan("execute", [Step("archive", {"folder": Origin(literal="spam")})])
-
-
-def archive_required(r: Any) -> Plan:
-    step = Step("archive", {"folder": Origin(literal="spam")}, [Requirement("d:flag", True)])
-    return Plan("execute", [step], reason="it is spam")
-
-
-def requiring(r: Any) -> Plan:
-    r.require("d:gone")
-    return Plan("inform", reply="unreached")
+def requiring(r: Any) -> str:
+    r.require("d:mid")
+    return "send"
 
 
 def flag(r: Any) -> bool:
@@ -104,23 +102,29 @@ def gone(r: Any) -> Any:
     raise RuntimeError("no value")
 
 
-def loaded_with(policy: Callable[[Any], Plan], **changes: Any) -> LoadedDesign:
-    from ommat import Rule
+def mid(r: Any) -> bool:
+    r.require("d:gone")
+    return True
 
+
+def loaded_with(policy: Callable[[Any], str], **changes: Any) -> LoadedDesign:
     fields: dict[str, Any] = {
         "state": t.record(subject=t.string),
         "rules": {
             "flag": Rule("d:flag", t.boolean, flag, version="1"),
             "gone": Rule("d:gone", t.boolean, gone, version="1"),
+            "mid": Rule("d:mid", t.boolean, mid, version="1", reads=["d:gone"]),
+            "act": Rule(
+                "d:act", t.label("send", "hold"), policy, version="1", reads=["d:flag", "d:mid"]
+            ),
         },
-        "policy": Policy(policy, version="1", reads=["d:flag", "d:gone"]),
-        "tools": ["archive"],
+        "policy": "d:act",
     }
     fields.update(changes)
     return load(minimal(**fields))
 
 
-def turn(policy: Callable[[Any], Plan], **changes: Any) -> Record:
+def turn(policy: Callable[[Any], str], **changes: Any) -> Record:
     return decide_sync(loaded_with(policy, **changes), {"subject": "hi"}, {}).record
 
 
@@ -128,104 +132,167 @@ def turn(policy: Callable[[Any], Plan], **changes: Any) -> Record:
 # The escalation
 
 
-def test_a_passed_execute_plan_holds_no_escalation() -> None:
-    assert escalation(turn(archive, default_deny=False)) is None
+def test_a_value_at_the_policys_ref_holds_no_escalation() -> None:
+    assert escalation(turn(send)) is None
 
 
-def clarify(r: Any) -> Plan:
-    return Plan("clarify", reply="which?")
-
-
-def nothing(r: Any) -> None:
-    return None
-
-
-@pytest.mark.parametrize("policy", [inform, clarify])
-def test_a_passed_inform_or_clarify_plan_holds_no_escalation(
-    policy: Callable[[Any], Plan],
-) -> None:
-    assert escalation(turn(policy)) is None
-
-
-def test_a_broken_plan_holds_no_escalation() -> None:
-    assert escalation(turn(nothing)) is None  # type: ignore[arg-type]
-    broken = decide_sync(loaded_with(inform), {}, {})  # a broken entry
-    assert broken.record.log[2]["kind"] == "broken"
-    assert escalation(broken.record) is None
-
-
-def test_a_refused_verdict_escalates_with_the_refused_cause_and_no_reason() -> None:
-    record = turn(archive_required)
-    found = escalation(record)
-    assert found == {
-        "cause": {"code": "refused", "refs": ["d:flag"]},
-        "failures": [{"step": 1, "requirement": {"ref": "d:flag", "value": True}, "ref": "d:flag"}],
-        "reason": None,  # the plan is execute, so its reason is not the escalation's
-        "record_hash": record.record_hash,
-    }
-
-
-def test_a_default_deny_failure_names_its_step() -> None:
-    found = escalation(turn(archive))
-    assert found is not None
-    assert found["cause"] == {"code": "refused", "refs": ["step:1"]}
-    assert found["failures"] == [{"step": 1, "requirement": None, "ref": None}]
-
-
-def test_a_policys_escalate_has_no_cause_and_keeps_its_reason() -> None:
-    found = escalation(turn(escalate))
-    assert found is not None
-    assert found["cause"] is None
-    assert found["reason"] == "a person should look"
-    assert found["failures"] == []
-
-
-def test_a_compile_built_escalate_carries_required() -> None:
+def test_the_root_cause_follows_required_across_two_hops() -> None:
     record = turn(requiring)
     found = escalation(record)
     assert found == {
-        "cause": {"code": "required", "refs": ["d:gone"]},
-        "failures": [],
-        "reason": None,
+        "kind": "Unavailable",
+        "cause": {"code": "required", "refs": ["d:mid"]},
+        "root_cause": {"code": "raised", "refs": ["gone"]},  # d:act -> d:mid -> d:gone
         "record_hash": record.record_hash,
     }
 
 
+def test_a_cause_not_required_is_its_own_root() -> None:
+    def raising(r: Any) -> str:
+        raise RuntimeError("the policy failed")
+
+    record = turn(raising)
+    cause = {"code": "raised", "refs": ["act"]}
+    assert escalation(record) == {
+        "kind": "Unavailable",
+        "cause": cause,
+        "root_cause": cause,
+        "record_hash": record.record_hash,
+    }
+
+
+def test_a_broken_entry_escalates_with_its_entry_cause() -> None:
+    record = decide_sync(loaded_with(send), {}, {}).record  # the state does not conform
+    found = escalation(record)
+    assert found is not None
+    assert found["kind"] == "Unavailable"
+    assert found["cause"] == found["root_cause"]
+    assert found["cause"]["code"] == "invalid-return"
+
+
+def test_the_root_cause_stops_at_a_ref_with_no_marker_entry_and_at_a_loop() -> None:
+    log = fresh(NORMAL_8)
+    required = {"kind": "Unsure", "cause": {"code": "required", "refs": ["d:tags.a"]}}
+    log[9] = entry("d:route", 2, None, marker=required)  # d:tags holds a value
+    assert escalation(read(log))["root_cause"] == required["cause"]  # type: ignore[index]
+    looped = {"kind": "Unsure", "cause": {"code": "required", "refs": ["d:route"]}}
+    log[9] = entry("d:route", 2, None, marker=looped)
+    assert escalation(read(log))["root_cause"] == looped["cause"]  # type: ignore[index]
+    log[9] = entry("d:route", 2, None, marker=required)
+    log[10] = entry("d:tags", 2, None, marker=looped)  # d:route -> d:tags -> d:route
+    assert escalation(read(log))["root_cause"] == required["cause"]  # type: ignore[index]
+
+
+def whole(r: Any) -> Any:
+    raise RuntimeError("no record")
+
+
+def requiring_a_field(r: Any) -> str:
+    r.require("d:whole.f")
+    return "send"
+
+
+def test_the_root_cause_hops_from_a_field_path_to_the_marker_at_its_entry() -> None:
+    rules = {
+        "whole": Rule("d:whole", t.record(f=t.boolean), whole, version="1"),
+        "act": Rule(
+            "d:act", t.label("send", "hold"), requiring_a_field, version="1", reads=["d:whole.f"]
+        ),
+    }
+    record = turn(requiring_a_field, rules=rules)
+    found = escalation(record)
+    assert found is not None
+    assert found["cause"] == {"code": "required", "refs": ["d:whole.f"]}
+    assert found["root_cause"] == {"code": "raised", "refs": ["whole"]}
+
+
+AWKWARD = 'A"b'
+"""A candidate whose grounded ref escapes a character, as RFC 8785 serializes it."""
+
+
+def names(r: Any) -> Any:
+    return r.read("t:state.names")
+
+
+def fit_or_raise(r: Any) -> bool:
+    if r.read("candidate") == AWKWARD:
+        raise RuntimeError("no fit")
+    return True
+
+
+def returning_a_grounded_cause(r: Any) -> Any:
+    r.read("d:fit")
+    return Unsure(Cause(CauseCode.required, [grounded_ref("d:fit", AWKWARD)]))
+
+
+def test_the_root_cause_hops_from_a_grounded_ref_to_the_entry_the_ledger_wrote() -> None:
+    loaded = load(
+        minimal(
+            state=t.record(names=t.list_(t.string)),
+            rules={
+                "people": Rule(
+                    "d:people",
+                    t.list_(t.string),
+                    names,
+                    version="1",
+                    reads=["t:state.names"],
+                    candidates=True,
+                ),
+                "fit": Rule(
+                    "d:fit",
+                    t.boolean,
+                    fit_or_raise,
+                    version="1",
+                    reads=["candidate"],
+                    grounded="d:people",
+                ),
+                "act": Rule(
+                    "d:act",
+                    t.label("send", "hold"),
+                    returning_a_grounded_cause,
+                    version="1",
+                    reads=["d:fit"],
+                ),
+            },
+            policy="d:act",
+        )
+    )
+    record = decide_sync(loaded, {"names": ["ok", AWKWARD]}, {}).record
+    written = grounded_ref("d:fit", AWKWARD)
+    assert written in {i["ref"] for i in record.log if i["item"] == "entry"}
+    found = escalation(record)
+    assert found is not None
+    assert found["cause"] == {"code": "required", "refs": [written]}
+    assert found["root_cause"] == {"code": "raised", "refs": ["fit"]}
+
+
 def test_the_escalation_is_plain_data_of_exactly_four_members() -> None:
-    found = escalation(turn(archive_required))
+    found = escalation(turn(requiring))
     assert found is not None
     assert type(found) is dict
-    assert list(found) == ["cause", "failures", "reason", "record_hash"]
-    cause, failures = found["cause"], found["failures"]
-    code: object = cause["code"]
-    refs: object = cause["refs"]
-    failure: object = failures[0]
-    assert type(cast(object, cause)) is dict
-    assert type(code) is str
-    assert type(refs) is list
-    assert type(cast(object, failures)) is list
-    assert type(failure) is dict
+    assert list(found) == ["kind", "cause", "root_cause", "record_hash"]
+    cause: object = found["cause"]
+    assert type(cause) is dict
+    assert type(found["cause"]["refs"]) is list
 
 
-def test_a_record_with_no_verdict_holds_no_escalation() -> None:
-    for n in range(1, len(NORMAL) - 1):
-        assert escalation(read(fresh(NORMAL[:n]))) is None
+@pytest.mark.parametrize("name", ["normal", "broken", "cancelled", "extraction", "described"])
+def test_a_record_before_format_8_holds_no_escalation(name: str) -> None:
+    assert escalation(read(fresh(LOGS[name]))) is None
 
 
-def test_the_escalation_reads_only_the_plan_and_verdict_items_and_the_hash() -> None:
-    refused = {
-        "item": "verdict",
-        "kind": "refused",
-        "failures": [
-            {"step": "plan", "requirement": {"ref": "d:route", "value": "keep"}, "ref": "d:route"},
-            {"step": 1, "requirement": None, "ref": None},
-        ],
-    }
-    record = read([*fresh(NORMAL[:-1]), refused])
+def test_a_record_with_no_entry_at_the_policys_ref_holds_no_escalation() -> None:
+    assert escalation(read(fresh(CANCELLED_8))) is None
+    for n in range(1, 10):  # every prefix before the policy's entry
+        assert escalation(read(fresh(NORMAL_8[:n]))) is None
+
+
+def test_the_escalation_reads_the_markers_and_the_hash() -> None:
+    record = read(fresh(BROKEN_8))
     assert escalation(record) == {
-        "cause": {"code": "refused", "refs": ["d:route", "step:1"]},
-        "failures": refused["failures"],
-        "reason": None,
+        "kind": "Unavailable",
+        "cause": ENTRY_CAUSE["cause"],
+        "root_cause": ENTRY_CAUSE["cause"],
         "record_hash": record.record_hash,
     }
 
@@ -241,20 +308,81 @@ class SubRecord(Record):
 
 # Built in the test, since pytest reads a parameter at collection.
 NOT_RECORDS: list[Callable[[], Any]] = [lambda: NORMAL, lambda: None, Untouchable]
+VIEWS = [escalation, transcript]
 
 
 @pytest.mark.parametrize("record", NOT_RECORDS, ids=["a log", "None", "untouchable"])
-def test_the_escalation_refuses_what_is_not_a_record_before_reading_it(
-    record: Callable[[], Any],
+@pytest.mark.parametrize("of", VIEWS, ids=["escalation", "transcript"])
+def test_each_view_refuses_what_is_not_a_record_before_reading_it(
+    record: Callable[[], Any], of: Callable[[Record], Any]
 ) -> None:
     with pytest.raises(ValueError, match="takes a Record"):
-        escalation(record())
+        of(record())
 
 
-def test_the_escalation_refuses_a_record_subclass_by_its_exact_type() -> None:
+@pytest.mark.parametrize("of", VIEWS, ids=["escalation", "transcript"])
+def test_each_view_refuses_a_record_subclass_by_its_exact_type(
+    of: Callable[[Record], Any],
+) -> None:
     sub = object.__new__(SubRecord)  # never initialised: refused before anything is read
     with pytest.raises(ValueError, match="takes a Record"):
-        escalation(sub)
+        of(sub)
+
+
+# ---------------------------------------------------------------------------------------------
+# The transcript
+
+
+def test_the_transcript_ends_at_decides_call_the_board_and_its_result_the_decision() -> None:
+    record = read(fresh(NORMAL_8))
+    stem = "om_" + record.record_hash.removeprefix("sha256:")[:24]
+    found = transcript(record)
+    assert found is not None
+    assert found["record_hash"] == record.record_hash
+    assert found["design"] == {"hash": NORMAL_8[0]["hash"]}
+    assert [[c["source"] for c in r] for r in found["rounds"]] == [["fetch_mail"], ["ask_spam"]]
+    assert found["rounds"][1][0]["answers"] == {"q:spam": {"value": NORMAL_8[8]["value"]}}
+    assert found["decide"] == {
+        "id": f"{stem}_d",
+        "board": {"d:tags": {"value": [{"a": "x"}, None]}},  # the policy's own entry left out
+        "decision": {"value": "archive"},
+    }
+
+
+def test_the_transcript_of_a_decided_turn_holds_its_board_and_decision() -> None:
+    record = turn(requiring, name="mail")
+    found = transcript(record)
+    assert found is not None
+    assert found["design"] == {"hash": record.design_hash}
+    assert found["rounds"] == []
+    decided = found["decide"]
+    assert set(decided["board"]) == {"d:flag", "d:gone", "d:mid"}
+    assert decided["decision"] == {
+        "marker": {"kind": "Unavailable", "cause": {"code": "required", "refs": ["d:mid"]}}
+    }
+    assert set(decided) == {"id", "board", "decision"}
+
+
+def test_no_policys_entry_or_a_record_before_format_8_gives_no_transcript() -> None:
+    assert transcript(read(fresh(NORMAL))) is None
+    assert transcript(read(fresh(CANCELLED_8))) is None
+    assert transcript(read(fresh(NORMAL_8[:9]))) is None
+
+
+def test_a_broken_entrys_transcript_holds_no_rounds_and_the_entry_cause() -> None:
+    found = transcript(read(fresh(BROKEN_8)))
+    assert found is not None
+    assert found["rounds"] == []
+    assert found["decide"]["board"] == {}
+    assert found["decide"]["decision"] == {"marker": ENTRY_CAUSE}
+
+
+def test_a_record_cancelled_after_the_policy_fired_still_shows_its_decision() -> None:
+    record = read(fresh([*NORMAL_8, CANCEL]))
+    assert escalation(record) is None
+    found = transcript(record)
+    assert found is not None
+    assert found["decide"]["decision"] == {"value": "archive"}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -599,12 +727,11 @@ def test_a_cause_item_passes_through_and_a_design_only_record_has_nothing_digest
     assert view(read(fresh([DESIGN])))["log"] == [DESIGN]
 
 
-def test_a_redacted_turn_decide_wrote_digests_its_state_and_text() -> None:
-    loaded = loaded_with(escalate)
+def test_a_redacted_turn_decide_wrote_digests_its_state() -> None:
+    loaded = loaded_with(send, name="mail")
     record = decide_sync(loaded, {"subject": "secret"}, {}, RunSettings()).record
     out = view(record)
     assert out["log"][2]["value"] == {"subject": digest("secret", record)}
-    assert out["log"][-2]["reason"] == digest("a person should look", record)
     assert out["unhashed"]["engine"] == record.unhashed["engine"]
 
 
@@ -621,7 +748,7 @@ def test_a_declared_class_tree_is_the_one_the_ledger_fits_and_redact_reads() -> 
     # The settings item carries load's tree in full, the declared tree over the default, so the
     # ledger fits each value to it and redact digests by it.
     classes = {"t:state": {"subject": "open"}, "d:flag": "identifier"}
-    loaded = loaded_with(escalate, classes=classes)
+    loaded = loaded_with(send, classes=classes)
     record = decide_sync(loaded, {"subject": "secret"}, {}, RunSettings()).record
     assert record.log[1]["classes"]["t:state"] == {"subject": "open"}
     assert record.log[1]["classes"]["d:flag"] == "identifier"
@@ -629,3 +756,18 @@ def test_a_declared_class_tree_is_the_one_the_ledger_fits_and_redact_reads() -> 
     assert out["log"][2]["value"] == {"subject": "secret"}
     (index,) = [i for i, item in enumerate(record.log) if item.get("ref") == "d:flag"]
     assert out["log"][index]["value"] == digest(False, record)
+
+
+def test_a_decided_policy_entry_is_digested_by_its_class_and_a_marker_passes() -> None:
+    loaded = loaded_with(send, classes={"d:act": "identifier"})
+    record = decide_sync(loaded, {"subject": "hi"}, {}, RunSettings()).record
+    (index,) = [i for i, item in enumerate(record.log) if item.get("ref") == "d:act"]
+    assert view(record)["log"][index]["value"] == digest("send", record)
+
+    undecided = decide_sync(
+        loaded_with(requiring, classes={"d:act": "identifier"}), {"subject": "hi"}, {}
+    ).record
+    (index,) = [i for i, item in enumerate(undecided.log) if item.get("ref") == "d:act"]
+    policy_entry = undecided.log[index]
+    assert policy_entry["marker"]["kind"] == "Unavailable"
+    assert view(undecided)["log"][index] == policy_entry

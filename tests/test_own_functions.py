@@ -16,8 +16,6 @@ from ommat import (
     InvalidDesign,
     LoadedDesign,
     Parameter,
-    Plan,
-    Policy,
     Rule,
     Source,
     When,
@@ -37,15 +35,15 @@ from ommat.evaluation import (
 
 def closures(prefix: str = "") -> LoadedDesign:
     """A design whose rules, source ``when`` and policy are a lambda and closures, which load
-    of its document alone cannot import; ``prefix`` opens the policy's reply, a value its
+    of its document alone cannot import; ``prefix`` opens the policy's estimate, a value its
     closure holds and the document does not."""
     shown = {True: "big", False: "small"}
 
     def say(r: Any) -> str:
         return shown[bool(r.read("d:big"))]
 
-    def policy(r: Any) -> Plan:
-        return Plan("inform", reply=prefix + str(r.read("d:say")))
+    def reply(r: Any) -> str:
+        return prefix + str(r.read("d:say"))
 
     return load(
         Design(
@@ -68,9 +66,10 @@ def closures(prefix: str = "") -> LoadedDesign:
                     boundaries={"t:state.n": ["lim/k"]},
                 ),
                 "say": Rule("d:say", t.label("big", "small"), say, version="1", reads=["d:big"]),
+                "reply": Rule("d:reply", t.string, reply, version="1", reads=["d:say"]),
             },
             parameters={"lim/k": Parameter(t.integer(0, 10), 3)},
-            policy=Policy(policy, version="1", reads=["d:say"]),
+            policy="d:reply",
         )
     )
 
@@ -92,7 +91,7 @@ def test_the_document_alone_does_not_load() -> None:
 
 def test_intervene_takes_loadeds_own_functions() -> None:
     out = intervene_sync(RECORD, LOADED, [{"rule": "d:big", "output": False}])
-    assert any(f["kind"] == "plan" for f in out["findings"])
+    assert any(f.get("ref") == "d:reply" for f in out["findings"])
 
 
 def test_deciding_inputs_takes_loadeds_own_functions() -> None:
@@ -101,8 +100,8 @@ def test_deciding_inputs_takes_loadeds_own_functions() -> None:
 
 def test_switching_values_takes_loadeds_own_functions(tmp_path: Path) -> None:
     entry = switching_values_sync(RECORD, LOADED, "lim/k", results=EvaluationStore(tmp_path))
-    plan = entry["value"]["plan"]
-    assert [c["least"] for c in plan["classes"]] == [0, 5]  # n > k switches at k = 5
+    reply = entry["value"]["entries"]["d:reply"]
+    assert [c["least"] for c in reply["classes"]] == [0, 5]  # n > k switches at k = 5
 
 
 def test_explicit_functions_override_loadeds_own() -> None:
@@ -111,15 +110,15 @@ def test_explicit_functions_override_loadeds_own() -> None:
     out = intervene_sync(
         RECORD, LOADED, [{"rule": "d:big", "output": False}], functions=other._callables
     )
-    (plan,) = [f for f in out["findings"] if f["kind"] == "plan"]
-    assert plan["replayed"]["reply"] == "other: small"
+    (reply,) = [f for f in out["findings"] if f.get("ref") == "d:reply"]
+    assert reply["replayed"]["value"] == "other: small"
 
 
 def test_a_rule_made_constant_loads_with_the_rerun_designs_own_functions() -> None:
     rerun = closures("other: ")
     out = intervene_sync(RECORD, LOADED, [{"rule": "d:big", "output": False}], rerun_design=rerun)
-    (plan,) = [f for f in out["findings"] if f["kind"] == "plan"]
-    assert plan["replayed"]["reply"] == "other: small"
+    (reply,) = [f for f in out["findings"] if f.get("ref") == "d:reply"]
+    assert reply["replayed"]["value"] == "other: small"
 
 
 def test_explicit_empty_functions_do_not_fall_back(tmp_path: Path) -> None:

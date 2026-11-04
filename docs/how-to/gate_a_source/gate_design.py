@@ -1,7 +1,7 @@
 """The how-to's design: a triage source, a projection of its intent, and a refund source
 gated on that projection by a source requirement, so the intent is never sent."""
 
-from ommat import Design, Plan, Policy, Question, ReadView, Rule, Source, SourceRequirement, Text
+from ommat import Design, Question, ReadView, Rule, Source, SourceRequirement, Text
 from ommat import types as t
 from ommat.helpers import pick_with_margin
 
@@ -28,16 +28,16 @@ def refund_asked(r: ReadView) -> object:
     return pick_with_margin(r, "q:refund/amount_stated", 0.7, 0.2)
 
 
-def route(r: ReadView) -> Plan:
+def route(r: ReadView) -> object:
     intent = r.read("d:intent_label")
     if not isinstance(intent, str):
-        return Plan("escalate", reason="the intent is not settled")
+        return intent
     if intent != "refund":
-        return Plan("inform", reply="Noted.")
+        return "note"
     # Only a refund asked the gated question, so only here is its estimate read for a value.
     if r.read("d:amount_stated") == "yes":
-        return Plan("inform", reply="A refund with its amount: queued for review.")
-    return Plan("clarify", reply="How much should we refund?")
+        return "queue_refund"
+    return "ask_amount"
 
 
 # --- the asking source, its estimate and the projection ---------------------------------
@@ -58,6 +58,13 @@ RULES = {
     ),
     "intent_label": Rule(
         "d:intent_label", t.label(*INTENTS), intent_label, version="1", reads=["d:triage.intent"]
+    ),
+    "route": Rule(
+        "d:route",
+        t.label("ask_amount", "note", "queue_refund"),
+        route,
+        version="1",
+        reads=["d:intent_label", "d:amount_stated"],
     ),
     "amount_stated": Rule(
         "d:amount_stated",
@@ -80,5 +87,5 @@ DESIGN = Design(
     state=t.record(message=t.string),
     sources={"ask": ASK, "refund": REFUND},
     rules=RULES,
-    policy=Policy(route, version="1", reads=["d:intent_label", "d:amount_stated"]),
+    policy="d:route",
 )

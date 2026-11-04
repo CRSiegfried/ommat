@@ -6,17 +6,15 @@ from typing import Any
 
 import pytest
 
-from designs import document_before_key_order
 from ledger_logs import before_profile, rehashed
 from ommat import (
     CallResult,
     Design,
     InvalidDesign,
     InvalidRecord,
-    Plan,
-    Policy,
     Question,
     Record,
+    Rule,
     Source,
     SourceCall,
     Text,
@@ -32,8 +30,11 @@ YES = {"name": "yes", "description": "The message names a sender"}
 DESCRIBED = [YES, "no"]
 
 
-def inform(r: Any) -> Plan:
-    return Plan("inform", reply="ok")
+def inform(r: Any) -> str:
+    return "ok"
+
+
+ACT = Rule("d:act", t.string, inform, version="1")
 
 
 def design(labels: Any = None, wording: Any = None) -> Design:
@@ -42,7 +43,8 @@ def design(labels: Any = None, wording: Any = None) -> Design:
         name="wording",
         state=t.record(),
         sources={"ask": Source({"q:named": q})},
-        policy=Policy(inform, version="1"),
+        rules={"act": ACT},
+        policy="d:act",
     )
 
 
@@ -116,13 +118,7 @@ def test_a_described_noul_replays_and_from_record_answers_it() -> None:
     assert entry["marker"]["cause"]["code"] == "unsupported"
 
 
-def test_a_described_noul_before_format_4_is_refused_in_a_document_and_a_record() -> None:
-    loaded = load(design(DESCRIBED))
-    doc = document_before_key_order(json.loads(loaded.document), 3)
-    del doc["context"]  # a design before format 5 holds no block
-    with pytest.raises(InvalidDesign) as raised:
-        load(json.dumps(doc).encode())
-    assert "is a noul question with labels, which format 3 does not have" in str(raised.value)
+def test_a_described_noul_before_format_4_is_refused_in_a_record() -> None:
     record, _ = run(design(DESCRIBED))
     stored = json.loads(record.document)
     before_profile(stored, 3)
@@ -142,7 +138,8 @@ def slotted(template: Any, *slots: dict[str, Any]) -> Design:
         name="structured",
         state=t.record(body=t.string),
         sources={"ask": Source({"q:named": q})},
-        policy=Policy(inform, version="1"),
+        rules={"act": ACT},
+        policy="d:act",
     )
 
 
@@ -208,15 +205,6 @@ def test_a_structured_wording_has_its_own_identity_and_a_text_keeps_its_own() ->
     assert identity(text) == identity(design(DESCRIBED))
 
 
-def test_a_structured_wording_before_format_4_is_refused() -> None:
-    loaded = load(slotted({"task": "Does it name a sender?"}))
-    doc = document_before_key_order(json.loads(loaded.document), 3)
-    del doc["context"]  # a design before format 5 holds no block
-    with pytest.raises(InvalidDesign) as raised:
-        load(json.dumps(doc).encode())
-    assert "has a structured wording, which format 3 does not have" in str(raised.value)
-
-
 def test_a_documents_string_template_reads_as_text_and_an_object_as_structured() -> None:
     from ommat._load import _text_of
 
@@ -226,7 +214,7 @@ def test_a_documents_string_template_reads_as_text_and_an_object_as_structured()
 
 def test_a_structured_wording_loads_from_its_document_to_its_hash() -> None:
     loaded = load(slotted({"task": "Does {body} name a sender?"}, BODY))
-    again = load(loaded.document, functions={"policy": inform})
+    again = load(loaded.document, functions={"act": inform})
     assert again.design_hash == loaded.design_hash
 
 

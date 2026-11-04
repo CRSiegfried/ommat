@@ -29,9 +29,7 @@ from ommat import (
     InvalidDesign,
     LoadedDesign,
     Parameter,
-    Policy,
     Question,
-    Requirement,
     Rule,
     Source,
     SourceRequirement,
@@ -76,36 +74,38 @@ def src_hash(fn: Callable[..., Any]) -> str:
 def test_a_minimal_design_writes_every_member_with_its_default() -> None:
     loaded = load(minimal())
     assert decode(loaded.document) == {
-        "format": 9,
+        "format": 10,
         "name": None,
         "state": "record{}",
+        "policy": "d:decision",
         "sources": {},
-        "rules": {},
-        "policy": {
-            "form": "function",
-            "reads": [],
-            "params": [],
-            "boundaries": None,
-            "module": "designs",
-            "qualname": "policy",
-            "version": "p1",
-            "source": src_hash(designs.policy),
+        "rules": {
+            "decision": {
+                "form": "function",
+                "provides": "d:decision",
+                "outputs": "boolean",
+                "reads": [],
+                "params": [],
+                "boundaries": None,
+                "candidates": False,
+                "grounded": None,
+                "target": None,
+                "module": "designs",
+                "qualname": "decision",
+                "version": "p1",
+                "source": src_hash(designs.decision),
+            }
         },
-        "requirements": [],
-        "default_deny": True,
-        "tools": {},
         "parameters": {},
         "types": {},
-        "plans": {},
         "groups": {},
         "classes": {},
-        "context": None,
         "targets": {},
     }
     assert loaded.design_hash == sha256_ref(loaded.document)
-    assert dict(loaded._graph) == {}
-    assert dict(loaded._providers) == {}
-    assert loaded._classes == {"t:state": {}}
+    assert dict(loaded._graph) == {"decision": frozenset()}
+    assert dict(loaded._providers) == {"d:decision": "decision"}
+    assert loaded._classes == {"t:state": {}, "d:decision": "open"}
 
 
 def test_the_document_is_canonical() -> None:
@@ -169,7 +169,7 @@ def test_a_source_and_its_questions() -> None:
     }
 
 
-def test_function_rules_and_the_policy() -> None:
+def test_function_rules_and_the_policy_member() -> None:
     doc = decode(load(full()).document)
     assert doc["rules"]["route"] == {
         "form": "function",
@@ -186,11 +186,17 @@ def test_function_rules_and_the_policy() -> None:
         "version": "r2",
         "source": src_hash(designs.route),
     }
-    assert doc["policy"] == {
+    assert doc["policy"] == "d:act"
+    assert doc["rules"]["act"] == {
         "form": "function",
+        "provides": "d:act",
+        "outputs": 'label{"archive", "hold", "send"}',
         "reads": ["d:route", "t:state.subject"],
         "params": ["list/cap"],
         "boundaries": None,
+        "candidates": False,
+        "grounded": None,
+        "target": None,
         "module": "designs",
         "qualname": "policy",
         "version": "p3",
@@ -220,11 +226,8 @@ def test_a_function_whose_wrapper_chain_loops_has_a_null_source() -> None:
     assert decode(load(design).document)["rules"]["size"]["source"] is None
 
 
-def test_requirements_default_deny_tools_parameters_types_and_groups() -> None:
+def test_parameters_types_and_groups() -> None:
     doc = decode(load(full()).document)
-    assert doc["requirements"] == [{"ref": "d:route", "value": "yes"}]
-    assert doc["default_deny"] is False
-    assert doc["tools"] == {"archive": {}, "send": {}}
     assert doc["parameters"] == {
         "intent/bar": {"type": "number [0, 1]", "value": 0.9, "order": {}},
         "list/cap": {"type": "list<string>", "value": ["a", "b"], "order": {}},
@@ -240,14 +243,6 @@ def test_requirements_default_deny_tools_parameters_types_and_groups() -> None:
     assert doc["name"] == "mail"
 
 
-def test_requirements_keep_declaration_order() -> None:
-    design = full(requirements=[Requirement("d:score", 0.5), Requirement("d:route", "no")])
-    assert decode(load(design).document)["requirements"] == [
-        {"ref": "d:score", "value": 0.5},
-        {"ref": "d:route", "value": "no"},
-    ]
-
-
 def test_unordered_lists_sort_by_canonical_bytes() -> None:
     design = with_rule(
         full(), "x", rule("x", reads=("t:state", "d:score", "q:intent/tone", "d:route"))
@@ -259,19 +254,15 @@ def test_unordered_lists_sort_by_canonical_bytes() -> None:
 def test_the_graph_maps_every_node_to_its_providers_in_code_point_order() -> None:
     loaded = load(full())
     assert isinstance(loaded._graph, MappingProxyType)
-    assert list(loaded._graph) == ["intent", "lookup", "route", "score"]
+    assert list(loaded._graph) == ["act", "intent", "lookup", "route", "score"]
     assert dict(loaded._graph) == {
+        "act": frozenset({"route"}),  # d:route; t:state.subject gives no edge
         "intent": frozenset({"lookup"}),  # the slot t:lookup; t:state gives no edge
         "lookup": frozenset(),
         "route": frozenset({"intent", "lookup", "score"}),
         "score": frozenset({"intent"}),
     }
     assert all(type(v) is frozenset for v in loaded._graph.values())
-
-
-def test_the_policy_and_requirements_add_no_edge() -> None:
-    bare = full(policy=Policy(designs.policy, version="p3"), requirements=[])
-    assert dict(load(full())._graph) == dict(load(bare)._graph)
 
 
 def test_every_predecessor_is_a_key() -> None:
@@ -282,6 +273,7 @@ def test_every_predecessor_is_a_key() -> None:
 def test_the_provider_map_has_no_state_key() -> None:
     loaded = load(full())
     assert dict(loaded._providers) == {
+        "d:act": "act",
         "d:route": "route",
         "d:score": "score",
         "q:intent/email": "intent",
@@ -299,6 +291,7 @@ def test_class_trees_are_computed_in_full_for_the_state_and_every_provided_ref()
         "q:intent/tone": "open",
         "t:lookup": "content",
         "t:profile": {"age": "open", "name": "content"},
+        "d:act": "open",
         "d:route": "open",
         "d:score": "open",
     }
@@ -336,7 +329,7 @@ def test_the_loaded_design_holds_callables_types_leaves_and_groups() -> None:
     assert dict(loaded._callables) == {
         "route": designs.route,
         "score": designs.score,
-        "policy": designs.policy,
+        "act": designs.policy,
     }
     assert loaded._leaf_types["mood"] == Label(("calm", "wild"))
     assert loaded._leaf_types["list/cap"] == ListOf(Scalar("string"))
@@ -355,6 +348,7 @@ def test_a_leaf_type_naming_a_definition_is_held_resolved() -> None:
 def test_each_t_and_d_refs_declared_type_is_held_parsed() -> None:
     loaded = load(full())
     assert dict(loaded._types) == {
+        "d:act": Label(("archive", "hold", "send")),
         "d:route": Label(("no", "yes")),  # the definition `verdict`, resolved
         "d:score": Interval("number", 0, 1),
         "t:lookup": Scalar("string"),
@@ -513,31 +507,22 @@ def test_load_takes_a_design_or_a_document() -> None:
     "design",
     [
         with_source(minimal(), "Bad", Source({"t:x": t.string})),
-        with_rule(minimal(), "policy", rule("policy")),
         with_rule(minimal(), "codec", rule("codec")),
         minimal(types={"number": t.string}),
         minimal(types={"Upper": t.string}),
         minimal(groups={"bad group": Group([], ["convergent"])}),
-        minimal(tools=["send", "send"]),
-        minimal(tools=["Send"]),
         minimal(parameters={"a": Parameter(t.number(), 1), "a/b": Parameter(t.number(), 2)}),
         minimal(parameters={"a/": Parameter(t.number(), 1)}),
         with_source(minimal(), "s", Source({"t:x": t.string}, oracle="default")),
         with_rule(
             with_source(minimal(), "x", Source({"t:y": t.string})), "x", rule("x")
         ),  # a source and a rule share an id
-        minimal(tools=["x"], parameters={"x": Parameter(t.number(), 1)}),
         with_source(minimal(), "s", Source({"t:x": t.string}, needs=["t:state", "t:state"])),
         with_rule(minimal(), "r", rule("r", reads=("t:state", "t:state"))),
         with_rule(
             minimal(parameters={"p": Parameter(t.number(), 1)}),
             "r",
             rule("r", params=("p", "p")),
-        ),
-        minimal(policy=Policy(designs.policy, version="1", reads=["t:state", "t:state"])),
-        minimal(
-            policy=Policy(designs.policy, version="1", params=["p", "p"]),
-            parameters={"p": Parameter(t.number(), 1)},
         ),
     ],
 )
@@ -579,8 +564,6 @@ def nowhere(design: Design, *, check: int = 3) -> None:
     [
         with_source(minimal(), "s", Source({"t:x": t.string}, needs=["d:none"])),
         with_rule(minimal(), "r", rule("r", reads=("q:none",))),
-        minimal(policy=Policy(designs.policy, version="1", reads=["d:none"])),
-        minimal(requirements=[Requirement("d:none", True)]),
         minimal(groups={"g": Group(["q:none"], ["convergent"])}),
         full(groups={"g": Group(["q:intent/tone", "q:intent/tone"], ["convergent"])}),
         with_source(minimal(), "s", Source({"q:x": question("Is {a}?", slot("a", ref="t:none"))})),
@@ -612,8 +595,6 @@ def test_a_candidate_slot_on_an_ungrounded_source_fails_check_4() -> None:
     [
         with_source(minimal(), "s", Source({"d:x": t.string})),
         with_rule(minimal(), "r", rule("r", provides="d:other")),
-        full(policy=Policy(designs.policy, version="1", reads=["q:intent/tone"])),
-        full(requirements=[Requirement("t:lookup", "a")]),
         with_source(
             full(), "s", Source({"q:x": question("Is {a}?", slot("a", ref="q:intent/tone"))})
         ),
@@ -726,7 +707,7 @@ def test_the_sorter_adds_an_unkeyed_predecessor_as_a_root() -> None:
 
 def test_the_loaded_graph_drives_a_sorter() -> None:
     sorter = TopologicalSorter(load(full())._graph)
-    assert list(sorter.static_order()) == ["lookup", "intent", "score", "route"]
+    assert list(sorter.static_order()) == ["lookup", "intent", "score", "route", "act"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -744,8 +725,7 @@ def test_the_loaded_graph_drives_a_sorter() -> None:
         with_source(minimal(), "s", Source({"q:X": question()})),
         with_rule(minimal(), "r", rule("r", reads=("t:state.",))),
         with_rule(minimal(), "r", rule("r", provides="d:r.f")),
-        minimal(policy=Policy(designs.policy, version="1", reads=["t:state["])),
-        minimal(requirements=[Requirement("rule:1", True)]),
+        with_rule(minimal(), "r", rule("r", reads=("t:state[",))),
         minimal(groups={"g": Group(["q:"], ["convergent"])}),
         with_source(minimal(), "s", Source({"q:x": question("Is {a}?", slot("a", ref="nope"))})),
     ],
@@ -775,7 +755,7 @@ def test_a_candidate_slots_clause_stands_when_its_ref_fails_check_7() -> None:
 
 
 def test_a_ref_check_7_refuses_is_left_out_of_checks_3_and_4() -> None:
-    design = minimal(policy=Policy(designs.policy, version="1", reads=["q:bad["]))
+    design = with_rule(minimal(), "r", rule("r", reads=("q:bad[",)))
     assert checks(design) == {7}
 
 
@@ -787,7 +767,6 @@ def test_a_ref_check_7_refuses_is_left_out_of_checks_3_and_4() -> None:
     "design",
     [
         with_rule(minimal(), "r", rule("r", params=("none",))),
-        minimal(policy=Policy(designs.policy, version="1", params=["none"])),
         with_source(minimal(), "s", Source({"q:x": question("Is {a}?", slot("a", param="none"))})),
         minimal(parameters={"p": Parameter(t.number(0, 1), 70)}),
         minimal(parameters={"p": Parameter(t.mapping(t.number(0, 1)), {"yes": 0.9, "no": 70})}),
@@ -817,7 +796,6 @@ def templated(template: str, *slots: dict[str, Any]) -> Design:
         with_rule(full(), "r", rule("r", reads=("t:profile.none",))),
         with_rule(full(), "r", rule("r", reads=("t:profile.age.more",))),
         with_rule(full(), "r", rule("r", reads=("q:intent/tone.f",))),
-        full(policy=Policy(designs.policy, version="1", reads=["t:state.none"])),
         templated("Is { name }?"),
         templated("Is {}?"),
         templated("Is } it?"),
@@ -827,78 +805,10 @@ def templated(template: str, *slots: dict[str, Any]) -> Design:
         templated("Is {a}?"),
         templated("Is it?", slot("a", ref="t:lookup")),
         templated("  {a}  ", slot("a", ref="t:lookup")),
-        full(requirements=[Requirement("d:route", "maybe")]),
     ],
 )
 def test_check_9(design: Design) -> None:
     only(design, 9)
-
-
-def required(outputs: str, value: object) -> Design:
-    """``full`` with a rule ``d:x`` of type ``outputs`` and a plan-level requirement on it."""
-    design = with_rule(full(), "x", rule("x", outputs=outputs))
-    return dataclasses.replace(design, requirements=[Requirement("d:x", value)])
-
-
-@pytest.mark.parametrize(
-    "design",
-    [
-        required(t.bytes_, "AAE"),
-        required(t.nullable(t.bytes_), None),
-        required(t.record(a=t.string, b=t.list_(t.bytes_)), {"a": "x", "b": []}),
-        required(t.record(a=t.string), {"a": "x", "extra": 1}),
-        required(t.list_(t.record(a=t.string)), [{"a": "x"}, {"a": "y", "z": None}]),
-        required(t.mapping(t.record(a=t.string)), {"k": {"a": "x", "z": 1}}),
-        required(t.record(a=t.nullable(t.record(b=t.string))), {"a": {"b": "x", "c": "y"}}),
-    ],
-)
-def test_check_9_refuses_a_requirement_that_can_never_hold(design: Design) -> None:
-    # A bytes entry has no encoding to compare, and an undeclared field is dropped at the
-    # write, so neither requirement could hold.
-    only(design, 9)
-
-
-@pytest.mark.parametrize(
-    ("design", "reason"),
-    [
-        (required(t.bytes_, "AAE"), "its ref's type holds bytes"),
-        (required(t.record(a=t.string), {"a": 1}), "its value does not conform to its ref's type"),
-        (
-            required(t.record(a=t.string), {"a": "x", "b": 1}),
-            "its value holds a field its ref's type does not declare",
-        ),
-    ],
-)
-def test_check_9s_message_names_why_a_requirement_cannot_hold(design: Design, reason: str) -> None:
-    (failure,) = only(design, 9)
-    assert failure.message == f'a plan-level requirement on "d:x" can never hold: {reason}'
-
-
-@pytest.mark.parametrize(
-    "design",
-    [
-        required(t.record(a=t.string), {"a": "x"}),
-        required(t.list_(t.record(a=t.nullable(t.string))), [{"a": None}, {"a": "y"}]),
-        required(t.mapping(t.integer()), {"k": 1}),
-        required(t.nullable(t.record(a=t.string)), None),
-    ],
-)
-def test_a_requirement_that_can_hold_loads(design: Design) -> None:
-    load(design)
-
-
-@pytest.mark.parametrize(
-    "design",
-    [
-        full(requirements=[Requirement("d:route.f", "yes")]),
-        minimal(requirements=[Requirement("d:none.f", 1)]),
-        minimal(requirements=[Requirement("t:state.f", 1)]),
-    ],
-)
-def test_a_requirement_on_a_field_path_fails_check_7_alone(design: Design) -> None:
-    # A requirement names a whole estimate; check 7 refuses the ref, so no
-    # other check reads it.
-    only(design, 7)
 
 
 def test_escapes_and_placeholders_that_are_well_formed() -> None:
@@ -933,7 +843,6 @@ def test_check_9_does_not_run_while_an_earlier_check_fails() -> None:
         with_rule(minimal(), "r", rule("r", outputs="list<string or null>")),
         with_rule(minimal(), "r", rule("r", version=None)),
         with_rule(minimal(), "r", rule("r", version=3)),
-        minimal(policy=Policy(designs.policy)),
         minimal(parameters={"p": Parameter(t.nullable(t.number()), 1)}),
         minimal(parameters={"p": Parameter(t.record(a=t.number()), {"a": 1})}),
         minimal(parameters={"p": Parameter(t.list_(t.list_(t.number())), [[1]])}),
@@ -964,17 +873,10 @@ NAN = float("nan")
 FORMS: list[Design] = [
     # The design's own members, a None block among them
     minimal(sources=None),
-    minimal(rules=None),
     minimal(parameters=None),
     minimal(types=None),
-    minimal(plans=None),
     minimal(groups=None),
     minimal(classes=None),
-    minimal(requirements=None),
-    minimal(requirements=[1]),
-    minimal(tools="send"),
-    minimal(tools=[1]),
-    minimal(default_deny=1),
     minimal(name=1),
     minimal(policy=1),
     minimal(sources={"s": 1}),
@@ -983,8 +885,6 @@ FORMS: list[Design] = [
     minimal(parameters={"p": 1}),
     minimal(groups={"g": 1}),
     minimal(groups={"g": Group("q:x", ["convergent"])}),
-    minimal(plans={"p": 1}),
-    full(requirements=[Requirement("d:score", {0.5})]),
     minimal(name=b"x"),
     # A source
     src(provides=None),
@@ -1032,7 +932,7 @@ FORMS: list[Design] = [
     asks("noul", Text("Is {a}?", [{"name": "a", "origin": {"other": "t:x"}}])),
     asks("noul", Text("Is {a}?", [{"name": "a", "origin": {"ref": 1}}])),
     asks("noul", Text("Is {a}?", [{"name": 1, "origin": {"ref": "t:x"}}])),
-    # A rule and the policy
+    # A rule
     with_rule(minimal(), "r", rule("r", function=1)),
     with_rule(minimal(), "r", rule("r", provides=1)),
     with_rule(minimal(), "r", rule("r", reads="t:state")),  # type: ignore[arg-type]
@@ -1040,14 +940,17 @@ FORMS: list[Design] = [
     with_rule(minimal(), "r", rule("r", params=[1])),
     with_rule(minimal(), "r", rule("r", candidates=1)),
     with_rule(minimal(), "r", rule("r", grounded=1)),
-    minimal(policy=Policy(1, version="1")),  # type: ignore[arg-type]
-    minimal(policy=Policy(designs.policy, version="1", reads="d:x")),
 ]
 
 
 @pytest.mark.parametrize("design", FORMS)
 def test_check_10_tests_every_members_form(design: Design) -> None:
     only(design, 10)
+
+
+def test_a_rules_block_that_is_not_a_mapping_fails_check_10() -> None:
+    design = dataclasses.replace(minimal(), rules=None)  # type: ignore[arg-type]
+    assert 10 in checks(design)
 
 
 def test_two_keys_sharing_string_data_fail_check_10() -> None:
@@ -1073,7 +976,7 @@ def test_a_function_without_a_qualified_name_fails_check_10() -> None:
 
         def __call__(self, r: object) -> None: ...
 
-    only(minimal(policy=Policy(NoName(), version="1")), 10)
+    only(with_rule(minimal(), "r", rule("r", function=NoName())), 10)  # type: ignore[arg-type]
 
 
 SET = Source({"t:s": {"type": t.list_(t.string), "candidates": True}})
@@ -1227,14 +1130,130 @@ def test_a_refused_form_gates_check_5() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
+# The policy ref
+
+
+def test_the_policy_names_a_declared_rule_and_is_written_as_its_ref() -> None:
+    loaded = load(minimal())
+    assert loaded._design.policy == "d:decision"
+    assert decode(loaded.document)["policy"] == "d:decision"
+    other = minimal(
+        policy="d:other",
+        rules={"other": rule("other", outputs=t.string), "decision": designs.DECISION},
+    )
+    assert decode(load(other).document)["policy"] == "d:other"
+    assert load(other).design_hash != loaded.design_hash
+
+
+def test_a_policy_table_is_an_ordinary_rule() -> None:
+    act = Table("d:act", t.label("go", "stop"), "F", [], [["go"]])
+    loaded = load(minimal(policy="d:act", rules={"act": act}))
+    assert decode(loaded.document)["rules"]["act"]["form"] == "table"
+    assert loaded._providers["d:act"] == "act"
+
+
+@pytest.mark.parametrize("policy", [None, 1, ["d:decision"], b"d:decision"])
+def test_check_10_a_policy_that_is_no_string(policy: object) -> None:
+    (failure,) = only(minimal(policy=policy), 10)  # type: ignore[arg-type]
+    assert failure.names == ("policy",)
+    assert failure.message == "the policy is not a string"
+
+
+def test_check_3_a_policy_naming_no_declared_rule_has_no_provider() -> None:
+    (failure,) = only(minimal(policy="d:none"), 3)
+    assert failure.names == ("d:none",)
+    assert failure.message == 'the policy names "d:none", which has no provider'
+
+
+@pytest.mark.parametrize("policy", ["decision", "d:", "x:decision", "d:Decision"])
+def test_check_7_a_policy_that_is_not_a_ref(policy: str) -> None:
+    (failure,) = only(minimal(policy=policy), 7)
+    assert failure.names == (policy,)
+
+
+def test_check_7_a_policy_with_a_field_path() -> None:
+    (failure,) = only(minimal(policy="d:decision.f"), 7)
+    assert failure.names == ("d:decision.f",)
+    assert failure.message == 'the policy names "d:decision.f", which has a field path'
+
+
+def test_check_4_a_policy_with_a_bracket() -> None:
+    (failure,) = only(minimal(policy='d:decision["a"]'), 4)
+    assert failure.names == ('d:decision["a"]',)
+    assert "the policy names" in failure.message
+    assert "a grounded ref" in failure.message
+
+
+def test_check_4_a_policy_naming_a_grounded_declared_ref() -> None:
+    finder = Rule("d:g", t.string, designs.route, version="1", reads=["candidate"], grounded="t:s")
+    design = minimal(policy="d:g", rules={"g": finder}, sources={"set": SET})
+    (failure,) = only(design, 4)
+    assert failure.names == ("d:g",)
+    assert failure.message == 'the policy names "d:g", a grounded declared ref'
+
+
+@pytest.mark.parametrize("policy", ["t:state", "t:lookup", "q:intent/tone"])
+def test_check_4_a_policy_at_the_wrong_level(policy: str) -> None:
+    (failure,) = only(full(policy=policy), 4)
+    assert failure.names == (policy,)
+    assert failure.message == f'the policy names "{policy}", which is not a d: ref'
+
+
+def read_by(kind: str) -> Design:
+    """``minimal`` whose policy ``d:decision`` is read by a ``kind`` of its design."""
+    ref = "d:decision"
+    if kind == "rule":
+        return with_rule(minimal(), "r", rule("r", reads=(ref,)))
+    if kind == "need":
+        return with_source(minimal(), "s", Source({"t:x": t.string}, needs=[ref]))
+    if kind == "slot":
+        return with_source(minimal(), "s", Source({"q:x": question("Is {a}?", slot("a", ref=ref))}))
+    if kind == "source-requirement":
+        requirement = SourceRequirement(ref, [True])
+        return with_source(minimal(), "s", Source({"t:x": t.string}, requirement=requirement))
+    return with_rule(minimal(), "tab", Table("d:tab", t.boolean, "F", [ref], [["-", True]]))
+
+
+READER = {"need": "s", "rule": "r", "slot": "s", "source-requirement": "s", "table": "tab"}
+"""The declaration ``read_by`` adds, by kind."""
+
+
+@pytest.mark.parametrize("kind", sorted(READER))
+def test_the_policy_s_ref_may_be_read_like_any_d_ref(kind: str) -> None:
+    loaded = load(read_by(kind))
+    assert loaded._graph[READER[kind]] == frozenset({"decision"})
+
+
+def reading_itself(r: Any) -> bool:
+    return bool(r.read("d:decision"))
+
+
+def test_a_policy_reading_its_own_ref_is_a_cycle() -> None:
+    itself = Rule("d:decision", t.boolean, reading_itself, version="1", reads=["d:decision"])
+    found = refused(minimal(rules={"decision": itself}))
+    assert [f.check for f in found] == [5]
+
+
+def test_a_group_may_name_the_policy() -> None:
+    load(minimal(groups={"g": Group(["d:decision"], ["convergent"])}))
+
+
+# ---------------------------------------------------------------------------------------------
 # InvalidDesign
 
 
 def test_failures_are_ordered_by_check_then_names_then_message() -> None:
-    design = full(
-        tools=["Z", "A"],
-        policy=Policy(designs.policy, reads=["d:none"]),
-        types={"verdict": VERDICT, "number": t.string},
+    design = with_rule(
+        with_rule(
+            full(
+                groups={"Z": Group([], ["convergent"]), "A": Group([], ["convergent"])},
+                types={"verdict": VERDICT, "number": t.string},
+            ),
+            "r",
+            rule("r", reads=("d:none",)),
+        ),
+        "v",
+        rule("v", version=None),  # type: ignore[arg-type]
     )
     found = refused(design)
     assert found == sorted(found, key=lambda f: (f.check, list(f.names), f.message))
@@ -1267,7 +1286,7 @@ def test_design_failure_and_invalid_design_are_built_only_by_load() -> None:
 
 def test_failures_are_a_tuple_of_frozen_design_failures() -> None:
     with pytest.raises(InvalidDesign) as info:
-        load(minimal(tools=["Bad"]))
+        load(minimal(groups={"Bad": Group([], ["convergent"])}))
     failures = info.value.failures
     assert type(failures) is tuple
     (failure,) = failures
@@ -1278,7 +1297,7 @@ def test_failures_are_a_tuple_of_frozen_design_failures() -> None:
 
 
 def test_the_string_is_the_messages_one_per_line() -> None:
-    design = full(tools=["Z", "A"])
+    design = full(groups={"Z": Group([], ["convergent"]), "A": Group([], ["convergent"])})
     with pytest.raises(InvalidDesign) as info:
         load(design)
     assert str(info.value) == "\n".join(f.message for f in info.value.failures)
@@ -1317,7 +1336,7 @@ def _pickled(value: Any) -> Any:
 )
 def test_an_invalid_design_survives_pickle_and_copy(clone: Callable[[Any], Any]) -> None:
     with pytest.raises(InvalidDesign) as info:
-        load(full(tools=["Z", "A"]))
+        load(full(groups={"Z": Group([], ["convergent"]), "A": Group([], ["convergent"])}))
     original = info.value
     original.add_note("seen")
     again = clone(original)
@@ -1338,8 +1357,8 @@ def test_a_message_quotes_names_as_json_strings() -> None:
 
 
 def test_names_are_in_code_point_order() -> None:
-    (failure,) = only(full(policy=Policy(designs.policy, version="1", reads=["d:zz"])), 3)
-    assert failure.names == ("d:zz", "policy")
+    (failure,) = only(with_rule(full(), "r", rule("r", reads=("d:zz",))), 3)
+    assert failure.names == ("d:zz", "r")
 
 
 def test_invalid_design_is_a_value_error() -> None:
@@ -1429,7 +1448,7 @@ def test_a_cycle_through_a_question_slot() -> None:
 @pytest.mark.parametrize(
     "design",
     [
-        minimal(requirements=[Requirement("d:\ud800", True)]),
+        with_rule(minimal(), "r", rule("r", reads=("d:\ud800",))),
         with_source(
             minimal(),
             "s",
@@ -1467,7 +1486,7 @@ def test_a_refused_t_declaration_still_provides_its_ref() -> None:
 def test_a_refused_leaf_is_still_a_declared_leaf_and_name() -> None:
     design = with_rule(minimal(parameters={"p": 5}), "r", rule("r", params=("p",)))
     assert checks(design) == {10}
-    assert checks(minimal(parameters={"policy": 5})) == {1, 10}
+    assert checks(minimal(parameters={"codec": 5})) == {1, 10}
     clash = minimal(parameters={"a": 5, "a/b": Parameter(t.number(), 1)})
     assert checks(clash) == {1, 10}
 
@@ -1488,11 +1507,11 @@ def test_a_refused_question_still_provides_for_check_2() -> None:
 @pytest.mark.parametrize(
     "design",
     [
-        minimal(parameters={"policy": Parameter(t.number(), 1)}),
-        minimal(tools=["codec"]),
+        minimal(parameters={"codec": Parameter(t.number(), 1)}),
+        minimal(groups={"codec": Group([], ["convergent"])}),
     ],
 )
-def test_check_1_a_parameter_or_tool_with_a_role_name(design: Design) -> None:
+def test_check_1_a_parameter_or_group_with_a_role_name(design: Design) -> None:
     only(design, 1)
 
 
@@ -1569,7 +1588,7 @@ def test_a_whens_callable_is_keyed_by_its_source_id_a_dot_and_when() -> None:
     # The key interpret reads, spelt as load spells a field function's.
     loaded = load(gate(when=When(designs.score, version="w1")))
     assert loaded._callables["s.when"] is designs.score
-    assert set(loaded._callables) == {"policy", "route", "score", "s.when"}
+    assert set(loaded._callables) == {"act", "route", "score", "s.when"}
 
 
 def test_a_whens_version_changes_the_hash() -> None:
@@ -1821,7 +1840,6 @@ def too_deep(depth: int) -> dict[str, Any]:
         gate(when=When(1, version="1")),  # type: ignore[arg-type]
         gate(when=When(designs.route)),  # no version
         gate(when=When(designs.route, version=1)),  # type: ignore[arg-type]
-        gate(requirement=Requirement("d:route", "yes")),
         gate(requirement=SourceRequirement("d:route", [])),
         gate(requirement=SourceRequirement("d:route", "yes")),  # type: ignore[arg-type]
         gate(requirement=SourceRequirement("d:route", {"yes"})),  # type: ignore[arg-type]
@@ -1876,7 +1894,7 @@ def test_the_held_back_design_fails_only_check_9_and_check_10s_tree_test() -> No
 
 def test_an_invalid_designs_pickled_state_leaves_out_its_failures() -> None:
     with pytest.raises(InvalidDesign) as info:
-        load(full(tools=["Z", "A"]))
+        load(full(groups={"Z": Group([], ["convergent"]), "A": Group([], ["convergent"])}))
     original = info.value
     _, args, state = original.__reduce__()
     assert args == (original.failures,)
@@ -1950,8 +1968,10 @@ def test_check_10_refuses_a_declared_type_over_the_bound_through_its_definitions
     (failure,) = only(minimal(types={"big": body}, state=state), 10)
     assert failure.names == ("t:state",)
     assert failure.message == f"the state declaration: {_OVER}"
-    # At the bound it passes: the state is its own spelling with big's in place of the name.
-    load(minimal(types={"big": _long(_BOUND - len("record{a: }"))}, state="record{a: big}"))
+    # At the bound it passes: the state is its own spelling with big's in place of the name,
+    # and the policy's ``boolean`` is summed with it.
+    at_bound = _long(_BOUND - len("record{a: }") - len("boolean"))
+    load(minimal(types={"big": at_bound}, state="record{a: big}"))
 
 
 @pytest.mark.parametrize("where", ["source", "rule", "parameter", "definition"])
@@ -1975,9 +1995,14 @@ def test_check_10_names_each_declaration_whose_type_is_over_the_bound(where: str
 
 def _summed(state_field: str) -> Design:
     """A design whose class trees' types sum to 2^20 code points with ``state_field`` ``ab``:
-    the state, ``t:x`` and the answer's six."""
-    big = _long((_BOUND - len("record{ab: }") - len("answer")) // 2)
-    design = minimal(types={"big": big}, state=f"record{{{state_field}: big}}")
+    the state, ``t:x``, the answer's six and the policy's ``number``."""
+    big = _long((_BOUND - len("record{ab: }") - len("answer") - len("number")) // 2)
+    policy_rule = dataclasses.replace(designs.DECISION, outputs=t.number())
+    design = minimal(
+        types={"big": big},
+        state=f"record{{{state_field}: big}}",
+        rules={"decision": policy_rule},
+    )
     return with_source(
         with_source(design, "s", Source({"t:x": "big"})), "a", Source({"q:ask": question()})
     )
@@ -1986,13 +2011,13 @@ def _summed(state_field: str) -> Design:
 def test_check_10_bounds_the_class_trees_types_summed_naming_every_ref() -> None:
     def total(design: Design) -> int:
         big = design.types["big"]
-        return len(design.state) - 3 + len(big) + len(big) + len("answer")
+        return len(design.state) - 3 + len(big) + len(big) + len("answer") + len("number")
 
     assert total(_summed("ab")) == _BOUND
     load(_summed("ab"))
     assert total(_summed("abc")) == _BOUND + 1
     (failure,) = only(_summed("abc"), 10)
-    assert failure.names == ("q:ask", "t:state", "t:x")
+    assert failure.names == ("d:decision", "q:ask", "t:state", "t:x")
     assert failure.message == (
         "the types of t:state and the provided refs sum to more than 2^20 code points with "
         "their definitions resolved"
@@ -2028,8 +2053,6 @@ def test_check_10_size_tests_every_value_of_a_design_where_it_stands(
     leaf = Parameter("list<string>", rows)
     (failure,) = only(minimal(parameters={"p": leaf}), 10)
     assert failure.message == 'parameter "p"\'s value is outside the value domain'
-    (failure,) = only(full(requirements=[Requirement("d:route", rows)]), 10)
-    assert failure.names == ("d:route",)
 
 
 def test_check_10_refuses_a_shared_class_tree_fast(small_bounds: SmallBounds) -> None:
@@ -2237,7 +2260,7 @@ def test_a_label_sets_document_holds_its_fixed_part_and_set_and_loads_to_its_has
         "candidates": "t:s",
         "fixed": ["none"],
     }
-    functions = {"policy": cast(Policy, loaded._design.policy).function}
+    functions = {"decision": loaded._callables["decision"]}
     assert load(loaded.document, functions=functions).design_hash == loaded.design_hash
 
 
@@ -2314,3 +2337,25 @@ def test_a_cycle_through_a_label_set_edge_fails_check_5() -> None:
     finder = rule("find", outputs=t.list_(t.string), candidates=True, reads=("q:x",))
     (failure,) = only(over("d:find", find=finder), 5)
     assert "cycle" in failure.message
+
+
+def a_list(r: Any) -> list[str]:
+    return ["a", "b"]
+
+
+CANDIDATE_POLICY = Rule("d:decision", t.list_(t.string), a_list, version="1", candidates=True)
+"""A policy that is a candidate set, not grounded."""
+
+
+def test_a_policy_that_is_a_candidate_set_loads() -> None:
+    loaded = load(minimal(rules={"decision": CANDIDATE_POLICY}))
+    assert loaded._candidate_sets == {"d:decision": None}
+    assert loaded._providers["d:decision"] == "decision"
+
+
+def test_a_source_grounded_over_the_policy_loads() -> None:
+    asked = Source(
+        {"q:x": question("Is {c}?", slot("c", candidate="d:decision"))}, grounded="d:decision"
+    )
+    loaded = load(with_source(minimal(rules={"decision": CANDIDATE_POLICY}), "s", asked))
+    assert loaded._grounded == {"q:x": "d:decision"}

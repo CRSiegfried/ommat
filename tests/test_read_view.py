@@ -380,7 +380,7 @@ def test_the_stop_record_is_handed_out_as_a_copy() -> None:
 
 @pytest.mark.parametrize(
     ("kind", "name"),
-    [(ComponentKind.rule, "route"), (ComponentKind.policy, "policy"), (ComponentKind.when, "mail")],
+    [(ComponentKind.rule, "route"), (ComponentKind.when, "mail")],
 )
 def test_the_view_says_which_component_it_serves(kind: ComponentKind, name: str) -> None:
     r = view(kind=kind, name=name, params=() if kind is ComponentKind.when else ("intent/bar",))

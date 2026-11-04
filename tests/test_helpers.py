@@ -30,7 +30,7 @@ BOARD: dict[str, object] = {"t:state": {}, "q:intent": INTENT, "d:gone": GONE}
 def view(
     kind: ComponentKind = ComponentKind.rule, reads: tuple[str, ...] = ("q:intent", "d:gone")
 ) -> ReadView:
-    name = {"rule": "route", "policy": "policy", "when": "mail"}[kind]
+    name = {"rule": "route", "when": "mail"}[kind]
     state = RecordOf(()) if kind is ComponentKind.when else None
     return ReadView(Role(kind, name), reads, (), BOARD, {}, state=state)
 
@@ -114,11 +114,7 @@ def test_helpers_is_not_in_the_engines_api() -> None:
         "TurnFailure",
         "priority",
         "collect",
-        "run_plan",
-        "RunRefusal",
-        "BindingNotFound",
         "dead_questions",
-        "unsure_to_execute",
     }
     # HELPERS is a module attribute the record's design item reads, not an exported name.
     assert {n for n in vars(ommat.helpers) if not n.startswith("_")} == {*names, "HELPERS"}
@@ -252,9 +248,8 @@ def test_a_when_that_catches_the_raise_goes_on() -> None:
     assert r.stops == ()
 
 
-@pytest.mark.parametrize("kind", [ComponentKind.rule, ComponentKind.policy])
-def test_a_helper_on_a_rule_or_the_policy_reads(kind: ComponentKind) -> None:
-    r = view(kind)
+def test_a_helper_on_a_rule_reads() -> None:
+    r = view(ComponentKind.rule)
     assert echo(r, "q:intent") is INTENT
 
 

@@ -4,7 +4,9 @@ candidate for a per-candidate question, with the answer or marker, the top label
 question's targets and groups; with a gold set, the gold answer and whether the answer erred,
 a missing gold answer kept as a row. A record of another design is refused."""
 
+import asyncio
 import dataclasses
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +15,20 @@ import pytest
 import extraction
 import test_grounded_rules as grounded
 import test_label_sets as label_sets
-from ommat import Cause, CauseCode, EntryRefusal, Group, Unavailable, decide_sync, load
+from ommat import (
+    Cause,
+    CauseCode,
+    EntryRefusal,
+    Group,
+    Source,
+    Unavailable,
+    When,
+    decide_sync,
+    escalation,
+    load,
+    read_record,
+)
+from ommat import types as t
 from ommat.evaluation import (
     EvaluationRefusal,
     EvaluationStore,
@@ -22,7 +37,18 @@ from ommat.evaluation import (
     write_gold_answers,
 )
 from scripted import returns
-from test_decide import LOADED, bindings, go, slice_design
+from test_decide import (
+    ASK,
+    BODY,
+    LOADED,
+    LOOK,
+    bindings,
+    caught,
+    deciding,
+    go,
+    record_of,
+    slice_design,
+)
 from test_extraction_turn import ran as extraction_ran
 from test_targets import STATE as TARGET_STATE
 from test_targets import binding as target_binding
@@ -122,7 +148,7 @@ def test_a_row_names_the_groups_holding_its_question_with_their_reasons() -> Non
 # Gold
 
 
-def labelled(root: Path, record: Any, labels: dict[str, object]) -> EvaluationStore:
+def labelled(root: Path, record: Any, labels: Mapping[str, object]) -> EvaluationStore:
     store = EvaluationStore(root)
     write_gold_answers("g", [record], {record.record_hash: labels}, results=store)
     return store
@@ -181,10 +207,43 @@ def test_a_per_candidate_gold_answer_is_found_by_its_candidate(tmp_path: Path) -
 
 
 def test_a_record_of_another_design_is_wrong_design() -> None:
-    other = go(slice_design(tools=["archive", "send"])).record
+    other = go(slice_design(name="changed")).record
     with pytest.raises(EvaluationRefusal) as raised:
         answers([go().record, other], LOADED)
     assert (raised.value.reason, raised.value.turn) == (R.wrong_design, other.record_hash)
+
+
+def test_every_records_format_is_checked_before_any_design_hash() -> None:
+    old = read_record((Path(__file__).parent / "format_9" / "record.json").read_bytes())
+    other = go(slice_design(name="changed")).record
+    for given in ([other, old], [old, other]):
+        with pytest.raises(EvaluationRefusal) as raised:
+            answers(given, LOADED)
+        assert (raised.value.reason, raised.value.turn) == (R.wrong_design, old.record_hash)
+        assert "records[" in str(raised.value)
+        assert "format-7 record, before format 8" in str(raised.value)
+    with pytest.raises(EvaluationRefusal) as raised:
+        answers([old, b"not json"], LOADED)  # every record is read before any is checked
+    assert raised.value.reason is R.invalid_record
+
+
+def cancels(r: Any) -> Any:
+    raise asyncio.CancelledError
+
+
+def test_a_cancelled_records_answered_calls_are_rows() -> None:
+    later = Source({"t:later": t.string}, needs=["d:route"], when=When(cancels, version="1"))
+    loaded = slice_design(sources={"ask": ASK, "body": BODY, "look": LOOK, "later": later})
+    record = record_of(caught(deciding(loaded)))
+    assert record.log[-1]["item"] == "cause"
+    (row,) = answers([record], loaded)
+    assert (row["ref"], row["turn"], row["top"]) == ("q:spam", record.record_hash, "yes")
+
+
+def test_a_broken_entry_gives_no_rows_and_no_refusal() -> None:
+    broken = go(state={}).record
+    assert escalation(broken) is not None
+    assert answers([broken], LOADED) == []
 
 
 def test_a_record_that_does_not_read_is_invalid_record() -> None:

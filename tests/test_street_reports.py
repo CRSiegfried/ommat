@@ -1,5 +1,5 @@
 """The street-reports design: docs/tutorials/street_reports, shared by the binding's tests and the
-tutorial. It loads, its lints pass, and fixed answers reach each row of its policy's table."""
+tutorial. It loads, its lints pass, and fixed answers reach each row of its policy."""
 
 import json
 from collections.abc import Callable, Mapping
@@ -10,16 +10,17 @@ import pytest
 import street_reports_design as works
 from ommat import (
     CallResult,
+    Cause,
     Decision,
     LoadedDesign,
-    PlanKind,
     SourceCall,
+    Unsure,
     decide_sync,
     load,
     replay_sync,
 )
 from ommat._binding import OracleBinding
-from ommat.helpers import dead_questions, unsure_to_execute
+from ommat.helpers import dead_questions
 
 FILED_ON = "2026-03-10"
 LIGHT = "The street light outside 14 Alder Lane has flickered since 3 March and is dark by 9 pm."
@@ -128,7 +129,7 @@ def entry(decision: Decision, ref: str) -> dict[str, Any]:
 
 
 TURNS: dict[str, tuple[str, Callable[[], Answers], list[str]]] = {
-    "execute": (
+    "open-work-order": (
         LIGHT,
         lambda: answers(
             LIGHT,
@@ -139,23 +140,23 @@ TURNS: dict[str, tuple[str, Callable[[], Answers], list[str]]] = {
         ),
         [],
     ),
-    "execute-undated": (
+    "open-work-order-undated": (
         UNDATED,
         lambda: answers(UNDATED, asset="signage", places=listed(UNDATED, "Birch Close")),
         [],
     ),
-    "escalate-hazard": (
+    "send-crew": (
         DRAIN,
         lambda: answers(DRAIN, hazard=0.95, asset="drainage", places=listed(DRAIN, "Mill Road")),
         [],
     ),
-    "escalate-abstained": (VAGUE, lambda: answers(VAGUE, places=none_found(0.8)), []),
-    "inform-other": (
+    "undecided-abstained": (VAGUE, lambda: answers(VAGUE, places=none_found(0.8)), []),
+    "front-desk": (
         SHELTER,
         lambda: answers(SHELTER, asset="other", places=listed(SHELTER, "Quay Street")),
         [],
     ),
-    "inform-open": (
+    "already-open": (
         POTHOLE,
         lambda: answers(POTHOLE, severity="serious", places=listed(POTHOLE, "Station Road")),
         ["Station Road"],
@@ -179,8 +180,9 @@ def test_the_document_reloads_to_the_same_hash_and_bytes(loaded: LoadedDesign) -
 
 def test_every_function_component_imports_from_the_design_module(loaded: LoadedDesign) -> None:
     document = json.loads(loaded.document)
-    components = [*document["rules"].values(), document["policy"]]
-    assert len(components) == len(works.RULES) + 1
+    assert document["policy"] == "d:route"
+    components = list(document["rules"].values())
+    assert len(components) == len(works.RULES)
     for component in components:
         assert component["module"] == "street_reports_design"
         assert "<" not in component["qualname"]
@@ -189,7 +191,7 @@ def test_every_function_component_imports_from_the_design_module(loaded: LoadedD
 
 def test_it_asks_each_kind_the_binding_must_handle(loaded: LoadedDesign) -> None:
     seen: list[tuple[SourceCall, ...]] = []
-    report, given, open_orders = TURNS["execute"]
+    report, given, open_orders = TURNS["open-work-order"]
     decide(loaded, report, given(), open_orders, seen)
     by_id = {tuple(call.id for call in batch): batch for batch in seen}
     assert sorted(by_id) == [("details", "timing"), ("registry",), ("triage",)]
@@ -241,67 +243,54 @@ def test_its_lints_pass(loaded: LoadedDesign) -> None:
     assert {ref: q["status"] for ref, q in report["questions"].items()} == dict.fromkeys(
         QUESTIONS, "live"
     )
-    reads = {
-        "d:noticed": ["2026-03-03"],
-        "d:places": [["Alder Lane"]],
-        "d:seen_at": ["21:00:00"],
-        "t:open_orders": [[], ["Alder Lane"]],
-    }
-    # Its rules read the questions, so the lint also runs turns: it needs the free inputs too.
-    assert unsure_to_execute(loaded, values={**inputs, **reads})["execute"] == []
 
 
 # --- the policy's table, row by row -------------------------------------------------------
 
 
+def decided(decision: Decision) -> object:
+    return decision.estimate
+
+
 def test_a_settled_report_opens_a_work_order(loaded: LoadedDesign) -> None:
-    decision = run(loaded, "execute")
-    assert decision.plan.kind is PlanKind.execute
-    assert decision.verdict.kind == "passed"
-    (step,) = decision.plan.steps
-    assert step.tool == "open_work_order"
+    decision = run(loaded, "open-work-order")
+    assert decided(decision) == "open_work_order"
     assert entry(decision, "d:noticed")["value"] == "2026-03-03"
     assert entry(decision, "d:places")["value"] == ["Alder Lane"]
     assert entry(decision, "d:seen_at")["value"] == "21:00:00"
 
 
 def test_a_report_with_no_date_opens_an_order_without_one(loaded: LoadedDesign) -> None:
-    decision = run(loaded, "execute-undated")
-    assert decision.plan.kind is PlanKind.execute
+    decision = run(loaded, "open-work-order-undated")
+    assert decided(decision) == "open_work_order"
     assert entry(decision, "d:noticed")["value"] is None
 
 
 def test_a_missing_date_the_model_thinks_is_there_abstains(loaded: LoadedDesign) -> None:
-    report, given, open_orders = TURNS["execute"]
+    report, given, open_orders = TURNS["open-work-order"]
     decision = decide(loaded, report, given() | {"q:details/noticed": none_found(0.1)}, open_orders)
-    assert decision.plan.kind is PlanKind.escalate
-    assert decision.plan.reason == "d:noticed Unsure: abstained on q:details/noticed"
+    assert decided(decision) == Unsure(Cause("abstained", ["q:details/noticed"]))
 
 
-def test_a_hazard_escalates(loaded: LoadedDesign) -> None:
-    decision = run(loaded, "escalate-hazard")
-    assert decision.plan.kind is PlanKind.escalate
-    assert decision.plan.reason == "a hazard to people: send a crew now"
+def test_a_hazard_sends_a_crew(loaded: LoadedDesign) -> None:
+    assert decided(run(loaded, "send-crew")) == "send_crew"
 
 
-def test_an_abstaining_rule_escalates_naming_its_answer(loaded: LoadedDesign) -> None:
-    decision = run(loaded, "escalate-abstained")
-    assert decision.plan.kind is PlanKind.escalate
-    assert decision.plan.reason == "d:places Unsure: abstained on q:details/places"
+def test_an_abstaining_rule_leaves_the_turn_undecided_naming_its_answer(
+    loaded: LoadedDesign,
+) -> None:
+    decision = run(loaded, "undecided-abstained")
+    assert decided(decision) == Unsure(Cause("abstained", ["q:details/places"]))
     marker = entry(decision, "d:places")["marker"]
     assert marker["cause"] == {"code": "abstained", "refs": ["q:details/places"]}
 
 
-def test_an_asset_the_desk_does_not_keep_informs(loaded: LoadedDesign) -> None:
-    decision = run(loaded, "inform-other")
-    assert decision.plan.kind is PlanKind.inform
-    assert decision.plan.reply == "Not a public-works asset; passed to the front desk."
+def test_an_asset_the_desk_does_not_keep_goes_to_the_front_desk(loaded: LoadedDesign) -> None:
+    assert decided(run(loaded, "front-desk")) == "front_desk"
 
 
-def test_a_place_with_an_open_order_informs(loaded: LoadedDesign) -> None:
-    decision = run(loaded, "inform-open")
-    assert decision.plan.kind is PlanKind.inform
-    assert decision.plan.reply == "A work order is already open at Station Road."
+def test_a_place_with_an_open_order_is_already_open(loaded: LoadedDesign) -> None:
+    assert decided(run(loaded, "already-open")) == "already_open"
 
 
 @pytest.mark.parametrize("name", list(TURNS))

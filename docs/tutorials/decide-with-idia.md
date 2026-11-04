@@ -75,7 +75,7 @@ A source names the oracle that answers it, and `decide` takes one binding per or
 
 ## Decide two reports
 
-1. `run` decides each of the two reports with `await decide(...)`, prints the plan and each
+1. `run` decides each of the two reports with `await decide(...)`, prints the decision and each
    call, and replays the record. Run it from its folder:
 
    ```
@@ -86,7 +86,7 @@ A source names the oracle that answers it, and `decide` takes one binding per or
    This is what one run printed:
 
    ```
-   escalate | d:hazard Unsure: abstained on q:triage/hazard | passed
+   decision: Unsure (abstained on q:triage/hazard)
      call 3: ['details', 'timing'], precision unrounded, attempts 2
        details: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
        timing: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
@@ -100,7 +100,7 @@ A source names the oracle that answers it, and `decide` takes one binding per or
        triage: unchecked-limit min_levels: min_levels is unknown, so it was not checked
        triage: unchecked-limit max_total_options: max_total_options is unknown, so it was not checked
      replay findings: []
-   escalate | a hazard to people: send a crew now | passed
+   decision: send_crew
      call 3: ['details', 'timing'], precision unrounded, attempts 2
        details: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
        timing: no-snapshot snapshot: the wire reported the short name 'clairic', with no version: alias drift cannot be detected from the response
@@ -114,23 +114,23 @@ A source names the oracle that answers it, and `decide` takes one binding per or
        triage: unchecked-limit min_levels: min_levels is unknown, so it was not checked
        triage: unchecked-limit max_total_options: max_total_options is unknown, so it was not checked
      replay findings: []
-   escalate | d:hazard Unsure: abstained on q:triage/hazard | passed
+   decision: Unsure (abstained on q:triage/hazard)
      call 3: ['details', 'timing'], precision None, attempts None
-       answered from record sha256:2cf0b1a22a60aa4d6c32cfa86523a8365aae005daa163bc8d5ab5bc8cea5a6f5
+       answered from record sha256:6130c985aab17e66e0d1218a6ff1c06a76e3e8269c18855150d780b5f9ca0a47
      call 4: ['registry'], precision None, attempts None
        registry: unsupported: the idia binding asks q: refs only, not t:open_orders
      call 5: ['triage'], precision None, attempts None
-       answered from record sha256:2cf0b1a22a60aa4d6c32cfa86523a8365aae005daa163bc8d5ab5bc8cea5a6f5
+       answered from record sha256:6130c985aab17e66e0d1218a6ff1c06a76e3e8269c18855150d780b5f9ca0a47
    ```
 
-2. The first report escalates on `d:hazard`: the classifier put 0.58 on a danger to people,
-   below the design's bar of 0.6, so the rule abstained and the policy escalated, naming the
-   answer that fell short. The second escalates as a hazard: the classifier judged a deep
-   pothole a danger.
+2. The first report is undecided: the classifier put 0.58 on a danger to people, below the
+   design's bar of 0.6, so the rule abstained and the policy's estimate is that `Unsure`,
+   naming the answer that fell short. The second is decided, `send_crew`: the classifier
+   judged a deep pothole a danger.
 
 ## Read each call
 
-Each line under a plan is one call item of the record: the sources it asked, its `precision`,
+Each line under a decision is one call item of the record: the sources it asked, its `precision`,
 and from the record's `unhashed` part its `attempts` and its `warnings` lines.
 
 1. `precision` is how the model's provider declares it rounds probabilities: 2 decimals for
@@ -162,7 +162,7 @@ and from the record's `unhashed` part its `attempts` and its `warnings` lines.
 1. Each turn printed `replay findings: []`. `run` reads each record back from its stored
    bytes with `read_record` and replays it with `await replay(record, loaded)`: replay answers
    every source from the record and calls no binding, neither a model nor the registry, and an
-   empty list says every entry, the plan and the verdict came out as recorded.
+   empty list says every entry and the decision came out as recorded.
 
 ## Answer a turn from a stored record
 
@@ -178,7 +178,8 @@ and from the record's `unhashed` part its `attempts` and its `warnings` lines.
    }
    ```
 
-2. It gives the first turn's plan again, since the policy stops at the abstained `d:hazard`.
+2. It gives the first turn's decision again: the policy's estimate is the `Unsure` that
+   `d:hazard` abstained with, as in the first turn.
    Each call it answered opens its `warnings` with `answered from record` and the stored
    record's hash, and holds no precision and no attempts, since it called no model.
 

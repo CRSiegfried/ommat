@@ -86,14 +86,6 @@ class OnTop:
         return {label: 1.0 if label == top else 0.0 for label in labels}
 
 
-@dataclass(frozen=True, slots=True)
-class AtZero(OnTop):
-    """A candidate-valued question's abstention point: every label the run renders at 0."""
-
-    def over(self, labels: Sequence[str], at: int) -> dict[str, float]:
-        return dict.fromkeys(labels, 0.0)
-
-
 # ---------------------------------------------------------------------------------------------
 # An axis
 
@@ -562,34 +554,6 @@ def _extracted(q: Question, value: object, p_null: float | None, confidence: flo
         cast(Any, q.value_type), q.is_list, fresh(value), None, p_null, confidence, None
     )
     return Point(extraction_document(answer), binding_form(answer))
-
-
-def abstention(loaded: LoadedDesign, ref: str) -> Point:
-    """A question's abstention point: a probability answer with every label at 0, a tie at
-    the top on which every pick abstains whatever its bar, thresholds or margin, over the
-    labels a run renders for a candidate-valued question; an extraction answer with a null
-    ``value`` and ``p_null`` 1, on which ``extract`` abstains whatever its ``null_bar``."""
-    q = question(loaded, ref)
-    if q.kind is AnswerKind.extraction:
-        return _extracted(q, None, 1.0, None)
-    if ref in loaded._label_sets:
-        return Point({"on_top": None, "at_zero": True}, AtZero(None))
-    labels = labels_of(loaded, ref)
-    return _answer(q, labels, dict.fromkeys(labels, 0.0))
-
-
-def is_abstention(value: object) -> bool:
-    """Whether an answer as the record writes it is an abstention point: every probability 0,
-    or a null extraction ``value``."""
-    if type(value) is not dict:
-        return False
-    held = cast("dict[str, Any]", value)
-    if held.get("kind") == "extraction":
-        return held.get("value") is None
-    probabilities = held.get("probabilities")
-    if type(probabilities) is not dict:
-        return False
-    return all(p == 0 for p in cast("dict[str, object]", probabilities).values())
 
 
 def entry_points(points: Sequence[Point], ref: str) -> list[Point]:

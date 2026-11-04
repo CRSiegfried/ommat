@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
 """Format 4: each binding call receives its ``seconds``; a binding's ``timed-out`` or ``raised``
 on a ref under a returned call, the other refs standing, replayed as recorded and refused at the
-read of an earlier format; and a stored format-3 design and record read under format 3's rules
-to their own hash and replayed."""
+read of an earlier format; and a stored format-3 design and record: the record read under
+format 3's rules to its own hash and refused at replay, the design refused at load."""
 
 import asyncio
 import copy
@@ -18,10 +18,8 @@ from ommat import (
     Cause,
     Design,
     FindingKind,
+    InvalidDesign,
     InvalidRecord,
-    LoadedDesign,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Record,
@@ -64,10 +62,10 @@ def lost(r: ReadView) -> object:
     return pick_with_margin(r, "q:b/lost", 0.5, 0.1)
 
 
-def report(r: ReadView) -> Plan:
+def report(r: ReadView) -> str:
     held = [r.read(ref) for ref in ("d:kept", "d:lost", "t:c/size")]
     shown = ["marker" if isinstance(v, MARKERS) else "value" for v in held]
-    return Plan("inform", reply=", ".join(shown))
+    return ", ".join(shown)
 
 
 DESIGN = Design(
@@ -81,8 +79,11 @@ DESIGN = Design(
     rules={
         "kept": Rule("d:kept", t.label("no", "yes"), kept, version="1", reads=["q:a/kept"]),
         "lost": Rule("d:lost", t.label("no", "yes"), lost, version="1", reads=["q:b/lost"]),
+        "report": Rule(
+            "d:report", t.string, report, version="1", reads=["d:kept", "d:lost", "t:c/size"]
+        ),
     },
-    policy=Policy(report, version="1", reads=["d:kept", "d:lost", "t:c/size"]),
+    policy="d:report",
 )
 LOADED = load(DESIGN)
 YES = {"yes": 0.8, "no": 0.2}
@@ -125,8 +126,11 @@ def seen_seconds(settings: RunSettings | None = None, **source: Any) -> list[flo
     design = Design(
         state=t.record(),
         sources={"s": Source({"q:x": Question("noul", Text("Is it?"))}, oracle="o", **source)},
-        rules={"x": Rule("d:x", t.label("no", "yes"), lambda r: "yes", version="1", reads=[])},
-        policy=Policy(lambda r: Plan("inform", reply="ok"), version="1", reads=["d:x"]),
+        rules={
+            "x": Rule("d:x", t.label("no", "yes"), lambda r: "yes", version="1", reads=[]),
+            "ok": Rule("d:ok", t.boolean, lambda r: True, version="1", reads=["d:x"]),
+        },
+        policy="d:ok",
     )
     decide_sync(load(design), {}, {"o": binding}, settings)
     return seen
@@ -188,7 +192,7 @@ def test_a_per_ref_timed_out_and_raised_stand_beside_an_answered_ref() -> None:
         "c: HTTP 503 Service Unavailable",
     ]
     assert calls["attempts"] == 3
-    assert decide_sync(LOADED, {"text": "a report"}, {"o": split}).plan.reply == (
+    assert decide_sync(LOADED, {"text": "a report"}, {"o": split}).estimate == (
         "value, marker, marker"
     )
 
@@ -215,24 +219,32 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
     assert any("t:c/size" in line for line in lines)
 
 
-GOLDEN_DESIGN = "sha256:469a22cefa7c291cad390fdb5a3a7c6a676fd6d33190feef0c4df93ee974f9c9"
-GOLDEN_RECORD = "sha256:9788c0a6da9c9de0b021bb73cc00b8b25225be707aa6eebcf8458a25e5ed73c2"
+GOLDEN_DESIGN = "sha256:c9170d5a65f09d9dfb23829b1ef597b5cfbe83c1f77a50ce519d0ac783bfb0f6"
+GOLDEN_RECORD = "sha256:bdf816166798c265f307978d7cc9532398841d021b606e778e1ac84929de4050"
 
 
 def test_the_golden_per_ref_record() -> None:
     record = per_ref_turn()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 7, "helpers": 3}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 8, "helpers": 3}
+    assert record.log[1]["policy"] == "d:report"
+    assert entry(record, "d:report")["value"] == "value, marker, marker"
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)
     assert decode(record.document)["hash"] == GOLDEN_RECORD
+
+
+def earlier(doc: dict[str, Any], fmt: int) -> dict[str, Any]:
+    """A current record document made format ``fmt`` by ``before_profile``. Its ``hash`` is left
+    to recompute."""
+    return before_profile(doc, fmt)
 
 
 def test_a_per_ref_marker_reads_back_at_format_4_and_is_refused_at_format_3() -> None:
     doc = json.loads(per_ref_turn().document)
     assert read_record(json.dumps(doc).encode()).log == per_ref_turn().log
-    for earlier in (1, 2, 3):
+    for fmt in (1, 2, 3):
         old = copy.deepcopy(doc)
-        before_profile(old, earlier)
-        if earlier < 3:
+        earlier(old, fmt)
+        if fmt < 3:
             for item in old["log"]:
                 if item["item"] == "call":
                     item.pop("precision", None)
@@ -250,7 +262,7 @@ async def raised_only(batch: Batch, *, seconds: float) -> object:
 
 def test_a_raised_marker_alone_is_refused_at_format_3() -> None:
     doc = json.loads(decide_sync(LOADED, {"text": "a"}, {"o": raised_only}).record.document)
-    before_profile(doc, 3)
+    earlier(doc, 3)
     with pytest.raises(InvalidRecord, match="raised marker under returned call item"):
         read_record(rehashed(doc))
 
@@ -265,7 +277,7 @@ def test_an_engine_timeout_under_a_failed_call_is_read_at_every_format() -> None
     (call,) = (i for i in record.log if i["item"] == "call")
     assert call["outcome"]["failed"]["code"] == "timed-out"
     doc = json.loads(record.document)
-    before_profile(doc, 3)
+    earlier(doc, 3)
     assert read_record(rehashed(doc)).log[0]["format"] == 3
 
 
@@ -273,20 +285,15 @@ def test_an_engine_timeout_under_a_failed_call_is_read_at_every_format() -> None
 # The stored format-3 design and record
 
 
-def format_3_design() -> LoadedDesign:
-    return load((FORMAT_3 / "design.json").read_bytes())
-
-
 def format_3_record() -> Record:
     return read_record((FORMAT_3 / "record.json").read_bytes())
 
 
-def test_a_format_3_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
-    data = (FORMAT_3 / "design.json").read_bytes()
-    loaded = load(data)
-    assert loaded.design_hash == FORMAT_3_DESIGN
-    assert loaded.document == data
-    assert decode(loaded.document)["format"] == 3
+def test_check_11_refuses_the_stored_format_3_design_naming_its_format() -> None:
+    with pytest.raises(InvalidDesign) as info:
+        load((FORMAT_3 / "design.json").read_bytes())
+    assert [f.check for f in info.value.failures] == [11]
+    assert "the document's format 3 is not 10" in str(info.value)
 
 
 def test_a_format_3_record_reads_back_to_its_own_hash() -> None:
@@ -297,27 +304,10 @@ def test_a_format_3_record_reads_back_to_its_own_hash() -> None:
     assert record.log[0] == {"item": "design", "hash": FORMAT_3_DESIGN, "format": 3, "helpers": 2}
 
 
-def test_a_format_3_record_replays_under_its_format_3_design_with_the_helper_version_alone() -> (
-    None
-):
-    again, findings = replay_sync(format_3_record(), format_3_design())
-    assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}]
-    assert again is not None
-    assert again.log[0]["format"] == 7  # the engine writes its own format
-
-
-def test_a_format_3_record_under_the_format_4_design_is_design_and_helper_mismatch() -> None:
+def test_a_format_3_record_is_wrong_design_at_replay() -> None:
     from test_decide import LOADED as SLICE
 
-    _, findings = replay_sync(format_3_record(), SLICE)
-    assert findings == [
-        {
-            "kind": FindingKind.design_mismatch,
-            "recorded": FORMAT_3_DESIGN,
-            "replayed": SLICE.design_hash,
-        },
-        {"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3},
-    ]
+    assert replay_sync(format_3_record(), SLICE) == (None, [{"kind": FindingKind.wrong_design}])
 
 
 # ---------------------------------------------------------------------------------------------

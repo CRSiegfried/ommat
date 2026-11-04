@@ -2,18 +2,18 @@
 """Another record's answers: rerun ``record``'s turn under
 ``loaded`` with ``other``'s call items and entries answering, ``q:`` and ``t:`` refs alike.
 
-Both records are read first, then refused in order, each before any replay: ``unfinished``,
-``nothing-to-replay`` and ``wrong-design``, each for ``record`` then ``other``, then
+Both records are read first, then refused in order, each before any replay: ``wrong-design``
+for a record before format 8, ``unfinished``, ``nothing-to-replay``, then ``wrong-design`` for
+a design hash other than the loaded design's, each for ``record`` then ``other``; then
 ``different-turn`` when their state entries or ``settings`` items differ by canonical bytes.
-The findings are replay's: the entries, plan and verdict against ``record``, and
+The findings are replay's: the entries against ``record``, and
 ``stale-question`` for each ref whose source is checked against ``other``: not answered there,
-or asked with other needs or as another question. A plan is compared without its ``context``, so
-a change of context text alone is no plan change. Neither record is edited, and nothing is read
+or asked with other needs or as another question. Neither record is edited, and nothing is read
 from either's ``unhashed``.
 
-The record read, its checks, the replay less context-alone plan findings, the sync runner and
-``own_functions``, the ``functions`` a job given ``loaded`` loads an edited design with, are
-shared with ``intervene`` in ``_edit``.
+The record read, its checks, the replay, the sync runner and ``own_functions``, the
+``functions`` a job given ``loaded`` loads an edited design with, are shared with ``intervene``
+in ``_edit``.
 """
 
 import asyncio
@@ -28,11 +28,12 @@ from ommat._ledger import (
     _ITEM_DEPTH,
     InvalidRecord,
     Record,
-    _with_held_order,
+    decision_bytes,
+    finished,
     read_record,
 )
 from ommat._replay import _STATE, FindingKind, _differ, _replay_with
-from ommat._values import type_name
+from ommat._values import POLICY_FORMAT, type_name
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 
 _R = RefusalReason
@@ -49,8 +50,6 @@ async def use_answers(record: object, loaded: LoadedDesign, other: object) -> di
     logs = tuple(r.log for r in records)  # read once: every read decodes afresh
     _refuse_unfit(_NAMES, records, logs, loaded)
     mine, theirs = logs
-    # Compared as replay compares items: an item of a record before format 6, holding no
-    # order, is compared without the other's.
     states = (_state(mine), _state(theirs))
     for what, a, b in (("state entry", *states), ("settings item", mine[1], theirs[1])):
         if _differ(a, b):
@@ -69,17 +68,32 @@ def _refuse_unfit(
     logs: tuple[list[dict[str, Any]], ...],
     loaded: LoadedDesign,
 ) -> None:
-    """Refuse, in order, ``unfinished``, ``nothing-to-replay`` and ``wrong-design``, each
-    checked on every record in turn, its ``turn`` the record's hash (§do-and-diff)."""
+    """Refuse, in order, ``wrong-design`` for a record before format 8, which holds no
+    policy's entry; ``unfinished`` for one not finished, holding a ``cause`` item or no entry at
+    the policy's ref; ``nothing-to-replay`` for one whose state entry is missing or holds a
+    marker; and ``wrong-design`` for a design hash other than ``loaded``'s; each checked on every
+    record in turn, its ``turn`` the record's hash (§do-and-diff)."""
     for name, r, log in zip(names, records, logs, strict=True):
-        if not any(item["item"] == "verdict" for item in log):
+        if log[0]["format"] < POLICY_FORMAT:
             raise EvaluationRefusal(
-                f"{name} has no verdict item", reason=_R.unfinished, turn=r.record_hash
+                f"{name} is a format-{log[0]['format']} record, before format {POLICY_FORMAT}, "
+                "so it holds no policy's entry",
+                reason=_R.wrong_design,
+                turn=r.record_hash,
             )
     for name, r, log in zip(names, records, logs, strict=True):
-        if _state(log) is None:
+        if not finished(log):
             raise EvaluationRefusal(
-                f"{name} has no state entry", reason=_R.nothing_to_replay, turn=r.record_hash
+                f"{name} is unfinished: it holds a cause item or no entry at the policy's ref",
+                reason=_R.unfinished,
+                turn=r.record_hash,
+            )
+    for name, r, log in zip(names, records, logs, strict=True):
+        state = _state(log)
+        if state is None or "marker" in state:
+            held = "no state entry" if state is None else "a marker at its state entry"
+            raise EvaluationRefusal(
+                f"{name} has {held}", reason=_R.nothing_to_replay, turn=r.record_hash
             )
     for name, r in zip(names, records, strict=True):
         if r.design_hash != loaded.design_hash:
@@ -107,8 +121,7 @@ async def _replayed(
 ) -> tuple[Record, list[dict[str, Any]], frozenset[str]]:
     """The replay record of ``log`` rerun under ``loaded``, answered by ``answers``' calls and
     checked against ``base`` and ``design`` as ``_replay_with`` checks, stale sources asked of
-    ``live`` when given; replay's findings less a ``plan`` finding of context alone; and the
-    refs answered from ``answers``."""
+    ``live`` when given; replay's findings; and the refs answered from ``answers``."""
     rerun, found, fixture = await _replay_with(
         log,
         loaded,
@@ -123,8 +136,7 @@ async def _replayed(
         note=note,
         unpinned=unpinned,
     )
-    kept = [f for f in found if not _context_alone(f)]
-    return rerun, kept, _stood(rerun.log, fixture.pinned, fixture.reproduced)
+    return rerun, found, _stood(rerun.log, fixture.pinned, fixture.reproduced)
 
 
 def _stood(log: list[dict[str, Any]], given: set[str], reproduced: set[str]) -> frozenset[str]:
@@ -176,25 +188,6 @@ def outcome(entry: dict[str, Any]) -> bytes:
     return encode(["value", entry["value"]], _ITEM_DEPTH)
 
 
-def _context_alone(finding: dict[str, Any]) -> bool:
-    """Whether a ``plan`` finding's two items differ only in their ``context``. The rest of each
-    is compared with an ``order`` derived afresh over the rest alone; when either item holds no
-    ``order``, as one of a record before format 6 does not, the rest is compared without one.
-    The items given are not changed."""
-    if finding["kind"] is not FindingKind.plan:
-        return False
-    mine, theirs = finding["recorded"], finding["replayed"]
-    if mine is None or theirs is None:
-        return False
-    held = "order" in mine and "order" in theirs
-    rest = [
-        {k: v for k, v in item.items() if k not in ("context", "order")} for item in (mine, theirs)
-    ]
-    if held:
-        rest = [_with_held_order(item) for item in rest]
-    return encode(rest[0], _ITEM_DEPTH) == encode(rest[1], _ITEM_DEPTH)
-
-
 def use_answers_sync(record: object, loaded: LoadedDesign, other: object) -> dict[str, Any]:
     """``use_answers`` run to completion; ``RuntimeError`` inside a running event loop, raised
     before the coroutine is built."""
@@ -205,7 +198,7 @@ def own_functions(
     loaded: LoadedDesign, functions: Mapping[str, Callable[..., Any]] | None
 ) -> Mapping[str, Callable[..., Any]]:
     """``functions``, or when ``None`` ``loaded``'s own callables, keyed as load's ``functions``
-    are, by declared name, ``<source>.when`` and ``policy``: an edited copy of ``loaded``'s
+    are, by declared name and ``<source>.when``: an edited copy of ``loaded``'s
     document names the same code."""
     return loaded._callables if functions is None else functions
 
@@ -220,6 +213,12 @@ def _run_sync(name: str, job: Callable[[], Coroutine[Any, Any, _T]]) -> _T:
     else:
         raise RuntimeError(f"{name}_sync was called inside a running event loop; await {name}")
     return asyncio.run(job())
+
+
+def decided(log: list[dict[str, Any]], rerun: list[dict[str, Any]]) -> bool:
+    """Whether a rerun changed the decision: the policy's entries of the two logs differ by
+    ``decision_bytes``, a marker's cause and refs included (§decide-output)."""
+    return decision_bytes(log) != decision_bytes(rerun)
 
 
 def _read(document: object, name: str) -> Record:

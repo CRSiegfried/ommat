@@ -1,7 +1,7 @@
 """The per-candidate picks: ``pick_each_with_margin`` and ``pick_each_with_thresholds`` over a
 per-candidate question's declared ref, each candidate's pick, abstention or marker in the set's
-order; the record a rule passing one candidate's abstention on writes, a flagged context entry
-included; and the board check on a returned cause naming a grounded ref."""
+order; the record a rule passing one candidate's abstention on writes; and the board check on a
+returned cause naming a grounded ref."""
 
 import json
 from collections.abc import Callable
@@ -15,12 +15,8 @@ from ommat import (
     CallResult,
     Cause,
     CauseCode,
-    Context,
-    ContextEntry,
     Design,
     LoadedDesign,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Record,
@@ -80,8 +76,8 @@ def both(r: ReadView) -> object:
     return "yes" if got[0] else "no"
 
 
-def escalate(r: ReadView) -> Plan:
-    return Plan("escalate", reason="checked")
+def escalate(r: ReadView) -> str:
+    return "checked"
 
 
 SOURCE = Source(
@@ -114,9 +110,9 @@ def design(
             "both": Rule(
                 "d:both", t.label("yes", "no"), both, version="1", reads=["d:lit", "d:doubt"]
             ),
+            "act": Rule("d:act", t.string, escalate, version="1", reads=["d:both"]),
         },
-        policy=Policy(escalate, version="1", reads=["d:both"]),
-        context=Context([ContextEntry("d:doubt", Text("Doubt: {d}", [slot("d", ref="d:doubt")]))]),
+        policy="d:act",
     )
 
 
@@ -177,16 +173,13 @@ def test_the_derivation_names_the_declared_ref_alone() -> None:
     }
 
 
-def test_a_rule_passing_one_candidate_s_abstention_on_into_the_context_records_cleanly() -> None:
+def test_a_rule_passing_one_candidate_s_abstention_on_records_cleanly() -> None:
     record = decided(["Elm Row", "Quay Street"])
     doubt = entries(record)["d:doubt"]
     assert doubt["marker"]["cause"] == {
         "code": "abstained",
         "refs": [grounded_ref(OUT, "Elm Row")],
     }
-    (plan,) = [i for i in record.log if i["item"] == "plan"]
-    (context_entry,) = plan["context"]["entries"]
-    assert context_entry["marker"] == doubt["marker"]
     # The record reads back, replays and redacts with the candidate digested in the cause.
     stored = read_record(record.document)
     assert replay_sync(stored, LOADED)[1] == []
@@ -194,13 +187,19 @@ def test_a_rule_passing_one_candidate_s_abstention_on_into_the_context_records_c
     assert "Elm Row" not in redacted
 
 
-def test_redact_digests_a_grounded_ref_in_a_plan_s_own_cause() -> None:
+def test_redact_digests_a_grounded_ref_in_the_policy_s_own_cause() -> None:
     doc = json.loads(decided(["Elm Row", "Quay Street"]).document)
-    plan = next(i for i in doc["log"] if i["item"] == "plan")
-    plan["cause"] = {"code": "required", "refs": [grounded_ref(OUT, "Elm Row")]}
+    policy = next(i for i in doc["log"] if i["item"] == "entry" and i["ref"] == "d:act")
+    policy.pop("value", None)
+    policy["marker"] = {
+        "kind": "Unsure",
+        "cause": {"code": "required", "refs": [grounded_ref(OUT, "Elm Row")]},
+    }
     record = read_record(json.dumps(rehashed(doc)).encode("utf-8"))
     redacted = json.loads(redact(record, b"k" * 32))
-    (cause_ref,) = next(i for i in redacted["log"] if i["item"] == "plan")["cause"]["refs"]
+    (cause_ref,) = next(i for i in redacted["log"] if i["item"] == "entry" and i["ref"] == "d:act")[
+        "marker"
+    ]["cause"]["refs"]
     assert cause_ref.startswith('q:lamps/out["hmac-sha256:')
     assert "Elm Row" not in json.dumps(redacted)
 

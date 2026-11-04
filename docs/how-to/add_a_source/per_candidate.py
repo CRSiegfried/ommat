@@ -6,8 +6,6 @@ The how-to at docs/how-to/add-a-source.md shows it under "Ask a question per can
 from ommat import (
     CallResult,
     Design,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Rule,
@@ -65,19 +63,21 @@ RULES = {
 }
 
 
-def policy(r: ReadView) -> Plan:
+def policy(r: ReadView) -> object:
     out = r.read("d:out")
     if isinstance(out, MARKERS) or not out:
-        return Plan("escalate", reason="no lamp is out")
-    return Plan("inform", reply="Logged.")
+        return "escalate"
+    return "log"
 
+
+RULES["policy"] = Rule("d:policy", t.label("escalate", "log"), policy, version="1", reads=["d:out"])
 
 DESIGN = Design(
     name="lamps",
     state=t.record(text=t.string, streets=t.list_(t.string)),
     sources=SOURCES,
     rules=RULES,
-    policy=Policy(policy, version="1", reads=["d:out"]),
+    policy="d:policy",
 )
 
 
@@ -100,4 +100,4 @@ if __name__ == "__main__":
     loaded = load(DESIGN)
     for streets in (["Quay Street", "Elm Row"], []):
         decision = decide_sync(loaded, {"text": "x", "streets": streets}, {"default": binding})
-        print(decision.plan.kind, "| replay findings:", replay_sync(decision.record, loaded)[1])
+        print(decision.estimate, "| replay findings:", replay_sync(decision.record, loaded)[1])

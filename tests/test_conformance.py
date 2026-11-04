@@ -5,6 +5,7 @@ pass it, and a binding that breaks each rule fails the check that names it."""
 import asyncio
 import dataclasses
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -18,7 +19,6 @@ from ommat import (
     Cause,
     Failed,
     LoadedDesign,
-    PlanKind,
     SourceCall,
     Unavailable,
     Unsure,
@@ -76,7 +76,7 @@ def test_the_fixture_binding_passes_on_the_batches_its_record_answers(name: str)
 
 def test_from_record_passes_on_the_suites_own_batches() -> None:
     # The record holds none of the suite's sources, so every ref is unsupported, with a reason.
-    loaded, decision, _ = street_turn("execute")
+    loaded, decision, _ = street_turn("open-work-order")
     assert check(from_record(decision.record, loaded), deterministic=True) == []
 
 
@@ -100,7 +100,10 @@ def test_every_batch_interpret_builds_over_the_example_designs_passes() -> None:
     seen: list[Batch] = []
     for name in street.TURNS:
         loaded, decision, batches = street_turn(name)
-        assert decision.plan.kind is not PlanKind.broken
+        state = next(
+            i for i in decision.record.log if i["item"] == "entry" and i["ref"] == "t:state"
+        )
+        assert "value" in state  # the entry is not broken
         seen += batches
         assert check(from_record(decision.record, loaded), batches=batches) == []
     kinds = {q.kind for batch in seen for call in batch for q in call.questions.values()}
@@ -184,6 +187,31 @@ def test_a_binding_that_refuses_everything_passes_with_null_provenance() -> None
         return CallResult(dict.fromkeys(refs, marker), warnings=("no provider here",))
 
     assert check(refusing) == []
+
+
+def _with_usage(usage: Mapping[str, object]) -> BindingFn:
+    async def binding(batch: Batch, *, seconds: float) -> object:
+        result = await answering(batch, seconds=seconds)
+        assert isinstance(result, CallResult)
+        given = {f"usage.{key}" for key in usage}
+        missing = {d: r for d, r in (result.missing or {}).items() if d not in given}
+        return dataclasses.replace(result, usage=usage, missing=missing)
+
+    return binding
+
+
+def test_a_usage_of_the_closed_keys_passes() -> None:
+    usage = {"input_tokens": 10, "output_tokens": 3, "passes": 1}
+    assert check(_with_usage(usage), batches=_default_batches()[:1]) == []
+
+
+@pytest.mark.parametrize("key", ["cached_tokens", "total_tokens", ""])
+def test_a_usage_key_outside_the_closed_set_fails_the_provenance_check(key: str) -> None:
+    failures = check(_with_usage({"input_tokens": 1, key: 2}), batches=_default_batches()[:1])
+    assert any(
+        "usage is not null or a dict of input_tokens, output_tokens or passes" in f
+        for f in failures
+    )
 
 
 def test_a_failed_call_passes_but_is_never_deterministic() -> None:

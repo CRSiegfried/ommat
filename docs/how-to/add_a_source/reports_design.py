@@ -6,8 +6,6 @@ The how-to at docs/how-to/add-a-source.md wires it, and reports_run.py decides w
 from ommat import (
     Cause,
     Design,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Rule,
@@ -65,21 +63,29 @@ RULES = {
 }
 
 
-def route(r: ReadView) -> Plan:
-    """Log a report against the streets it names; escalate one that names none."""
+def route(r: ReadView) -> object:
+    """Log a report against the streets it names; hand on one that names none."""
     street = r.read("d:street")
     streets = r.read("d:streets")
     if isinstance(streets, MARKERS) or not streets:
-        return Plan("escalate", reason="the report names no street")
+        return Unsure(Cause("abstained", ["d:streets"]))
     if isinstance(street, MARKERS):
-        return Plan("inform", reply=f"Logged for {', '.join(streets)}; no one street stands out.")
-    return Plan("inform", reply=f"Logged for {street}.")
+        return {"log": streets}
+    return {"log": [street]}
 
+
+RULES["route"] = Rule(
+    "d:route",
+    t.record(log=t.list_(t.string)),
+    route,
+    version="1",
+    reads=["d:street", "d:streets"],
+)
 
 DESIGN = Design(
     name="lamp-reports",
     state=t.record(text=t.string),
     sources=SOURCES,
     rules=RULES,
-    policy=Policy(route, version="1", reads=["d:street", "d:streets"]),
+    policy="d:route",
 )

@@ -3,9 +3,7 @@ compatibility promise while it is validated. Install it with ``ommat[pydantic-ai
 
 ``to_model_messages(view)`` gives each source call and decide as a ``ModelResponse`` of tool
 calls and a ``ModelRequest`` of their returns, each message marked as ommat's bookkeeping in its
-``metadata``, which Pydantic AI never sends to a model; then the pending steps as a trailing
-``ModelResponse``, unmarked, since those are real actions. A history ending in those calls, run
-with no new user prompt, has the agent run them with its own tools. ``is_bookkeeping(message)``
+``metadata``, which Pydantic AI never sends to a model. ``is_bookkeeping(message)``
 reads the mark, and ``drop_earlier_bookkeeping`` is a history processor that keeps the latest
 record's bookkeeping and drops every earlier record's, each return with its call.
 """
@@ -38,20 +36,18 @@ def to_model_messages(
 ) -> list[ModelMessage]:
     """A ``transcript`` view as Pydantic AI messages, ``[]`` for ``None``: per group of calls a
     ``ModelResponse`` of ``ToolCallPart``s, then a ``ModelRequest`` of a ``ToolReturnPart`` per
-    call with a result, a failed source call's with ``outcome="failed"`` and decide's with
-    ``metadata`` ``{"record_hash", "design_hash"}``. The source calls' and decide's messages
-    carry ``metadata`` ``{"ommat": "bookkeeping", "record_hash"}``, with ``turn`` when given;
-    the pending calls' response carries none.
-    Every response carries ``model_name`` and ``provider_name``. ``turn`` stems every id, and is
-    held in the mark, as ``to_chat_completions`` says. Raises ``ValueError`` for a tool name no
-    provider takes, as ``to_chat_completions`` does."""
+    call, a failed source call's with ``outcome="failed"`` and decide's with ``metadata``
+    ``{"record_hash", "design_hash"}``. Every message carries ``metadata``
+    ``{"ommat": "bookkeeping", "record_hash"}``, with ``turn`` when given. Every response carries
+    ``model_name`` and ``provider_name``. ``turn`` stems every id, and is held in the mark, as
+    ``to_chat_completions`` says. Raises ``ValueError`` for a tool name no provider takes, as
+    ``to_chat_completions`` does."""
     check_turn(turn)
     if view is None:
         return []
     stamp = {"record_hash": view["record_hash"], "design_hash": view["design"]["hash"]}
     messages: list[ModelMessage] = []
     for group in exchanges(view, turn):
-        kept = all(call.result is not None for call in group)
         calls = [
             ToolCallPart(call.name, deepcopy(call.arguments), tool_call_id=call.id)
             for call in group
@@ -61,7 +57,7 @@ def to_model_messages(
                 parts=calls,
                 model_name=model_name,
                 provider_name=provider_name,
-                metadata=_marked(view["record_hash"], turn) if kept else None,
+                metadata=_marked(view["record_hash"], turn),
             )
         )
         returns = [
@@ -73,23 +69,18 @@ def to_model_messages(
                 outcome="failed" if call.failed else "success",
             )
             for call in group
-            if call.result is not None
         ]
-        if returns:
-            messages.append(
-                ModelRequest(parts=returns, metadata=_marked(view["record_hash"], turn))
-            )
+        messages.append(ModelRequest(parts=returns, metadata=_marked(view["record_hash"], turn)))
     return messages
 
 
 def is_bookkeeping(message: ModelMessage) -> bool:
     """Whether ``message`` is one ``to_model_messages`` marked as ommat's bookkeeping: a source
-    call or decide, or its return. A pending call's response, and anything the agent or the
-    model wrote, is not."""
+    call or decide, or its return. Anything the agent or the model wrote is not."""
     metadata = message.metadata
     if type(metadata) is not dict or metadata.get(_MARK) != BOOKKEEPING:
         return False
-    if isinstance(message, ModelRequest):  # a request merged with other parts is no longer ours
+    if isinstance(message, ModelRequest):  # a request merged with other parts is not ours
         return all(isinstance(part, ToolReturnPart) for part in message.parts)
     return all(isinstance(part, ToolCallPart) for part in message.parts)
 

@@ -13,8 +13,6 @@ from ommat import (
     Cause,
     CauseCode,
     Design,
-    Plan,
-    Policy,
     Question,
     Record,
     Rule,
@@ -37,8 +35,11 @@ SET = "t:sender_candidates"
 FIXED = ["none", "several"]
 
 
-def inform(r: Any) -> Plan:
-    return Plan("inform", reply="ok")
+def inform(r: Any) -> str:
+    return "ok"
+
+
+ACT = Rule("d:act", t.string, inform, version="1")
 
 
 def asks(
@@ -64,7 +65,8 @@ def design(pick: Source | None = None, **sources: Source) -> Design:
         name="label-sets",
         state=t.record(candidates=t.list_(t.string)),
         sources={"finder": finder, "pick": asks() if pick is None else pick, **sources},
-        policy=Policy(inform, version="1"),
+        rules={"act": ACT},
+        policy="d:act",
     )
 
 
@@ -211,7 +213,8 @@ def rule_set(function: Any) -> Design:
                 version="1",
                 reads=["t:state"],
                 candidates=True,
-            )
+            ),
+            "act": ACT,
         },
         policy=base.policy,
     )
@@ -446,7 +449,8 @@ def versioned(function: Any, version: str) -> Design:
                 version=version,
                 reads=list(rule.reads),
                 candidates=True,
-            )
+            ),
+            "act": ACT,
         },
         policy=d.policy,
     )
@@ -541,6 +545,7 @@ def test_an_open_set_shows_its_candidates_in_the_set_and_the_answer() -> None:
         name=d.name,
         state=d.state,
         sources=d.sources,
+        rules=d.rules,
         policy=d.policy,
         classes={SET: "open"},
     )
@@ -565,13 +570,13 @@ def picked(r: Any) -> Any:
     return pick_with_margin(r, "q:sender", 0.6, 0.2)
 
 
-def mark_if_named(r: Any) -> Plan:
+def mark_if_named(r: Any) -> str:
     from ommat import Undetermined
 
     sender = r.read("d:sender")
     if isinstance(sender, Undetermined) or sender in FIXED:
-        return Plan("clarify", reply="Who?")
-    return Plan("inform", reply="named")
+        return "clarify"
+    return "named"
 
 
 def lint_design(*, pick_reads_other: bool = False) -> Design:
@@ -582,8 +587,9 @@ def lint_design(*, pick_reads_other: bool = False) -> Design:
         sources={"finder": finder, "pick": asks()},
         rules={
             "sender": Rule("d:sender", t.string, picked, version="1", reads=["q:sender"]),
+            "act": Rule("d:act", t.string, mark_if_named, version="1", reads=["d:sender"]),
         },
-        policy=Policy(mark_if_named, version="1", reads=["d:sender"]),
+        policy="d:act",
     )
 
 
@@ -627,7 +633,7 @@ def test_a_candidate_valued_question_that_changes_nothing_is_not_on_grid() -> No
     from ommat.helpers import dead_questions
 
     d = lint_design()
-    d = Design(name=d.name, state=d.state, sources=d.sources, policy=Policy(inform, version="1"))
+    d = Design(name=d.name, state=d.state, sources=d.sources, rules={"act": ACT}, policy="d:act")
     report = dead_questions(load(d), values=SETS)
     assert report["questions"]["q:sender"] == {"status": "not-on-grid", "witness": None}
 
@@ -637,14 +643,6 @@ def test_a_candidate_set_with_no_values_is_unfilled_before_any_run() -> None:
 
     with pytest.raises(ValueError, match=SET):
         dead_questions(load(lint_design()))
-
-
-def test_the_unsure_lint_runs_over_a_candidate_valued_design() -> None:
-    from ommat.helpers import unsure_to_execute
-
-    values = {**SETS, "d:sender": ["ana@x.org", "none"]}
-    report = unsure_to_execute(load(lint_design()), values=values)
-    assert report["execute"] == []
 
 
 # ---------------------------------------------------------------------------------------------
@@ -783,14 +781,15 @@ def test_the_dead_lint_takes_the_first_candidate_at_its_position() -> None:
 
 @pytest.mark.parametrize("kind", ["score", "noul"])
 def test_only_a_choice_may_be_candidate_valued(kind: str) -> None:
-    from ommat import InvalidDesign, Plan, Policy, Text
+    from ommat import InvalidDesign, Text
 
     q = Question(kind, Text("Which?"), {"fixed": ["a", "b"], "candidates": SET})
     d = Design(
         name="kinds",
         state=t.record(),
         sources={"ask": Source({"q:which": q})},
-        policy=Policy(lambda r: Plan("inform", reply="ok"), version="1"),
+        rules={"act": ACT},
+        policy="d:act",
     )
     with pytest.raises(InvalidDesign, match="only a choice may have"):
         load(d)
@@ -817,12 +816,15 @@ def routed(*rows: Any, inputs: Any = None) -> Design:
         name=d.name,
         state=d.state,
         sources=d.sources,
-        rules={"route": route},
+        rules={
+            "route": route,
+            "act": Rule("d:act", t.string, inform, version="1", reads=["d:route"]),
+        },
         parameters={
             "bar": Parameter(t.number(0, 1), 0.6),
             "margin": Parameter(t.number(0, 1), 0.2),
         },
-        policy=Policy(inform, version="1", reads=["d:route"]),
+        policy="d:act",
     )
 
 
@@ -865,19 +867,19 @@ def test_a_value_cell_over_a_bare_string_still_fails_check_9() -> None:
 def test_the_dead_lint_reaches_a_fixed_label_row() -> None:
     from ommat.helpers import dead_questions
 
-    def by_route(r: Any) -> Plan:
+    def by_route(r: Any) -> str:
         if r.read("d:route") == "none":
-            return Plan("clarify", reply="Who?")
-        return Plan("inform", reply="ok")
+            return "clarify"
+        return "ok"
 
     d = routed()
     d = Design(
         name=d.name,
         state=d.state,
         sources=d.sources,
-        rules=d.rules,
+        rules={**d.rules, "act": Rule("d:act", t.string, by_route, version="1", reads=["d:route"])},
         parameters=d.parameters,
-        policy=Policy(by_route, version="1", reads=["d:route"]),
+        policy=d.policy,
     )
     report = dead_questions(load(d), values={**SETS, "t:state.candidates": [[]]})
     assert report["questions"]["q:sender"]["status"] == "live"

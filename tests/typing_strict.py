@@ -1,13 +1,12 @@
 """Plain literals and lambdas pass the public constructors under pyright strict: this module
 is checked, never collected, and test_package imports it so it runs."""
 
-from ommat import Origin, Plan, Policy, Rule, Source, Step, When
+from ommat import Design, Rule, Source, Table, When
 from ommat import types as t
 
 when = When(lambda r: r.read("d:x") == "y", version="1")
 rule = Rule("d:x", t.string, function=lambda r: r.read("t:state.subject"), version="1")
-policy = Policy(lambda r: Plan("escalate", reason="x"), version="1")
-args = {"days": Origin(ref="t:state.days")}
-step = Step("t", args)
+act = Table("d:act", t.label("send", "hold"), "F", ["d:x"], [["y", "send"], ["-", "hold"]])
 needs = ["t:state"]
 source = Source({"t:y": t.string}, needs=needs, when=when)
+design = Design(t.record(subject=t.string), "d:act", rules={"x": rule, "act": act})

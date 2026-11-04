@@ -1,8 +1,9 @@
 # pyright: reportPrivateUsage=false
-"""Format 3: a stored format-2 design and record read under format 2's rules to their own hash;
-label descriptions at load, in the document, the call and the record; a call's warnings and
-precision; the binding's ``unsupported`` refusal; the record document's ``hash``; the edited
-tracebacks; and the ledger's refusal of each format-3 form under formats 1 and 2."""
+"""Format 3: a stored format-2 record read under format 2's rules to its own hash, and its
+design refused at load; label descriptions at load, in the document, the call and the record; a
+call's warnings and precision; the binding's ``unsupported`` refusal; the record document's
+``hash``; the edited tracebacks; and the ledger's refusal of each format-3 form under formats 1
+and 2."""
 
 import copy
 import dataclasses
@@ -19,7 +20,7 @@ from typing import Any, cast
 import pytest
 
 from counting import SmallBounds
-from designs import bounded, document_before_key_order, minimal, slot, with_source
+from designs import bounded, minimal, slot, with_source
 from ledger_logs import DESCRIBED, UNHASHED, fresh, rehashed
 from ommat import (
     CallResult,
@@ -31,8 +32,6 @@ from ommat import (
     InvalidDesign,
     InvalidRecord,
     LoadedDesign,
-    Plan,
-    Policy,
     Question,
     Record,
     RenderedQuestion,
@@ -59,6 +58,7 @@ from ommat._values import MAX_DOCUMENT_DEPTH
 from ommat.helpers import pick_with_margin
 from ommat.helpers._points import filled
 from scripted import sleeping, unsupported
+from test_views import digest
 
 FORMAT_2 = Path(__file__).parent / "format_2"
 FORMAT_2_DESIGN = "sha256:56f74e4909ca929686a9ec747af56e98ced7a47774c2a43463113a6a61e0a9f4"
@@ -71,20 +71,15 @@ Batch = tuple[SourceCall, ...]
 # The stored format-2 design and record
 
 
-def format_2_design() -> LoadedDesign:
-    return load((FORMAT_2 / "design.json").read_bytes())
-
-
 def format_2_record() -> Record:
     return read_record((FORMAT_2 / "record.json").read_bytes())
 
 
-def test_a_format_2_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
-    data = (FORMAT_2 / "design.json").read_bytes()
-    loaded = load(data)
-    assert loaded.design_hash == FORMAT_2_DESIGN
-    assert loaded.document == data
-    assert decode(loaded.document)["format"] == 2
+def test_check_11_refuses_the_stored_format_2_design_naming_its_format() -> None:
+    with pytest.raises(InvalidDesign) as info:
+        load((FORMAT_2 / "design.json").read_bytes())
+    assert [f.check for f in info.value.failures] == [11]
+    assert "the document's format 2 is not 10" in str(info.value)
 
 
 def test_a_format_2_record_reads_back_to_its_own_hash_with_no_hash_member() -> None:
@@ -98,28 +93,10 @@ def test_a_format_2_record_reads_back_to_its_own_hash_with_no_hash_member() -> N
     assert "precision" not in call
 
 
-def test_a_format_2_record_replays_under_its_format_2_design_with_the_helper_version_alone() -> (
-    None
-):
-    again, findings = replay_sync(format_2_record(), format_2_design())
-    assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3}]
-    assert again is not None
-    assert again.log[0]["format"] == 7  # the engine writes its own format
-    assert decode(again.document)["hash"] == again.record_hash
-
-
-def test_a_format_2_record_under_the_current_design_is_design_and_helper_mismatch() -> None:
+def test_a_format_2_record_under_the_current_design_is_wrong_design() -> None:
     from test_decide import LOADED
 
-    _, findings = replay_sync(format_2_record(), LOADED)
-    assert findings == [
-        {
-            "kind": FindingKind.design_mismatch,
-            "recorded": FORMAT_2_DESIGN,
-            "replayed": LOADED.design_hash,
-        },
-        {"kind": FindingKind.helpers_mismatch, "recorded": 2, "replayed": 3},
-    ]
+    assert replay_sync(format_2_record(), LOADED) == (None, [{"kind": FindingKind.wrong_design}])
 
 
 def test_an_undescribed_question_keeps_its_identity_across_formats() -> None:
@@ -130,18 +107,6 @@ def test_an_undescribed_question_keeps_its_identity_across_formats() -> None:
         return cast(str, call["questions"]["q:spam"]["identity"])
 
     assert identity(go().record) == identity(format_2_record())
-
-
-def test_a_format_2_design_decides_a_turn_at_the_engines_format() -> None:
-    stored_state = format_2_record().log[2]["value"]
-
-    async def nothing(batch: Batch, *, seconds: float) -> object:
-        return None
-
-    record = decide_sync(
-        format_2_design(), stored_state, {"mail": nothing, "default": nothing}
-    ).record
-    assert record.log[0] == {"item": "design", "hash": FORMAT_2_DESIGN, "format": 7, "helpers": 3}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -159,10 +124,6 @@ def tone(r: Any) -> Any:
 def other(r: Any) -> Any:
     r.read("q:other")
     return True
-
-
-def inform(r: Any) -> Plan:
-    return Plan("inform", reply="ok")
 
 
 def tone_question(labels: Any = (WARM, "cold"), kind: str = "choice") -> Question:
@@ -186,7 +147,6 @@ def described(question: Question | None = None, **changes: Any) -> Design:
             "tone": Rule("d:tone", t.label("cold", "warm"), tone, version="1", reads=["q:tone"]),
             "other": Rule("d:other", t.boolean, other, version="1", reads=["q:other"]),
         },
-        "policy": Policy(inform, version="1"),
     }
     fields.update(changes)
     return minimal(**fields)
@@ -262,7 +222,7 @@ def test_a_described_design_loads_and_writes_its_labels_as_declared() -> None:
     loaded = load(described())
     asked = decode(loaded.document)["sources"]["ask"]["provides"]["q:tone"]
     assert asked["labels"] == [WARM, "cold"]
-    assert decode(loaded.document)["format"] == 9
+    assert decode(loaded.document)["format"] == 10
     assert loaded._labels["q:tone"] == (("warm", "cold"), ("Friendly or grateful", None))
     assert loaded._labels["q:other"] == (("yes", "no"), (None, None))
 
@@ -436,13 +396,6 @@ def check_11(doc: dict[str, Any]) -> str:
     return failure.message
 
 
-@pytest.mark.parametrize("fmt", [1, 2])
-def test_check_11_refuses_a_described_label_in_an_earlier_format(fmt: int) -> None:
-    doc = document_before_key_order(document_of(described()), fmt)
-    del doc["context"]  # a design before format 5 holds no block
-    assert f"has a described label, which format {fmt} does not have" in check_11(doc)
-
-
 def test_check_11_refuses_a_described_label_with_a_member_missing_or_extra() -> None:
     doc = document_of(described())
     del tone_labels(doc)[0]["description"]
@@ -450,13 +403,6 @@ def test_check_11_refuses_a_described_label_with_a_member_missing_or_extra() -> 
     doc = document_of(described())
     tone_labels(doc)[0]["colour"] = "red"
     assert 'has the member "colour", which its form does not have' in check_11(doc)
-
-
-def test_a_format_2_document_with_undescribed_labels_loads() -> None:
-    doc = document_before_key_order(document_of(described(tone_question(["warm", "cold"]))), 2)
-    del doc["context"]  # a design before format 5 holds no block
-    loaded = load(doc)
-    assert decode(loaded.document)["format"] == 2
 
 
 # ---------------------------------------------------------------------------------------------
@@ -612,9 +558,9 @@ def test_a_late_result_keeps_no_warnings() -> None:
 def test_redact_digests_the_warnings_as_one_value() -> None:
     record = ran(answering(warnings=("one", "two")))
     view = decode(redact(record, bytes(range(32))))
-    from test_views import digest
-
-    assert view["unhashed"]["calls"]["3"]["warnings"] == digest(["one", "two"], record)
+    (key,) = record.unhashed["calls"]
+    assert record.log[int(key)]["item"] == "call"
+    assert view["unhashed"]["calls"][key]["warnings"] == digest(["one", "two"], record)
     assert view["hash"] == record.record_hash
 
 
@@ -696,9 +642,9 @@ def passing_tone(r: Any) -> Any:
     return tone(r)
 
 
-def requiring_tone(r: Any) -> Plan:
+def requiring_tone(r: Any) -> bool:
     r.require("d:tone")
-    return Plan("inform", reply="ok")
+    return True
 
 
 def test_a_rule_passing_an_unsupported_marker_through_writes_it_and_a_require_escalates() -> None:
@@ -707,16 +653,17 @@ def test_a_rule_passing_an_unsupported_marker_through_writes_it_and_a_require_es
             "d:tone", t.label("cold", "warm"), passing_tone, version="1", reads=["q:tone"]
         ),
         "other": Rule("d:other", t.boolean, other, version="1", reads=["q:other"]),
+        "decision": Rule("d:decision", t.boolean, requiring_tone, version="1", reads=["d:tone"]),
     }
-    policy = Policy(requiring_tone, version="1", reads=["d:tone"])
-    record = ran(unsupported(), load(described(rules=rules, policy=policy)))
+    record = ran(unsupported(), load(described(rules=rules)))
     assert entry(record, "d:tone")["marker"] == {
         "kind": "Unavailable",
         "cause": {"code": "unsupported", "refs": ["q:tone"]},
     }
-    plan = next(i for i in record.log if i["item"] == "plan")
-    assert plan["kind"] == "escalate"
-    assert plan["cause"]["code"] == "required"
+    assert entry(record, "d:decision")["marker"] == {
+        "kind": "Unavailable",
+        "cause": {"code": "required", "refs": ["d:tone"]},
+    }
 
 
 def test_an_unsupported_turn_replays_with_no_finding() -> None:
@@ -741,9 +688,9 @@ def test_a_format_3_document_holds_its_record_hash() -> None:
 def test_the_hash_is_recomputed_at_the_read_and_a_mismatch_refused() -> None:
     record = ran()
     doc = json.loads(record.document)
-    doc["log"][-1]["kind"] = "refused"  # an edit made without recomputing the hash
-    doc["log"][-1]["failures"] = [{"step": "plan", "requirement": None, "ref": None}]
-    with pytest.raises(InvalidRecord):
+    decision = next(i for i in doc["log"] if i.get("ref") == "d:decision")
+    decision["value"] = False  # an edit made without recomputing the hash
+    with pytest.raises(InvalidRecord, match="is not its log's record hash"):
         read_record(doc)
     doc = json.loads(record.document)
     doc["log"][2]["value"]["body"] = "edited"
@@ -955,7 +902,7 @@ def broken_rule(r: Any) -> Any:
     raise ValueError("the rule broke")
 
 
-def broken_policy(r: Any) -> Plan:
+def broken_policy(r: Any) -> bool:
     raise ValueError("the policy broke")
 
 
@@ -1001,7 +948,8 @@ def test_a_helpers_frames_inside_a_rule_are_kept() -> None:
 
 
 def test_a_raising_policys_traceback_starts_at_the_policy() -> None:
-    text = text_of(ran(loaded=load(described(policy=Policy(broken_policy, version="1")))))
+    policy = Rule("d:decision", t.boolean, broken_policy, version="1")
+    text = text_of(ran(loaded=load(described(rules={**described().rules, "decision": policy}))))
     names = frames(text)
     assert names[0] == "test_format_3"
     assert not any(n.startswith("ommat") for n in names)
@@ -1119,8 +1067,8 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden described record
 
-GOLDEN_DESIGN = "sha256:79ad5e48da93e7c30a99f1095f268c8379a3d7f061b682a4a67d003f3f89e370"
-GOLDEN_RECORD = "sha256:8aa1b1aeb6e633a49461a762a05a76c319eefd5cf8c8e278c60992828cebf38f"
+GOLDEN_DESIGN = "sha256:c887a76113f5675949a93968e450a67a53b38617ea656458412e696b3acb8fd6"
+GOLDEN_RECORD = "sha256:f6139af34a6eb572dbcd835363c4690f04617485c28364ff1fb9b1794e8f4c59"
 
 
 def golden() -> Record:
@@ -1129,6 +1077,12 @@ def golden() -> Record:
 
 def test_the_golden_described_record() -> None:
     record = golden()
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 8, "helpers": 3}
+    assert record.log[1]["policy"] == "d:decision"
+    assert entry(record, "d:tone")["value"] == "warm"
+    assert entry(record, "d:decision")["value"] is True
+    assert call_of(record)["precision"] == 2
+    assert calls_entry(record)["warnings"] == ["rounded to 2 places"]
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)
     assert decode(record.document)["hash"] == GOLDEN_RECORD
 

@@ -15,9 +15,9 @@ source with no oracle is a batch of one through ``default``.
 
 Three ends share one path: at the round bound after the rule phase, and at the budget or the
 deadline in the source phase with no rule phase first, the pending sources are ``Unasked`` and
-the sorter is drained. The budget is tested before a frontier is asked, then the
-deadline, which is tested again when the frontier's task group closes; under replay the recorded cut
-stands in for the clock.
+the sorter is drained: the drain fires every unfired rule, the policy among them. The budget is
+tested before a frontier is asked, then the deadline, which is tested again when the frontier's
+task group closes; under replay the recorded cut stands in for the clock.
 
 Two boards: the live one the views and the needs read holds an ``Answer`` or an
 ``ExtractionAnswer`` for a ``q:`` ref and Python ``bytes`` for a ``bytes`` value; the ledger is
@@ -25,8 +25,6 @@ handed plain data.
 """
 
 import asyncio
-import contextvars
-import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -65,6 +63,7 @@ from ommat._provenance import (
     REASONS,
     precision_conforms,
     string_conforms,
+    usage_conforms,
     versions,
     versions_conform,
 )
@@ -625,25 +624,13 @@ def _binding_marker(ref: str, value: object) -> Unavailable:
     return Unavailable(Cause(_C.invalid_return, [ref]))
 
 
-def _finite_number(value: object) -> bool:
-    if type(value) is int:
-        return abs(value) <= MAX_INTEGER
-    return type(value) is float and math.isfinite(value)
-
-
 def _usage(value: object, invalid: dict[str, str]) -> dict[str, float] | None:
-    """A ``usage`` of the right type, else null with the value kept in ``invalid``."""
+    """A ``usage`` copied when it conforms (``usage_conforms``), else null with the value kept
+    in ``invalid``."""
     if value is None:
         return None
-    # In the domain, size bounds included, each key's length tested before its code points.
-    if type(value) is dict and domain_error(cast(object, value)) is None:
-        out: dict[str, float] = {}
-        for key, number in cast("dict[object, object]", value).items():
-            if type(key) is not str or not _finite_number(number):
-                break
-            out[key] = cast(float, number)
-        else:
-            return out
+    if type(value) is dict and usage_conforms(cast("dict[object, object]", value)):
+        return dict(cast("dict[str, float]", value))
     invalid["usage"] = guarded_repr(cast(object, value))
     return None
 
@@ -767,11 +754,6 @@ def _render(template: str, values: Mapping[str, object]) -> str:
     return "".join(out)
 
 
-SORTED_TEXT: contextvars.ContextVar[bool] = contextvars.ContextVar("sorted_text", default=False)
-"""Set by replay over a record before format 6, whose engine wrote slot text in canonical key
-order, so its rerun renders as the turn did."""
-
-
 def _text(value: object) -> str:
     """A slot value by the declared-text closed rule: a string as itself, a list as its
     members' renderings joined by ``, ``, any other value as its ordered encoding, each object in
@@ -780,8 +762,6 @@ def _text(value: object) -> str:
         return value
     if type(value) in (list, tuple):
         return ", ".join(_text(member) for member in cast("Sequence[object]", value))
-    if SORTED_TEXT.get():
-        return encode(_record_form(value)).decode("utf-8")
     return ordered(_record_form(value))
 
 
@@ -840,7 +820,7 @@ class _Turn:
         self.document = cast("dict[str, Any]", decode(loaded.document))["sources"]
 
     async def run(self) -> dict[str, object]:
-        """Run the rounds and return the live board, which compile reads."""
+        """Run the rounds and return the live board, which decide reads."""
         held = self.rule_phase(0)
         n = 0
         while held:  # the fixpoint: no source held after a rule phase

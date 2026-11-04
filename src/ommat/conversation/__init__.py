@@ -1,13 +1,10 @@
 """The conversation renderers: a view rendered for an LLM conversation, outside the
 compatibility promise while they are validated.
 
-``handoff_text(handoff)`` renders a ``handoff`` view as plain text, for the caller to place as
-instructions, a system or developer message, or fenced user content. ``to_chat_completions(view)``
-renders a ``transcript`` view as Chat Completions messages: each source call and decide as a tool
-call and its result, then the pending steps as calls with no result. A renderer words nothing:
-each sentence it gives is a plan's ``reason`` or ``reply`` or a context entry's text.
+``to_chat_completions(view)`` renders a ``transcript`` view as Chat Completions messages: each
+source call and decide as a tool call and its result. A renderer words nothing.
 ``is_bookkeeping`` and ``drop_earlier_bookkeeping`` tell ommat's bookkeeping, its source calls
-and decide, from the pending steps and the model's own messages, by the transcript's ids.
+and decide, from the model's own messages, by the transcript's ids.
 ``ommat.conversation.pydantic_ai`` renders a transcript as Pydantic AI messages. ``import ommat``
 does not import this package, and this module takes nothing beyond the standard library.
 """
@@ -17,43 +14,7 @@ from typing import Any, cast
 from ommat._canonical import ordered
 from ommat.conversation._exchanges import BOOKKEEPING_ID, check_turn, exchanges
 
-__all__ = ["drop_earlier_bookkeeping", "handoff_text", "is_bookkeeping", "to_chat_completions"]
-
-
-def handoff_text(handoff: dict[str, Any] | None) -> str:
-    """A ``handoff`` view as labelled lines, ``""`` for ``None`` or a view that gives none:
-    ``Plan:``; ``Verdict:``, ``Reason:`` and ``Reply:`` where not null; ``Step <n>:`` with its
-    tool and tagged arguments as JSON; each entry's text, or ``<ref>: <kind> (<cause code>)``
-    for a marker entry; ``Design:`` with its name, where there is one, and hash; ``Record:``.
-    Texts are written as they are, so a text holding a newline can read as a line of its own:
-    fence the whole as data where a slot or argument reads free text."""
-    if handoff is None:
-        return ""
-    lines: list[str] = []
-    plan = cast("dict[str, Any] | None", handoff.get("plan"))
-    if plan is not None:
-        if "kind" in plan:
-            lines.append(f"Plan: {plan['kind']}")
-            if plan["verdict"] is not None:
-                lines.append(f"Verdict: {plan['verdict']}")
-            if plan["reason"] is not None:
-                lines.append(f"Reason: {plan['reason']}")
-            if plan["reply"] is not None:
-                lines.append(f"Reply: {plan['reply']}")
-        for n, step in enumerate(cast("list[dict[str, Any]]", plan.get("steps", [])), 1):
-            lines.append(f"Step {n}: {step['tool']} {_json(step['arguments'])}")
-    for entry in cast("list[dict[str, Any]]", handoff["context"]):
-        marker = entry["marker"]
-        if marker is None:
-            lines.append(cast(str, entry["text"]))
-        else:
-            lines.append(f"{entry['ref']}: {marker['kind']} ({marker['cause']['code']})")
-    if "design" in handoff:
-        design = cast("dict[str, Any]", handoff["design"])
-        named = design["hash"] if design["name"] is None else f"{design['name']} {design['hash']}"
-        lines.append(f"Design: {named}")
-        lines.append(f"Record: {handoff['record_hash']}")
-    return "\n".join(lines)
+__all__ = ["drop_earlier_bookkeeping", "is_bookkeeping", "to_chat_completions"]
 
 
 def to_chat_completions(
@@ -61,12 +22,11 @@ def to_chat_completions(
 ) -> list[dict[str, Any]]:
     """A ``transcript`` view as Chat Completions messages, ``[]`` for ``None``: per group of calls
     an assistant message with null ``content`` and its ``tool_calls``, then a ``tool`` message per
-    call with a result. Every argument and result is in the ordered encoding, each object in the
-    order the record holds it, so a record renders to the same bytes each time. Raises
-    ``ValueError`` for a tool name no provider takes: a source or pending tool named ``decide``,
-    a pending tool outside ``[A-Za-z0-9_-]``, or a name over 64 characters. ``turn``, exactly a
-    ``str`` or an ``int`` the canonical encoding takes, else ``ValueError``, gives every id a
-    stem hashed from the record hash and the turn, so one record rendered for two turns of a
+    call. Every argument and result is in the ordered encoding, each object in the order the
+    record holds it, so a record renders to the same bytes each time. Raises ``ValueError`` for a
+    tool name no provider takes: a source named ``decide`` or a name over 64 characters. ``turn``,
+    exactly a ``str`` or an ``int`` the canonical encoding takes, else ``ValueError``, gives every
+    id a stem hashed from the record hash and the turn, so one record rendered for two turns of a
     conversation repeats no id; ``None`` keeps the transcript's ids."""
     check_turn(turn)
     if view is None:
@@ -83,17 +43,15 @@ def to_chat_completions(
         ]
         messages.append({"role": "assistant", "content": None, "tool_calls": calls})
         for call in group:
-            if call.result is not None:
-                messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": _json(call.result)}
-                )
+            content = _json(call.result)
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
     return messages
 
 
 def is_bookkeeping(message: dict[str, Any]) -> bool:
     """Whether a Chat Completions ``message`` is ommat's bookkeeping, a source call or decide or
     its result, read from the transcript's ids: an assistant message with no text whose every
-    tool call has one, or a ``tool`` message answering one. A pending call is not bookkeeping."""
+    tool call has one, or a ``tool`` message answering one."""
     if message.get("role") == "tool":
         return _bookkept(message.get("tool_call_id"))
     if message.get("role") != "assistant" or message.get("content") not in (None, ""):

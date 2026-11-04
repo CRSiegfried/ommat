@@ -79,9 +79,9 @@ gets depends on what the gate holds:
 The driver runs one turn for each of the first three:
 
 ```text
-'I want my money back, 40 euros': gate refund; refund source asked; plan inform
-'Why was I charged twice?': gate billing; refund source Unasked (when-false: d:intent_label); plan inform
-'Hello?': gate Unsure; refund source Unasked (need-undetermined: d:intent_label); plan escalate
+'I want my money back, 40 euros': gate refund; refund source asked; decision queue_refund
+'Why was I charged twice?': gate billing; refund source Unasked (when-false: d:intent_label); decision note
+'Hello?': gate Unsure; refund source Unasked (need-undetermined: d:intent_label); decision Unsure(kind=<MarkerKind.unsure: 'Unsure'>, cause=Cause(code=<CauseCode.abstained: 'abstained'>, refs=('q:ask/intent',)))
 ```
 
 Read the gated estimate for a value only on the branch where the gate held, so a turn the gate
@@ -89,10 +89,10 @@ closed is not taken for a missing answer:
 
 ```python
     if intent != "refund":
-        return Plan("inform", reply="Noted.")
+        return "note"
     # Only a refund asked the gated question, so only here is its estimate read for a value.
     if r.read("d:amount_stated") == "yes":
-        return Plan("inform", reply="A refund with its amount: queued for review.")
+        return "queue_refund"
 ```
 
 ## What load refuses

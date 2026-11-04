@@ -30,10 +30,10 @@ def test_a_call_result_takes_its_provenance_by_keyword_only() -> None:
     with pytest.raises(TypeError):
         CallResult({}, "snap")  # pyright: ignore[reportCallIssue]
     result = CallResult(
-        {}, revision="m-1", elicitation="e", prompt="p", usage={"in": 3}, attempts=2
+        {}, revision="m-1", elicitation="e", prompt="p", usage={"input_tokens": 3}, attempts=2
     )
     assert (result.revision, result.elicitation, result.prompt) == ("m-1", "e", "p")
-    assert (result.usage, result.attempts) == ({"in": 3}, 2)
+    assert (result.usage, result.attempts) == ({"input_tokens": 3}, 2)
 
 
 def test_a_call_result_checks_nothing_when_built() -> None:

@@ -20,8 +20,6 @@ from ommat import (
     InvalidDesign,
     InvalidRecord,
     LoadedDesign,
-    Plan,
-    Policy,
     Question,
     ReadView,
     Record,
@@ -68,8 +66,8 @@ def out(r: ReadView) -> object:
     return [name for name, pick in picks.items() if pick == "yes"]
 
 
-def plan(r: ReadView) -> Plan:
-    return Plan("inform", reply=f"out: {r.read('d:out')}")
+def act(r: ReadView) -> str:
+    return f"out: {r.read('d:out')}"
 
 
 def design(**changes: Any) -> Design:
@@ -99,8 +97,9 @@ def design(**changes: Any) -> Design:
                 ["t:state.who", SET],
                 [["in d:people", "-", True], ["-", "-", False]],
             ),
+            "act": Rule("d:act", t.string, act, version="1", reads=["d:out", "d:known"]),
         },
-        "policy": Policy(plan, version="1", reads=["d:out", "d:known"]),
+        "policy": "d:act",
         "classes": {SET: {"name": "identifier"}},
     }
     fields.update(changes)
@@ -149,7 +148,7 @@ def failures(d: Design) -> list[tuple[int, str]]:
 def test_a_record_set_loads_with_its_candidate_field() -> None:
     assert dict(LOADED._candidate_sets) == {SET: "name"}
     doc = json.loads(LOADED.document)
-    assert doc["format"] == 9
+    assert doc["format"] == 10
     assert doc["rules"]["people"]["candidates"] == "name"
 
 
@@ -224,27 +223,6 @@ def test_check_form_refuses_a_candidates_member_of_another_type() -> None:
 def test_check_1_refuses_a_name_spelt_candidate() -> None:
     found = failures(with_rule(minimal(), "candidate", rule("candidate")))
     assert (1, 'rule "candidate" is the name a grounded component reads') in found
-
-
-def test_check_11_refuses_a_format_7_document_naming_a_candidate_field() -> None:
-    doc = json.loads(LOADED.document)
-    doc["format"] = 7
-    with pytest.raises(InvalidDesign) as info:
-        load(doc)
-    assert [f.check for f in info.value.failures] == [11]
-    assert 'rule "people" names a candidate field, which format 7 does not have' in str(info.value)
-
-
-def test_check_11_refuses_a_format_7_t_provision_naming_a_candidate_field() -> None:
-    sources = {
-        "lookup": Source({"t:people": {"type": PEOPLE, "candidates": "name"}}, needs=["t:state"])
-    }
-    doc = json.loads(load(minimal(sources=sources)).document)
-    doc["format"] = 7
-    with pytest.raises(InvalidDesign) as info:
-        load(doc)
-    assert [f.check for f in info.value.failures] == [11]
-    assert '"t:people" names a candidate field, which format 7 does not have' in str(info.value)
 
 
 def in_table(ref: str, who: str = "t:state.who") -> Table:
@@ -355,9 +333,23 @@ def test_the_settings_item_names_each_set_s_field() -> None:
 
 
 def test_a_list_string_set_is_null_under_sets() -> None:
-    from format_7_design import DESIGN, STATE, binding
+    def streets(r: ReadView) -> object:
+        return r.read("t:state.streets")
 
-    record = decide_sync(load(DESIGN), STATE, {"model": binding}).record
+    d = minimal(
+        state=t.record(streets=t.list_(t.string)),
+        rules={
+            "streets": Rule(
+                "d:streets",
+                t.list_(t.string),
+                streets,
+                version="1",
+                reads=["t:state.streets"],
+                candidates=True,
+            )
+        },
+    )
+    record = decide_sync(load(d), {"streets": ["Elm Row"]}, {"default": answer}).record
     assert record.log[1]["sets"] == {"d:streets": None}
 
 
@@ -482,12 +474,9 @@ def test_from_record_takes_a_label_set_whose_other_fields_changed() -> None:
 
 
 def test_the_ledger_refuses_sets_in_a_format_5_record() -> None:
-    from format_6_design import DESIGN as PLAIN
-    from format_6_design import STATE as PLAIN_STATE
-    from format_6_design import binding as plain_binding
     from ledger_logs import before_key_order
 
-    record = decide_sync(load(PLAIN), PLAIN_STATE, {"default": plain_binding}).record
+    record = decided()
     doc = before_key_order(
         {"log": copy.deepcopy(record.log), "unhashed": copy.deepcopy(record.unhashed)}, 5
     )
@@ -498,19 +487,14 @@ def test_the_ledger_refuses_sets_in_a_format_5_record() -> None:
 
 
 def test_a_slot_on_a_record_set_renders_its_candidate_values() -> None:
-    from ommat import Context, ContextEntry
-
     ask = Source(
         {"q:all/ok": Question("noul", Text("All {all} ok?", [slot("all", ref=SET)]))},
         needs=[SET],
     )
     d = design(
         sources={**design().sources, "all": ask},
-        context=Context([ContextEntry(SET, Text("E {x}", [slot("x", ref=SET)]))]),
         classes={},
     )
-    record = decided(loaded=load(d))
+    decided(loaded=load(d))
     found = [s for b in ASKED for s in b if "q:all/ok" in s.questions]
     assert found[0].questions["q:all/ok"].wording == "All Ana, Bo ok?"
-    plan = next(i for i in record.log if i["item"] == "plan")
-    assert plan["context"]["entries"][0]["text"] == "E Ana, Bo"

@@ -17,30 +17,24 @@ import pytest
 import extraction as x
 import test_grounded_rules as grounded
 from designs import minimal, slot
+from ledger_logs import rehashed
 from ommat import (
     CallResult,
-    Context,
-    ContextEntry,
+    Cause,
     Helper,
     Input,
     InvalidDesign,
     InvalidRecord,
     LoadedDesign,
-    Origin,
     Param,
     Parameter,
-    Plan,
-    PlanDeclaration,
-    Policy,
-    PolicyTable,
     Question,
     Record,
-    Requirement,
     Rule,
     Source,
-    Step,
     Table,
     Text,
+    Unsure,
     decide_sync,
     load,
     read_record,
@@ -60,7 +54,7 @@ from ommat.evaluation import (
 )
 from scripted import Scripted, returns
 from test_decide import LOADED
-from test_use_answers import broken, unfinished
+from test_use_answers import broken, format_7, unfinished
 
 R = RefusalReason
 KIND = "switching-value"
@@ -96,12 +90,23 @@ def flip(r: Any) -> bool:
     return FLIP[0]
 
 
-def told(r: Any) -> Plan:
-    return Plan("inform", reply=r.read("d:big"))
+def told(r: Any) -> object:
+    return r.read("d:big")
 
 
-def plan_of(r: Any) -> Plan:
-    return Plan("inform", reply="ok")
+def policy_rule(function: Any, *reads: str, outputs: Any = t.string) -> Rule:
+    """The policy's rule, ``d:act``, of ``function`` over ``reads``."""
+    return Rule("d:act", outputs, function, version="1", reads=list(reads))
+
+
+def designed(policy: Rule | Table | None = None, **fields: Any) -> Any:
+    """``minimal`` with ``policy`` as the policy ``d:act`` beside the rules given, or
+    ``minimal``'s own policy when ``None``."""
+    if policy is None:
+        return minimal(**fields)
+    return minimal(
+        **{**fields, "rules": {**fields.get("rules", {}), "act": policy}}, policy="d:act"
+    )
 
 
 STATE_T = t.record(n=t.number(), k=t.integer(), flag=t.boolean, items=t.list_(t.integer()))
@@ -163,11 +168,11 @@ PARAMETERS: dict[str, Any] = {
     "names": Parameter(t.mapping(t.string), {"a": "b"}),
 }
 TABLES = load(
-    minimal(
+    designed(
         state=STATE_T,
         rules=RULES,
         parameters=PARAMETERS,
-        policy=Policy(told, version="1", reads=["d:big"]),
+        policy=policy_rule(told, "d:big", outputs=BIG_SMALL),
     )
 )
 
@@ -185,15 +190,13 @@ def run(
 
 
 def value_of(result: Any) -> Any:
-    """A result's entry or plan value, or the result itself when it is not one."""
+    """A result's entry value, or the result itself when it is not one."""
     if type(result) is not dict:
         return result
     held = cast("dict[str, Any]", result)
     if "entry" in held:
         entry = cast("dict[str, Any] | None", held["entry"])
         return None if entry is None else entry.get("value", entry.get("marker"))
-    if "plan" in held:
-        return held["plan"]["reply"]
     return held
 
 
@@ -228,7 +231,7 @@ def refusal(*args: Any, **kwargs: Any) -> EvaluationRefusal:
 def test_a_table_cell_is_probed_at_its_input_and_the_gap_and_end_values(tmp_path: Path) -> None:
     value = run(tables_record(), TABLES, "lim/n", tmp_path)["value"]
     assert value["unseen"] == ["hid"]  # it declares the leaf and has no boundaries field
-    assert list(value["entries"]) == ["d:big", "d:echo", "d:part"]
+    assert list(value["entries"]) == ["d:act", "d:big", "d:echo", "d:part"]
     assert shape(value["entries"]["d:big"]) == {
         "switching": [7.0],
         "slacks": [None, 2.0],
@@ -239,7 +242,7 @@ def test_a_table_cell_is_probed_at_its_input_and_the_gap_and_end_values(tmp_path
     }
     assert value["entries"]["d:echo"] == "carries"  # a Param output
     assert value["entries"]["d:part"] == "carries"  # a Param row firing below 7 alone
-    assert shape(value["plan"]) == shape(value["entries"]["d:big"])  # the reply is d:big
+    assert shape(value["entries"]["d:act"]) == shape(value["entries"]["d:big"])  # d:act is d:big
 
 
 def test_an_integer_leaf_takes_integer_points_within_its_interval(tmp_path: Path) -> None:
@@ -272,17 +275,32 @@ def test_a_function_rule_with_boundaries_is_probed_at_its_reads(tmp_path: Path) 
 
 
 def test_a_value_whose_design_fails_load_marks_its_range_not_loading(tmp_path: Path) -> None:
-    value = run(tables_record(), TABLES, "band/lo", tmp_path)["value"]
-    assert value["entries"] == {}  # d:band holds wherever the design loads
-    plan = value["plan"]
-    assert plan["switching"] == [7.0]  # beside a not-loading class, as beside any
-    assert plan["slacks"] == [None, 6.0]
-    (first, last) = plan["classes"]
-    assert (first["least"], first["greatest"], last["least"]) == (1.0, 7.0, 8.0)
+    rules = {
+        "tab": Table(
+            "d:tab", BIG_SMALL, "F", ["t:state.k"], [["[lim/y, lim/x]", "big"], ["-", "small"]]
+        ),
+        "hi": Table("d:hi", BIG_SMALL, "F", ["t:state.j"], [[">= lim/y", "big"], ["-", "small"]]),
+    }
+    leaves = {"lim/x": Parameter(t.integer(), 7), "lim/y": Parameter(t.integer(), 2)}
+    loaded = load(
+        designed(state=t.record(k=t.integer(), j=t.integer()), rules=rules, parameters=leaves)
+    )
+    record = decide_sync(loaded, {"k": 4, "j": 9}, {}).record
+    value = run(record, loaded, "lim/y", tmp_path)["value"]
+    assert value["unseen"] == ["tab"]  # past lim/x the band does not load
+    # d:hi holds wherever the design loads; the decision is listed always.
+    assert list(value["entries"]) == ["d:decision", "d:tab"]
+    decision = value["entries"]["d:decision"]
+    assert [list(c["result"]) for c in decision["classes"]] == [["entry"], ["not-loading"]]
+    tab = value["entries"]["d:tab"]
+    assert tab["switching"] == [5, 9]  # beside a not-loading class, as beside any
+    assert tab["slacks"] == [None, 3]
+    (big, small, last) = tab["classes"]
+    assert [(c["least"], c["greatest"]) for c in (big, small, last)] == [(2, 4), (5, 5), (9, 10)]
     (failure,) = last["result"]["not-loading"]
     assert failure["check"] == 9
-    assert failure["names"] == ["band"]
-    assert "band" in failure["message"]
+    assert failure["names"] == ["tab"]
+    assert "tab" in failure["message"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -295,7 +313,10 @@ def test_a_boolean_leaf_is_partitioned_false_first(tmp_path: Path) -> None:
     assert shape(value["entries"]["d:on"]) == {
         "classes": [{"values": [False], "result": False}, {"values": [True], "result": True}]
     }
-    assert shape(value["plan"]) == {"classes": [{"values": [False, True], "result": "big"}]}
+    # The policy's entry is always listed: d:big's "big" at both values, one class.
+    assert shape(value["entries"]["d:act"]) == {
+        "classes": [{"values": [False, True], "result": "big"}]
+    }
 
 
 def test_a_label_leaf_is_partitioned_in_declared_order(tmp_path: Path) -> None:
@@ -313,8 +334,8 @@ def test_a_label_leaf_is_partitioned_in_declared_order(tmp_path: Path) -> None:
 # The pick helpers and a numeric mapping
 
 
-def calm(r: Any) -> Plan:
-    return Plan("inform", reply=r.read("d:th"))
+def calm(r: Any) -> object:
+    return r.read("d:th")
 
 
 def thf(r: Any) -> bool:
@@ -324,7 +345,7 @@ def thf(r: Any) -> bool:
 def mood_design(wording: Text | None = None) -> LoadedDesign:
     question = Question("choice", wording or Text("Mood?"), labels=("calm", "wild"))
     return load(
-        minimal(
+        designed(
             state=STATE_T,
             sources={"ask": Source({"q:mood": question}, needs=["t:state"])},
             rules={
@@ -365,7 +386,7 @@ def mood_design(wording: Text | None = None) -> LoadedDesign:
                 "mood/labels": Parameter(t.list_(t.string), ["calm"]),
                 "mood/mbar": Parameter(t.number(0, 1), 0.5),
             },
-            policy=Policy(calm, version="1", reads=["d:th"]),
+            policy=policy_rule(calm, "d:th", outputs=YES_NO),
         )
     )
 
@@ -396,7 +417,9 @@ def test_a_mapping_leaf_varies_each_key_alone(tmp_path: Path) -> None:
             {"least": 1.0, "greatest": 1.0, "result": "no"},
         ],
     }
-    assert value["keys"]["wild"]["entries"] == {}  # calm leads whatever wild's threshold
+    # calm leads whatever wild's threshold: the decision alone is listed, in one class.
+    assert list(value["keys"]["wild"]["entries"]) == ["d:act"]
+    assert len(value["keys"]["wild"]["entries"]["d:act"]["classes"]) == 1
 
 
 def test_a_pick_bar_is_probed_at_each_labels_probability(tmp_path: Path) -> None:
@@ -436,11 +459,12 @@ def test_a_question_reading_the_leaf_leaves_other_values_not_determined(tmp_path
         "yes",
         "not-determined",
     ]
-    classes = value["plan"]["classes"]
+    act = value["entries"]["d:act"]  # the policy's entry, listed as any
+    classes = act["classes"]
     assert [value_of(c["result"]) for c in classes] == ["not-determined", "yes", "not-determined"]
     assert classes[1]["least"] == classes[1]["greatest"] == 0.5
-    assert value["plan"]["switching"] == [0.3, 0.7]  # each facing value compared
-    assert value["plan"]["slacks"] == [-0.2, 0.2]
+    assert act["switching"] == [0.3, 0.7]  # each facing value compared
+    assert act["slacks"] == [-0.2, 0.2]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -490,7 +514,7 @@ def test_the_entry_is_written_looked_up_and_returned_as_plain_data(tmp_path: Pat
     key = {"record": record.record_hash, "design": TABLES.design_hash, "parameter": "lim/n"}
     assert {k: entry[k] for k in ("kind", "format", "key")} == {
         "kind": KIND,
-        "format": 1,
+        "format": 2,
         "key": key,
     }
     assert EvaluationStore(tmp_path).lookup(KIND, key) == entry
@@ -535,7 +559,10 @@ def test_invalid_record_comes_first(tmp_path: Path) -> None:
     assert isinstance(exc.error, InvalidRecord)
 
 
-def test_unfinished_then_nothing_to_replay_then_wrong_design(tmp_path: Path) -> None:
+def test_wrong_design_then_unfinished_then_nothing_to_replay_then_wrong_design(
+    tmp_path: Path,
+) -> None:
+    assert refusal(format_7(), LOADED, "nope", tmp_path).reason is R.wrong_design
     assert refusal(unfinished(), LOADED, "nope", tmp_path).reason is R.unfinished
     assert refusal(broken(), LOADED, "nope", tmp_path).reason is R.nothing_to_replay
     record = tables_record()
@@ -546,7 +573,7 @@ def test_unfinished_then_nothing_to_replay_then_wrong_design(tmp_path: Path) -> 
 
 @pytest.mark.parametrize("path", ["lim", "nope", "lim//n", "Lim/n", 3, ["lim"]])
 def test_unknown_path_names_no_leaf(path: Any, tmp_path: Path, no_replay: None) -> None:
-    exc = refusal(tables_record(), TABLES, path, tmp_path, functions={"policy": 1})
+    exc = refusal(tables_record(), TABLES, path, tmp_path, functions={"act": 1})
     assert exc.reason is R.unknown_path
     assert exc.path == (path if isinstance(path, str) else None)
 
@@ -557,7 +584,7 @@ def test_unknown_path_names_no_leaf(path: Any, tmp_path: Path, no_replay: None) 
 def test_unsupported_leaf_names_the_type(
     path: str, type_: str, tmp_path: Path, no_replay: None
 ) -> None:
-    exc = refusal(tables_record(), TABLES, path, tmp_path, functions={"policy": 1})
+    exc = refusal(tables_record(), TABLES, path, tmp_path, functions={"act": 1})
     assert exc.reason is R.unsupported_leaf
     assert exc.path == path
     assert type_ in str(exc)
@@ -566,15 +593,15 @@ def test_unsupported_leaf_names_the_type(
 def test_invalid_design_when_the_document_does_not_load_with_functions(
     tmp_path: Path, no_replay: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def local(r: Any) -> Plan:
-        return Plan("inform", reply="ok")
+    def local(r: Any) -> str:
+        return "ok"
 
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"many": RULES["many"]},
             parameters={"lim/k": PARAMETERS["lim/k"]},
-            policy=Policy(local, version="1", reads=["d:many"]),
+            policy=policy_rule(local, "d:many"),
         )
     )
     record = decide_sync(loaded, STATE, {}).record
@@ -583,7 +610,7 @@ def test_invalid_design_when_the_document_does_not_load_with_functions(
     assert isinstance(exc.error, InvalidDesign)
     assert exc.__cause__ is exc.error
     monkeypatch.undo()  # replay again: with the function given, or none, the document loads
-    assert run(record, loaded, "lim/k", tmp_path, functions={"policy": local})["value"]["entries"]
+    assert run(record, loaded, "lim/k", tmp_path, functions={"act": local})["value"]["entries"]
     assert run(record, loaded, "lim/k", tmp_path / "own")["value"]["entries"]
 
 
@@ -679,8 +706,8 @@ def test_a_pick_helper_switches_nowhere_but_its_reported_switching_value(tmp_pat
 # Two rounds of probes, and what they leave unseen
 
 
-def constant(r: Any) -> Plan:
-    return Plan("inform", reply="ok")
+def constant(r: Any) -> str:
+    return "ok"
 
 
 def twice(r: Any) -> float:
@@ -707,7 +734,7 @@ def test_a_value_each_round_recomputes_ends_at_round_1_and_lists_its_component(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={
                 "cap": Table("d:cap", "number", "F", [], [[Param("lim/n")]]),
@@ -716,7 +743,7 @@ def test_a_value_each_round_recomputes_ends_at_round_1_and_lists_its_component(
                 ),
             },
             parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=Policy(constant, version="1", reads=["d:chk"]),
+            policy=policy_rule(constant, "d:chk"),
         )
     )
     seen = counting_replays(monkeypatch)
@@ -729,7 +756,7 @@ def test_a_value_each_round_recomputes_ends_at_round_1_and_lists_its_component(
 
 def test_a_function_computing_from_the_leaf_ends_and_is_unseen(tmp_path: Path) -> None:
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={
                 "y": Rule("d:y", t.number(), twice, version="1", reads=[], params=["lim/f"]),
@@ -744,18 +771,18 @@ def test_a_function_computing_from_the_leaf_ends_and_is_unseen(tmp_path: Path) -
                 ),
             },
             parameters={"lim/f": PARAMETERS["lim/f"]},
-            policy=Policy(constant, version="1", reads=["d:over"]),
+            policy=policy_rule(constant, "d:over"),
         )
     )
     value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/f", tmp_path)["value"]
     # y has no boundaries; over reads d:y, which holds the leaf, as the policy reads d:over,
     # whose function declares it.
-    assert value["unseen"] == ["over", "policy", "y"]
+    assert value["unseen"] == ["act", "over", "y"]
 
 
 def three_way(own: float) -> LoadedDesign:
     return load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={
                 "cmp": Table(
@@ -767,7 +794,7 @@ def three_way(own: float) -> LoadedDesign:
                 )
             },
             parameters={"lim/n": Parameter(t.number(), own)},
-            policy=Policy(constant, version="1", reads=["d:cmp"]),
+            policy=policy_rule(constant, "d:cmp"),
         )
     )
 
@@ -790,7 +817,7 @@ def test_a_three_way_table_gives_classes_whatever_the_own_value(
 def counted(own: float) -> LoadedDesign:
     fields = ("a", "b", "c", "d")
     return load(
-        minimal(
+        designed(
             state=t.record(**dict.fromkeys(fields, t.number())),
             rules={
                 "count": Table(
@@ -802,7 +829,7 @@ def counted(own: float) -> LoadedDesign:
                 )
             },
             parameters={"lim/c": Parameter(t.number(), own)},
-            policy=Policy(constant, version="1", reads=["d:count"]),
+            policy=policy_rule(constant, "d:count"),
         )
     )
 
@@ -823,11 +850,11 @@ def test_the_slacks_are_the_switching_values_bounding_the_own_class(
 def one_table(table: Table, **parameters: Parameter) -> tuple[LoadedDesign, Record]:
     """A design of ``table`` alone over ``STATE``, its leaves ``parameters``, and its record."""
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={table.provides.removeprefix("d:"): table},
             parameters=parameters,
-            policy=Policy(constant, version="1", reads=[table.provides]),
+            policy=policy_rule(constant, table.provides),
         )
     )
     return loaded, decide_sync(loaded, STATE, {}).record
@@ -865,11 +892,11 @@ def test_a_mass_input_is_probed_at_the_mass(tmp_path: Path) -> None:
 def test_a_slack_no_float_holds_is_refused_before_the_write(tmp_path: Path) -> None:
     big = 1.7976931348623157e308
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"big": RULES["big"]},
             parameters={"lim/n": Parameter(t.number(), big)},
-            policy=Policy(constant, version="1", reads=["d:big"]),
+            policy=policy_rule(constant, "d:big"),
         )
     )
     record = decide_sync(loaded, {**STATE, "n": -big}, {}).record
@@ -881,66 +908,16 @@ def test_a_slack_no_float_holds_is_refused_before_the_write(tmp_path: Path) -> N
 
 
 # ---------------------------------------------------------------------------------------------
-# The plan and the verdict
-
-
-def act(r: Any) -> Plan:
-    return Plan("execute", [Step("archive", {"what": Origin(literal="x")})])
-
-
-def test_a_verdict_change_alone_splits_the_plan(tmp_path: Path) -> None:
-    loaded = load(
-        minimal(
-            state=STATE_T,
-            rules={"big": RULES["big"]},
-            parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=Policy(act, version="1", reads=["d:big"]),
-            requirements=[Requirement("d:big", "big")],
-            tools=["archive"],
-        )
-    )
-    plan = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]["plan"]
-    verdicts = [c["result"]["verdict"]["failures"] for c in plan["classes"]]
-    assert len(verdicts[1]) == len(verdicts[0]) + 1  # d:big's plan-level requirement fails
-    assert plan["classes"][0]["result"]["plan"] == plan["classes"][1]["result"]["plan"]
-    assert plan["switching"] == [7.0]
-
-
-def test_a_change_of_context_alone_is_no_plan_change(tmp_path: Path) -> None:
-    entry = ContextEntry(
-        "d:big", Text("{b} over {lim}", [slot("b", ref="d:big"), slot("lim", param="lim/n")])
-    )
-    loaded = load(
-        minimal(
-            state=STATE_T,
-            rules={"big": RULES["big"]},
-            parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=Policy(constant, version="1", reads=["d:big"]),
-            context=Context(entries=[entry]),
-        )
-    )
-    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
-    assert len(value["entries"]["d:big"]["classes"]) == 2
-    assert len(value["plan"]["classes"]) == 1
-
-
-# ---------------------------------------------------------------------------------------------
-# A record of an older format, the helper version its only difference
-
-FORMAT_5 = Path(__file__).parent / "format_5"
+# A record whose only difference is the helper version
 
 
 def test_both_jobs_take_a_record_whose_only_finding_is_the_helper_version(tmp_path: Path) -> None:
-    loaded = load((FORMAT_5 / "design.json").read_bytes())
-    record = read_record((FORMAT_5 / "record.json").read_bytes())
-    assert deciding_inputs_sync(record, loaded, "d:weights") is not None
-    value = run(record, loaded, "order/weights", tmp_path)["value"]
-    assert value["unseen"] == ["weights"]
-    assert value["keys"]["alpha"]["entries"] == {}  # the rule reads zeta alone
-    classes = value["keys"]["zeta"]["entries"]["d:weights"]["classes"]
-    # No value compares the key, so it is tried at the axis's two ends and its own.
-    assert [c["least"] for c in classes] == [-(2**53 - 1), 2, 2**53 - 1]
-    assert len(value["keys"]["zeta"]["plan"]["classes"]) == 1  # the plan's context alone moves
+    doc = json.loads(tables_record().document)
+    doc["log"][0]["helpers"] -= 1
+    record = read_record(rehashed(doc))
+    assert deciding_inputs_sync(record, TABLES, "d:on") == {"t:state.flag": "not-deciding"}
+    value = run(record, TABLES, "lim/n", tmp_path)["value"]
+    assert value == run(tables_record(), TABLES, "lim/n", tmp_path / "own")["value"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -987,7 +964,7 @@ def test_a_candidate_read_is_probed_at_each_members_field(tmp_path: Path) -> Non
     record = decide_sync(loaded, state, {"default": grounded.answer}).record
     value = run(record, loaded, "lim/age", tmp_path)["value"]
     assert value["unseen"] == []
-    assert list(value["entries"]) == ['d:level["Ana"]', 'd:level["Bo"]']  # code-point order
+    assert list(value["entries"]) == ["d:act", 'd:level["Ana"]', 'd:level["Bo"]']  # code-point
     assert value["entries"]['d:level["Ana"]']["switching"] == [31]
     assert value["entries"]['d:level["Ana"]']["slacks"] == [None, 13]
     assert value["entries"]['d:level["Bo"]']["switching"] == [42]
@@ -999,29 +976,51 @@ def test_a_candidate_read_is_probed_at_each_members_field(tmp_path: Path) -> Non
 def test_a_change_of_rows_alone_is_no_change(tmp_path: Path) -> None:
     rows = Table("d:same", BIG_SMALL, "F", ["t:state.n"], [[">= lim/n", "big"], ["-", "big"]])
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"same": rows, "big": RULES["big"]},
             parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=Policy(told, version="1", reads=["d:big"]),
+            policy=policy_rule(told, "d:big", outputs=BIG_SMALL),
         )
     )
     entries = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"][
         "entries"
     ]
-    assert list(entries) == ["d:big"]  # d:same's rows change past 7, its value never
+    assert list(entries) == ["d:act", "d:big"]  # d:same's rows change past 7, its value never
+
+
+def refs_by_big(r: Any) -> object:
+    return Unsure(Cause("abstained", ["d:big"] if r.read("d:big") == "big" else []))
+
+
+def test_a_change_of_the_policys_marker_refs_alone_switches_the_decision(tmp_path: Path) -> None:
+    loaded = load(
+        designed(
+            state=STATE_T,
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=policy_rule(refs_by_big, "d:big", outputs=BIG_SMALL),
+        )
+    )
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
+    act = value["entries"]["d:act"]
+    assert act["switching"] == [7.0]
+    assert [c["result"]["entry"]["marker"]["cause"]["refs"] for c in act["classes"]] == [
+        ["d:big"],
+        [],
+    ]
 
 
 def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             sources={"a": Source({"t:a": t.string}, oracle="o")},
             rules={"big": RULES["big"]},
             parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=Policy(constant, version="1", reads=["d:big"]),
+            policy=policy_rule(constant, "d:big"),
         )
     )
     binding = Scripted({"a": returns({"t:a": "x"})})
@@ -1034,9 +1033,9 @@ def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
         return rerun, [*found, stale], fixture
 
     monkeypatch.setattr(_switching, "_replay_with", staled)
-    plan = run(record, loaded, "lim/n", tmp_path)["value"]["plan"]
+    big = run(record, loaded, "lim/n", tmp_path)["value"]["entries"]["d:big"]
     # Its own value's result is the record's, not replayed; every other value's is undetermined.
-    assert [value_of(c["result"]) for c in plan["classes"]] == ["ok", "not-determined"]
+    assert [value_of(c["result"]) for c in big["classes"]] == ["big", "not-determined"]
 
 
 def test_under_f_a_later_param_row_matched_but_not_first_does_not_carry(tmp_path: Path) -> None:
@@ -1049,11 +1048,11 @@ def test_under_f_a_later_param_row_matched_but_not_first_does_not_carry(tmp_path
     )
     literal = Table("d:lit", "string", "F", ["t:state.n"], [[">= lim/n", "lim/n"], ["-", "x"]])
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"f": table, "lit": literal},
             parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=Policy(constant, version="1", reads=["d:f"]),
+            policy=policy_rule(constant, "d:f"),
         )
     )
     entries = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"][
@@ -1063,46 +1062,45 @@ def test_under_f_a_later_param_row_matched_but_not_first_does_not_carry(tmp_path
     assert entries["d:lit"]["switching"] == [7.0]  # a literal equal to the path is no Param
 
 
-def test_the_plan_carries_when_its_policy_row_names_a_plan_holding_the_leaf(
-    tmp_path: Path,
-) -> None:
-    loud = PlanDeclaration("inform", reply=Text("At {p}.", [slot("p", param="lim/n")]))
+def test_a_policy_table_whose_row_outputs_the_leaf_carries(tmp_path: Path) -> None:
+    table = Table("d:act", "number", "F", ["d:big"], [["big", Param("lim/n")], ["-", 0.0]])
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"big": RULES["big"]},
             parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=PolicyTable(["d:big"], [["big", "loud"], ["-", "quiet"]]),
-            plans={"loud": loud, "quiet": PlanDeclaration("inform", reply=Text("Quiet."))},
+            policy=table,
         )
     )
     value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
-    assert value["plan"] == "carries"
+    assert value["entries"]["d:act"] == "carries"
 
 
-def test_a_plan_change_of_rows_alone_is_no_switch(tmp_path: Path) -> None:
+def test_a_policy_change_of_rows_alone_is_no_switch(tmp_path: Path) -> None:
+    table = Table("d:act", "string", "F", ["d:big"], [["big", "quiet"], ["-", "quiet"]])
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"big": RULES["big"]},
             parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=PolicyTable(["d:big"], [["big", "quiet"], ["-", "quiet"]]),
-            plans={"quiet": PlanDeclaration("inform", reply=Text("Quiet."))},
+            policy=table,
         )
     )
     value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
     assert value["entries"]["d:big"]["switching"] == [7.0]  # the winning row moves there
-    plan = value["plan"]
-    assert (plan["switching"], plan["slacks"], len(plan["classes"])) == ([], [None, None], 1)
+    assert list(value["entries"]) == ["d:act", "d:big"]
+    assert shape(value["entries"]["d:act"])["classes"] == [
+        {"least": 5.0, "greatest": 8.0, "result": "quiet"}
+    ]
 
 
 def integer_leaf(own: int, k: int) -> tuple[LoadedDesign, Record]:
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"many": RULES["many"]},
             parameters={"lim/k": Parameter(t.integer(), own)},
-            policy=Policy(constant, version="1", reads=["d:many"]),
+            policy=policy_rule(constant, "d:many"),
         )
     )
     return loaded, decide_sync(loaded, {**STATE, "k": k}, {}).record
@@ -1142,7 +1140,7 @@ def test_a_boundaries_member_not_naming_the_leaf_compares_nothing() -> None:
     roles = {"bar": ["other"], "thresholds": [], "margin": ["other"]}
     mass = [{"labels": ["calm"], "bounds": ["other"]}]
     rule: dict[str, Any] = {"form": "function", "boundaries": {"q:mood": {**roles, "mass": mass}}}
-    document = {"rules": {"r": rule}, "policy": {"form": "function", "boundaries": None}}
+    document = {"rules": {"r": rule}}
     answer = {"kind": "choice", "labels": ["calm"], "probabilities": {"calm": 0.7}}
     log = [{"item": "entry", "ref": "q:mood", "value": answer}]
     assert _switching._compared(document, "lim", log) == ({}, set())
@@ -1175,11 +1173,11 @@ def test_a_reader_of_an_entry_holding_the_leaf_is_unseen(tmp_path: Path) -> None
         Table("d:chk", "number", "F", ["d:cap"], [["-", Input("d:cap")]]),
     ):
         loaded = load(
-            minimal(
+            designed(
                 state=STATE_T,
                 rules={"cap": cap, "chk": reader},
                 parameters=leaves,
-                policy=Policy(constant, version="1", reads=["d:chk"]),
+                policy=policy_rule(constant, "d:chk"),
             )
         )
         record = decide_sync(loaded, STATE, {}).record
@@ -1191,7 +1189,7 @@ def test_a_reader_of_an_entry_holding_the_leaf_is_unseen(tmp_path: Path) -> None
 def test_an_aggregate_mixing_the_leaf_with_other_values_is_unseen(hit: str, tmp_path: Path) -> None:
     table = Table("d:tab", "number", hit, ["t:state.n"], [[">= lim/n", Param("lim/n")], ["-", 1.0]])
     loaded, record = one_table(table, **{"lim/n": PARAMETERS["lim/n"]})
-    assert run(record, loaded, "lim/n", tmp_path)["value"]["unseen"] == ["policy", "tab"]
+    assert run(record, loaded, "lim/n", tmp_path)["value"]["unseen"] == ["act", "tab"]
 
 
 def test_the_components_a_load_failure_names_are_unseen(tmp_path: Path) -> None:
@@ -1228,9 +1226,12 @@ def test_an_integer_side_past_the_interval_is_clipped_to_it(
     loaded, record = one_table(RULES["many"], **{"lim/k": PARAMETERS["lim/k"]})
     record = decide_sync(loaded, {**STATE, "k": 10}, {}).record
     seen = counting_replays(monkeypatch)
-    plan = run(record, loaded, "lim/k", tmp_path)["value"]["plan"]
+    value = run(record, loaded, "lim/k", tmp_path)["value"]
     # 10 and 11 beside k: 11 clipped to 10, so no value outside the interval fails load.
-    assert [(c["least"], c["greatest"]) for c in plan["classes"]] == [(0, 10)]
+    assert value["unseen"] == []
+    assert list(value["entries"]) == ["d:act"]  # the decision, listed always, never switches
+    assert value["entries"]["d:act"]["switching"] == []
+    assert [(c["least"], c["greatest"]) for c in value["entries"]["d:act"]["classes"]] == [(0, 10)]
     assert seen[0] == 2  # 0 and 10 beside the own 2; 11 is never tried
 
 
@@ -1240,11 +1241,11 @@ def test_a_round_1_value_already_compared_leaves_nothing_unseen(
     step = Table("d:v", "number", "F", ["t:state.n"], [[">= lim/n", 3.0], ["-", 9.0]])
     check = Table("d:chk", BIG_SMALL, "F", ["d:v"], [[">= lim/n", "big"], ["-", "small"]])
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"v": step, "chk": check},
             parameters={"lim/n": PARAMETERS["lim/n"]},
-            policy=Policy(constant, version="1", reads=["d:chk"]),
+            policy=policy_rule(constant, "d:chk"),
         )
     )
     seen = counting_replays(monkeypatch)
@@ -1272,11 +1273,11 @@ def test_a_param_row_giving_the_recorded_value_still_carries(tmp_path: Path) -> 
         "lim/z": Parameter(t.number(), 2.5),
     }
     loaded = load(
-        minimal(
+        designed(
             state=STATE_T,
             rules={"tab": table},
             parameters=leaves,
-            policy=Policy(constant, version="1", reads=["d:tab"]),
+            policy=policy_rule(constant, "d:tab"),
         )
     )
     record = decide_sync(loaded, {**STATE, "n": 3.0}, {}).record
@@ -1292,4 +1293,4 @@ def test_an_aggregate_whose_one_row_is_param_is_not_unseen(hit: str, tmp_path: P
     )
     value = run(record, loaded, "lim/n", tmp_path)["value"]
     assert value["entries"]["d:tab"] == "carries"
-    assert value["unseen"] == ["policy"]  # the policy reads d:tab, which holds the leaf
+    assert value["unseen"] == ["act"]  # the policy reads d:tab, which holds the leaf

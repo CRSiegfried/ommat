@@ -43,6 +43,7 @@ except ModuleNotFoundError as error:
     ) from error
 
 from ommat import AnswerKind, CallResult, Cause, Failed, RenderedQuestion, SourceCall, Unavailable
+from ommat._provenance import USAGE_KEYS
 from ommat.bindings import (
     OracleBinding,
     RequestProvenance,
@@ -396,11 +397,7 @@ def _provenance(outcome: idia.Outcome) -> RequestProvenance:
     figures = (
         None
         if usage is None
-        else {
-            name: getattr(usage, name)
-            for name in ("input_tokens", "output_tokens", "passes")
-            if getattr(usage, name) is not None
-        }
+        else {name: getattr(usage, name) for name in USAGE_KEYS if getattr(usage, name) is not None}
     )
     cut = any(w.code == idia.WARNING_PROVIDER_TRUNCATED for w in outcome.warnings)
     return RequestProvenance(

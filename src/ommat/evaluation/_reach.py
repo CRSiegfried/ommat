@@ -1,12 +1,13 @@
 # pyright: reportPrivateUsage=false
 """The question-reach job: for each question, whether its answer, changed alone, changes the
-plan or the verdict of a recorded turn (§question-reach).
+decision of a recorded turn (§question-reach).
 
 It asks the dead-question lint's question from turns the design is known to reach. ``values``
 is checked as the lints check it, through ``points`` over every ``q:`` ref a source
 provides, before any record is read; a key naming any other read, an unfilled read and each
 other slip is one ``ValueError``. Each record is then read and refused as the deciding inputs
-refuse one, ``invalid-record``, ``unfinished``, ``nothing-to-replay``, ``wrong-design`` and
+refuse one, ``invalid-record``, ``wrong-design`` for a record before format 8,
+``unfinished``, ``nothing-to-replay``, ``wrong-design`` for another design hash and
 ``baseline-differs``, each but the first naming its turn, every record in list order before
 any trial.
 
@@ -18,7 +19,8 @@ a grounded entry's with its own marker last; a candidate-valued question's are e
 and then the first candidate at 1, every other label the call asked with at 0; a returned call
 always rendered a candidate, since an empty set leaves the question out with its call null. A
 trial whose replay reports ``stale-question`` is undetermined, whatever else it finds; any other
-reaches when its findings hold ``plan`` or ``verdict``, a plan compared without its ``context``.
+reaches when the policy's entry it wrote differs from the record's by ``decision_bytes``, a
+marker's cause and refs included.
 
 A question is ``live`` when some trial of an entry of it reaches; else ``not-determined`` when
 some trial was undetermined; else ``no-change-found`` when some trial ran; else
@@ -39,14 +41,11 @@ from ommat._fixture import _binding_form
 from ommat._ledger import _ITEM_DEPTH, Record
 from ommat._markers import Cause, Unavailable
 from ommat._refs import code_point_sorted, declared_ref
-from ommat._replay import FindingKind
 from ommat._values import described, is_scalar_string, quote, string_data, type_name
-from ommat.evaluation._diff import OUTSIDE, _read, _refuse_unfit, _run_sync, baseline
+from ommat.evaluation._diff import OUTSIDE, _read, _refuse_unfit, _run_sync, baseline, decided
 from ommat.evaluation._edit import _applied, _labels, _q_value, _SetEntry
 from ommat.helpers import points
 
-_K = FindingKind
-_DECIDING = frozenset({_K.plan, _K.verdict})
 _Log = list[dict[str, Any]]
 
 
@@ -96,7 +95,7 @@ async def question_reach(
                 ran.add(question)
                 if any(f["kind"] in OUTSIDE for f in found):
                     undetermined.add(question)
-                elif question not in witnesses and any(f["kind"] in _DECIDING for f in found):
+                elif question not in witnesses and decided(log, done.record.log):
                     written = done.items[0]
                     shown = written["value"] if "value" in written else written["marker"]
                     witnesses[question] = {

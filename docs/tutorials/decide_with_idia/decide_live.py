@@ -20,6 +20,7 @@ from ommat import (
     Decision,
     LoadedDesign,
     SourceCall,
+    Undetermined,
     decide,
     from_record,
     load,
@@ -54,10 +55,17 @@ async def registry(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResu
     return CallResult({"t:open_orders": ["Station Road"]})
 
 
+def said(estimate: object) -> str:
+    """A value as it is, a marker as its kind and its cause's code and refs."""
+    if isinstance(estimate, Undetermined):
+        cause = estimate.cause
+        return f"{estimate.kind.value} ({cause.code.value} on {', '.join(cause.refs)})"
+    return str(estimate)
+
+
 def show(decision: Decision) -> None:
-    """The plan, then each call: its sources, precision, attempts and warnings lines."""
-    plan = decision.plan
-    print(plan.kind, "|", plan.reply or plan.reason, "|", decision.verdict.kind)
+    """The decision, then each call: its sources, precision, attempts and warnings lines."""
+    print("decision:", said(decision.estimate))
     unhashed = json.loads(decision.record.document)["unhashed"]["calls"]
     for index, item in enumerate(decision.record.log):
         if item["item"] == "call":
@@ -88,7 +96,7 @@ async def run(providers: Providers = live_providers) -> list[Any]:
             stored.append(decision.record.document)
             rerun, findings = await replay(read_record(stored[-1]), loaded)
             print("  replay findings:", findings)
-            results.append((decision.plan, findings, rerun is not None))
+            results.append((decision.estimate, findings, rerun is not None))
 
         # The first turn again, every model answer from its record and no provider called; the
         # registry is bound to the idia binding, which asks q: refs only.
@@ -101,7 +109,7 @@ async def run(providers: Providers = live_providers) -> list[Any]:
         state = {"report": REPORTS[0], "filed_on": FILED_ON}
         again = await decide(loaded, state, answered)
         show(again)
-        results.append((again.plan, again.record))
+        results.append((again.estimate, again.record))
     return results
 
 

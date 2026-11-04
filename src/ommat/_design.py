@@ -303,18 +303,6 @@ class SourceRequirement:
 
 
 @dataclass(frozen=True, slots=True)
-class Requirement:
-    """A plan-level or step requirement: ``ref`` is determined with ``value``. ``ref`` is a
-    ``d:`` ref with no field path."""
-
-    ref: str
-    value: Any
-
-    def __post_init__(self) -> None:
-        _set(self, ref=_string(self.ref))
-
-
-@dataclass(frozen=True, slots=True)
 class Parameter:
     """A parameter leaf: its type and its value."""
 
@@ -473,117 +461,29 @@ class Table:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class Policy:
-    """A function policy: it reads ``reads`` and ``params`` and returns a plan."""
-
-    function: Callable[[ReadView], object]
-    version: str | None = None
-    reads: Sequence[str] = ()
-    params: Sequence[str] = ()
-    boundaries: Mapping[str, Any] | None = None
-    form: Literal["function"] = field(default="function", init=False)
-
-    def __post_init__(self) -> None:
-        _set(
-            self,
-            version=_string(self.version),
-            reads=_strings(self.reads),
-            params=_strings(self.params),
-            boundaries=_mapping(self.boundaries),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class PolicyTable:
-    """The policy table: its ``inputs``, ``d:`` and ``t:`` reads or helpers over one, and its
-    ``rows``, each a list of its cells, then the name of the plan declaration it gives. Its hit
-    policy is first."""
-
-    inputs: Sequence[Any]
-    rows: Sequence[Any]
-    form: Literal["table"] = field(default="table", init=False)
-
-    def __post_init__(self) -> None:
-        _set(self, inputs=_sequence(self.inputs), rows=_sequence(self.rows))
-
-
-@dataclass(frozen=True, slots=True)
-class PlanDeclaration:
-    """A plan a policy table's row names: its ``kind``, its ``steps``, each a ``Step``, and
-    its ``reason`` and ``reply`` as declared text."""
-
-    kind: str
-    steps: Sequence[Any] = ()
-    reason: Text | None = None
-    reply: Text | None = None
-    grounded: str | None = None
-
-    def __post_init__(self) -> None:
-        _set(
-            self,
-            kind=_string(self.kind),
-            steps=_sequence(self.steps),
-            grounded=_string(self.grounded),
-        )
-
-
 # ---------------------------------------------------------------------------------------------
 # The design
 
 
 @dataclass(frozen=True, slots=True)
-class ContextEntry:
-    """One entry of a context block: ``ref``, the flagged ref, ``t:state`` or a declared ``d:``
-    ref, with or without a field path; ``text``, a ``Text`` with a slot naming ``ref``."""
-
-    ref: str
-    text: Text
-
-    def __post_init__(self) -> None:
-        _set(self, ref=_string(self.ref))
-
-
-@dataclass(frozen=True, slots=True)
-class Context:
-    """A design's context block: what a turn hands its next reader. ``entries`` in declared
-    order; ``plan``, ``steps`` and ``record`` switch on the plan's kind, verdict, reply and
-    reason, its steps, and the design and record hash."""
-
-    entries: Sequence[ContextEntry] = ()
-    plan: bool = True
-    steps: bool = True
-    record: bool = True
-
-    def __post_init__(self) -> None:
-        _set(self, entries=_sequence(self.entries))
-
-
-@dataclass(frozen=True, slots=True)
 class Design:
-    """A design: the state declaration, the components and the blocks.
+    """A design: the state declaration, the policy and the components.
 
-    ``sources``, ``rules``, ``plans``, ``types`` and ``groups`` map each declared name to its
-    declaration; ``parameters`` maps each leaf's full path to a ``Parameter``; ``classes``
-    maps a ref to its class tree; ``targets`` maps each target id to a ``Target``; ``tools``
-    lists the tool names; each defaults to empty. ``context`` is the context block, ``None`` for
-    none.
+    ``policy`` is the ``d:`` ref of the rule whose estimate is the decision. ``sources``,
+    ``rules``, ``types`` and ``groups`` map each declared name to its declaration;
+    ``parameters`` maps each leaf's full path to a ``Parameter``; ``classes`` maps a ref to its
+    class tree; ``targets`` maps each target id to a ``Target``; each defaults to empty.
     """
 
     state: str
-    policy: Policy | PolicyTable
+    policy: str
     sources: Mapping[str, Source] = field(default_factory=_empty)
     rules: Mapping[str, Rule | Table] = field(default_factory=_empty)
-    requirements: Sequence[Requirement] = ()
-    default_deny: bool = True
-    tools: Sequence[str] = ()
     parameters: Mapping[str, Parameter] = field(default_factory=_empty)
     types: Mapping[str, str] = field(default_factory=_empty)
-    plans: Mapping[str, PlanDeclaration] = field(default_factory=_empty)
     groups: Mapping[str, Group] = field(default_factory=_empty)
     classes: Mapping[str, Any] = field(default_factory=_empty)
     name: str | None = None
-    context: Context | None = None
     targets: Mapping[str, Target] = field(default_factory=_empty)
 
     def __post_init__(self) -> None:
@@ -595,15 +495,13 @@ class Design:
         _set(
             self,
             state=_string(self.state),
+            policy=_string(self.policy),
             sources=_mapping(self.sources),
             rules=_mapping(self.rules),
             parameters=_mapping(self.parameters),
-            plans=_mapping(self.plans),
             groups=_mapping(self.groups),
-            requirements=_sequence(self.requirements),
             types=types,
             classes=_mapping(self.classes),
-            tools=_strings(self.tools),
             name=_string(self.name),
             targets=_mapping(self.targets),
         )
@@ -692,35 +590,29 @@ class LoadedDesign:
     rest is the engine's.
 
     The private parts: ``_design``, the snapshotted ``Design``; ``_callables``, each function
-    component keyed by declared name, ``policy``, or a source's id and ``.when`` for its function
-    ``when``; ``_types``, each ``t:`` and ``d:`` ref's
-    declared type, ``t:state`` included, and ``_leaf_types``, each leaf's type, each with its
-    definitions resolved; ``_needs``, each source's needs with its question slots' refs
-    added; ``_groups``, each group's refs in code-point order, and ``_group_reasons`` its
-    reasons; ``_graph``, each node's predecessors; ``_providers``, the ref-to-provider map;
-    ``_grid``, the answer grid; ``_labels``, each ``q:`` ref's label names and descriptions,
-    aligned, ``None`` where a label is undescribed, ``yes`` and ``no`` for ``noul`` and none for
-    ``extraction``, a candidate-valued label set's fixed part alone; ``_label_sets``, each
-    candidate-valued question's set ref, and ``_label_at`` how many of its fixed labels come
-    before the candidates; ``_candidate_sets``, each declared candidate set's candidate field,
-    ``None`` for a ``list<string>`` set;
+    component keyed by declared name, or a source's id and ``.when`` for its function ``when``;
+    ``_types``, each ``t:`` and ``d:`` ref's declared type, ``t:state`` included, and
+    ``_leaf_types``, each leaf's type, each with its definitions resolved; ``_needs``, each
+    source's needs with its question slots' refs added; ``_groups``, each group's refs in
+    code-point order, and ``_group_reasons`` its reasons; ``_graph``, each node's predecessors;
+    ``_providers``, the ref-to-provider map; ``_grid``, the answer grid; ``_labels``, each
+    ``q:`` ref's label names and descriptions, aligned, ``None`` where a label is undescribed,
+    ``yes`` and ``no`` for ``noul`` and none for ``extraction``, a candidate-valued label set's
+    fixed part alone; ``_label_sets``, each candidate-valued question's set ref, and
+    ``_label_at`` how many of its fixed labels come before the candidates; ``_candidate_sets``,
+    each declared candidate set's candidate field, ``None`` for a ``list<string>`` set;
     ``_grounded``, each per-candidate question's declared ref and its grounding set's ref;
-    ``_requirement_bytes``, each source requirement's values as
-    canonical bytes, by source id; ``_context_bytes``, the context block's document object or
-    null; ``_reads`` and ``_params``, each rule's and the policy's declared reads and leaf
-    paths, a table's from its inputs, cells and outputs and the policy table's with its plans'
-    board refs and slot leaves; ``_table_bytes``, each table's document object by rule id, the
-    policy table's under ``policy``, and ``_plan_bytes``, each plan declaration's, read by
-    ``_table`` and ``_plan``. The
-    class trees, payloads, leaf values and plan-level requirements are decoded afresh at each
-    read, so nothing a caller changes after load reaches a turn.
+    ``_requirement_bytes``, each source requirement's values as canonical bytes, by source id;
+    ``_reads`` and ``_params``, each rule's declared reads and leaf paths, a table's from its
+    inputs, cells and outputs; ``_table_bytes``, each table's document object by rule id, read
+    by ``_table``. The class trees, payloads and leaf values are decoded afresh at each read, so
+    nothing a caller changes after load reaches a turn.
     """
 
     __slots__ = (
         "_callables",
         "_candidate_sets",
         "_classes_bytes",
-        "_context_bytes",
         "_design",
         "_document",
         "_graph",
@@ -737,11 +629,9 @@ class LoadedDesign:
         "_needs",
         "_params",
         "_payload_bytes",
-        "_plan_bytes",
         "_providers",
         "_reads",
         "_requirement_bytes",
-        "_requirements_bytes",
         "_table_bytes",
         "_types",
     )
@@ -762,17 +652,14 @@ class LoadedDesign:
     _candidate_sets: Mapping[str, str | None]
     _grounded: Mapping[str, str]
     _classes_bytes: bytes
-    _context_bytes: bytes
     _payload_bytes: Mapping[str, bytes]
     _leaf_bytes: Mapping[str, bytes]
     _requirement_bytes: Mapping[str, frozenset[bytes]]
-    _requirements_bytes: bytes
     _document: bytes
     _hash: str
     _reads: Mapping[str, tuple[str, ...]]
     _params: Mapping[str, tuple[str, ...]]
     _table_bytes: Mapping[str, bytes]
-    _plan_bytes: Mapping[str, bytes]
 
     def __init__(self, token: object, **parts: object) -> None:
         if token is not _BUILT_BY_LOAD:
@@ -801,27 +688,13 @@ class LoadedDesign:
         """Each ref's class tree in full, keyed by ``t:state`` and every provided ref."""
         return cast("dict[str, Any]", decode(self._classes_bytes))
 
-    @property
-    def _context(self) -> dict[str, Any] | None:
-        """The context block's document object, decoded afresh, or ``None`` for none."""
-        return cast("dict[str, Any] | None", decode(self._context_bytes))
-
     def _payload(self, source: str) -> Any:
         """A source's payload as decoded from the document."""
         return decode(self._payload_bytes[source])
 
-    def _requirements(self) -> tuple[Requirement, ...]:
-        """The plan-level requirements as decoded from the document, in declaration order."""
-        decoded = cast("list[dict[str, Any]]", decode(self._requirements_bytes))
-        return tuple(Requirement(r["ref"], r["value"]) for r in decoded)
-
     def _table(self, key: str) -> dict[str, Any]:
-        """A table's document object, by rule id or ``policy``, decoded afresh."""
+        """A table's document object, by rule id, decoded afresh."""
         return cast("dict[str, Any]", decode(self._table_bytes[key]))
-
-    def _plan(self, name: str) -> dict[str, Any]:
-        """A plan declaration's document object, decoded afresh."""
-        return cast("dict[str, Any]", decode(self._plan_bytes[name]))
 
     def _leaf_value(self, path: str) -> Any:
         """A leaf's value as decoded from the document; a ``bytes`` value as ``bytes``."""

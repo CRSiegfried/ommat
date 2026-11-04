@@ -1,16 +1,16 @@
 # pyright: reportPrivateUsage=false
 """The dead-question lint, ``dead_questions``: whether any point the lint ran found a
-question's answer changing the plan or the verdict.
+question's answer changing the decision.
 
 It fills the exogenous values, every ref a source provides and ``t:state``, by the read points,
 and runs ``decide_sync`` once per point with the default run settings, no codec, the point's
 ``t:state`` as the state and one binding, under ``default`` and every declared oracle name,
 that answers each asked ref from the point. So the ``d:`` values, ``Unasked`` and ``Unsure``
-come from the rules and the ``when``s, which decide runs. Two runs differ when their ``plan``
-or ``verdict`` items' canonical bytes differ, as replay compares them. Each point
-runs once, and every question is judged from those runs. A candidate-valued question is
-answered over the labels each run renders, each fixed label on top and then a candidate; it
-is never on the grid, and a witness shows it as that run's record wrote its entry.
+come from the rules and the ``when``s, which decide runs. Two runs differ when the canonical
+bytes of the policy's whole entry, cause included, differ. Each point runs once, and every
+question is judged from those runs. A candidate-valued question is answered over the labels
+each run renders, each fixed label on top and then a candidate; it is never on the grid, and
+a witness shows it as that run's record wrote its entry.
 
 A per-candidate question is no read of its own. At each assignment of the other reads its
 set's value is fixed, a ``t:`` set's by the point and a ``d:`` set's by a probe run with every
@@ -20,7 +20,7 @@ reads in code-point order of their grounded refs, so each assignment holds a blo
 whose size follows its sets. An empty set, or one holding a marker, grounds nothing. Two runs
 whose other reads agree are compared too when each holds every grounded entry at its first
 point, whatever entries each grounds, so a read whose answer changes a set is judged by the
-plan and verdict that change gives.
+decision that change gives.
 """
 
 import itertools
@@ -32,7 +32,7 @@ import ommat._decide as _decide
 from ommat._binding import CallResult, SourceCall
 from ommat._canonical import encode
 from ommat._design import LoadedDesign
-from ommat._ledger import _ITEM_DEPTH
+from ommat._ledger import decision_bytes
 from ommat._refs import code_point_sorted, declared_ref, grounded_ref
 from ommat._values import type_name
 from ommat.helpers._points import OnTop, Point, entry_points, filled, fresh
@@ -40,12 +40,12 @@ from ommat.helpers._points import OnTop, Point, entry_points, filled, fresh
 _STATE = "t:state"
 _DEFAULT = "default"
 
-_Run = tuple[bytes, bytes]
+_Run = bytes
 
 
 @dataclass(frozen=True, slots=True)
 class _Ran:
-    """One run: its ``plan`` and ``verdict`` bytes, the index of each other read's point, the
+    """One run: the decision's bytes, the index of each other read's point, the
     index of each grounded entry's point by grounded ref, and its point as a report shows it."""
 
     run: _Run
@@ -58,13 +58,13 @@ def dead_questions(
     loaded: LoadedDesign, *, values: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
     """The report ``{"points": N, "questions": {ref: {"status", "witness"}}, "narrowed":
-    [ref]}``, keyed by every ``q:`` ref a source provides; a ``ValueError`` before any run for
-    a read nothing fills or a slip in ``values``, and during the runs for a ``d:`` set that
-    differs within one assignment. ``values`` maps a read the lint fills, ``t:state`` or a
-    field path under it, or a ``t:`` or ``q:`` ref a source provides, to a list of its values;
-    a ``d:`` ref is never a key, since rules compute those values. For a label question with
-    no grid entry its list is the labels to try, and ``narrowed`` names each such question in
-    code-point order."""
+    [ref]}``, keyed by every ``q:`` ref a source provides; a ``ValueError`` before any run for a
+    read nothing fills or a slip in ``values``, and during the runs for a ``d:`` set that
+    differs within one assignment, or for a point whose turn is a broken entry (its ``t:state``
+    entry a marker). ``values`` maps a read the lint fills, ``t:state`` or a field path under
+    it, or a ``t:`` or ``q:`` ref a source provides, to a list of its values; a ``d:`` ref is
+    never a key, since rules compute those values. For a label question with no grid entry its
+    list is the labels to try, and ``narrowed`` names each such question in code-point order."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     sources = loaded._design.sources.values()
@@ -162,7 +162,7 @@ def _block(
 def _run(
     loaded: LoadedDesign, point: dict[str, Point], keys: set[str]
 ) -> tuple[_Run, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-    """One turn at ``point``: its ``plan`` and ``verdict`` items' canonical bytes, each
+    """One turn at ``point``: the decision's canonical bytes, each
     candidate-valued question's value or marker as the run's record wrote its entry, each
     grounding ``d:`` set's value or marker as the record wrote it, and the record's log."""
 
@@ -179,18 +179,30 @@ def _run(
 
     bindings = {_DEFAULT: binding, **dict.fromkeys(keys, binding)}
     decision = _decide.decide_sync(loaded, fresh(point[_STATE].live), bindings)
-    from ommat._replay import _first  # imported here: replay imports this package
-
     log = decision.record.log
-    plan, verdict = _first(log, "plan"), _first(log, "verdict")
-    assert plan is not None  # decide_sync returned, so the log holds both
-    assert verdict is not None
+    _refuse_broken(point, log)
+    run = decision_bytes(log)
+    assert run is not None  # decide_sync returned, so the log holds the policy's entry
     written = {
         i["ref"]: i["value"] if "value" in i else i["marker"] for i in log if i["item"] == "entry"
     }
     entries = {r: fresh(v) for r, v in written.items() if r in loaded._label_sets}
     sets = {r: written.get(r) for r in loaded._grounded.values() if r.startswith("d:")}
-    return (encode(plan, _ITEM_DEPTH), encode(verdict, _ITEM_DEPTH)), entries, sets, log
+    return run, entries, sets, log
+
+
+def _refuse_broken(point: Mapping[str, Point], log: list[dict[str, Any]]) -> None:
+    """A ``ValueError`` naming the point when the turn is a broken entry: its ``t:state`` entry
+    holds a marker, which only a broken entry writes. The turn never ran its rules, so the
+    point says nothing about any question."""
+    for item in log:
+        if item["item"] == "entry" and item["ref"] == _STATE and "marker" in item:
+            code = item["marker"]["cause"]["code"]
+            shown = {r: fresh(point[r].record) for r in code_point_sorted(point)}
+            raise ValueError(
+                f"the turn at the point {shown!r} is a broken entry with the cause {code!r}, "
+                "so the lint cannot judge its questions"
+            )
 
 
 def _candidates(value: object, field: str | None) -> list[str]:

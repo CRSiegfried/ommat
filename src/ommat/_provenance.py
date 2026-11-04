@@ -30,6 +30,9 @@ HASHED_DETAILS = (*STRING_DETAILS, "runtime", "precision")
 USAGE_DETAILS = ("usage.input_tokens", "usage.output_tokens", "usage.passes")
 """The ``usage`` figures that are each a detail of their own."""
 
+USAGE_KEYS = tuple(detail.removeprefix("usage.") for detail in USAGE_DETAILS)
+"""The keys a ``usage`` may hold."""
+
 DETAILS: frozenset[str] = frozenset((*HASHED_DETAILS, *USAGE_DETAILS, "request_id"))
 """Every detail's name: the closed set a ``missing`` key and a ``claimed`` name come from."""
 
@@ -114,12 +117,12 @@ def versions(value: object) -> dict[str, str] | None:
 
 def usage_conforms(value: dict[object, object]) -> bool:
     """Whether a ``usage`` dict conforms as interpret keeps one: in the value domain, each key
-    an exact ``str`` and each figure exactly an ``int`` of magnitude at most 2^53 - 1 or a
-    finite ``float``."""
+    an exact ``str`` of ``USAGE_KEYS`` and each figure exactly an ``int`` of magnitude at most
+    2^53 - 1 or a finite ``float``."""
     if domain_error(value) is not None:
         return False
     for key, figure in value.items():
-        if type(key) is not str:
+        if type(key) is not str or key not in USAGE_KEYS:
             return False
         if type(figure) is int:
             if abs(figure) > MAX_INTEGER:

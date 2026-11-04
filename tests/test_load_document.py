@@ -63,7 +63,6 @@ def alike(a: LoadedDesign, b: LoadedDesign) -> None:
     assert dict(a._payload_bytes) == dict(b._payload_bytes)
     assert dict(a._leaf_bytes) == dict(b._leaf_bytes)
     assert dict(a._requirement_bytes) == dict(b._requirement_bytes)
-    assert a._requirements_bytes == b._requirements_bytes
 
 
 # ---------------------------------------------------------------------------------------------
@@ -75,7 +74,7 @@ def test_a_document_round_trips_as_bytes_and_parsed(design: Design) -> None:
     loaded = load(design)
     alike(load(loaded.document), loaded)
     alike(load(decode(loaded.document)), loaded)
-    keys = {"route": designs.route, "score": designs.score, "policy": designs.policy}
+    keys = {"route": designs.route, "score": designs.score, "act": designs.policy}
     alike(load(loaded.document, functions=keys), loaded)
 
 
@@ -83,11 +82,11 @@ def test_a_document_resolves_each_function_component_to_its_callable() -> None:
     loaded = load(load(gated()).document)
     assert dict(loaded._callables) == {
         "gate.when": designs.route,
-        "policy": designs.policy,
+        "act": designs.policy,
         "route": designs.route,
         "score": designs.score,
     }
-    assert loaded._design.policy.function is designs.policy  # type: ignore[union-attr]
+    assert loaded._design.policy == "d:act"
 
 
 def test_a_bytes_leaf_written_as_base64url_is_bytes_again() -> None:
@@ -167,7 +166,7 @@ def test_a_function_whose_source_cannot_be_read_round_trips() -> None:
 
 def with_check_1_defect() -> dict[str, Any]:
     doc = doc_of(minimal())
-    doc["tools"] = {"Bad": {}}  # not in the name grammar: check 1
+    doc["groups"] = {"Bad": {"refs": [], "reason": ["convergent"]}}  # not in the grammar: check 1
     return doc
 
 
@@ -222,8 +221,10 @@ def parsed_cases() -> list[tuple[Any, str]]:
         ({**with_check_1_defect(), "name": b"x"}, "outside the value domain"),
         ({**with_check_1_defect(), "extra": 1}, 'the member "extra"'),
     ]
-    for value in (0, DESIGN_FORMAT + 1, True, "1", 1.0, None):
-        cases.append(({**with_check_1_defect(), "format": value}, "format is not one this engine"))
+    for value in (0, 9, DESIGN_FORMAT + 1):
+        cases.append(({**with_check_1_defect(), "format": value}, f"format {value} is not 10"))
+    for value in (True, "1", 1.0, None):
+        cases.append(({**with_check_1_defect(), "format": value}, "format is not an integer"))
     for member in ("state", "classes"):
         doc = with_check_1_defect()
         del doc[member]
@@ -275,11 +276,11 @@ def component_cases() -> list[tuple[Callable[[dict[str, Any]], None], tuple[str,
         doc["rules"]["route"]["form"] = "data"
 
     return [
+        (drop("policy"), (), 'the document has no member "policy"'),
         (drop("rules", "route", "version"), ("route",), 'rule "route" has no member "version"'),
         (add("rules", "route", "inputs"), ("route",), 'the member "inputs"'),
         (drop("rules", "route", "form"), ("route",), 'no member "form"'),
         (form, ("route",), "neither function nor table"),
-        (drop("policy", "source"), ("policy",), 'the policy has no member "source"'),
         (drop("sources", "intent", "cost"), ("intent",), 'no member "cost"'),
         (drop("sources", "gate", "when", "qualname"), ("gate",), "when has no member"),
         (add("sources", "gate", "requirement", "value"), ("gate",), "requirement has"),
@@ -294,8 +295,6 @@ def component_cases() -> list[tuple[Callable[[dict[str, Any]], None], tuple[str,
             'no member "labels"',
         ),
         (add("parameters", "blob", "default"), ("blob",), 'parameter "blob"'),
-        (add("tools", "send", "x"), ("send",), 'tool "send"'),
-        (add("requirements", 0, "why"), (), "a plan-level requirement"),  # type: ignore[arg-type]
         (bounds_entry, ("q:intent/email", "route"), "no member"),
         (mass_member, ("q:intent/email", "route"), "mass member has no member"),
         (origin, ("intent", "q:intent/email"), "origin is not one of"),
@@ -307,64 +306,10 @@ def test_check_11_a_component_missing_or_with_an_extra_member(
     change: Callable[[dict[str, Any]], None], names: tuple[str, ...], says: str
 ) -> None:
     doc = doc_of(gated())
-    doc["tools"]["Bad"] = {}  # a check 1 defect, which the gate keeps from running
+    doc["groups"]["Bad"] = {"refs": [], "reason": ["convergent"]}  # check 1, kept from running
     change(doc)
     failure = gate_failure(written(doc))
     assert (failure.names, says in failure.message) == (names, True)
-
-
-def plan_doc() -> dict[str, Any]:
-    doc = doc_of(minimal())
-    doc["plans"] = {
-        "ask": {
-            "kind": "clarify",
-            "steps": [
-                {
-                    "tool": "send",
-                    "arguments": {
-                        "to": {"ref": "t:state"},
-                        "body": {"literal": [1, {"x": None}]},
-                        "after": {"step": 0, "path": None},
-                    },
-                    "requirements": [{"ref": "d:route", "value": "yes"}],
-                }
-            ],
-            "reason": {"template": "Why?", "slots": []},
-            "reply": None,
-            "grounded": None,
-        }
-    }
-    return doc
-
-
-def plan_without(*path: Any) -> bytes:
-    doc = plan_doc()
-    at: Any = doc["plans"]["ask"]
-    for p in path[:-1]:
-        at = at[p]
-    del at[path[-1]]
-    return written(doc)
-
-
-def plan_with_origin(origin: dict[str, Any]) -> bytes:
-    doc = plan_doc()
-    doc["plans"]["ask"]["steps"][0]["arguments"]["to"] = origin
-    return written(doc)
-
-
-@pytest.mark.parametrize(
-    "given",
-    [
-        plan_without("reason", "slots"),
-        plan_without("steps", 0, "requirements"),
-        plan_without("steps", 0, "requirements", 0, "value"),
-        plan_with_origin({"ref": "t:state", "literal": 1}),
-        plan_with_origin({"step": 0}),
-        plan_with_origin({}),
-    ],
-)
-def test_check_11_a_plan_declarations_member_missing_or_extra(given: bytes) -> None:
-    assert gate_failure(given).names == ("ask",)
 
 
 def refused_form_docs() -> list[tuple[dict[str, Any], str]]:
@@ -490,8 +435,8 @@ def test_an_unresolved_function_is_not_check_10s() -> None:
 
 def test_a_clashing_key_resolves_neither_and_check_1_names_it() -> None:
     doc = doc_of(full())
-    doc["rules"]["policy"] = {**doc["rules"]["score"], "provides": "d:policy"}
-    found = refused(written(doc), policy=designs.policy)
+    doc["rules"]["codec"] = {**doc["rules"]["score"], "provides": "d:codec"}
+    found = refused(written(doc), codec=designs.score)
     assert {f.check for f in found} == {1}
     assert any("role name" in f.message for f in found)
 
@@ -520,9 +465,9 @@ def test_a_differing_source_hash() -> None:
 
 def test_a_null_source_where_load_reads_the_source() -> None:
     doc = doc_of(full())
-    doc["policy"]["source"] = None
+    doc["rules"]["act"]["source"] = None
     (failure,) = only(written(doc), 11)
-    assert (failure.names, "holds a null source" in failure.message) == (("policy",), True)
+    assert (failure.names, "holds a null source" in failure.message) == (("act",), True)
 
 
 def test_a_source_hash_where_load_cannot_read_the_source() -> None:
@@ -592,14 +537,6 @@ def reversed_group(doc: dict[str, Any]) -> None:
     doc["groups"]["intents"]["refs"].reverse()
 
 
-def listed_tool(doc: dict[str, Any]) -> None:
-    doc["tools"]["send"] = []
-
-
-def listed_tools(doc: dict[str, Any]) -> None:
-    doc["tools"] = []
-
-
 def unsorted_boundaries(doc: dict[str, Any]) -> None:
     doc["rules"]["route"]["boundaries"] = {"d:score": ["b", "a"]}
 
@@ -608,8 +545,6 @@ def unsorted_boundaries(doc: dict[str, Any]) -> None:
     ("change", "names", "says"),
     [
         (reversed_group, ("intents",), 'group "intents"\'s refs are not in canonical order'),
-        (listed_tool, ("send",), 'tool "send" is not'),
-        (listed_tools, (), 'the document\'s "tools" is not'),
         (unsorted_boundaries, ("route",), '"boundaries" is not what load computes'),
     ],
 )
@@ -682,15 +617,15 @@ def test_a_document_with_a_dropped_leaf_still_declares_it() -> None:
 @pytest.mark.parametrize(
     ("member", "value"),
     [
-        ("policy", "a policy"),
-        ("requirements", {}),
-        ("requirements", [1]),
+        ("policy", 5),
+        ("policy", None),
+        ("policy", ["d:decision"]),
+        ("policy", {"ref": "d:decision"}),
         ("groups", []),
         ("groups", {"g": "q:x"}),
         ("sources", {"s": "a source"}),
         ("rules", {"r": 3}),
         ("parameters", []),
-        ("plans", {"p": 1}),
     ],
 )
 def test_a_block_of_another_form_passes_the_gate_for_check_10(member: str, value: Any) -> None:
@@ -904,31 +839,20 @@ def label_set_doc() -> dict[str, Any]:
     return doc_of(design)
 
 
-def test_a_label_set_document_loads_at_format_4() -> None:
+def test_a_label_set_document_loads() -> None:
     load(written(label_set_doc()))
 
 
-@pytest.mark.parametrize("fmt", [1, 2, 3])
-def test_a_candidate_set_or_label_set_before_format_4_fails_check_11(fmt: int) -> None:
-    doc = designs.document_before_key_order(label_set_doc(), fmt)
-    del doc["context"]  # a design before format 5 holds no block
+@pytest.mark.parametrize("fmt", [1, 2, 3, 4, 5, 6, 7, 8, 9])
+def test_an_earlier_format_is_refused_at_check_11_naming_it(fmt: int) -> None:
+    doc = label_set_doc()
+    doc["format"] = fmt
     (failure,) = refused(written(doc))
     assert failure.check == 11
-    assert failure.message.endswith(
-        f"is a candidate-valued label set, which format {fmt} does not have"
+    assert failure.names == ()
+    assert failure.message == (
+        f"the document's format {fmt} is not {DESIGN_FORMAT}, the one this engine reads"
     )
-    del doc["sources"]["s"]
-    (failure,) = refused(written(doc))
-    assert failure.message.endswith(f'"t:s" is a candidate set, which format {fmt} does not have')
-    rule_doc = doc_of(
-        designs.with_rule(
-            minimal(), "find", designs.rule("find", outputs="list<string>", candidates=True)
-        )
-    )
-    designs.document_before_targets(rule_doc, fmt)
-    del rule_doc["context"]
-    (failure,) = refused(written(rule_doc))
-    assert failure.message == f'rule "find" is a candidate set, which format {fmt} does not have'
 
 
 def test_a_label_set_document_without_at_fails_check_11() -> None:

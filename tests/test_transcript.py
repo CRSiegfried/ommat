@@ -1,5 +1,5 @@
 """The transcript view and the Chat Completions renderer, over the four paths of
-``transcript_turns``: clear, guard-refused, unsure then clarify, and the oracle down."""
+``transcript_turns``: clear, hold, undecided on an unsure confirmation, and the oracle down."""
 
 import asyncio
 import json
@@ -11,33 +11,37 @@ import pytest
 
 from ommat import (
     CallResult,
-    Context,
-    ContextEntry,
-    Origin,
-    Plan,
-    Policy,
     Question,
     Record,
-    Requirement,
+    Rule,
     Source,
-    Step,
     Text,
     decide_sync,
-    handoff,
     load,
     read_record,
     replay_sync,
     transcript,
 )
+from ommat import types as t
 from ommat.conversation import (
     drop_earlier_bookkeeping,
-    handoff_text,
     is_bookkeeping,
     to_chat_completions,
 )
-from transcript_turns import PATHS, SOURCES, STATE, YES, confirming, design, model, tools, turn
+from transcript_turns import (
+    PATHS,
+    RULES,
+    SOURCES,
+    STATE,
+    YES,
+    confirming,
+    design,
+    model,
+    tools,
+    turn,
+)
 
-ID = re.compile(r"om_[0-9a-f]{24}_(c[1-9][0-9]*|d|s[1-9][0-9]*)")
+ID = re.compile(r"om_[0-9a-f]{24}_(c[1-9][0-9]*|d)")
 
 
 def view(path: str, **kw: Any) -> dict[str, Any]:
@@ -51,22 +55,22 @@ def calls(v: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def ids(v: dict[str, Any]) -> list[str]:
-    return [c["id"] for c in calls(v)] + [v["decide"]["id"]] + [s["id"] for s in v["pending"]]
+    return [c["id"] for c in calls(v)] + [v["decide"]["id"]]
 
 
 # ---------------------------------------------------------------------------------------------
 # The view
 
 
-def test_the_view_gives_every_call_and_the_conclusion_in_order() -> None:
+def test_the_view_gives_every_call_and_the_decision_in_order() -> None:
     decision = turn("clear")
     record = decision.record
     v = transcript(record)
     assert v is not None
     stem = "om_" + record.record_hash.removeprefix("sha256:")[:24]
-    assert list(v) == ["record_hash", "design", "rounds", "decide", "pending"]
+    assert list(v) == ["record_hash", "design", "rounds", "decide"]
     assert v["record_hash"] == record.record_hash
-    assert v["design"] == {"name": "mail", "hash": record.design_hash}
+    assert v["design"] == {"hash": record.design_hash}
     yes = {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"no": 0.05, "yes": 0.95}}
     half = {"kind": "noul", "labels": ["yes", "no"], "probabilities": {"no": 0.5, "yes": 0.5}}
     assert v["rounds"] == [
@@ -103,38 +107,11 @@ def test_the_view_gives_every_call_and_the_conclusion_in_order() -> None:
             }
         ],
     ]
-    sure = [{"ref": "d:sure", "value": "yes"}]
     assert v["decide"] == {
         "id": f"{stem}_d",
         "board": {"d:route": {"value": "yes"}, "d:sure": {"value": "yes"}},
-        "plan": {
-            "kind": "execute",
-            "reason": "the user asked to archive",
-            "reply": None,
-            "cause": None,
-            "steps": [
-                {
-                    "tool": "archive",
-                    "arguments": {
-                        "folder": {"value": "old"},
-                        "order": {"ref": "t:order.id", "value": "o-1"},
-                    },
-                    "requirements": sure,
-                },
-                {
-                    "tool": "notify",
-                    "arguments": {"receipt": {"value": "done"}},
-                    "requirements": sure,
-                },
-            ],
-        },
-        "verdict": {"kind": "passed", "failures": []},
-        "context": [{"marker": None, "ref": "d:route", "text": "Archive asked: yes"}],
+        "decision": {"value": "archive"},
     }
-    assert v["pending"] == [
-        {"id": f"{stem}_s1", "tool": "archive", "arguments": {"folder": "old", "order": "o-1"}},
-        {"id": f"{stem}_s2", "tool": "notify", "arguments": {"receipt": "done"}},
-    ]
 
 
 def test_two_sources_of_one_call_item_share_its_outcome_and_round() -> None:
@@ -152,25 +129,20 @@ def test_the_view_holds_no_state_provenance_prompt_or_derivation() -> None:
     assert "Archive this?" not in text  # no question wording
 
 
-def test_a_refused_verdict_is_given_as_recorded_and_nothing_is_pending() -> None:
-    decision = turn("refused")
-    v = transcript(decision.record)
-    assert v is not None
-    recorded = next(i for i in decision.record.log if i["item"] == "verdict")
-    assert v["decide"]["verdict"] == {"kind": "refused", "failures": recorded["failures"]}
-    assert v["decide"]["verdict"]["failures"]
-    assert len(v["decide"]["plan"]["steps"]) == 2
-    assert v["pending"] == []
+def test_a_value_decision_is_tagged_and_the_board_leaves_out_the_policy_s_entry() -> None:
+    v = view("hold")
+    assert v["decide"]["decision"] == {"value": "hold"}
+    assert "d:act" not in v["decide"]["board"]
 
 
-def test_an_unsure_estimate_is_a_tagged_marker_and_the_plan_clarifies() -> None:
+def test_an_unsure_confirmation_leaves_the_decision_a_tagged_marker() -> None:
     v = view("unsure")
     assert v["decide"]["board"]["d:sure"] == {
         "marker": {"kind": "Unsure", "cause": {"code": "abstained", "refs": ["q:confirm"]}}
     }
-    assert v["decide"]["plan"]["kind"] == "clarify"
-    assert v["decide"]["plan"]["reply"] == "Shall I archive them?"
-    assert v["pending"] == []
+    assert v["decide"]["decision"] == {
+        "marker": {"kind": "Unsure", "cause": {"code": "abstained", "refs": ["q:confirm"]}}
+    }
 
 
 def test_a_failed_call_keeps_its_outcome_and_a_source_never_called_is_in_no_round() -> None:
@@ -182,15 +154,6 @@ def test_a_failed_call_keeps_its_outcome_and_a_source_never_called_is_in_no_roun
         "q:route": {"marker": {"kind": "Unavailable", "cause": failed["failed"]}}
     }
     assert "confirm" not in [c["source"] for c in calls(v)]
-
-
-def test_a_plan_with_a_binding_shows_it_tagged_and_leaves_nothing_pending() -> None:
-    v = view("clear", bound=True)
-    assert v["decide"]["plan"]["steps"][1]["arguments"] == {
-        "receipt": {"step": 1, "path": "receipt"}
-    }
-    assert v["decide"]["verdict"]["kind"] == "passed"
-    assert v["pending"] == []
 
 
 def test_a_value_with_a_marker_field_reads_as_a_value() -> None:
@@ -210,20 +173,6 @@ def test_a_value_with_a_marker_field_reads_as_a_value() -> None:
     assert calls(v)[2]["answers"] == {"t:order": {"value": {"id": "o-1", "marker": "m"}}}
 
 
-def test_with_no_block_the_name_is_null_and_there_is_no_context() -> None:
-    record = turn("clear", load(design(context=None))).record
-    v = transcript(record)
-    assert v is not None
-    assert v["design"] == {"name": None, "hash": record.design_hash}
-    assert "context" not in v["decide"]
-
-
-def test_an_empty_block_gives_an_empty_context() -> None:
-    v = transcript(turn("clear", load(design(context=Context([])))).record)
-    assert v is not None
-    assert v["decide"]["context"] == []
-
-
 @pytest.mark.parametrize("path", PATHS)
 def test_ids_fit_the_pattern_are_unique_and_one_log_gives_the_same(path: str) -> None:
     record = turn(path).record
@@ -234,37 +183,41 @@ def test_ids_fit_the_pattern_are_unique_and_one_log_gives_the_same(path: str) ->
     assert len(set(got)) == len(got)
     again = transcript(read_record(record.document))
     assert again == v
-    replayed, findings = replay_sync(record, load(design(**_changes(path))))
+    replayed, findings = replay_sync(record, load(design()))
     assert findings == []
     assert replayed is not None
     assert replayed.record_hash == record.record_hash
     assert transcript(replayed) == v
 
 
-def _changes(path: str) -> dict[str, Any]:
-    return {"requirements": [Requirement("d:route", "no")]} if path == "refused" else {}
+OLD_RECORDS = {
+    **{fmt: f"format_{fmt}/record.json" for fmt in range(1, 7)},
+    7: "format_7_record/turn.record.json",
+}
+"""A stored record of each record format before 8, by its format."""
 
 
-@pytest.mark.parametrize("fmt", [1, 2, 3, 4])
-def test_a_record_before_format_5_gives_no_name_and_no_context(fmt: int) -> None:
-    data = (Path(__file__).parent / f"format_{fmt}" / "record.json").read_bytes()
-    record = read_record(data)
-    v = transcript(record)
-    assert v is not None
-    assert v["design"]["name"] is None
-    assert "context" not in v["decide"]
-    assert all(ID.fullmatch(i) for i in ids(v))
+def old_record(fmt: int) -> Record:
+    record = read_record((Path(__file__).parent / OLD_RECORDS[fmt]).read_bytes())
+    assert record.log[0].get("format", 1) == fmt
+    return record
 
 
-def test_a_record_with_no_plan_item_gives_none() -> None:
-    def cancel(r: Any) -> Plan:
+@pytest.mark.parametrize("fmt", sorted(OLD_RECORDS))
+def test_a_record_before_format_8_gives_no_transcript(fmt: int) -> None:
+    assert transcript(old_record(fmt)) is None
+
+
+def test_a_record_with_no_entry_at_the_policy_gives_none() -> None:
+    def cancel(r: Any) -> str:
         raise asyncio.CancelledError
 
-    ld = load(design(policy=Policy(cancel, version="1", reads=["d:sure"])))
+    rule = Rule("d:act", t.label("archive", "hold"), cancel, version="1", reads=["d:sure"])
+    ld = load(design(policy="d:act", rules={**RULES, "act": rule}))
     with pytest.raises(asyncio.CancelledError) as caught:
         turn("clear", ld)
     record = cast("Record", getattr(caught.value, "record"))  # noqa: B009
-    assert not any(i["item"] == "plan" for i in record.log)
+    assert not any(i["item"] == "entry" and i["ref"] == "d:act" for i in record.log)
     assert transcript(record) is None
 
 
@@ -277,7 +230,7 @@ def test_the_view_refuses_what_is_not_a_record() -> None:
 # The Chat Completions renderer
 
 
-def test_chat_completions_gives_each_round_decide_and_the_pending_calls() -> None:
+def test_chat_completions_gives_each_round_and_decide() -> None:
     v = view("clear")
     messages = to_chat_completions(v)
     roles = [(m["role"], len(m.get("tool_calls", []))) for m in messages]
@@ -290,7 +243,6 @@ def test_chat_completions_gives_each_round_decide_and_the_pending_calls() -> Non
         ("tool", 0),
         ("assistant", 1),
         ("tool", 0),
-        ("assistant", 2),
     ]
     first = messages[0]
     assert first["content"] is None
@@ -306,22 +258,17 @@ def test_chat_completions_gives_each_round_decide_and_the_pending_calls() -> Non
     }
     assert [m["tool_call_id"] for m in messages[1:4]] == [c["id"] for c in calls(v)[:3]]
     assert json.loads(messages[2]["content"]) == calls(v)[1]["answers"]
-    decide_call = messages[6]["tool_calls"][0]
+    decide_call = messages[-2]["tool_calls"][0]
     assert decide_call["id"] == v["decide"]["id"]
     assert decide_call["function"]["name"] == "decide"
-    assert json.loads(decide_call["function"]["arguments"]) == {"design": v["design"]}
-    result = json.loads(messages[7]["content"])
-    assert result == {k: x for k, x in v["decide"].items() if k != "id"}
-    pending = messages[8]["tool_calls"]
-    assert [(c["id"], c["function"]["name"]) for c in pending] == [
-        (s["id"], s["tool"]) for s in v["pending"]
-    ]
-    # The step's arguments in the order the policy gave them.
-    assert pending[0]["function"]["arguments"] == '{"order":"o-1","folder":"old"}'
+    assert json.loads(decide_call["function"]["arguments"]) == {"board": v["decide"]["board"]}
+    result = json.loads(messages[-1]["content"])
+    assert result == {k: x for k, x in v["decide"].items() if k not in ("id", "board")}
+    assert result["decision"] == {"value": "archive"}
 
 
 @pytest.mark.parametrize("path", PATHS)
-def test_chat_completions_renders_every_path_and_ends_after_decide_with_nothing_pending(
+def test_chat_completions_renders_every_path_and_ends_at_decide_s_result(
     path: str,
 ) -> None:
     v = view(path)
@@ -329,12 +276,9 @@ def test_chat_completions_renders_every_path_and_ends_after_decide_with_nothing_
     calls_made = [c for m in messages for c in m.get("tool_calls", [])]
     results = [m["tool_call_id"] for m in messages if m["role"] == "tool"]
     assert [c["id"] for c in calls_made] == ids(v)
-    if path == "clear":
-        assert messages[-1]["role"] == "assistant"
-    else:
-        assert messages[-1]["role"] == "tool"
-        assert messages[-1]["tool_call_id"] == v["decide"]["id"]
-        assert results == [c["id"] for c in calls_made]
+    assert messages[-1]["role"] == "tool"
+    assert messages[-1]["tool_call_id"] == v["decide"]["id"]
+    assert results == [c["id"] for c in calls_made]
 
 
 def test_a_failed_call_s_result_is_its_marker_answers_and_nothing_else() -> None:
@@ -364,14 +308,10 @@ def test_none_renders_as_no_messages() -> None:
     assert to_chat_completions(None) == []
 
 
-def _renamed(
-    v: dict[str, Any], *, source: str | None = None, tool: str | None = None
-) -> dict[str, Any]:
+def _renamed(v: dict[str, Any], *, source: str | None = None) -> dict[str, Any]:
     v = json.loads(json.dumps(v))
     if source is not None:
         v["rounds"][0][0]["source"] = source
-    if tool is not None:
-        v["pending"][0]["tool"] = tool
     return v
 
 
@@ -380,9 +320,6 @@ def _renamed(
     [
         ({"source": "decide"}, "the name decide's call takes"),
         ({"source": "a/" + "b" * 63}, "over 64 characters"),
-        ({"tool": "decide"}, "the name decide's call takes"),
-        ({"tool": "mail/send"}, "not a tool name a provider takes"),
-        ({"tool": "x" * 65}, "not a tool name a provider takes"),
     ],
 )
 def test_a_tool_name_no_provider_takes_is_refused(change: dict[str, str], message: str) -> None:
@@ -400,18 +337,17 @@ def test_a_source_s_slash_becomes_a_hyphen_and_a_long_name_within_64_passes() ->
 # Chat Completions bookkeeping
 
 
-def test_chat_bookkeeping_is_the_source_calls_and_decide_and_never_the_pending_calls() -> None:
+def test_chat_bookkeeping_is_the_source_calls_and_decide() -> None:
     messages = to_chat_completions(view("clear"))
-    assert [is_bookkeeping(m) for m in messages] == [True] * 8 + [False]
+    assert [is_bookkeeping(m) for m in messages] == [True] * 8
 
 
 def test_a_message_of_the_caller_s_or_the_model_s_is_not_bookkeeping() -> None:
     assert not is_bookkeeping({"role": "user", "content": "hi"})
     assert not is_bookkeeping({"role": "assistant", "content": "ok"})
     assert not is_bookkeeping({"role": "tool", "tool_call_id": "call_1", "content": "{}"})
-    step = to_chat_completions(view("clear"))[-1]["tool_calls"][0]
-    mixed = {"role": "assistant", "content": None, "tool_calls": [step]}
-    assert not is_bookkeeping(mixed)
+    own = {"id": "call_1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+    assert not is_bookkeeping({"role": "assistant", "content": None, "tool_calls": [own]})
 
 
 def _chat_paired(messages: list[dict[str, Any]]) -> bool:
@@ -422,8 +358,6 @@ def _chat_paired(messages: list[dict[str, Any]]) -> bool:
 def _first_turn() -> list[dict[str, Any]]:
     first: list[dict[str, Any]] = [{"role": "user", "content": "Archive the newsletters"}]
     first += to_chat_completions(view("clear"))
-    step_ids = [c["id"] for c in first[-1]["tool_calls"]]
-    first += [{"role": "tool", "tool_call_id": i, "content": "{}"} for i in step_ids]
     first += [{"role": "assistant", "content": "Archived."}]
     return first
 
@@ -433,7 +367,7 @@ def test_dropping_earlier_bookkeeping_over_two_turns_keeps_calls_paired() -> Non
     second = [*first, {"role": "user", "content": "Are you sure?"}]
     current = to_chat_completions(view("unsure"))
     kept = drop_earlier_bookkeeping(second + current)
-    assert kept == [first[0], *first[-4:], second[-1], *current]
+    assert kept == [first[0], first[-1], second[-1], *current]
     assert _chat_paired(kept)
 
 
@@ -447,7 +381,7 @@ def test_chat_takes_empty_content_as_none_and_keeps_a_result_with_a_kept_call() 
     first = _first_turn()
     first[1] = {**first[1], "content": ""}
     assert is_bookkeeping(first[1])
-    first[5] = {**first[5], "content": "thinking"}  # decide's call, no longer bookkeeping
+    first[5] = {**first[5], "content": "thinking"}  # a call with text, not bookkeeping
     current = to_chat_completions(view("unsure"))
     kept = drop_earlier_bookkeeping([*first, *current])
     assert first[5] in kept
@@ -457,60 +391,6 @@ def test_chat_takes_empty_content_as_none_and_keeps_a_result_with_a_kept_call() 
 
 # ---------------------------------------------------------------------------------------------
 # Round-one review cases
-
-
-def _with_step_over(record: Record, ref: str) -> Record:
-    """The record with a step whose argument names ``ref``, rehashed, as no decide writes."""
-    from ledger_logs import rehashed
-
-    doc = json.loads(record.document)
-    plan = next(i for i in doc["log"] if i["item"] == "plan")
-    plan["steps"] = [{"tool": "archive", "arguments": {"order": {"ref": ref}}, "requirements": []}]
-    return read_record(json.dumps(rehashed(doc)).encode())
-
-
-def test_a_step_argument_with_no_value_in_the_log_raises_in_both_views() -> None:
-    edited = _with_step_over(turn("unsure").record, "d:sure")  # a marker, no value
-    with pytest.raises(ValueError, match="holds no value in the log"):
-        transcript(edited)
-    with pytest.raises(ValueError, match="holds no value in the log"):
-        handoff(edited)
-
-
-def test_the_flagged_ref_s_marker_wins_over_an_earlier_slot_s() -> None:
-    entry = ContextEntry(
-        "d:sure",
-        Text(
-            "{r} then {s}",
-            [
-                {"name": "r", "origin": {"ref": "d:route"}},
-                {"name": "s", "origin": {"ref": "d:sure"}},
-            ],
-        ),
-    )
-    v = transcript(turn("down", load(design(context=Context([entry])))).record)
-    assert v is not None
-    (got,) = v["decide"]["context"]
-    assert got["marker"]["cause"]["code"] == "need-unavailable"  # d:sure's, not d:route's
-
-
-def test_handoff_text_writes_an_unavailable_marker_as_recorded() -> None:
-    lines = handoff_text(handoff(turn("down").record)).splitlines()
-    assert "d:route: Unavailable (raised)" in lines
-
-
-def test_handoff_text_names_the_design_by_hash_alone_with_no_name() -> None:
-    record = turn("clear").record
-    view = handoff(record)
-    assert view is not None
-    view["design"]["name"] = None
-    assert f"Design: {record.design_hash}" in handoff_text(view).splitlines()
-
-
-@pytest.mark.parametrize("fmt", [1, 2, 3, 4])
-def test_a_record_before_format_5_hands_off_nothing(fmt: int) -> None:
-    data = (Path(__file__).parent / f"format_{fmt}" / "record.json").read_bytes()
-    assert handoff(read_record(data)) is None
 
 
 def test_chat_filters_ignore_odd_members() -> None:
@@ -564,9 +444,6 @@ def test_five_turns_repeating_one_record_repeat_no_id_and_keep_only_the_last() -
         history.append({"role": "user", "content": f"turn {n}"})
         messages = to_chat_completions(view(path), turn=n)
         history += messages
-        if messages[-1]["role"] == "assistant":  # pending calls the caller runs
-            ids_ = [c["id"] for c in messages[-1]["tool_calls"]]
-            history += [{"role": "tool", "tool_call_id": i, "content": "{}"} for i in ids_]
         history.append({"role": "assistant", "content": "ok"})
     every = [c["id"] for m in history for c in m.get("tool_calls", [])]
     assert len(every) == len(set(every))
@@ -599,59 +476,6 @@ def test_a_source_asking_two_refs_lists_them_in_code_point_order() -> None:
     assert list(call["answers"]) == ["q:alpha", "q:zeta"]
 
 
-def test_pending_arguments_share_no_object_with_decide_s_steps() -> None:
-    def whole(r: Any) -> Plan:
-        step = Step(
-            "archive",
-            {"order": Origin(ref="t:order"), "folder": Origin(literal="old")},
-            [Requirement("d:sure", "yes")],
-        )
-        return (
-            Plan("execute", [step], reason="archive")
-            if r.read("d:sure") == "yes"
-            else Plan("clarify", reply="?")
-        )
-
-    ld = load(design(policy=Policy(whole, version="1", reads=["d:sure", "t:order"])))
-    v = transcript(turn("clear", ld).record)
-    assert v is not None
-    shown = v["decide"]["plan"]["steps"][0]["arguments"]["order"]["value"]
-    pending = v["pending"][0]["arguments"]["order"]
-    assert shown == pending == {"id": "o-1"}
-    assert shown is not pending
-
-
-def test_the_first_marker_in_slot_order_wins_when_the_flagged_ref_holds_none() -> None:
-    entry = ContextEntry(
-        "t:state.message",
-        Text(
-            "{m}: {r} {s}",
-            [
-                {"name": "m", "origin": {"ref": "t:state.message"}},
-                {"name": "r", "origin": {"ref": "d:route"}},
-                {"name": "s", "origin": {"ref": "d:sure"}},
-            ],
-        ),
-    )
-    v = transcript(turn("down", load(design(context=Context([entry])))).record)
-    assert v is not None
-    assert v["decide"]["context"][0]["marker"]["cause"]["code"] == "raised"  # d:route's
-
-
-def test_a_path_walking_into_a_value_that_is_no_record_raises() -> None:
-    edited = _with_step_over(turn("clear").record, "d:route.x")  # d:route is a label
-    with pytest.raises(ValueError, match="holds no value in the log"):
-        transcript(edited)
-
-
-def test_handoff_text_gives_steps_alone_with_the_plan_switch_off() -> None:
-    record = turn("clear", load(design(context=Context([], plan=False, record=False)))).record
-    assert handoff_text(handoff(record)).splitlines() == [
-        'Step 1: archive {"order":{"ref":"t:order.id","value":"o-1"},"folder":{"value":"old"}}',
-        'Step 2: notify {"receipt":{"value":"done"}}',
-    ]
-
-
 def test_a_call_message_mixing_ommat_and_other_ids_is_not_bookkeeping() -> None:
     ours = to_chat_completions(view("unsure"))[0]["tool_calls"][0]
     other = {"id": "call_abc", "type": "function", "function": {"name": "x", "arguments": "{}"}}
@@ -679,12 +503,6 @@ def test_records_whose_stems_differ_only_in_their_last_digit_are_two_records() -
 
     earlier, latest = record("om_" + "a" * 23 + "b"), record("om_" + "a" * 23 + "c")
     assert drop_earlier_bookkeeping(earlier + latest) == latest
-
-
-def test_a_pending_tool_name_may_hold_digits() -> None:
-    v = json.loads(json.dumps(view("clear")))
-    v["pending"][0]["tool"] = "archive2"
-    assert to_chat_completions(v)[-1]["tool_calls"][0]["function"]["name"] == "archive2"
 
 
 @pytest.mark.parametrize(

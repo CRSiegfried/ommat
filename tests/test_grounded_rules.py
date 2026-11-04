@@ -21,10 +21,6 @@ from ommat import (
     Helper,
     InvalidDesign,
     LoadedDesign,
-    Plan,
-    PlanDeclaration,
-    Policy,
-    PolicyTable,
     Question,
     ReadView,
     Record,
@@ -88,8 +84,8 @@ def summary(r: ReadView) -> object:
     return "seen"
 
 
-def plan(r: ReadView) -> Plan:
-    return Plan("inform", reply=f"fit: {r.read(FIT)}")
+def act(r: ReadView) -> str:
+    return f"fit: {r.read(FIT)}"
 
 
 LEVEL_TABLE = Table(
@@ -131,8 +127,9 @@ def design(**changes: Any) -> Design:
             ),
             "level": LEVEL_TABLE,
             "summary": Rule("d:summary", t.string, summary, version="1", reads=[FIT]),
+            "act": Rule("d:act", t.string, act, version="1", reads=[FIT, "d:summary"]),
         },
-        "policy": Policy(plan, version="1", reads=[FIT, "d:summary"]),
+        "policy": "d:act",
         "classes": {SET: {"name": "identifier"}},
     }
     fields.update(changes)
@@ -197,11 +194,6 @@ def test_check_4_refuses_a_candidate_read_in_an_ungrounded_rule() -> None:
     ]
 
 
-def test_check_4_refuses_a_candidate_read_in_the_policy() -> None:
-    found = failures(design(policy=Policy(plan, version="1", reads=[FIT, "candidate"])))
-    assert (4, 'the policy reads "candidate", which only a grounded rule or table reads') in found
-
-
 @pytest.mark.parametrize("read", ["candidate.nick", "candidate.age.x", "candidate.name.x"])
 def test_check_9_refuses_a_candidate_read_naming_no_field(read: str) -> None:
     rules = {
@@ -250,7 +242,6 @@ def test_a_rule_grounded_over_the_same_set_reads_a_grounded_ref_by_a_field_path(
     load(
         design(
             rules={**design().rules, "fit": record_fit, "summary": reader},
-            policy=Policy(plan, version="1", reads=[FIT]),
         )
     )
 
@@ -267,9 +258,9 @@ def test_check_4_refuses_a_table_reading_a_grounded_ref_outside_its_set() -> Non
     ]
 
 
-def test_check_4_refuses_a_policy_table_reading_a_grounded_ref() -> None:
-    policy = PolicyTable([FIT], [["-", "done"]])
-    found = failures(design(policy=policy, plans={"done": PlanDeclaration("inform")}))
+def test_check_4_refuses_a_table_reading_a_grounded_ref_it_is_not_grounded_over() -> None:
+    table = Table("d:act", t.label("done"), "F", [FIT], [["-", "done"]])
+    found = failures(design(rules={**design().rules, "act": table}))
     assert any(c == 4 and "a grounded declared ref" in m for c, m in found)
 
 
@@ -301,24 +292,6 @@ def test_check_9_refuses_a_boundaries_field_naming_a_candidate_read() -> None:
     )
     found = failures(design(rules={**design().rules, "fit": bounded}))
     assert any(c == 9 and 'names "candidate.age", a candidate read' in m for c, m in found)
-
-
-def test_check_11_refuses_a_format_7_document_reading_candidate() -> None:
-    doc = json.loads(LOADED.document)
-    doc["format"] = 7
-    for r in doc["rules"].values():
-        r["candidates"] = r["candidates"] is not False and r["candidates"]
-    doc["rules"]["people"]["candidates"] = True
-    with pytest.raises(InvalidDesign) as info:
-        load(doc)
-    assert [(f.check, f.message) for f in info.value.failures] == [
-        (11, 'rule "fit" reads candidate, which format 7 does not have'),
-    ]
-    del doc["rules"]["fit"]
-    doc["policy"]["reads"] = []
-    with pytest.raises(InvalidDesign) as info:
-        load(doc)
-    assert 'rule "level" reads candidate, which format 7 does not have' in str(info.value)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -430,8 +403,7 @@ def test_a_helper_given_a_candidate_read_names_the_sets_ref() -> None:
 
 def test_the_policy_reads_a_grounded_rules_declared_ref_as_a_dict() -> None:
     record = decided()
-    plan_item = next(i for i in record.log if i["item"] == "plan")
-    assert plan_item["reply"] == "fit: {'Bo': 'Bo:yes', 'Ana': 'Ana:yes'}"
+    assert entries(record)["d:act"]["value"] == "fit: {'Bo': 'Bo:yes', 'Ana': 'Ana:yes'}"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -469,17 +441,15 @@ def test_redact_digests_a_grounded_rules_candidate() -> None:
     assert grounded_ref(FIT, "Ana") not in written
 
 
-def test_check_4_refuses_a_requirement_naming_a_grounded_declared_ref() -> None:
-    from ommat import Requirement, SourceRequirement
+def test_check_4_refuses_a_source_requirement_naming_a_grounded_declared_ref() -> None:
+    from ommat import SourceRequirement
 
-    found = failures(design(requirements=[Requirement(FIT, "x")]))
-    assert any(c == 4 and "which no requirement names" in m for c, m in found)
     gated = Source(
         {"q:other": Question("noul", Text("Other?"))},
         requirement=SourceRequirement(FIT, ["x"]),
     )
     found = failures(design(sources={**design().sources, "other": gated}))
-    assert any(c == 4 and "which no requirement names" in m for c, m in found)
+    assert any(c == 4 and "which no requirement names" in m for c, m in found), found
 
 
 @pytest.mark.parametrize(

@@ -231,7 +231,7 @@ def test_a_type_spelled_otherwise_fails_with_the_canonical_spelling(
     assert render(p(canonical)) == canonical
 
 
-SORTED_BEFORE_FORMAT_6 = [
+FIELDS_OUT_OF_CODE_POINT_ORDER = [
     ("record{b: string, a: string}", "record{a: string, b: string}"),
     (
         "record{z: record{b: string, a: string}, a: integer}",
@@ -250,20 +250,9 @@ SORTED_BEFORE_FORMAT_6 = [
 ]
 
 
-@pytest.mark.parametrize(("text", "canonical"), SORTED_BEFORE_FORMAT_6)
+@pytest.mark.parametrize(("text", "canonical"), FIELDS_OUT_OF_CODE_POINT_ORDER)
 def test_a_record_spells_its_fields_as_declared(text: str, canonical: str) -> None:
     assert render(p(text)) == text
-
-
-@pytest.mark.parametrize(("text", "canonical"), SORTED_BEFORE_FORMAT_6)
-def test_before_format_6_a_record_out_of_code_point_order_is_not_canonical(
-    text: str, canonical: str
-) -> None:
-    failure = parse_type(text, nullable=True, sorted_fields=True)
-    assert isinstance(failure, TypeFailure)
-    assert failure.kind is FailureKind.not_canonical
-    assert failure.canonical == canonical
-    assert parse_type(canonical, nullable=True, sorted_fields=True) == p(canonical)
 
 
 MALFORMED = [

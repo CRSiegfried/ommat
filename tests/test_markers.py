@@ -20,12 +20,10 @@ from ommat._markers import (
     Failed,
     MarkerKind,
     OutcomeKind,
-    PlanKind,
     Unasked,
     Unavailable,
     Undetermined,
     Unsure,
-    VerdictKind,
 )
 
 # The cause set, its 25 codes.
@@ -66,10 +64,8 @@ def test_the_cause_set_is_exactly_the_decisions() -> None:
 @pytest.mark.parametrize(
     ("enum_type", "values"),
     [
-        (PlanKind, {"execute", "clarify", "inform", "escalate", "broken"}),
         (OutcomeKind, {"returned", "failed"}),
         (MarkerKind, {"Unsure", "Unavailable", "Unasked"}),
-        (VerdictKind, {"passed", "refused"}),
     ],
 )
 def test_closed_sets(enum_type: type[enum.StrEnum], values: set[str]) -> None:
@@ -99,8 +95,8 @@ class MyList(list[str]):
 
 def test_cause_refs_are_a_tuple_kept_in_order_with_repeats() -> None:
     assert CAUSE.refs == ("q:b", "q:a", "q:b")
-    listed = Cause(CauseCode.raised, ["rule:2", "policy"])
-    assert listed.refs == ("rule:2", "policy")
+    listed = Cause(CauseCode.raised, ["d:act", "codec"])
+    assert listed.refs == ("d:act", "codec")
     assert type(listed.refs) is tuple
 
 
@@ -244,7 +240,7 @@ def test_failed() -> None:
 
 def test_public_names() -> None:
     public = ["Undetermined", "Unsure", "Unavailable", "Unasked", "Failed", "Cause"]
-    for name in [*public, "CauseCode", "PlanKind", "VerdictKind"]:
+    for name in [*public, "CauseCode"]:
         assert name in ommat.__all__
         assert getattr(ommat, name) is globals()[name]
     # A marker's kind and an outcome's are named by their classes.

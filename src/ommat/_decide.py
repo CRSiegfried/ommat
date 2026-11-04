@@ -4,9 +4,11 @@
 ``decide`` refuses a wrong caller argument with ``EntryRefusal`` before anything runs. Then it reads
 the monotonic clock, opens the ledger, writes ``unhashed``'s ``turn.start``, ``engine`` and
 ``codec``, appends the ``design`` and ``settings`` items and the state entry ``t:state``, runs
-interpret and then compile, and returns the frozen ``Decision``. A codec that raises an
-``Exception``, or a state that does not conform, is a broken entry: decide builds the ``broken``
-plan, calls the guard over an empty board and appends ``plan`` and ``verdict`` itself.
+interpret, which fires every rule and so the policy, and returns the frozen ``Decision``, whose
+estimate is the policy's entry: nothing is written after interpret. A codec that raises an
+``Exception``, or a state that does not conform, is a broken entry: decide writes ``t:state``
+and then the policy's ref as ``Unavailable`` with the entry cause, both in round 0, and runs no
+interpret.
 
 One handler sorts what ends a turn early by identity first: the observer's exception closes
 the record and propagates with it; a cancellation, one the codec raises included,
@@ -15,9 +17,8 @@ anything else propagates bare, with no record.
 
 ``_turn`` is the body, which replay's internal entry reruns with the record's state entry as
 the state, its run settings, the fixture binding, no codec and the record's cut. There
-``clock`` is ``None``: decide reads no clock and interpret enforces no deadline, stopping at
-the cut instead. What ``_turn`` takes is checked values, never a
-``RunSettings``.
+``clock`` is ``None``: decide reads no clock, and interpret enforces no deadline and stops at
+the cut. What ``_turn`` takes is checked values, never a ``RunSettings``.
 """
 
 import asyncio
@@ -32,14 +33,11 @@ from types import FunctionType, MethodType
 from typing import Any, cast
 
 from ommat._binding import OracleBinding
-from ommat._compile import compile_turn, context_member, plan_item
 from ommat._component import exception_record, now, refuse_awaitable
 from ommat._design import LoadedDesign
-from ommat._guard import Verdict, guard, verdict_item
-from ommat._interpret import interpret
-from ommat._ledger import Ledger, Observer, Record
-from ommat._markers import Cause, CauseCode, PlanKind
-from ommat._plan import Plan, engine_plan
+from ommat._interpret import _MARKER_KINDS, _marker_document, interpret
+from ommat._ledger import Ledger, Observer, Record, decision_entry
+from ommat._markers import Cause, CauseCode, Unavailable, Undetermined
 from ommat._refs import code_point_sorted
 from ommat._typed import is_a, typed
 from ommat._values import (
@@ -81,21 +79,21 @@ class RunSettings:
 _BUILT_BY_DECIDE = object()
 
 
+_MARKERS: dict[str, type[Undetermined]] = {kind: cls for cls, kind in _MARKER_KINDS.items()}
+
+
 class Decision:
-    """A turn's decision: the plan, the guard verdict and the record; the design hash is the
-    record's. Frozen, and built only by decide."""
+    """A turn's decision and its record: the estimate is the policy's entry and the design
+    hash is the record's, each read from the record and stored nowhere. Frozen, and built
+    only by decide."""
 
-    __slots__ = ("_plan", "_record", "_verdict")
+    __slots__ = ("_record",)
 
-    _plan: Plan
-    _verdict: Verdict
     _record: Record
 
-    def __init__(self, token: object, plan: Plan, verdict: Verdict, record: Record) -> None:
+    def __init__(self, token: object, record: Record) -> None:
         if token is not _BUILT_BY_DECIDE:
             raise TypeError("a Decision is built only by decide")
-        object.__setattr__(self, "_plan", plan)
-        object.__setattr__(self, "_verdict", verdict)
         object.__setattr__(self, "_record", record)
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -103,14 +101,6 @@ class Decision:
 
     def __delattr__(self, name: str) -> None:
         raise AttributeError("a Decision is frozen")
-
-    @property
-    def plan(self) -> Plan:
-        return self._plan
-
-    @property
-    def verdict(self) -> Verdict:
-        return self._verdict
 
     @property
     def record(self) -> Record:
@@ -121,8 +111,21 @@ class Decision:
         """The record's design hash, read from it and stored nowhere."""
         return self._record.design_hash
 
+    @property
+    def estimate(self) -> object:
+        """The policy's estimate, read from its entry in the record: the value as recorded, or
+        an ``Unsure``, ``Unavailable`` or ``Unasked`` rebuilt with its cause."""
+        entry = decision_entry(self._record.log)
+        if entry is None:  # decide writes the policy's entry on every turn it returns
+            raise _EngineDefect("the record holds no entry at the policy's ref")
+        if "value" in entry:
+            return entry["value"]
+        marker = cast("dict[str, Any]", entry["marker"])
+        cause = cast("dict[str, Any]", marker["cause"])
+        return _MARKERS[marker["kind"]](Cause(cause["code"], cause["refs"]))
+
     def __repr__(self) -> str:
-        return f"Decision(plan={self._plan!r}, verdict={self._verdict!r}, record={self._record!r})"
+        return f"Decision(estimate={self.estimate!r}, record={self._record!r})"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -373,24 +376,8 @@ async def _turn(
         ledger.write_unhashed("engine", _ENGINE)
         if codec is not None:
             ledger.write_unhashed("codec", _codec_name(codec))
-        ledger.append(
-            {
-                "item": "design",
-                "hash": loaded.design_hash,
-                "format": RECORD_FORMAT,
-                "helpers": HELPERS,
-            }
-        )
-        ledger.append(
-            {
-                "item": "settings",
-                "settings": run.item(),
-                "providers": dict(loaded._providers),
-                "classes": loaded._classes,
-                "grounded": dict(loaded._grounded),
-                "sets": dict(loaded._candidate_sets),
-            }
-        )
+        for item in _opening(loaded, run.item()):
+            ledger.append(item)
         value = state
         if codec is not None:
             text = None
@@ -427,8 +414,11 @@ async def _turn(
             cut=cut,
             carried=frozenset(),
         )
-        plan, verdict = compile_turn(ledger, loaded, board)
-        return Decision(_BUILT_BY_DECIDE, plan, verdict, _end(ledger))
+        if loaded._design.policy not in board:
+            raise _EngineDefect(
+                f"interpret ended with no entry at the policy's ref {quote(loaded._design.policy)}"
+            )
+        return Decision(_BUILT_BY_DECIDE, _end(ledger))
     except BaseException as exc:
         if exc is ledger.observer_error:  # by identity, never by type
             _attach(exc, _end(ledger))
@@ -446,20 +436,42 @@ async def _turn(
         raise
 
 
+def _opening(loaded: LoadedDesign, settings: dict[str, object]) -> list[dict[str, object]]:
+    """The ``design`` and ``settings`` items every turn opens with, ``settings`` the run
+    settings in force as the record holds them."""
+    return [
+        {"item": "design", "hash": loaded.design_hash, "format": RECORD_FORMAT, "helpers": HELPERS},
+        {
+            "item": "settings",
+            "settings": settings,
+            "providers": dict(loaded._providers),
+            "classes": loaded._classes,
+            "grounded": dict(loaded._grounded),
+            "sets": dict(loaded._candidate_sets),
+            "policy": loaded._design.policy,
+        },
+    ]
+
+
+class _EngineDefect(RuntimeError):
+    """A turn the engine cannot finish by its own rules; never a caller's error."""
+
+
 def _broken(
     ledger: Ledger, loaded: LoadedDesign, cause: Cause, text: dict[str, str] | None
 ) -> Decision:
-    """A broken entry: the ``broken`` plan with the entry cause, the guard's verdict over an
-    empty board, both appended; a raising codec's text, or its closed coroutine's, under the
-    ``plan`` item's index, taken at the catch and written after the append."""
-    plan = engine_plan(PlanKind.broken, cause)
-    index = ledger.append(plan_item(plan, None, context_member(loaded, None)))
+    """A broken entry: ``t:state`` and then the policy's ref written ``Unavailable`` with the
+    entry cause in round 0; a raising codec's text, or its closed coroutine's, under the
+    ``t:state`` entry's index, taken at the catch and written after the append."""
+    marker = _marker_document(Unavailable(cause))
+    index = ledger.append(
+        {"item": "entry", "ref": _STATE, "round": 0, "call": None, "marker": marker}
+    )
     if text is not None:
         ledger.write_unhashed("exceptions", text, index)
-    design = loaded._design
-    verdict = guard(plan, {}, design.requirements, design.default_deny)
-    ledger.append(verdict_item(verdict))
-    return Decision(_BUILT_BY_DECIDE, plan, verdict, _end(ledger))
+    policy = loaded._design.policy
+    ledger.append({"item": "entry", "ref": policy, "round": 0, "call": None, "marker": marker})
+    return Decision(_BUILT_BY_DECIDE, _end(ledger))
 
 
 def _end(ledger: Ledger) -> Record:

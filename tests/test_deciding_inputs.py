@@ -8,7 +8,7 @@ import asyncio
 import copy
 import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -21,7 +21,7 @@ from ommat import (
     FindingKind,
     InvalidDesign,
     InvalidRecord,
-    Policy,
+    Record,
     Rule,
     Source,
     Table,
@@ -43,11 +43,23 @@ from ommat.evaluation import (
     intervene_sync,
 )
 from scripted import Scripted, returns
-from test_decide import ASK, BODY, LOADED, RULES, ok_policy, slice_design
-from test_do_and_diff import records_in
-from test_use_answers import broken, live, unfinished
+from test_decide import ASK, BODY, LOADED, RULES, act_rule, slice_design
+from test_use_answers import CHANGED, broken, format_7, live, unfinished
 
 R = RefusalReason
+
+
+def records_in(value: object) -> list[object]:
+    """Every ``Record`` reachable from a plain return, through dicts, lists and tuples."""
+    if type(value) is Record:
+        return [value]
+    if type(value) is dict:
+        value = list(cast("dict[object, object]", value).values())
+    if type(value) in (list, tuple):
+        return [r for v in cast("list[object]", value) for r in records_in(v)]
+    return []
+
+
 STATE_T = t.record(flag=t.boolean, mood=t.nullable(t.label("calm", "wild")), subject=t.string)
 STATE: dict[str, Any] = {"flag": True, "mood": "calm", "subject": "hello"}
 
@@ -209,20 +221,6 @@ def test_a_read_no_intervention_changes_runs_every_trial_through_the_job(
     assert any(type(e) is _edit._FailCall for edits in tried for e in edits)
 
 
-@pytest.mark.parametrize(
-    ("fmt", "left_out"), [(2, {"unsupported", "timed-out", "raised"}), (3, {"timed-out", "raised"})]
-)
-def test_a_marker_the_records_format_does_not_hold_is_not_tried(
-    fmt: int, left_out: set[str]
-) -> None:
-    log = decided().log
-    log[0] = {**log[0], "format": fmt}
-    tried = flat(_deciding._trials("t:kind", log, DESIGN)[0])
-    markers: list[Any] = [x.value for x in tried if type(x) is _edit._SetEntry]
-    codes = {m.cause.code for m in markers if m not in ("a", "b")}
-    assert codes == set(_BINDING_MARKERS) - left_out
-
-
 def test_a_q_answer_is_tried_at_refused_only_and_a_shared_call_never_failed() -> None:
     trials, exhaustive = _deciding._trials("q:spam", decided().log, DESIGN)
     assert not exhaustive
@@ -256,7 +254,6 @@ def flag(r: Any) -> object:
 
 NESTED = load(
     minimal(
-        policy=Policy(ok_policy, version="1"),
         state=t.record(s=t.nullable(t.record(flag=t.boolean, name=t.string))),
         rules={"m": Rule("d:m", t.boolean, flag, version="1", reads=["t:state.s.flag"])},
     )
@@ -278,7 +275,6 @@ def maybe(r: Any) -> object:
 
 NULLABLE = load(
     minimal(
-        policy=Policy(ok_policy, version="1"),
         state=t.record(k=t.label("a", "b", "c")),
         sources={"src": Source({"t:bb": t.nullable(t.boolean)})},
         rules={
@@ -321,6 +317,17 @@ def test_a_change_of_a_markers_refs_alone_is_no_change() -> None:
     assert _diff.changed({"recorded": entry, "replayed": marked("raised", "a")})
     assert _diff.changed({"recorded": entry, "replayed": {"ref": "d:x", "value": None}})
     assert _diff.changed({"recorded": entry, "replayed": None})
+
+
+def refs_by_flag(r: Any) -> object:
+    return Unsure(Cause("abstained", ["t:state.flag"] if r.read("t:state.flag") else []))
+
+
+def test_a_change_of_the_policys_marker_refs_alone_changes_the_decision() -> None:
+    act = act_rule(refs_by_flag, "t:state.flag")
+    design = load(minimal(state=STATE_T, policy="d:act", rules={"act": act}))
+    record = decide_sync(design, STATE, {}).record
+    assert deciding_inputs_sync(record, design, "d:act") == {"t:state.flag": "deciding"}
 
 
 def test_a_d_read_is_tried_at_unsure_then_each_value() -> None:
@@ -367,7 +374,6 @@ def lab(r: Any) -> str:
 
 GATED = load(
     minimal(
-        policy=Policy(ok_policy, version="1"),
         sources={
             "src": Source({"t:lab": t.label("p", "q")}),
             "gated": Source({"t:other": t.boolean}, needs=["t:lab"], when=When(gate, version="1")),
@@ -414,7 +420,6 @@ def test_a_record_its_design_no_longer_replays_is_baseline_differs(
     rules = {"d": Rule("d:d", t.label("x", "y"), drifting, version="1", reads=["t:bb"])}
     loaded = load(
         minimal(
-            policy=Policy(ok_policy, version="1"),
             sources={"src": Source({"t:bb": t.nullable(t.boolean)})},
             rules=rules,
         )
@@ -439,7 +444,6 @@ def test_a_field_path_read_of_an_entry_is_tried_through_the_whole_entry(
 ) -> None:
     loaded = load(
         minimal(
-            policy=Policy(ok_policy, version="1"),
             sources={"src": Source({"t:rec": t.record(f=t.boolean, g=t.string)})},
             rules={"m": Rule("d:m", t.boolean, flagged, version="1", reads=["t:rec.f"])},
         )
@@ -464,7 +468,6 @@ def test_a_rule_that_does_not_reload_with_the_functions_given_propagates() -> No
 
     loaded = load(
         minimal(
-            policy=Policy(ok_policy, version="1"),
             rules={
                 "a": Rule("d:a", t.boolean, never, version="1"),
                 "b": Rule("d:b", t.string, local, version="1", reads=["d:a"]),
@@ -492,9 +495,10 @@ def test_a_ref_no_rule_provides_in_the_record_is_not_found(ref: Any) -> None:
 
 @pytest.mark.usefixtures("no_replay")
 def test_the_record_is_refused_in_order_before_the_ref() -> None:
-    other_design = live(slice_design(tools=["archive", "send"]))
+    other_design = live(CHANGED)
     for given, reason in (
         (b"not json", R.invalid_record),
+        (format_7(), R.wrong_design),
         (unfinished(), R.unfinished),
         (broken(), R.nothing_to_replay),
         (other_design, R.wrong_design),

@@ -12,7 +12,6 @@ from helpdesk_design import DESIGN
 from ommat import (
     CallResult,
     Cause,
-    Plan,
     SourceCall,
     Unavailable,
     decide_sync,
@@ -55,15 +54,14 @@ async def fixed_answers(calls: tuple[SourceCall, ...], *, seconds: float) -> Cal
     return CallResult(values)
 
 
-def main() -> list[tuple[Plan, list[Mapping[str, object]]]]:
-    """Decide each message and replay its record; return each plan with replay's findings."""
+def main() -> list[tuple[object, list[Mapping[str, object]]]]:
+    """Decide each message and replay its record; return each decision with replay's findings."""
     loaded = load(DESIGN)
     bindings = {"classifier": fixed_answers, "reader": fixed_answers}
-    results: list[tuple[Plan, list[Mapping[str, object]]]] = []
+    results: list[tuple[object, list[Mapping[str, object]]]] = []
     for message in MESSAGES:
         decision = decide_sync(loaded, {"message": message}, bindings)
-        plan = decision.plan
-        print(plan.kind, "|", plan.reply or plan.reason, "|", decision.verdict.kind)
+        print("decision:", decision.estimate)
 
         stored = decision.record.document  # the bytes you would save
         record = read_record(stored)
@@ -78,7 +76,7 @@ def main() -> list[tuple[Plan, list[Mapping[str, object]]]]:
         assert rerun is not None
         print("  replay findings:", findings)
         print("  same hash:", rerun.record_hash == record.record_hash)
-        results.append((plan, list(findings)))
+        results.append((decision.estimate, list(findings)))
     return results
 
 

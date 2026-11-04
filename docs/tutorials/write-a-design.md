@@ -137,39 +137,39 @@ An estimate ommat cannot settle is never `None` or a quiet `no` but a marker: `U
 MARKERS = (Unsure, Unavailable, Unasked)
 ```
 
-## Policy and plans
+## The policy rule
 
-The policy is one function that reads the estimates and returns the plan.
+The policy is an ordinary rule whose estimate is the turn's decision. It reads the other
+estimates and returns the name of what the caller should do.
 
 1. Find it in `helpdesk_design.py`:
 
    ```python
-   def route(r: ReadView) -> Plan:
+   def route(r: ReadView) -> object:
        """Escalate what the desk cannot settle or must answer today; inform the rest."""
        topic = r.read("d:topic")
        urgent = r.read("d:urgent")
        order = r.read("d:order")
        if isinstance(topic, MARKERS):
-           return Plan("escalate", reason="the topic is not settled")
+           return topic
        if urgent == "yes":
-           return Plan("escalate", reason=f"an urgent {topic} message")
+           return "answer_today"
        if isinstance(order, MARKERS):
-           return Plan("inform", reply=f"Routed to {topic}; no order number found.")
-       return Plan("inform", reply=f"Routed to {topic} for order {order}.")
+           return f"route_{topic}"
+       return f"route_{topic}_with_order"
    ```
 
-   Each marker is handled on purpose: an unsettled topic escalates, an unsettled urgency
-   never equals `"yes"`, and a missing order number still informs.
+   Each marker is handled on purpose: an unsettled topic is returned as it is, so the
+   turn is undecided; an unsettled urgency never equals `"yes"`; and a missing order number
+   still routes.
 
-2. Each plan carries the text its kind needs. An `inform` plan needs a `reply`, the text
-   the caller sends back. An `escalate` plan needs a `reason`. A plan without its text, or
-   with a `reply` on an `escalate` plan, becomes a `broken` plan whose cause is
-   `invalid-return`. Dispatch on `plan.kind`, never on the verdict alone: a `broken` plan
-   has no steps, and the guard passes it with nothing to run.
+2. The design wraps it as a rule, `d:route` of type `t.string`, with
+   `reads=["d:topic", "d:urgent", "d:order"]`, and names it in `Design` as
+   `policy="d:route"`, with `state`, `sources` and `rules`.
 
-3. The design wraps it as
-   `Policy(route, version="1", reads=["d:topic", "d:urgent", "d:order"])` and passes it,
-   with `state`, `sources` and `rules`, to `Design`.
+3. The engine stops at the decision. It names no tool and runs nothing: the caller reads
+   `decision.estimate` and acts on it. When the estimate is a marker, the turn is
+   undecided, and `escalation(record)` routes it by its root cause.
 
 ## Bindings and decide
 
@@ -225,11 +225,11 @@ answers, so no model is needed.
    python helpdesk_run.py
    ```
 
-   Each turn's first line shows the plan's kind, its text and the guard's verdict:
+   Each turn's first line shows the decision:
 
    ```
-   inform | Routed to delivery for order A-1042. | passed
-   inform | Routed to delivery; no order number found. | passed
+   decision: route_delivery_with_order
+   decision: route_delivery
    ```
 
    In the second, `extract` abstained, so `d:order` is `Unsure`.
@@ -237,7 +237,7 @@ answers, so no model is needed.
 ## Reading the record
 
 `decision.record.document` is the record as canonical JSON bytes; store them and read them
-back with `read_record`. Its `log` is the hashed turn, one item per step; `unhashed` sits
+back with `read_record`. Its `log` is the hashed turn, its items; `unhashed` sits
 outside every hash.
 
 1. Find the call items in the log. A call item holds `item`, `round`, `sources`,
@@ -273,12 +273,12 @@ outside every hash.
 1. Replay each record, as `main` does: `rerun, findings = replay_sync(record, loaded)`.
    Replay answers from the record and calls nothing. Each finding is one difference.
 
-2. Check the findings, and the plan and verdict, not `record_hash`, since replay answers
+2. Check the findings, and the decision, not `record_hash`, since replay answers
    with null provenance and a real provider's record hashes differently from its replay.
    This offline binding returns null provenance too, so here the hashes happen to match:
    the driver prints `same hash: True`.
 
-3. Each turn prints `replay findings: []`: the same answers rebuilt the same plan.
+3. Each turn prints `replay findings: []`: the same answers rebuilt the same decision.
 
 To compare two models' records of one turn, `ommat.evaluation.use_answers(record, loaded,
 other)` reruns `record` with `other`'s answers. It is async, and `use_answers_sync` is its

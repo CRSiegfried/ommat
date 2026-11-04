@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -67,18 +67,11 @@ def test_every_path_renders_as_responses_of_calls_and_requests_of_returns(path: 
     messages = to_model_messages(v, model_name="ommat", provider_name="ommat")
     kinds = [type(m).__name__ for m in messages]
     rounds = len(v["rounds"])
-    expected = ["ModelResponse", "ModelRequest"] * (rounds + 1)
-    if v["pending"]:
-        expected.append("ModelResponse")
-    assert kinds == expected
+    assert kinds == ["ModelResponse", "ModelRequest"] * (rounds + 1)
     made = calls(messages)
-    got = (
-        [c["id"] for r in v["rounds"] for c in r]
-        + [v["decide"]["id"]]
-        + [s["id"] for s in v["pending"]]
-    )
+    got = [c["id"] for r in v["rounds"] for c in r] + [v["decide"]["id"]]
     assert [c.tool_call_id for c in made] == got
-    assert [r.tool_call_id for r in returns(messages)] == got[: len(got) - len(v["pending"])]
+    assert [r.tool_call_id for r in returns(messages)] == got
     for m in messages:
         if isinstance(m, ModelResponse):
             assert (m.model_name, m.provider_name) == ("ommat", "ommat")
@@ -94,15 +87,13 @@ def test_the_parts_carry_the_view_s_names_arguments_and_results() -> None:
         "lookup",
         "confirm",
         "decide",
-        "archive",
-        "notify",
     ]
     assert made[1].args == {"asks": ["q:route"]}
-    assert made[4].args == {"design": v["design"]}
-    assert made[5].args == {"folder": "old", "order": "o-1"}
+    assert made[4].args == {"board": v["decide"]["board"]}
     back = returns(messages)
     assert back[1].content == v["rounds"][0][1]["answers"]
-    assert back[4].content == {k: x for k, x in v["decide"].items() if k != "id"}
+    assert back[4].content == {k: x for k, x in v["decide"].items() if k not in ("id", "board")}
+    assert cast("dict[str, Any]", back[4].content)["decision"] == {"value": "archive"}
     assert back[4].metadata == {"record_hash": v["record_hash"], "design_hash": v["design"]["hash"]}
     assert [r.metadata for r in back[:4]] == [None] * 4
     assert {r.outcome for r in back} == {"success"}
@@ -135,14 +126,14 @@ def test_none_renders_as_no_messages() -> None:
     assert to_model_messages(None) == []
 
 
-def test_a_tool_name_no_provider_takes_is_refused() -> None:
+def test_a_source_named_decide_is_refused() -> None:
     v = json.loads(json.dumps(view("clear")))
-    v["pending"][0]["tool"] = "mail/send"
-    with pytest.raises(ValueError, match=re.escape("not a tool name a provider takes")):
+    v["rounds"][0][0]["source"] = "decide"
+    with pytest.raises(ValueError, match=re.escape("the name decide's call takes")):
         to_model_messages(v)
 
 
-def test_an_agent_runs_the_pending_calls_with_its_own_tools_and_continues() -> None:
+def test_an_agent_answers_from_the_history_ending_at_decide_s_return() -> None:
     seen: list[list[ModelMessage]] = []
 
     def front(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -150,41 +141,23 @@ def test_an_agent_runs_the_pending_calls_with_its_own_tools_and_continues() -> N
         return ModelResponse(parts=[TextPart("Archived.")])
 
     agent = Agent(FunctionModel(front))
-    ran: list[tuple[str, dict[str, Any]]] = []
-
-    @agent.tool_plain
-    def archive(order: str, folder: str) -> dict[str, str]:
-        ran.append(("archive", {"order": order, "folder": folder}))
-        return {"receipt": "r-1"}
-
-    @agent.tool_plain
-    def notify(receipt: str) -> None:
-        ran.append(("notify", {"receipt": receipt}))
-
     history: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("Archive the newsletters")])]
     history += to_model_messages(view("clear"), model_name="ommat")
     result = asyncio.run(agent.run(None, message_history=history))
-    assert ran == [("archive", {"order": "o-1", "folder": "old"}), ("notify", {"receipt": "done"})]
     assert result.output == "Archived."
     last = seen[-1][-1]
     assert isinstance(last, ModelRequest)
-    assert [p.tool_name for p in last.parts if isinstance(p, ToolReturnPart)] == [
-        "archive",
-        "notify",
-    ]
+    assert [p.tool_name for p in last.parts if isinstance(p, ToolReturnPart)] == ["decide"]
 
 
 # ---------------------------------------------------------------------------------------------
 # Bookkeeping
 
 
-def test_the_source_calls_and_decide_are_bookkeeping_and_the_pending_calls_are_not() -> None:
+def test_the_source_calls_and_decide_are_bookkeeping() -> None:
     messages = to_model_messages(view("clear"), model_name="ommat")
     marks = [is_bookkeeping(m) for m in messages]
-    assert marks == [True] * 6 + [False]
-    assert messages[-1].metadata is None
-    assert isinstance(messages[-1], ModelResponse)
-    assert messages[-1].model_name == "ommat"
+    assert marks == [True] * 6
     record_hash = view("clear")["record_hash"]
     assert messages[0].metadata == {"ommat": "bookkeeping", "record_hash": record_hash}
 
@@ -215,14 +188,6 @@ def test_a_history_processor_drops_earlier_turns_bookkeeping_over_two_turns() ->
 
     agent = Agent(FunctionModel(front), capabilities=[ProcessHistory(drop_earlier_bookkeeping)])
 
-    @agent.tool_plain
-    def archive(order: str, folder: str) -> dict[str, str]:
-        return {"receipt": "r-1"}
-
-    @agent.tool_plain
-    def notify(receipt: str) -> None:
-        return None
-
     first: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("Archive the newsletters")])]
     first += to_model_messages(view("clear"), model_name="ommat")
     one = asyncio.run(agent.run(None, message_history=first))
@@ -236,7 +201,7 @@ def test_a_history_processor_drops_earlier_turns_bookkeeping_over_two_turns() ->
     shown = seen[-1]
     assert _paired(shown)
     names = [c.tool_name for c in calls(shown)]
-    assert names == ["archive", "notify", "ask-again", "mail-router", "lookup", "confirm", "decide"]
+    assert names == ["ask-again", "mail-router", "lookup", "confirm", "decide"]
     assert (
         sum(
             isinstance(m, ModelRequest) and any(isinstance(p, UserPromptPart) for p in m.parts)
@@ -333,19 +298,15 @@ def test_a_marked_request_holding_a_prompt_is_not_bookkeeping() -> None:
 
 
 @pytest.mark.parametrize(
-    ("where", "name", "message"),
+    ("name", "message"),
     [
-        ("source", "decide", "the name decide's call takes"),
-        ("source", "a/" + "b" * 63, "over 64 characters"),
-        ("tool", "decide", "the name decide's call takes"),
+        ("decide", "the name decide's call takes"),
+        ("a/" + "b" * 63, "over 64 characters"),
     ],
 )
-def test_the_names_refused_are_the_chat_renderer_s(where: str, name: str, message: str) -> None:
+def test_the_names_refused_are_the_chat_renderer_s(name: str, message: str) -> None:
     v = json.loads(json.dumps(view("clear")))
-    if where == "source":
-        v["rounds"][0][0]["source"] = name
-    else:
-        v["pending"][0]["tool"] = name
+    v["rounds"][0][0]["source"] = name
     with pytest.raises(ValueError, match=re.escape(message)):
         to_model_messages(v)
 
@@ -364,14 +325,6 @@ def test_five_agent_turns_repeating_one_record_repeat_no_id() -> None:
         return ModelResponse(parts=[TextPart("ok")])
 
     agent = Agent(FunctionModel(front), capabilities=[ProcessHistory(drop_earlier_bookkeeping)])
-
-    @agent.tool_plain
-    def archive(order: str, folder: str) -> dict[str, str]:
-        return {"receipt": "r-1"}
-
-    @agent.tool_plain
-    def notify(receipt: str) -> None:
-        return None
 
     history: list[ModelMessage] = []
     for n, path in enumerate(["clear", "unsure", "clear", "down", "clear"]):

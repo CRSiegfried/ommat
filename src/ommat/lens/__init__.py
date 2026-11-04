@@ -2,13 +2,14 @@
 the compatibility promise while it is validated.
 
 ``page(records, designs=())`` returns a self-contained page with three views. Design shows a
-design document with or without a record: its targets, questions, rules, policy reads,
-requirements and parameters, and the lineage of any card, a target's declared links included.
+design document with or without a record: its targets, questions, rules, the policy among them,
+parameters, and the lineage of any card, a target's declared links included.
 Turn shows each record round by round: its calls and entries, each choice's probabilities and an
 extraction's confidence as percentages against the boundaries its design declares, each marker by
-kind and cause, then the plan and the verdict, and the lineage of any entry, call or the plan: the
-links the record holds, and, with the design the record ran under, each rule's and the policy's
-declared reads, marked as declared. Turns lists the records grouped by design hash or by a
+kind and cause, then the decision, the entry at the policy's ref, and the lineage of any entry or
+call: the links the record holds, and, with the design
+the record ran under, each rule's declared reads, marked as declared. A record before format 8
+shows its entries and calls alone. Turns lists the records grouped by design hash or by a
 question's identity. A design pairs with a record by its hash. ``python -m ommat.lens PATH``
 writes the page for a record or design file or a folder.
 

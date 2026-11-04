@@ -424,9 +424,22 @@ def edited(record: Record, edit: Any) -> Record:
 
 def unfinished() -> Record:
     def cut(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return [i for i in log if i["item"] != "verdict"]
+        """The log ending at a cancellation, which leaves the turn unfinished."""
+        return [*log, {"item": "cause", "cause": {"code": "cancelled", "refs": []}}]
 
     return edited(ONE, cut)
+
+
+def format_7() -> Record:
+    record = read_record((Path(__file__).parent / "format_9" / "record.json").read_bytes())
+    assert record.log[0]["format"] == 7
+    return record
+
+
+def test_a_record_before_format_8_is_wrong_design_before_unfinished(tmp_path: Path) -> None:
+    old = format_7()
+    exc = refused(tmp_path, "v1", [unfinished(), old], {ONE.record_hash: {"q:spam": "yes"}})
+    assert (exc.reason, exc.turn) == (R.wrong_design, old.record_hash)
 
 
 def test_an_unfinished_record_is_refused_naming_its_turn(tmp_path: Path) -> None:

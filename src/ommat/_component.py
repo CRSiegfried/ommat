@@ -1,16 +1,15 @@
 # pyright: reportPrivateUsage=false
-"""A component's call through its read view, as interpret calls a rule and compile the policy.
+"""A component's call through its read view, as interpret calls a rule.
 
 ``call`` runs the component and catches what the protected region catches: a view's stop,
 which the view has recorded, and an ``Exception``. A ``_ViewError`` is the engine's defect and
-propagates, as does any other ``BaseException``. What the outcome then
-is, the first that applies of the read view's order, is the caller's: the deciding stop, then a
-raise, then the judged return. Judging the return, a rule's against its ``outputs`` and the
-policy's against the plan rules, is not shared; its first test is, inside ``call``: an
-awaitable returned is an invalid return, and a returned coroutine is closed unawaited whatever
-outcome wins, an ``Exception`` its close raises kept beside the outcome it leaves as it stands. The
-codec, which has no view, shares that test. The view is closed when the call returns, so a component
-that kept it, or another handed it, reads nothing more and adds no stop.
+propagates, as does any other ``BaseException``. What the outcome then is, the first that
+applies of the read view's order, is the caller's: the deciding stop, then a raise, then the
+judged return, against the rule's ``outputs``. Its first test is inside ``call``: an awaitable
+returned is an invalid return, and a returned coroutine is closed unawaited whatever outcome
+wins, an ``Exception`` its close raises kept beside the outcome it leaves as it stands. The
+codec, which has no view, shares that test. The view is closed when the call returns, so a
+component that kept it, or another handed it, reads nothing more and adds no stop.
 
 Also here, each written once for the stages that share it: whether an undeclared read is a
 name the design holds, an exception's text and a wall-clock time as ``unhashed`` holds them,
@@ -154,17 +153,14 @@ def _provided(loaded: LoadedDesign, ref: str) -> bool:
     return t is not None and not isinstance(read_type(t, p.fields, {}), TypeFailure)
 
 
-_NUMBERED = re.compile(r"(?:rule|step):(?:0|[1-9][0-9]*)")
-
-
 def names_cause_ref(loaded: LoadedDesign, ref: str) -> bool:
-    """Whether ``ref`` is of a form a cause's refs take: a provided ref,
-    with or without a field path, a declared name, parameter paths included, a role name,
-    ``rule:N`` or ``step:N``. No cause names a type definition or a group."""
-    if ref in ("policy", "codec") or _NUMBERED.fullmatch(ref):
+    """Whether ``ref`` is of a form a cause's refs take: a provided ref, with or without a field
+    path, a declared name, parameter paths included, or the role name ``codec``. No cause names
+    a type definition or a group."""
+    if ref == "codec":
         return True
     d = loaded._design
-    declared = (d.sources, d.rules, d.tools, d.plans, loaded._leaf_types)
+    declared = (d.sources, d.rules, loaded._leaf_types)
     return any(ref in names for names in declared) or _provided(loaded, ref)
 
 

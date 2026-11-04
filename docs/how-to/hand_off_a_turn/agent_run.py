@@ -1,7 +1,7 @@
 """The how-to's Pydantic AI driver: two turns rendered as Pydantic AI messages. In the first the
-agent runs the pending refund with its own tool; in the second the plan clarifies and the
-caller appends the design's reply itself. A stand-in function plays the model, so it runs with
-no model; it needs ``ommat[pydantic-ai]``."""
+decision is ``refund_order``, which the caller carries out itself before the agent answers; in
+the second the decision is ``ask_if_refund``, and the caller appends its own question. A
+stand-in function plays the model, so it runs with no model; it needs ``ommat[pydantic-ai]``."""
 
 import asyncio
 
@@ -10,7 +10,6 @@ from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from handoff_run import STATE, answering
 from ommat import decide_sync, load, transcript
 from ommat.conversation.pydantic_ai import (
     drop_earlier_bookkeeping,
@@ -18,6 +17,7 @@ from ommat.conversation.pydantic_ai import (
     to_model_messages,
 )
 from support_design import DESIGN
+from turn_run import STATE, answering
 
 
 def front(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -28,8 +28,8 @@ def front(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
 agent = Agent(FunctionModel(front), capabilities=[ProcessHistory(drop_earlier_bookkeeping)])
 
 
-@agent.tool_plain
 def refund_order(order: str) -> dict[str, str]:
+    """The caller's own action on the decision ``refund_order``."""
     print("refunding", order)
     return {"refund": f"R-{order}"}
 
@@ -39,6 +39,8 @@ def main() -> None:
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
     history: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(str(STATE["message"]))])]
     history += to_model_messages(transcript(decision.record), model_name="ommat")
+    if decision.estimate == "refund_order":
+        refund_order(str(STATE["order"]["id"]))  # type: ignore[index]
     result = asyncio.run(agent.run(None, message_history=history))
     print(result.output)
 
@@ -48,8 +50,8 @@ def main() -> None:
     history = result.all_messages()
     history.append(ModelRequest(parts=[UserPromptPart(said)]))
     history += to_model_messages(transcript(unsure.record), model_name="ommat")
-    reply = unsure.plan.reply
-    if unsure.plan.kind in ("clarify", "inform") and reply is not None:
+    if unsure.estimate == "ask_if_refund":
+        reply = "Would you like a refund for this order?"
         history.append(ModelResponse(parts=[TextPart(reply)], model_name="ommat"))
         print(reply)
     kept = drop_earlier_bookkeeping(history)

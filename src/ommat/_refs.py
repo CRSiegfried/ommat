@@ -3,7 +3,7 @@
 A name is one or more segments joined by ``/``; a segment is a lowercase ASCII letter then
 lowercase letters, digits or underscores. A field path is ``.`` and a segment, repeated. A
 grounded bracket is ``[``, a JSON string exactly as RFC 8785 serializes it, then ``]``.
-Cause refs such as ``rule:N``, ``step:N``, ``policy`` and ``codec`` are not refs.
+Cause refs such as ``codec`` are not refs.
 """
 
 import json
@@ -22,7 +22,6 @@ _SEGMENT = r"[a-z][a-z0-9_]*"
 _SEGMENT_RE = re.compile(_SEGMENT)
 _NAME_RE = re.compile(rf"{_SEGMENT}(?:/{_SEGMENT})*")
 _FIELDS_RE = re.compile(rf"(?:\.{_SEGMENT})*")
-_PATH_RE = re.compile(rf"{_SEGMENT}(?:\.{_SEGMENT})*")
 _JSON = json.JSONDecoder(strict=True)
 
 
@@ -132,12 +131,6 @@ def candidate_values(members: object, field: str | None) -> list[str]:
 def is_declared_name(value: object) -> bool:
     """Whether ``value`` is in the name grammar: segments joined by ``/``, no prefix."""
     return isinstance(value, str) and _NAME_RE.fullmatch(value) is not None
-
-
-def is_field_path(value: object) -> bool:
-    """Whether ``value`` is a binding's field path: segments joined by ``.``, with no leading
-    dot. A ``str`` subclass is read by its string data."""
-    return isinstance(value, str) and _PATH_RE.fullmatch(string_data(value)) is not None
 
 
 def is_segment(value: object) -> bool:

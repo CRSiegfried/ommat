@@ -24,15 +24,13 @@ The checks, by name:
   when the binding sent a request, its ``attempts`` above 0; a result that sent none, as a
   replay's, owes none;
 - ``warnings`` and ``precision``: each conforms as interpret tests it;
-- ``provenance``: each detail of the provenance profile, ``request_id``,
-  ``usage``, ``attempts`` and ``clients`` in its form, ``claimed`` naming only details holding
-  a value,
-  ``missing`` only details and reasons of the profile and never a detail holding a value; a
-  result that sent a request gives each detail a value or a reason, and one that sent none has
-  no provenance;
+- ``provenance``: each detail of the provenance profile, ``request_id``, ``usage`` (only
+  ``input_tokens``, ``output_tokens`` and ``passes``), ``attempts`` and ``clients`` in its form,
+  ``claimed`` naming only details holding a value, ``missing`` only details and reasons of the
+  profile and never a detail holding a value; a result that sent a request gives each detail a
+  value or a reason, and one that sent none has no provenance;
 - ``unsupported-provenance``: a result whose every ref is ``unsupported`` has no provenance,
-  ``usage``, ``attempts``, ``request_id``, ``missing`` or ``clients``, and
-  ``truncated`` empty;
+  ``usage``, ``attempts``, ``request_id``, ``missing`` or ``clients``, and ``truncated`` empty;
 - ``deterministic``, when asked: two calls with one batch return equal ``CallResult``s but
   for ``request_id``, which a provider gives each request afresh.
 
@@ -418,7 +416,9 @@ def _provenance_problems(result: CallResult) -> list[str]:
     if usage is not None and not (
         type(usage) is dict and usage_conforms(cast("dict[object, object]", usage))
     ):
-        problems.append("usage is not null or a dict of strings to numbers")
+        problems.append(
+            "usage is not null or a dict of input_tokens, output_tokens or passes to numbers"
+        )
     claimed = cast(object, result.claimed)
     names = cast("tuple[object, ...]", claimed) if type(claimed) is tuple else None
     strings = names is not None and all(type(n) is str for n in names)

@@ -8,7 +8,6 @@ from typing import Any
 from ommat import (
     AnswerKind,
     Decision,
-    Plan,
     RenderedQuestion,
     SourceCall,
     ValueType,
@@ -75,8 +74,8 @@ def answers(decision: Decision) -> dict[str, object]:
     }
 
 
-def main() -> list[tuple[Plan, int]]:
-    """Decide each report and replay its record; return each plan with the model calls replay
+def main() -> list[tuple[object, int]]:
+    """Decide each report and replay its record; return each decision with the model calls replay
     made."""
     model = Counted(StreetSpotter())  # load once, before decide
     binding = SpanBinding(model)
@@ -84,18 +83,17 @@ def main() -> list[tuple[Plan, int]]:
     print("own batches:", check(binding, batches=[OWN], deterministic=True))
 
     loaded = load(DESIGN)
-    results: list[tuple[Plan, int]] = []
+    results: list[tuple[object, int]] = []
     for report in REPORTS:
         decision = decide_sync(loaded, {"text": report}, {"spans": binding})
-        plan = decision.plan
-        print(plan.kind, "|", plan.reply or plan.reason, "|", decision.verdict.kind)
+        print("decision:", decision.estimate)
         print("  answers:", answers(decision))
 
         record = read_record(decision.record.document)
         before = model.calls
         _, findings = replay_sync(record, loaded)
         print("  replay findings:", findings, "| model calls:", model.calls - before)
-        results.append((plan, model.calls - before))
+        results.append((decision.estimate, model.calls - before))
     return results
 
 

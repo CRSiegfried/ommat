@@ -6,12 +6,15 @@ and ``str``, checks the copy against private check state taken from earlier copi
 copy with its canonical bytes, calls the observer with the index and the stored copy, and
 returns the index. A refusal raises ``_LedgerError`` and changes nothing. The closed ledger is
 a ``Record``, whose values are decoded from the stored bytes at every read.
+
+``decision_entry`` finds the decision, the policy's entry, in a read log, and
+``decision_bytes`` gives the bytes every comparison of the decision reads.
 """
 
 import enum
 import itertools
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
 from ommat._answer import PROBABILITY_KINDS, AnswerKind, ValueType
@@ -25,12 +28,13 @@ from ommat._canonical import (
     record_hash,
     with_order,
 )
-from ommat._markers import CauseCode, MarkerKind, OutcomeKind, PlanKind, VerdictKind
+from ommat._markers import CauseCode, MarkerKind, OutcomeKind
 from ommat._provenance import (
     HASHED_DETAILS,
     REASONS,
     RECORDED_DETAILS,
     STRING_DETAILS,
+    USAGE_KEYS,
     precision_conforms,
 )
 from ommat._refs import declared_ref, parse_ref
@@ -49,6 +53,7 @@ from ommat._values import (
     MISSING,
     NOUL_DESCRIPTION_FORMAT,
     PER_REF_FORMAT,
+    POLICY_FORMAT,
     PRECISION_FORMAT,
     PROFILE_FORMAT,
     RECORD_FORMAT,
@@ -358,17 +363,20 @@ _CAUSE_CODES: dict[int, frozenset[str]] = {
 """Each format's closed cause set."""
 
 
-def held_marker_code(code: str, fmt: int) -> bool:
-    """Whether a format-``fmt`` record holds a marker of ``code`` on an entry its returned call
-    wrote: a code of its cause set, and ``timed-out`` or ``raised`` from format 4 only."""
-    return code in _CAUSE_CODES[fmt] and (fmt >= PER_REF_FORMAT or code not in _PER_REF_CODES)
-
-
 _ANSWER_KINDS = frozenset(AnswerKind)
 _PROBABILITY_KINDS = frozenset(k.value for k in PROBABILITY_KINDS)
 _VALUE_TYPES = frozenset(v.value for v in ValueType)
-_PLAN_KINDS = frozenset(PlanKind)
-_VERDICT_KINDS = frozenset(VerdictKind)
+_PLAN_KINDS = frozenset({"execute", "clarify", "inform", "escalate", "broken"})
+"""A ``plan`` item's kinds, which a record of formats 1 to 7 holds."""
+_VERDICT_KINDS = frozenset({"passed", "refused"})
+"""A ``verdict`` item's kinds, which a record of formats 1 to 7 holds."""
+_ENTRY_CAUSES: dict[str, list[str]] = {
+    CauseCode.raised.value: ["codec"],
+    CauseCode.invalid_return.value: [_STATE],
+    CauseCode.design_changed.value: [],
+}
+"""The codes of a broken entry's ``Unavailable`` at ``t:state``, from format 8, each with the
+refs decide gives it."""
 _MARKER_KINDS = frozenset(k.value for k in MarkerKind)
 
 
@@ -386,8 +394,9 @@ def _context_entry(value: Any, where: str) -> None:
         raise _LedgerError(f"{where} holds neither or both of a text and a marker")
 
 
-def _context(value: Any, where: str) -> None:
-    """A ``plan`` item's ``context`` block: the design's name, the entries and the switches."""
+def _plan_context(value: Any, where: str) -> None:
+    """A ``plan`` item's ``context`` block, formats 5 to 7: the design's name, the entries and
+    the switches."""
     _members(
         value,
         where,
@@ -584,7 +593,7 @@ def _failure_step(value: Any, where: str) -> None:
 
 
 def _failure(value: Any, where: str) -> None:
-    """A failure the record views can build a ``GuardFailure`` from."""
+    """A verdict item's failure, as a record before format 8 holds it."""
     m = _members(
         value,
         where,
@@ -609,8 +618,6 @@ def _entry_shape(item: dict[str, Any], where: str) -> None:
     if ("value" in item) == ("marker" in item):
         raise _LedgerError(f"{where} has both value and marker, or neither")
     ref: str = item["ref"]
-    if ref == _STATE and "marker" in item:
-        raise _LedgerError(f"{where} is a t:state entry holding a marker; the state is a value")
     try:
         level = parse_ref(ref).level
     except ValueError:  # not a ref: _entry refuses it with its own message
@@ -623,7 +630,7 @@ def _verdict_shape(item: dict[str, Any], where: str) -> None:
     _members(item, where, {"item": _STR, "kind": _STR, "failures": _list_of(_failure)})
     if item["kind"] not in _VERDICT_KINDS:
         raise _LedgerError(f"{where}'s kind {item['kind']!r} is not passed or refused")
-    if (item["kind"] == VerdictKind.passed) != (not item["failures"]):
+    if (item["kind"] == "passed") != (not item["failures"]):
         raise _LedgerError(f"{where}'s failures are not empty exactly when its kind is passed")
 
 
@@ -714,7 +721,7 @@ _SHAPES: dict[str, _Check] = {
     "design": _shape({"hash": _STR, "format": _INT, "helpers": _INT}),
     "settings": _shape(
         {"settings": _run_settings, "providers": _OBJECT, "classes": _OBJECT},
-        {"grounded": _OBJECT, "sets": _OBJECT},
+        {"grounded": _OBJECT, "sets": _OBJECT, "policy": _STR},
     ),
     "entry": cast(_Check, _entry_shape),
     "call": _shape(
@@ -754,7 +761,7 @@ _SHAPES: dict[str, _Check] = {
                 "slots": _OBJECT,
                 "rows": _LIST,
                 "derivation": _LIST,
-                "context": _or_null(cast(_Check, _context)),
+                "context": _or_null(cast(_Check, _plan_context)),
             },
         ),
     ),
@@ -799,11 +806,8 @@ def _ref_places(
     elif kind == "plan":
         if item["cause"] is not None:
             places += _cause_refs(item["cause"], "its cause")
-        for i, entry in enumerate(_context_entries(item)):
-            places.append((f"context entry {i}'s ref", entry["ref"], False))
-            if entry["marker"] is not None:
-                places += _cause_refs(entry["marker"]["cause"], f"context entry {i}'s marker")
-        for n, step in enumerate(cast("list[dict[str, Any]]", item["steps"]), 1):
+        places += _context_places(item)
+        for n, step in enumerate(cast("list[dict[str, Any]]", item.get("steps", [])), 1):
             for name, origin in cast("dict[str, Any]", step["arguments"]).items():
                 if type(origin) is dict and "ref" in origin:
                     ref: Any = cast("dict[str, Any]", origin)["ref"]
@@ -820,9 +824,20 @@ def _ref_places(
     return places
 
 
+def _context_places(item: dict[str, Any]) -> list[tuple[str, Any, bool]]:
+    """Each of a ``plan`` item's context entry's ref, which holds no grounded ref, and its
+    marker's cause refs."""
+    places: list[tuple[str, Any, bool]] = []
+    for i, entry in enumerate(_context_entries(item)):
+        places.append((f"context entry {i}'s ref", entry["ref"], False))
+        if entry["marker"] is not None:
+            places += _cause_refs(entry["marker"]["cause"], f"context entry {i}'s marker")
+    return places
+
+
 def _context_entries(item: dict[str, Any]) -> list[dict[str, Any]]:
-    """A ``plan`` item's context entries, none when it holds no block. The item has passed
-    its shape check."""
+    """A ``plan`` item's context entries, none when it holds no block. The item has passed its
+    shape check."""
     context = item.get("context")
     return [] if context is None else cast("list[dict[str, Any]]", context["entries"])
 
@@ -1061,6 +1076,7 @@ _KEYED_ENTRY: dict[str, _Check] = {
 
 
 # The item kinds each keyed member's log index names.
+# A ``plan`` item, and so an index naming one, is in records of formats 1 to 7 only.
 _KEYED_KINDS: dict[str, frozenset[str]] = {
     "calls": frozenset({"call"}),
     "exceptions": frozenset({"call", "entry", "plan"}),
@@ -1106,6 +1122,46 @@ def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
             raise _LedgerError(
                 f"{where}'s grounded names {set_ref!r}, whose class tree is not a class name"
             )
+
+
+def _check_policy(item: dict[str, Any], fmt: int, where: str) -> None:
+    """Refuse a ``settings`` item's ``policy`` before format 8 or its absence from it, and one
+    that is not a ``d:`` key of ``providers`` with no field path, or that is a key of
+    ``grounded``."""
+    if fmt < POLICY_FORMAT:
+        if "policy" in item:
+            raise _LedgerError(f"{where} holds policy, which a format-{fmt} record does not")
+        return
+    if "policy" not in item:
+        raise _LedgerError(f"{where} has no 'policy' member")
+    policy = cast(str, item["policy"])
+    providers = cast("dict[str, Any]", item["providers"])
+    if not (_declared(policy) and policy.startswith("d:") and policy in providers):
+        raise _LedgerError(f"{where}'s policy {clipped(policy)} is not a d: key of its providers")
+    if policy in cast("dict[str, Any]", item.get("grounded", {})):
+        raise _LedgerError(f"{where}'s policy {clipped(policy)} is a grounded declared ref")
+
+
+def _check_broken(item: dict[str, Any], fmt: int, where: str) -> None:
+    """Refuse a ``t:state`` entry holding a marker before format 8, and from it one that is
+    not ``Unavailable`` with an entry cause holding the refs decide gives it: ``raised``
+    naming ``codec``, ``invalid-return`` naming ``t:state``, or ``design-changed`` naming
+    nothing."""
+    if fmt < POLICY_FORMAT:
+        raise _LedgerError(f"{where} is a t:state entry holding a marker; the state is a value")
+    marker = cast("dict[str, Any]", item["marker"])
+    code, refs = marker["cause"]["code"], marker["cause"]["refs"]
+    if marker["kind"] != "Unavailable" or code not in _ENTRY_CAUSES:
+        raise _LedgerError(
+            f"{where} is a t:state entry holding a marker other than Unavailable with an entry "
+            "cause: raised, invalid-return or design-changed"
+        )
+    if refs != _ENTRY_CAUSES[code]:
+        shown = ", ".join(clipped(r) for r in refs[:3]) + (", ..." if len(refs) > 3 else "")
+        raise _LedgerError(
+            f"{where}: its {code} cause names [{shown}]; a broken entry's names "
+            f"{_ENTRY_CAUSES[code]!r}"
+        )
 
 
 def _check_sets(item: dict[str, Any], fmt: int, where: str) -> dict[str, Any] | None:
@@ -1221,6 +1277,14 @@ def _call_entry_format(entry: dict[str, Any], fmt: int, where: str) -> None:
     missing = cast("dict[str, Any]", entry.get("missing", {}))
     if fmt >= UNCALIBRATED_FORMAT and any("calibrated" in m for m in (entry, invalid, missing)):
         raise _LedgerError(f"{where} holds calibrated, which a format-{fmt} record does not")
+    usage = entry.get("usage")
+    if fmt >= POLICY_FORMAT and type(usage) is dict:
+        for key in cast("dict[str, Any]", usage):
+            if key not in USAGE_KEYS:
+                raise _LedgerError(
+                    f"{where} holds the usage key {clipped(key)}, which a format-{fmt} record "
+                    "does not"
+                )
 
 
 def _codes(kind: str, item: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1272,6 +1336,8 @@ class Ledger:
         self._classes: dict[str, Any] = {}
         self._grounded: dict[str, str] = {}
         self._sets: dict[str, str | None] = {}
+        self._policy: str | None = None  # the settings item's policy, from format 8
+        self._broken: dict[str, Any] | None = None  # a marker t:state entry's marker
         self._round = 0
         self._round_ended = False
         self._round_has_entry = False
@@ -1352,10 +1418,15 @@ class Ledger:
                 raise _LedgerError(
                     f"{where}: {place}'s code {code!r} is not in format {fmt}'s cause set"
                 )
+        if kind in ("plan", "verdict") and fmt >= POLICY_FORMAT:
+            raise _LedgerError(f"{where}: a format-{fmt} record holds no {kind} item")
         if kind == "plan":
             self._check_context(item, fmt, where)
         if kind == "settings":
             _check_grounded(item, fmt, where)
+            _check_policy(item, fmt, where)
+        if kind == "entry" and item["ref"] == _STATE and "marker" in item:
+            _check_broken(item, fmt, where)
         if kind != "call":
             return
         if fmt >= PRECISION_FORMAT and "precision" not in item:
@@ -1431,10 +1502,17 @@ class Ledger:
             and not (kind == "entry" and item["ref"] == _STATE and item["round"] == 0)
         ):
             # A cause here is a cancellation a sync component raised.
+            if self._format >= POLICY_FORMAT:
+                raise _LedgerError(
+                    f"{where}: after the settings item comes the t:state entry in round 0, "
+                    "or at a cancellation the cause item"
+                )
             raise _LedgerError(
                 f"{where}: after the settings item comes the t:state entry in round 0, "
                 "at a broken entry the plan item, or at a cancellation the cause item"
             )
+        if self._broken is not None:
+            self._check_broken_order(kind, item, where)
         if kind == "design":
             fmt = item["format"]
             if fmt not in RECORD_FORMATS:
@@ -1452,6 +1530,24 @@ class Ledger:
             # await keeps every item before it.
             return self._set(_phase=_CAUSED)
         return self._round_item(kind, item, index, where)
+
+    def _check_broken_order(self, kind: str, item: dict[str, Any], where: str) -> None:
+        """After a ``t:state`` entry holding a marker, a broken entry's: the policy's entry in
+        round 0 with no call, holding that marker, and nothing after it."""
+        if self._policy not in self._written:
+            if not (
+                kind == "entry"
+                and item["ref"] == self._policy
+                and item["round"] == 0
+                and item["call"] is None
+                and item.get("marker") == self._broken
+            ):
+                raise _LedgerError(
+                    f"{where}: after a t:state entry holding a marker comes the policy's entry "
+                    "in round 0, with no call, holding that marker"
+                )
+        else:
+            raise _LedgerError(f"{where}: nothing comes after a broken entry's policy entry")
 
     def _set(self, *grows: "_Grow", **state: object) -> Callable[[], None]:
         def commit() -> None:
@@ -1483,6 +1579,7 @@ class Ledger:
         bound = cast(int, item["settings"]["round_bound"])
         return self._set(
             _phase=_SETTLED,
+            _policy=cast("str | None", item.get("policy")),
             _providers=providers,
             _classes=classes,
             _grounded=grounded,
@@ -1605,6 +1702,8 @@ class Ledger:
             self._asked(item, None if call is None else self._questions[call], where)
             self._per_ref(item, call, where)
             state["_round_has_entry"] = True
+            if item["ref"] == _STATE and "marker" in item:
+                state["_broken"] = item["marker"]
             entry_state, entry_grows = self._entry(item, where)
             state.update(entry_state)
             grows += entry_grows
@@ -1864,10 +1963,16 @@ class Record:
 
     @property
     def cause(self) -> dict[str, Any] | None:
-        """The derived cause, ``{"code", "refs"}``, or ``None``."""
+        """The derived cause, ``{"code", "refs"}``, or ``None``: the ``cause`` item's; from
+        format 8 a broken entry's, the marker ``t:state`` holds; before it a broken plan's."""
         log = self.log
         if log[-1]["item"] == "cause":
             return cast("dict[str, Any]", log[-1]["cause"])
+        if self._format >= POLICY_FORMAT:
+            for item in log:
+                if item["item"] == "entry" and item["ref"] == _STATE and "marker" in item:
+                    return cast("dict[str, Any]", item["marker"]["cause"])
+            return None
         plans = [item for item in log if item["item"] == "plan"]
         state = any(item["item"] == "entry" and item["ref"] == _STATE for item in log)
         if plans and not state:
@@ -1887,6 +1992,36 @@ class Record:
 
     def __repr__(self) -> str:
         return f"Record(record_hash={self.record_hash!r}, items={len(self._items)})"
+
+
+def decision_entry(log: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """The policy's entry in a read log, the decision: the entry item at the ``settings``
+    item's ``policy``, as the log holds it; ``None`` for a record before format 8 or one that
+    holds no such entry."""
+    if not log or log[0].get("format", 0) < POLICY_FORMAT or len(log) < 2:
+        return None
+    policy = log[1].get("policy")
+    for item in log:
+        if item.get("item") == "entry" and item.get("ref") == policy:
+            return cast("dict[str, Any]", item)
+    return None
+
+
+def finished(log: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether a read log is a finished turn's: from format 8, holding the policy's entry and
+    no ``cause`` item. A cancelled turn, or one that ended before the policy fired, is not."""
+    return decision_entry(log) is not None and not any(item["item"] == "cause" for item in log)
+
+
+def decision_bytes(log: Sequence[Mapping[str, Any]]) -> bytes | None:
+    """The decision compared: the canonical bytes of the policy's entry's ``value`` or
+    ``marker`` member, keyed by its name, so a marker's cause and refs count; ``None`` where
+    ``decision_entry`` finds none."""
+    entry = decision_entry(log)
+    if entry is None:
+        return None
+    member = "value" if "value" in entry else "marker"
+    return encode({member: entry[member]}, MAX_DOCUMENT_DEPTH)
 
 
 def record_prefix_hash(record: Record, n: int) -> str:

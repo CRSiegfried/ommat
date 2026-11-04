@@ -30,53 +30,47 @@ deepest member."""
 MAX_DOCUMENT_DEPTH = 128
 """The deepest a document the encoder writes or a reader parses nests."""
 
-RECORD_FORMAT = 7
+RECORD_FORMAT = 8
 """The format number this engine writes into a record. It reads every record format from 1 up
 to it, each under that format's rules."""
 
 RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
 """The record formats this engine reads."""
 
-DESIGN_FORMAT = 9
+DESIGN_FORMAT = 10
 """The format number this engine writes into a design document, which changes only when a
-design rule changes. It reads every design format from 1 up to it."""
-
-DESIGN_FORMATS = frozenset(range(1, DESIGN_FORMAT + 1))
-"""The design formats this engine reads."""
+design rule changes, and the only design format it reads."""
 
 EXTRACTION_FORMAT = 2
-"""The first format with the extraction answer kind and a call's ``truncated``."""
+"""The first record format with the extraction answer kind and a call's ``truncated``."""
 
 DESCRIPTION_FORMAT = 3
-"""The first format whose ``choice`` and ``score`` labels may each carry a description."""
+"""The first record format whose ``choice`` and ``score`` labels may each carry a
+description."""
 
 WARNINGS_FORMAT = 3
-"""The first format with a call's ``warnings``."""
+"""The first record format with a call's ``warnings``."""
 
 PRECISION_FORMAT = 3
-"""The first format whose call item holds the call's ``precision``."""
+"""The first record format whose call item holds the call's ``precision``."""
 
 UNSUPPORTED_FORMAT = 3
-"""The first format with the ``unsupported`` cause code."""
+"""The first record format with the ``unsupported`` cause code."""
 
 LABEL_OVERFLOW_FORMAT = 4
-"""The first format with the ``label-overflow`` cause code."""
+"""The first record format with the ``label-overflow`` cause code."""
 
 NOUL_DESCRIPTION_FORMAT = 4
-"""The first format whose design document and call item hold a noul's described labels."""
-
-STRUCTURED_WORDING_FORMAT = 4
-"""The first format whose design document holds a structured wording."""
+"""The first record format whose call item holds a noul's described labels."""
 
 CANDIDATE_FORMAT = 4
-"""The first format whose design document holds a candidate set or a candidate-valued label
-set."""
+"""The first record format whose call item holds a candidate-valued label set."""
 
 HASH_FORMAT = 3
-"""The first format whose record document holds the record hash as its ``hash`` member."""
+"""The first record format whose record document holds the record hash as its ``hash`` member."""
 
 PER_REF_FORMAT = 4
-"""The first format whose entry may hold a binding's ``timed-out`` or ``raised`` under a
+"""The first record format whose entry may hold a binding's ``timed-out`` or ``raised`` under a
 returned call."""
 
 PROFILE_FORMAT = 5
@@ -85,36 +79,19 @@ PROFILE_FORMAT = 5
 ``request_id``, ``missing`` and ``clients``, and before format 7 ``calibrated``."""
 
 CONTEXT_FORMAT = 5
-"""The first design format whose document holds a ``context`` member, and the first record
-format whose ``plan`` item does."""
+"""The first record format whose ``plan`` item holds a ``context`` member."""
 
 KEY_ORDER_FORMAT = 6
-"""The first design format whose record types spell their fields in declared order, not
-code-point order, and which holds a payload's, a parameter value's and a structured template's
-order; and the first record format whose entry, plan and verdict items hold their ``order``."""
+"""The first record format whose entry, plan and verdict items hold their ``order``, and whose
+record types spell their fields in declared order, not code-point order."""
 
 GROUNDED_FORMAT = 6
 """The first record format whose ``settings`` item names each grounded declared ref's set,
 under ``grounded``, and whose log may hold a grounded ref."""
 
-TARGETS_FORMAT = 7
-"""The first design format whose document holds ``targets``, a question's ``target`` and
-``latent_targets``, and a rule's ``target``."""
-
 UNCALIBRATED_FORMAT = 7
 """The first record format with no ``calibrated`` detail: no ``calls`` entry holds it, and no
 ``claimed``, ``missing`` or ``invalid`` names it."""
-
-CANDIDATE_FIELD_FORMAT = 8
-"""The first design format whose ``candidates`` member may name a candidate field, for a
-candidate set of records."""
-
-KNOWN_FORMAT = 9
-"""The first design format whose tables may hold a ``known`` cell."""
-
-GROUP_REASON_FORMAT = 9
-"""The first design format whose group is an object of its ``refs`` and ``reason``; an earlier
-format's group is its refs alone, read with the reason ``convergent``."""
 
 GROUP_REASONS = ("convergent", "discriminant", "exclusive", "exhaustive", "consistent")
 """The reasons a group may give, in their declared order."""
@@ -122,6 +99,11 @@ GROUP_REASONS = ("convergent", "discriminant", "exclusive", "exhaustive", "consi
 SETS_FORMAT = 7
 """The first record format whose ``settings`` item names each candidate set's candidate field,
 under ``sets``."""
+
+POLICY_FORMAT = 8
+"""The first record format whose turn ends at the policy's entry: its
+``settings`` item names the ``policy``, its ``t:state`` entry may hold ``Unavailable`` at a broken
+entry, it holds no ``plan`` or ``verdict`` item, and its ``usage`` keys are the closed set."""
 
 
 def string_data(value: str) -> str:

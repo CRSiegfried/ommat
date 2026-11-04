@@ -1,6 +1,6 @@
 # pyright: reportPrivateUsage=false
-"""The switching-value job: for one parameter leaf, the values at which each entry, and the
-plan with the verdict, change, found by replaying the turn under each value's design
+"""The switching-value job: for one parameter leaf, the values at which each entry, the
+policy's among them, changes, found by replaying the turn under each value's design
 (§switching-value).
 
 A value's design is the loaded design's document with the leaf, or one key of a numeric mapping
@@ -26,22 +26,23 @@ top label's lead; for a function component's ``boundaries`` entry naming the lea
 value, or the same role measure of its answer. Only an ``int`` or ``float`` is one. A
 ``boolean`` or ``label`` leaf is tried at every value.
 
-``entries`` lists each ref whose entry some run changed in value, or in marker kind and cause
-code, a run asking a stale question included, and each one that carries the leaf; a result compares
-those alone, so a change of ``rows``, ``derivation`` or ``round`` is none. A plan result is
-compared without its ``context`` and its ``rows``. A result is ``"carries"`` when at some value
+``entries`` lists the policy's entry, and each other ref whose entry some run changed in value,
+or in marker kind and cause code, a run asking a stale question included, and each one that
+carries the leaf; a result compares those alone, so a change of ``rows``, ``derivation`` or
+``round`` is none. The policy's entry is the decision, listed always, so a decision that never
+switches shows as one class beside any ``not-loading`` ones, and compared by ``decision_bytes``,
+a marker's cause refs included (§decide-output). A result is ``"carries"`` when at some value
 tried, read from that run's rows whatever its value, a table row giving its output, under ``F``
-the first matched, outputs ``Param`` of the leaf, or for the plan the policy table's row names a
-plan declaration holding the leaf; else it gets its classes, and for a numeric leaf the
-switching values between adjacent classes, each given once, and the slacks. Between two classes
-the switching value is, on an integer axis, the upper class's least; on a number axis the lower
-class's greatest when it alone of the two facing values is a compared value, else the upper
-class's least. A ``not-loading`` class's edges are located only to the values tried, and while
-``unseen`` names a component so are the switching values and slacks: one of a listed component
-may lie anywhere between two tried values. The slacks are the switching values bounding the
-leaf's own class, each minus the leaf's value, null on a side with none; one no ``float`` holds,
-or for an integer leaf past 2^53 - 1 in magnitude, is refused ``unrepresentable-slack`` before
-the write.
+the first matched, outputs ``Param`` of the leaf; else it gets its classes, and for a numeric
+leaf the switching values between adjacent classes, each given once, and the slacks. Between two
+classes the switching value is, on an integer axis, the upper class's least; on a number axis
+the lower class's greatest when it alone of the two facing values is a compared value, else the
+upper class's least. A ``not-loading`` class's edges are located only to the values tried, and
+while ``unseen`` names a component so are the switching values and slacks: one of a listed
+component may lie anywhere between two tried values. The slacks are the switching values
+bounding the leaf's own class, each minus the leaf's value, null on a side with none; one no
+``float`` holds, or for an integer leaf past 2^53 - 1 in magnitude, is refused
+``unrepresentable-slack`` before the write.
 
 ``unseen`` is empty only when every way the leaf reaches a component is a comparison against a
 probed value; it names, in code-point order, each component the leaf reaches otherwise: a
@@ -53,9 +54,9 @@ it provides, one level deep; each component of a value round 1 found; each table
 names when a value tried does not load. It is empty for a ``boolean`` or ``label`` leaf, every
 value of which was tried.
 
-Refused in §switching-value's order; the record checks are ``_edit``'s, the baseline replay
-and the change of an entry ``_diff``'s, shared with the deciding inputs. The entry written is
-returned, plain data reaching no ``Record``.
+Refused as ``_diff._refuse_unfit`` orders the record checks, which ``_edit`` runs; the baseline
+replay and the change of an entry are ``_diff``'s, shared with the deciding inputs. The entry
+written is returned, plain data reaching no ``Record``.
 """
 
 import itertools
@@ -67,15 +68,15 @@ from typing import Any, cast
 from ommat._axis import numeric_axis
 from ommat._canonical import decode, encode
 from ommat._design import InvalidDesign, LoadedDesign
+from ommat._ledger import decision_bytes
 from ommat._load import load
 from ommat._read_view import _ViewError, is_candidate_read, walk
 from ommat._refs import _RefError, code_point_sorted, parse_ref
-from ommat._replay import FindingKind, _differ, _replay_with
+from ommat._replay import FindingKind, _replay_with
 from ommat._types import Label, MappingOf, Scalar, Type, _numeric, render
 from ommat._values import MAX_INTEGER
 from ommat.evaluation._diff import (
     OUTSIDE,
-    _context_alone,
     _run_sync,
     baseline,
     changed,
@@ -98,6 +99,7 @@ _Result = dict[str, Any] | str
 _Compared = dict[Fraction, set[str]]  # each compared value to the components comparing it
 
 KIND = "switching-value"
+FORMAT = 2
 _NOT_DETERMINED = "not-determined"
 
 
@@ -109,9 +111,8 @@ async def switching_values(
     functions: _Functions = None,
     results: EvaluationStore,
 ) -> dict[str, Any]:
-    """The switching values of the leaf at ``path`` for ``record``, per entry and for the plan,
-    written to ``results`` under the record hash, the design hash and ``path``; the entry
-    written."""
+    """The switching values of the leaf at ``path`` for ``record``, per entry, written to
+    ``results`` under the record hash, the design hash and ``path``; the entry written."""
     read, log = _checked(record, loaded)
     functions = own_functions(loaded, functions)
     t = _leaf_type(path, loaded)
@@ -138,7 +139,7 @@ async def switching_values(
     else:
         summary = await job.summary(t, loaded._leaf_value(path), None)
         value = {"unseen": job.unseen(t), **summary}
-    entry = {"kind": KIND, "format": 1, "key": key, "value": value}
+    entry = {"kind": KIND, "format": FORMAT, "key": key, "value": value}
     results.write(entry)
     return entry
 
@@ -189,23 +190,21 @@ def _finite(t: Type) -> list[_Value] | None:
 
 
 class _Run:
-    """One run: each changed entry's item by ref, the plan and verdict, and whether it asked
-    a stale question, so that it determines nothing."""
+    """One run: each changed entry's item by ref, the decision's ``decision_bytes``, and
+    whether it asked a stale question, so that it determines nothing."""
 
     def __init__(
         self,
-        log: _Log,
         found: list[dict[str, Any]],
-        carrying: set[str | None],
+        carrying: set[str],
+        decision: bytes | None,
         outside: bool = False,
     ) -> None:
         self.outside = outside
-        self.carrying = carrying  # each ref, None for the plan, whose output passed the leaf
+        self.decision = decision
+        self.carrying = carrying  # each ref whose output passed the leaf
         self.entries = {f["ref"]: f["replayed"] for f in found if f["kind"] is _K.entry}
         self.changed = {f["ref"] for f in found if f["kind"] is _K.entry and changed(f)}
-        items = {f["kind"]: f["replayed"] for f in found if f["kind"] in (_K.plan, _K.verdict)}
-        self.plan = items.get(_K.plan, _first(log, "plan"))
-        self.verdict = items.get(_K.verdict, _first(log, "verdict"))
 
 
 def _points(bounds: set[Fraction], t: Type, integer: bool) -> list[_Value]:
@@ -218,10 +217,6 @@ def _points(bounds: set[Fraction], t: Type, integer: bool) -> list[_Value]:
         lo, hi = numeric[1] or (-MAX_INTEGER, MAX_INTEGER)
         points |= {max(lo, min(n, hi)) for b in bounds for n in (math.floor(b), math.floor(b) + 1)}
     return sorted(points, key=lambda v: exact(cast(float, v)))
-
-
-def _first(log: _Log, kind: str) -> dict[str, Any] | None:
-    return next((i for i in log if i["item"] == kind), None)
 
 
 class _Job:
@@ -240,13 +235,15 @@ class _Job:
         return code_point_sorted(_hidden(self.document, self.loaded, self.path) | self.late)
 
     async def summary(self, t: Type, own: Any, key: str | None) -> dict[str, Any]:
-        """``{"entries", "plan"}`` over the values tried for the leaf, or its key ``key``."""
+        """``{"entries"}`` over the values tried for the leaf, or its key ``key``."""
         values = _finite(t)
         numeric = _numeric(t)
         integer = numeric is not None and numeric[0] == "integer"
         if numeric is not None and not integer:
             own = float(own)  # a number leaf's own value as its points are held
-        tried: dict[_Value, _Run | _Result] = {own: _Run(self.log, [], self.carrying(self.log))}
+        tried: dict[_Value, _Run | _Result] = {
+            own: _Run([], self.carrying(self.log), decision_bytes(self.log))
+        }
         bounds: set[Fraction] = set()
         if values is not None:
             for v in values:
@@ -268,24 +265,23 @@ class _Job:
                 if last:
                     self.late |= {n for x, names in found.items() if x not in bounds for n in names}
             ordered = sorted(tried, key=lambda v: exact(cast(float, v)))
-        out: dict[str, Any] = {"entries": {}, "plan": None}
+        entries: dict[str, _Result] = {}
         runs = [run for run in tried.values() if isinstance(run, _Run)]
         carried = {r for run in runs for r in run.carrying}
-        named = {r for r in carried if r is not None}
-        refs = code_point_sorted({r for run in runs for r in run.changed} | named)
-        for ref in [*refs, None]:
+        policy = self.loaded._design.policy
+        listed = {r for run in runs for r in run.changed} | carried | {policy}
+        for ref in code_point_sorted(listed):
             results = [_result(tried[v], ref, self.mine) for v in ordered]
+            keys = [_key(tried[v], r, ref == policy) for v, r in zip(ordered, results, strict=True)]
             if ref in carried:
-                summary: _Result = "carries"
+                entries[ref] = "carries"
             elif values is not None:
-                summary = {"classes": _partition(ordered, results)}
+                entries[ref] = {"classes": _partition(ordered, results, keys)}
             else:
-                summary = _numeric_summary(ordered, results, own, bounds, integer, self.path)
-            if ref is None:
-                out["plan"] = summary
-            else:
-                out["entries"][ref] = summary
-        return out
+                entries[ref] = _numeric_summary(
+                    ordered, results, keys, own, bounds, integer, self.path
+                )
+        return {"entries": entries}
 
     async def run(self, v: _Value, key: str | None) -> tuple[_Run | _Result, _Log]:
         """The run at ``v``, or its failure, and the replay's log, empty when none ran."""
@@ -305,7 +301,8 @@ class _Job:
         rerun, found, _ = await _replay_with(self.log, design, self.log, observer=None)
         rerun_log = rerun.log
         outside = any(f["kind"] in OUTSIDE for f in found)
-        return _Run(self.log, found, self.carrying(rerun_log), outside), rerun_log
+        run = _Run(found, self.carrying(rerun_log), decision_bytes(rerun_log), outside)
+        return run, rerun_log
 
     def compared(self, log: _Log) -> _Compared:
         """``_compared`` over ``log``, a table whose ``candidate`` read finds no set noted
@@ -314,81 +311,68 @@ class _Job:
         self.late |= blind
         return found
 
-    def carrying(self, log: _Log) -> set[str | None]:
-        """Each entry of ``log`` whose output passes the leaf through, and ``None`` for its plan
-        when that does: a table row giving the output, under ``F`` the first matched, outputs
-        ``Param`` of the leaf, or for the plan the policy table's row names a plan declaration
-        holding it. The rows are read from every run, whatever its value."""
-        out: set[str | None] = set()
+    def carrying(self, log: _Log) -> set[str]:
+        """Each entry of ``log`` whose output passes the leaf through: a table row giving the
+        output, under ``F`` the first matched, outputs ``Param`` of the leaf. The rows are read
+        from every run, whatever its value."""
+        out: set[str] = set()
         rules: dict[str, dict[str, Any]] = {
             r["provides"]: r for r in self.document["rules"].values()
         }
-        policy = self.document["policy"]
         for item in log:
-            ref: str | None
-            if item["item"] == "entry" and item.get("rows"):  # a function's has none
-                table, ref = rules[_declared(item["ref"])], item["ref"]
-            elif item["item"] == "plan" and item.get("rows"):
-                table, ref = policy, None
-            else:
+            if item["item"] != "entry" or not item.get("rows"):  # a function's has none
                 continue
+            table, ref = rules[_declared(item["ref"])], cast(str, item["ref"])
             rows = cast("list[int]", item["rows"])
-            for n in rows[:1] if table.get("hit", "F") == "F" else rows:  # the policy's is F
-                row = table["rows"][n - 1]
-                held = row["output"] if ref is not None else self.document["plans"][row["plan"]]
-                if _contains(held, {"param": self.path}):
+            for n in rows[:1] if table["hit"] == "F" else rows:
+                if _contains(table["rows"][n - 1]["output"], {"param": self.path}):
                     out.add(ref)
-
         return out
 
 
-def _result(run: _Run | _Result, ref: str | None, mine: Mapping[str, Any]) -> _Result:
-    """A run's result for the entry at ``ref``, or for the plan at ``None``."""
+def _result(run: _Run | _Result, ref: str, mine: Mapping[str, Any]) -> _Result:
+    """A run's result for the entry at ``ref``."""
     if not isinstance(run, _Run):
         return run
     if run.outside:
         return _NOT_DETERMINED
-    if ref is None:
-        return {"plan": run.plan, "verdict": run.verdict}
     return {"entry": run.entries[ref] if ref in run.entries else mine.get(ref)}
 
 
-def _same(a: _Result, b: _Result) -> bool:
-    """Whether two results are one: items by canonical bytes, a plan without its ``context``
-    and its ``rows``, which name the winning rows and not what the plan does."""
-    if isinstance(a, dict) and isinstance(b, dict) and "plan" in a and "plan" in b:
-        mine, theirs = (_rowless(r["plan"]) for r in (a, b))
-        plan = {"kind": _K.plan, "recorded": mine, "replayed": theirs}
-        return not _differ(a["verdict"], b["verdict"]) and (
-            not _differ(a["plan"], b["plan"]) or _context_alone(plan)
-        )
-    if isinstance(a, dict) and isinstance(b, dict) and "entry" in a and "entry" in b:
-        x, y = a["entry"], b["entry"]  # by value, or marker kind and code, alone
-        return x is y is None or (x is not None and y is not None and outcome(x) == outcome(y))
-    return encode(a) == encode(b)
+_Key = tuple[str, bytes | None]
 
 
-def _rowless(plan: dict[str, Any] | None) -> dict[str, Any] | None:
-    """A plan item without its ``rows``, or ``None`` for none."""
-    return None if plan is None else {k: v for k, v in plan.items() if k != "rows"}
+def _key(run: _Run | _Result, result: _Result, decision: bool) -> _Key:
+    """What a result is compared by: the decision by its ``decision_bytes``, any other entry
+    by value, or marker kind and code, alone; any other result by canonical bytes."""
+    if isinstance(run, _Run) and not run.outside and decision:
+        return "decision", run.decision
+    if isinstance(result, dict) and "entry" in result:
+        entry = result["entry"]
+        return "entry", None if entry is None else outcome(entry)
+    return "result", encode(result)
 
 
-def _partition(values: list[_Value], results: list[_Result]) -> list[dict[str, Any]]:
+def _partition(
+    values: list[_Value], results: list[_Result], keys: list[_Key]
+) -> list[dict[str, Any]]:
     """A finite leaf's classes, each value with every other giving the same result, in
     declared order."""
     classes: list[dict[str, Any]] = []
-    for v, r in zip(values, results, strict=True):
-        held = next((c for c in classes if _same(c["result"], r)), None)
-        if held is None:
-            classes.append({"values": [v], "result": r})
+    held: list[_Key] = []
+    for v, r, k in zip(values, results, keys, strict=True):
+        if k in held:
+            classes[held.index(k)]["values"].append(v)
         else:
-            held["values"].append(v)
+            held.append(k)
+            classes.append({"values": [v], "result": r})
     return classes
 
 
 def _numeric_summary(
     values: list[_Value],
     results: list[_Result],
+    keys: list[_Key],
     own: Any,
     bounds: set[Fraction],
     integer: bool,
@@ -397,11 +381,13 @@ def _numeric_summary(
     """The classes of adjacent values with one result, the switching value between each two,
     and the slacks of the leaf's own class."""
     classes: list[dict[str, Any]] = []
-    for v, r in zip(values, results, strict=True):
-        if classes and _same(classes[-1]["result"], r):
+    last: _Key | None = None
+    for v, r, k in zip(values, results, keys, strict=True):
+        if classes and k == last:
             classes[-1]["greatest"] = v
         else:
             classes.append({"least": v, "greatest": v, "result": r})
+        last = k
     switching: list[_Value] = []
     for a, b in itertools.pairwise(classes):
         g, lo = a["greatest"], b["least"]
@@ -469,8 +455,8 @@ def _hidden(document: _Doc, loaded: LoadedDesign, path: str) -> set[str]:
 
 
 def _components(document: _Doc) -> dict[str, dict[str, Any]]:
-    """Each rule by id, then the policy as ``policy``."""
-    return {**document["rules"], "policy": document["policy"]}
+    """Each rule by id."""
+    return document["rules"]
 
 
 def _compared(document: _Doc, path: str, log: _Log) -> tuple[_Compared, set[str]]:

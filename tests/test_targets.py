@@ -10,12 +10,15 @@ from typing import Any
 
 import pytest
 
-from format_6_design import DESIGN, STATE, binding, urgent
 from ommat import (
+    CallResult,
     Design,
     InvalidDesign,
     Question,
+    ReadView,
     Rule,
+    Source,
+    SourceCall,
     Table,
     Target,
     TargetRole,
@@ -23,8 +26,53 @@ from ommat import (
     decide_sync,
     load,
 )
+from ommat import types as t
+from ommat.helpers import pick_with_margin
 
 FORMAT_6 = Path(__file__).parent / "format_6"
+
+
+def urgent(r: ReadView) -> object:
+    return pick_with_margin(r, "q:ask/urgent", 0.6, 0.2)
+
+
+def act(r: ReadView) -> str:
+    return "act" if r.read("d:urgent") == "yes" else "hold"
+
+
+DESIGN = Design(
+    name="targets",
+    state=t.record(request=t.string),
+    sources={
+        "ask": Source(
+            {
+                "q:ask/urgent": Question(
+                    "noul",
+                    Text(
+                        "Does {request} need action today?",
+                        [{"name": "request", "origin": {"ref": "t:state.request"}}],
+                    ),
+                )
+            },
+            needs=["t:state"],
+        ),
+    },
+    rules={
+        "urgent": Rule(
+            "d:urgent", t.label("no", "yes"), urgent, version="1", reads=["q:ask/urgent"]
+        ),
+        "act": Rule("d:act", t.label("act", "hold"), act, version="1", reads=["d:urgent"]),
+    },
+    policy="d:act",
+)
+
+STATE = {"request": "a cancelled flight"}
+
+
+async def binding(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+    return CallResult({"q:ask/urgent": {"yes": 0.9, "no": 0.1}})
+
+
 TARGETS = {
     "tg:urgency": Target("Whether the traveller needs action today", values="yes or no"),
     "tg:distress": Target("How upset the traveller is"),
@@ -37,7 +85,7 @@ def targeted(
     rule_target: object = "tg:urgency",
     targets: Mapping[str, Any] | None = None,
 ) -> Design:
-    """The format-6 golden's design with its question, its rule and the design targeted."""
+    """The design above with its question, its rule and the design targeted."""
     source = DESIGN.sources["ask"]
     question = source.provides["q:ask/urgent"]
     asked = dataclasses.replace(question, target=target, latent_targets=latent)  # type: ignore[arg-type]
@@ -45,7 +93,7 @@ def targeted(
     return dataclasses.replace(
         DESIGN,
         sources={"ask": dataclasses.replace(source, provides={"q:ask/urgent": asked})},
-        rules={"urgent": rule},
+        rules={**DESIGN.rules, "urgent": rule},
         targets=TARGETS if targets is None else targets,
     )
 
@@ -60,7 +108,7 @@ def failures(design: Design | dict[str, Any]) -> list[tuple[int, tuple[str, ...]
 def test_a_design_declaring_targets_writes_them_and_round_trips_byte_for_byte() -> None:
     loaded = load(targeted())
     doc = json.loads(loaded.document)
-    assert doc["format"] == 9
+    assert doc["format"] == 10
     assert doc["targets"] == {
         "tg:distress": {"statement": "How upset the traveller is", "values": None},
         "tg:urgency": {
@@ -218,8 +266,8 @@ def test_check_10_refuses_a_target_member_of_another_form(design: Design, says: 
 
 
 def test_a_questions_identity_leaves_its_targets_out() -> None:
-    """The format-6 record asked this question before targets existed; the identity a
-    format-7 design gives it, targets declared, is the one that record holds."""
+    """The stored format-6 record asked this question before targets existed; the identity a
+    design gives it, targets declared, is the one that record holds."""
     stored = json.loads((FORMAT_6 / "record.json").read_bytes())
     (call,) = [i for i in stored["log"] if i["item"] == "call"]
     expected = call["questions"]["q:ask/urgent"]["identity"]
@@ -229,10 +277,10 @@ def test_a_questions_identity_leaves_its_targets_out() -> None:
         assert asked["questions"]["q:ask/urgent"]["identity"] == expected
 
 
-def test_targets_leave_the_plan_and_the_entries_unchanged() -> None:
+def test_targets_leave_the_decision_and_the_entries_unchanged() -> None:
     plain = decide_sync(load(DESIGN), STATE, {"default": binding})
     with_targets = decide_sync(load(targeted()), STATE, {"default": binding})
-    assert with_targets.plan == plain.plan
+    assert with_targets.estimate == plain.estimate == "act"
     entries = [[i for i in d.record.log if i["item"] == "entry"] for d in (plain, with_targets)]
     assert entries[0] == entries[1]
 
@@ -256,7 +304,7 @@ def test_a_question_and_a_rule_default_to_no_target() -> None:
         (("rules", "urgent"), "target", 'rule "urgent" has no member "target"'),
     ],
 )
-def test_check_11_holds_a_format_7_documents_target_members(
+def test_check_11_holds_a_documents_target_members(
     path: tuple[str | int, ...], member: str, says: str
 ) -> None:
     doc: dict[str, Any] = json.loads(load(targeted()).document)
@@ -332,13 +380,15 @@ def test_a_documents_target_slips_are_refused_as_a_designs_are(
 def test_a_tables_target_is_held_to_its_form() -> None:
     table = Table("d:urgent", 'label{"no", "yes"}', "U", [], [], target="tg:urgency")
     assert table.target == "tg:urgency"
-    design = dataclasses.replace(targeted(rule_target=None), rules={"urgent": table})
+    design = dataclasses.replace(
+        targeted(rule_target=None), rules={**DESIGN.rules, "urgent": table}
+    )
     assert load(design).design_hash.startswith("sha256:")
     unknown = dataclasses.replace(table, target="tg:nowhere")
-    found = failures(dataclasses.replace(design, rules={"urgent": unknown}))
+    found = failures(dataclasses.replace(design, rules={**design.rules, "urgent": unknown}))
     assert {c for c, _, _ in found} == {3}
     bad = dataclasses.replace(table, target=3)  # type: ignore[arg-type]
-    found = failures(dataclasses.replace(design, rules={"urgent": bad}))
+    found = failures(dataclasses.replace(design, rules={**design.rules, "urgent": bad}))
     assert any(c == 10 and 'rule "urgent"\'s target is not a string' in m for c, _, m in found)
 
 

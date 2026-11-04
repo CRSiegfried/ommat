@@ -4,6 +4,8 @@ Its record holds the gold answers, its findings are what they change downstream,
 with no gold answer is stale and listed, and it refuses as ``intervene`` does."""
 
 import asyncio
+import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +14,17 @@ import pytest
 import extraction
 import test_grounded_rules as grounded
 import test_label_sets as label_sets
-from ommat import Cause, CauseCode, EntryRefusal, Failed, Record, Unavailable, load
+from ledger_logs import rehashed
+from ommat import (
+    Cause,
+    CauseCode,
+    EntryRefusal,
+    Failed,
+    Record,
+    Unavailable,
+    load,
+    read_record,
+)
 from ommat.evaluation import (
     EvaluationRefusal,
     EvaluationStore,
@@ -36,7 +48,7 @@ def kinds(found: list[dict[str, Any]]) -> list[tuple[str, str | None]]:
     return [(f["kind"], f.get("ref")) for f in found]
 
 
-def labelled(root: Path, record: Record, labels: dict[str, object]) -> EvaluationStore:
+def labelled(root: Path, record: Record, labels: Mapping[str, object]) -> EvaluationStore:
     store = EvaluationStore(root)
     write_gold_answers("g", [record], {record.record_hash: labels}, results=store)
     return store
@@ -53,7 +65,7 @@ def test_a_gold_answer_on_the_answers_label_changes_nothing_downstream(tmp_path:
 def test_a_gold_answer_that_differs_changes_what_follows(tmp_path: Path) -> None:
     base = go().record
     out = gold_record_sync(base, LOADED, "g", results=labelled(tmp_path, base, {"q:spam": "no"}))
-    assert kinds(out["findings"]) == [("entry", "d:route"), ("plan", None)]
+    assert kinds(out["findings"]) == [("entry", "d:act"), ("entry", "d:route")]
 
 
 def test_a_question_with_no_gold_answer_is_stale_and_listed(tmp_path: Path) -> None:
@@ -112,7 +124,7 @@ def test_a_grounded_question_takes_each_candidates_gold_answer(tmp_path: Path) -
 
 def test_a_gold_record_under_a_rerun_design(tmp_path: Path) -> None:
     base = go().record
-    rerun = slice_design(tools=["archive", "send"])
+    rerun = slice_design(name="changed")
     store = labelled(tmp_path, base, {"q:spam": "yes"})
     out = gold_record_sync(base, LOADED, "g", results=store, rerun_design=rerun)
     assert out["record"].design_hash == rerun.design_hash
@@ -162,6 +174,24 @@ def test_the_record_checks_and_argument_types_are_refused(tmp_path: Path) -> Non
         gold_record_sync(go().record, LOADED, 5, results=store)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="results"):
         gold_record_sync(go().record, LOADED, "g", results=tmp_path)  # type: ignore[arg-type]
+
+
+def test_a_record_before_format_8_is_wrong_design(tmp_path: Path) -> None:
+    old = read_record((Path(__file__).parent / "format_9" / "record.json").read_bytes())
+    assert old.log[0]["format"] == 7
+    with pytest.raises(EvaluationRefusal) as raised:
+        gold_record_sync(old, LOADED, "g", results=EvaluationStore(tmp_path))
+    assert (raised.value.reason, raised.value.turn) == (R.wrong_design, old.record_hash)
+
+
+def test_a_record_with_its_policy_s_entry_cut_is_unfinished(tmp_path: Path) -> None:
+    doc = json.loads(go().record.document)
+    policy = doc["log"][1]["policy"]
+    doc["log"] = [i for i in doc["log"] if not (i["item"] == "entry" and i["ref"] == policy)]
+    cut = read_record(rehashed(doc))
+    with pytest.raises(EvaluationRefusal) as raised:
+        gold_record_sync(cut, LOADED, "g", results=EvaluationStore(tmp_path))
+    assert (raised.value.reason, raised.value.turn) == (R.unfinished, cut.record_hash)
 
 
 def test_gold_record_is_awaitable_and_its_twin_refuses_inside_a_loop(tmp_path: Path) -> None:

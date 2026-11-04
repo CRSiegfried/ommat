@@ -1,7 +1,7 @@
 """An extraction design for the extraction-kind tests: a source asking an amount owed, a
 number, and the dates it is due by, a list of dates, from the state's ``body``, each resolving
 a yearless date against the state's ``today``; rules reading them through ``extract``; and a
-policy whose reply depends on both. Builders change one declaration."""
+policy rule whose reply depends on both. Builders change one declaration."""
 
 import dataclasses
 from typing import Any
@@ -11,11 +11,10 @@ from ommat import (
     Design,
     LoadedDesign,
     Parameter,
-    Plan,
-    Policy,
     Question,
     Rule,
     Source,
+    Table,
     Text,
     Undetermined,
     load,
@@ -54,11 +53,11 @@ def dates(r: Any) -> Any:
     return extract(r, "q:dates", 0.5)
 
 
-def reply(r: Any) -> Plan:
+def reply(r: Any) -> str:
     size, due = r.read("d:amount"), r.read("d:dates")
     shown = "unsure" if isinstance(size, Undetermined) else size
     when = "no date" if isinstance(due, Undetermined) else ", ".join(due)
-    return Plan("inform", reply=f"{shown}; {when}")
+    return f"{shown}; {when}"
 
 
 def question(value_type: str = "number", is_list: bool = False, **changes: Any) -> Question:
@@ -103,8 +102,9 @@ def design(**changes: Any) -> Design:
                 boundaries=BOUNDARIES,
             ),
             "dates": Rule("d:dates", t.list_(t.string), dates, version="1", reads=["q:dates"]),
+            "reply": Rule("d:reply", t.string, reply, version="1", reads=["d:amount", "d:dates"]),
         },
-        "policy": Policy(reply, version="1", reads=["d:amount", "d:dates"]),
+        "policy": "d:reply",
         "parameters": {
             "amount/null": Parameter(t.number(0, 1), 0.5),
             "amount/big": Parameter(t.number(), 100),
@@ -127,9 +127,18 @@ def replaced(d: Design, **changes: Any) -> Design:
     return dataclasses.replace(d, **changes)
 
 
-def dates_only(r: Any) -> Plan:
+def dates_only(r: Any) -> str:
     due = r.read("d:dates")
-    return Plan("inform", reply="no date" if isinstance(due, Undetermined) else ", ".join(due))
+    return "no date" if isinstance(due, Undetermined) else ", ".join(due)
+
+
+DATES_ONLY = Rule("d:reply", t.string, dates_only, version="1", reads=["d:dates"])
+"""The policy's rule reading ``d:dates`` alone."""
+
+
+def dates_only_rules(d: Design) -> dict[str, Rule | Table]:
+    """``d``'s rules with the policy's rule replaced by ``DATES_ONLY``."""
+    return {**d.rules, "reply": DATES_ONLY}
 
 
 def plain(**provides: Any) -> Design:

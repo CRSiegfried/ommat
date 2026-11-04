@@ -27,7 +27,7 @@ BOARD: dict[str, object] = {
 
 
 def view(kind: ComponentKind = ComponentKind.rule) -> ReadView:
-    name = {"rule": "route", "policy": "policy", "when": "mail"}[kind.value]
+    name = {"rule": "route", "when": "mail"}[kind.value]
     state = RecordOf(()) if kind is ComponentKind.when else None
     return ReadView(Role(kind, name), tuple(BOARD), (), BOARD, {}, state=state)
 

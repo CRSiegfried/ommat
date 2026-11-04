@@ -6,6 +6,7 @@ cut, the refusals in their order, and both records left as they were."""
 import asyncio
 import copy
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,7 +20,6 @@ from ommat import (
     LoadedDesign,
     Parameter,
     Record,
-    Requirement,
     Rule,
     RunSettings,
     Source,
@@ -66,7 +66,10 @@ from test_replay import (
 K = FindingKind
 R = RefusalReason
 HAM = {**SPAM, "q:spam": {"yes": 0.1, "no": 0.9}}
-REFUSING = slice_design(requirements=[Requirement("d:route", "no")])
+"""Turns ``d:route`` to ``no``, so the policy ``d:act`` keeps where SPAM archives."""
+CHANGED = slice_design(name="changed")
+"""The slice design under another name: another design hash, the same turn."""
+FORMAT_7 = Path(__file__).parent / "format_9" / "record.json"
 
 
 def live(
@@ -86,7 +89,7 @@ def diff(record: Record, other: Record, loaded: LoadedDesign = LOADED) -> list[A
     """The findings a rerun reproducing ``other``'s turn gives against ``record``."""
     mine = {i["ref"]: i for i in record.log if i["item"] == "entry"}
     theirs = {i["ref"]: i for i in other.log if i["item"] == "entry"}
-    rules = {"d:route": rule_of(loaded, "route"), "d:echo": rule_of(loaded, "echo")}
+    rules = {f"d:{rid}": rule_of(loaded, rid) for rid in ("act", "route", "echo")}
     out: list[Any] = [
         {
             "kind": K.entry,
@@ -98,10 +101,6 @@ def diff(record: Record, other: Record, loaded: LoadedDesign = LOADED) -> list[A
         for ref in sorted({*mine, *theirs})
         if mine.get(ref) != theirs.get(ref)
     ]
-    for kind in (K.plan, K.verdict):
-        a, b = (next(i for i in r.log if i["item"] == kind.value) for r in (record, other))
-        if a != b:
-            out.append({"kind": kind, "recorded": a, "replayed": b})
     return out
 
 
@@ -139,30 +138,28 @@ def test_two_records_of_the_same_answers_give_no_finding() -> None:
 
 
 def test_one_differing_answer_gives_exactly_the_findings_downstream_of_it() -> None:
-    record, other = live(REFUSING), live(REFUSING, ask=returns(HAM))
-    result = found(record, other, REFUSING)
-    assert result == diff(record, other, REFUSING)
+    record, other = live(), live(ask=returns(HAM))
+    result = found(record, other)
+    assert result == diff(record, other)
     assert [(f["kind"], f.get("ref")) for f in result] == [
+        (K.entry, "d:act"),
         (K.entry, "d:route"),
         (K.entry, "q:spam"),
-        (K.plan, None),
-        (K.verdict, None),
     ]
-    assert result[1]["replayed"] == entry(other.log, "q:spam")
-    assert result[0]["replayed"]["value"] == "no"
-    assert result[3]["recorded"]["kind"] == "refused"
-    assert result[3]["replayed"]["kind"] == "passed"
+    assert result[2]["replayed"] == entry(other.log, "q:spam")
+    assert result[1]["replayed"]["value"] == "no"
+    assert (result[0]["recorded"]["value"], result[0]["replayed"]["value"]) == ("archive", "keep")
 
 
 def test_a_q_and_a_t_answer_are_both_taken_from_other() -> None:
     other = live(ask=returns(HAM), look=returns({"t:size": 5}))
     result = found(live(), other)
     assert result == diff(live(), other)
-    assert [f.get("ref") for f in result] == ["d:route", "q:spam", "t:size", None]
+    assert [f.get("ref") for f in result] == ["d:act", "d:route", "q:spam", "t:size"]
 
 
 def test_the_findings_are_plain_data() -> None:
-    result = use_answers_sync(live(REFUSING), REFUSING, live(REFUSING, ask=returns(HAM)))
+    result = use_answers_sync(live(), LOADED, live(ask=returns(HAM)))
     assert json.loads(json.dumps(result)) == result
     assert copy.deepcopy(result) == result
 
@@ -285,12 +282,12 @@ def test_a_replay_record_under_the_first_design_is_a_valid_other() -> None:
     result = found(record, rerun, FIRST)
     assert result == diff(record, rerun, FIRST)
     assert [(f["kind"], f.get("ref")) for f in result] == [
+        (K.entry, "d:act"),
         (K.entry, "d:route"),
         (K.entry, "q:spam"),
-        (K.plan, None),
     ]
-    assert result[1]["replayed"] == entry(rerun.log, "q:spam")
-    assert (result[0]["recorded"]["value"], result[0]["replayed"]["value"]) == ("yes", "no")
+    assert result[2]["replayed"] == entry(rerun.log, "q:spam")
+    assert (result[1]["recorded"]["value"], result[1]["replayed"]["value"]) == ("yes", "no")
 
 
 def test_a_replay_record_is_a_valid_record_with_the_original_as_other() -> None:
@@ -298,9 +295,9 @@ def test_a_replay_record_is_a_valid_record_with_the_original_as_other() -> None:
     result = found(rerun, record, FIRST)
     assert result == diff(rerun, record, FIRST)
     assert [(f["kind"], f.get("ref")) for f in result] == [
+        (K.entry, "d:act"),
         (K.entry, "d:route"),
         (K.entry, "q:spam"),
-        (K.plan, None),
     ]
 
 
@@ -334,12 +331,34 @@ def broken() -> Record:
     return go(state={"subject": "no other field"}).record
 
 
+def format_7() -> Record:
+    record = read_record(FORMAT_7.read_bytes())
+    assert record.log[0]["format"] == 7
+    return record
+
+
+@pytest.mark.usefixtures("no_replay")
+def test_a_record_before_format_8_is_wrong_design_before_unfinished() -> None:
+    old = format_7()
+    for given, got in ((old, unfinished()), (unfinished(), old)):
+        exc = refusal(given, got)
+        assert exc.reason is R.wrong_design
+        assert exc.turn == old.record_hash
+        assert "before format 8" in str(exc)
+
+
 def test_an_unfinished_record_or_other_is_refused_record_first() -> None:
     record, other = unfinished(), unfinished()
     for given, got, name in ((record, other, record), (go().record, other, other)):
         exc = refusal(given, got)
         assert exc.reason is R.unfinished
         assert exc.turn == name.record_hash
+
+
+def test_a_broken_entry_ends_at_its_policy_entry_with_a_marker_at_its_state_entry() -> None:
+    log = broken().log
+    assert log[-1] == entry(log, "d:act")
+    assert entry(log, "t:state")["marker"]["kind"] == "Unavailable"
 
 
 def test_nothing_to_replay_is_refused_after_unfinished() -> None:
@@ -354,7 +373,7 @@ def test_nothing_to_replay_is_refused_after_unfinished() -> None:
 
 @pytest.mark.usefixtures("no_replay")
 def test_a_record_of_another_design_is_wrong_design_naming_its_turn_and_hash() -> None:
-    changed = slice_design(tools=["archive", "send"])
+    changed = CHANGED
     theirs = live(changed)
     exc = refusal(go().record, theirs)
     assert exc.reason is R.wrong_design
@@ -369,7 +388,7 @@ def test_a_record_of_another_design_is_wrong_design_naming_its_turn_and_hash() -
 
 @pytest.mark.usefixtures("no_replay")
 def test_wrong_design_is_refused_after_nothing_to_replay() -> None:
-    changed = live(slice_design(tools=["archive", "send"]))
+    changed = live(CHANGED)
     assert refusal(changed, broken()).reason is R.nothing_to_replay
 
 
@@ -392,8 +411,7 @@ def test_another_state_or_settings_is_different_turn(other: Any, what: str) -> N
 
 @pytest.mark.usefixtures("no_replay")
 def test_different_turn_is_refused_after_wrong_design() -> None:
-    changed = slice_design(tools=["archive", "send"])
-    exc = refusal(go().record, live(changed, settings=RunSettings(timeout=7)))
+    exc = refusal(go().record, live(CHANGED, settings=RunSettings(timeout=7)))
     assert exc.reason is R.wrong_design
 
 
@@ -464,12 +482,12 @@ def test_a_loaded_not_exactly_a_loaded_design_is_refused_before_the_records_are_
 
 
 def test_neither_records_document_changes() -> None:
-    record, other = live(REFUSING), live(REFUSING, ask=returns(HAM))
+    record, other = live(), live(ask=returns(HAM))
     before = (record.document, other.document)
     parsed = json.loads(other.document)
     kept = copy.deepcopy(parsed)
-    use_answers_sync(record, REFUSING, other)
-    use_answers_sync(record.document, REFUSING, parsed)
+    use_answers_sync(record, LOADED, other)
+    use_answers_sync(record.document, LOADED, parsed)
     assert (record.document, other.document) == before
     assert parsed == kept
 

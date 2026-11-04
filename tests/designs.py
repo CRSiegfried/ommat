@@ -3,15 +3,13 @@ builders that change one declaration of it."""
 
 import dataclasses
 import enum
-from typing import Any, cast
+from typing import Any
 
 from ommat import (
     Design,
     Group,
     Parameter,
-    Policy,
     Question,
-    Requirement,
     Rule,
     Source,
     SourceRequirement,
@@ -19,12 +17,6 @@ from ommat import (
     When,
 )
 from ommat import types as t
-from ommat._types import (
-    TypeFailure,
-    _sorted_fields,  # pyright: ignore[reportPrivateUsage]
-    parse_type,
-    render,
-)
 
 
 class Mood(enum.StrEnum):
@@ -40,16 +32,31 @@ def score(r: Any) -> float:
     return 0.5
 
 
-def policy(r: Any) -> None:
-    return None
+def decision(r: Any) -> bool:
+    return True
+
+
+def policy(r: Any) -> str:
+    return "hold"
 
 
 STATE = t.record(subject=t.string, sender=t.record(address=t.string))
 VERDICT = t.label("no", "yes")
+ACT = t.label("send", "archive", "hold")
+DECISION = Rule("d:decision", t.boolean, decision, version="p1")
+"""``minimal``'s policy, a rule that reads nothing."""
 
 
 def minimal(**changes: Any) -> Design:
-    fields: dict[str, Any] = {"state": t.record(), "policy": Policy(policy, version="p1")}
+    """A state, the policy ``d:decision`` and its rule. Rules given in ``changes`` are added
+    beside the policy's, unless ``changes`` names the policy too."""
+    fields: dict[str, Any] = {
+        "state": t.record(),
+        "policy": "d:decision",
+        "rules": {"decision": DECISION},
+    }
+    if changes.get("rules") is not None and "policy" not in changes:
+        changes = {**changes, "rules": {"decision": DECISION, **changes["rules"]}}
     fields.update(changes)
     return Design(**fields)
 
@@ -113,13 +120,16 @@ def full(**changes: Any) -> Design:
                 params=["intent/bar"],
             ),
             "score": Rule("d:score", t.number(0, 1), score, version="s1", reads=["q:intent/tone"]),
+            "act": Rule(
+                "d:act",
+                ACT,
+                policy,
+                version="p3",
+                reads=["d:route", "t:state.subject"],
+                params=["list/cap"],
+            ),
         },
-        "policy": Policy(
-            policy, version="p3", reads=["d:route", "t:state.subject"], params=["list/cap"]
-        ),
-        "requirements": [Requirement("d:route", "yes")],
-        "default_deny": False,
-        "tools": ["send", "archive"],
+        "policy": "d:act",
         "parameters": {
             "intent/bar": Parameter(t.number(0, 1), 0.9),
             "list/cap": Parameter(t.list_(t.string), ("a", "b")),
@@ -201,8 +211,8 @@ def roles(**given: Any) -> dict[str, Any]:
 
 
 def bounded(**changes: Any) -> Design:
-    """``full`` with a ``boundaries`` field on both rules and the policy: every role of a
-    ``q:`` read, a field-path ``t:`` read and a ``d:`` read the rules and the policy share."""
+    """``full`` with a ``boundaries`` field on each rule, the policy's among them: every role of
+    a ``q:`` read, a field-path ``t:`` read and a ``d:`` read the rules share."""
     design = full()
     route_rule = dataclasses.replace(
         design.rules["route"],
@@ -225,8 +235,8 @@ def bounded(**changes: Any) -> Design:
             )
         },
     )
-    policy_ = dataclasses.replace(
-        design.policy,
+    act_rule = dataclasses.replace(
+        design.rules["act"],
         reads=["d:route", "t:state.subject", "d:score"],
         boundaries={"d:score": ["score/low", "score/cut"]},
     )
@@ -240,74 +250,8 @@ def bounded(**changes: Any) -> Design:
         "score/low": Parameter(t.number(), 0.2),
     }
     fields: dict[str, Any] = {
-        "rules": {"route": route_rule, "score": score_rule},
-        "policy": policy_,
+        "rules": {"route": route_rule, "score": score_rule, "act": act_rule},
         "parameters": parameters,
     }
     fields.update(changes)
     return dataclasses.replace(design, **fields)
-
-
-def document_before_targets(doc: dict[str, Any], fmt: int = 6) -> dict[str, Any]:
-    """A current decoded design document made format ``fmt``, before format 7: the format
-    number set, and ``targets``, each question's ``target`` and ``latent_targets`` and each
-    rule's ``target`` dropped."""
-    doc["format"] = fmt
-    doc.pop("targets", None)
-    for source in cast("dict[str, dict[str, Any]]", doc["sources"]).values():
-        for provided in cast("dict[str, Any]", source["provides"]).values():
-            if isinstance(provided, dict):
-                cast("dict[str, Any]", provided).pop("target", None)
-                cast("dict[str, Any]", provided).pop("latent_targets", None)
-    for rule in cast("dict[str, Any]", doc["rules"]).values():
-        if isinstance(rule, dict):
-            cast("dict[str, Any]", rule).pop("target", None)
-    return doc
-
-
-def document_before_key_order(doc: dict[str, Any], fmt: int = 5) -> dict[str, Any]:
-    """A current decoded design document made format ``fmt``, before format 6: as
-    ``document_before_targets`` makes it, then each source's ``payload_order``, each parameter
-    leaf's ``order`` and each structured wording's ``order`` dropped, and every type string that
-    spells a record's fields out of code-point order re-spelled in it, as a document before
-    format 6 holds them."""
-    document_before_targets(doc, fmt)
-    sources: dict[str, dict[str, Any]] = doc["sources"]
-    for source in sources.values():
-        source.pop("payload_order", None)
-        provides: dict[str, Any] = source["provides"]
-        for provided in provides.values():
-            if isinstance(provided, dict):
-                wording = cast("dict[str, Any]", provided).get("wording")
-                if isinstance(wording, dict):
-                    cast("dict[str, Any]", wording).pop("order", None)
-    _drop_leaf_orders(doc["parameters"])
-    respelled = _sorted_spellings(doc)
-    doc.clear()
-    doc.update(respelled)
-    return doc
-
-
-def _drop_leaf_orders(tree: object) -> None:
-    if type(tree) is not dict:
-        return
-    members = cast("dict[str, Any]", tree)
-    if "type" in members and "value" in members:
-        members.pop("order", None)
-        return
-    for member in members.values():
-        _drop_leaf_orders(member)
-
-
-def _sorted_spellings(value: Any) -> Any:
-    """``value`` with each string that parses as a type holding a record re-spelled with every
-    record's fields in code-point order; every other string as it is."""
-    if type(value) is dict:
-        return {k: _sorted_spellings(v) for k, v in cast("dict[str, Any]", value).items()}
-    if type(value) is list:
-        return [_sorted_spellings(v) for v in cast("list[Any]", value)]
-    if type(value) is str and "record{" in value:
-        parsed = parse_type(value, nullable=True)
-        if not isinstance(parsed, TypeFailure):
-            return render(_sorted_fields(parsed))
-    return value

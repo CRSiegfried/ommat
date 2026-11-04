@@ -28,9 +28,9 @@ from ommat import (
     CauseCode,
     ExtractionAnswer,
     FindingKind,
+    InvalidDesign,
     InvalidRecord,
     LoadedDesign,
-    Policy,
     Question,
     Record,
     RenderedQuestion,
@@ -339,9 +339,9 @@ def test_each_temporal_grammar_and_value_type_at_the_write(
 
 
 def test_truncated_is_written_under_its_call_in_code_point_order() -> None:
-    record = ran(truncated=("q:dates", "q:amount"), usage={"passes": 3, "in": 10})
+    record = ran(truncated=("q:dates", "q:amount"), usage={"passes": 3, "input_tokens": 10})
     assert calls(record)["truncated"] == ["q:amount", "q:dates"]
-    assert calls(record)["usage"] == {"passes": 3, "in": 10}
+    assert calls(record)["usage"] == {"passes": 3, "input_tokens": 10}
     # It changes no outcome: the log is the log of a turn without it.
     assert ran().record_hash == record.record_hash
 
@@ -572,7 +572,8 @@ def test_the_ledger_refuses_a_truncated_off_its_shape(truncated: Any, says: str)
 
 
 def format_1(doc: dict[str, Any]) -> None:
-    """A current document made format 1, its call items without the precision format 3 added."""
+    """A current document made format 1, its call items without the precision format 3 added,
+    its settings without the policy and its log without the context item format 8 added."""
     before_profile(doc, 1)
     for item in doc["log"]:
         if item["item"] == "call":
@@ -636,16 +637,16 @@ def test_a_format_1_record_reads_back_to_its_own_hash() -> None:
 
 def test_the_append_refuses_a_design_item_of_an_unknown_format() -> None:
     ledger = Ledger()
-    with pytest.raises(_LedgerError, match="the format 8 is not one this ledger knows"):
-        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 8, "helpers": 2})
+    with pytest.raises(_LedgerError, match="the format 9 is not one this ledger knows"):
+        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 9, "helpers": 2})
 
 
 def test_a_record_of_an_unknown_format_is_refused() -> None:
     def change(doc: dict[str, Any]) -> None:
-        doc["log"][0]["format"] = 8
+        doc["log"][0]["format"] = 9
 
     with pytest.raises(
-        InvalidRecord, match="format 8 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7"
+        InvalidRecord, match="format 9 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8"
     ):
         read_record(edited(change))
 
@@ -653,8 +654,8 @@ def test_a_record_of_an_unknown_format_is_refused() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden extraction record
 
-GOLDEN_X_DESIGN = "sha256:2acc3b5d0ad02c8395556b324ad912bad0a2858d29f61f3e0dcbbf7a4adc0a1b"
-GOLDEN_X_RECORD = "sha256:a8cd1af3ec914b2b8a6f27016ec91e9fe21fa16efe97e460f90e37f32044e38e"
+GOLDEN_X_DESIGN = "sha256:bcb1b661a334bf0768b8b84dda0f54fbf81f2dffe62dd95eb0e8389fb668092d"
+GOLDEN_X_RECORD = "sha256:f0503127d6553607161a96c2747b203330c4b3a425b6b04bb48855ecf5c6db4f"
 
 
 def test_the_golden_extraction_record() -> None:
@@ -662,9 +663,11 @@ def test_the_golden_extraction_record() -> None:
     assert record.log[0] == {
         "item": "design",
         "hash": GOLDEN_X_DESIGN,
-        "format": 7,
+        "format": 8,
         "helpers": HELPERS,
     }
+    assert entry(record, "d:reply")["value"] == "big; 2024-02-29"
+    assert [i["item"] for i in record.log][-1] == "round"
     assert (record.design_hash, record.record_hash) == (GOLDEN_X_DESIGN, GOLDEN_X_RECORD)
 
 
@@ -755,7 +758,7 @@ def test_a_changed_value_type_list_flag_or_kind_is_a_stale_question_not_answered
         FindingKind.stale_question,
         FindingKind.entry,
         FindingKind.entry,
-        FindingKind.plan,
+        FindingKind.entry,
     ]
     assert (findings[1]["ref"], findings[1]["clause"]) == ("q:amount", "question")
     (found,) = [f for f in findings if f["kind"] == FindingKind.entry and f["ref"] == "q:amount"]
@@ -772,31 +775,9 @@ def test_a_recorded_probability_answer_asked_now_as_an_extraction_is_not_answere
     assert found["replayed"]["marker"]["cause"]["code"] == "not-returned"
 
 
-def test_a_format_1_record_replays_under_its_format_1_design_with_helpers_mismatch_alone() -> None:
-    loaded = load((FORMAT_1 / "design.json").read_bytes())
-    record = read_record((FORMAT_1 / "record.json").read_bytes())
-    again, findings = replay_sync(record, loaded)
-    assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 1, "replayed": HELPERS}]
-    assert again is not None
-    assert again.log[0]["format"] == 7  # the engine writes its own format
-
-
-def test_a_format_1_design_loads_to_its_own_hash_and_keeps_its_format() -> None:
-    data = (FORMAT_1 / "design.json").read_bytes()
-    loaded = load(data)
-    assert loaded.design_hash == (
-        "sha256:c2760531ea781e26dac6f13edfbfa8e65fe9cd31c6b921580d5dd099dd345791"
-    )
-    assert loaded.document == data
-    assert decode(loaded.document)["format"] == 1
-    stored_state = read_record((FORMAT_1 / "record.json").read_bytes()).log[2]["value"]
-
-    async def nothing(batch: tuple[SourceCall, ...], *, seconds: float) -> object:
-        return None  # each ref Unavailable: the turn still writes its design item
-
-    record = decide_sync(loaded, stored_state, {"mail": nothing, "default": nothing}).record
-    assert record.log[0]["item"] == "design"
-    assert record.log[0]["format"] == 7  # the engine writes its own format
+def test_a_format_1_design_is_refused_naming_its_format() -> None:
+    with pytest.raises(InvalidDesign, match="format 1 is not 10"):
+        load((FORMAT_1 / "design.json").read_bytes())
 
 
 # ---------------------------------------------------------------------------------------------
@@ -930,14 +911,14 @@ def test_the_dead_question_lint_runs_extraction_points() -> None:
         (99.0, 0.5),
     ]
 
-    ignored = x.loaded(policy=Policy(x.dates_only, version="1", reads=["d:dates"]))
+    ignored = load(x.replaced(x.design(), rules=x.dates_only_rules(x.design())))
     report = dead_questions(ignored, values={**STATE_VALUES, "q:dates": [["2024-02-29"]]})
     assert report["questions"]["q:amount"] == {"status": "no-change-found", "witness": None}
 
 
 def test_an_extraction_read_with_no_grid_entry_that_changes_nothing_is_not_on_grid() -> None:
     d = x.plain()
-    loaded = load(x.replaced(d, policy=Policy(x.dates_only, version="1", reads=["d:dates"])))
+    loaded = load(x.replaced(d, rules=x.dates_only_rules(d)))
     values = {**STATE_VALUES, "q:amount": [5], "q:dates": [["2024-02-29"]]}
     report = dead_questions(loaded, values=values)
     assert report["questions"]["q:amount"] == {"status": "not-on-grid", "witness": None}

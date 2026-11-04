@@ -13,7 +13,7 @@ from types import MappingProxyType
 
 import pytest
 
-from designs import full, minimal
+from designs import full
 from ommat import load
 from ommat._sorter import TurnSorter
 
@@ -22,7 +22,8 @@ NONE: frozenset[str] = frozenset()
 # Id heads whose code-point order is not their UTF-16 order: an astral letter sorts last.
 HEADS = "aZ\u00e9\u5b57\U0001d518"
 
-# load(full())._graph: intent <- lookup; score <- intent; route <- intent, lookup, score.
+# load(full())._graph: intent <- lookup; score <- intent; route <- intent, lookup, score;
+# act <- route.
 FULL = load(full())._graph
 
 
@@ -63,6 +64,7 @@ def test_the_loaded_graph_walks_in_wavefronts() -> None:
         frozenset({"intent"}),
         frozenset({"score"}),
         frozenset({"route"}),
+        frozenset({"act"}),
     ]
 
 
@@ -74,7 +76,7 @@ def test_a_wavefront_is_a_frozenset_and_interpret_sorts_it() -> None:
 
 
 def test_an_empty_graph_is_not_active() -> None:
-    sorter = TurnSorter(load(minimal())._graph, NONE)
+    sorter = TurnSorter({}, NONE)
     assert not sorter.is_active()
     assert sorter.get_ready() == NONE
 
@@ -140,7 +142,7 @@ def test_the_sets_are_alike_under_every_hash_seed() -> None:
     assert len(outputs) == 1
     lines = next(iter(outputs)).splitlines()
     assert len(lines) == 31
-    assert lines[0] == str([["lookup"], ["intent"], ["score"], ["route"]])
+    assert lines[0] == str([["lookup"], ["intent"], ["score"], ["route"], ["act"]])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -218,6 +220,7 @@ def test_a_carried_provider_is_neither_a_node_nor_a_predecessor() -> None:
         frozenset({"intent"}),
         frozenset({"score"}),
         frozenset({"route"}),
+        frozenset({"act"}),
     ]
 
 

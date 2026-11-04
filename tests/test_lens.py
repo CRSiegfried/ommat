@@ -12,13 +12,67 @@ from typing import Any
 import pytest
 
 import per_candidate as example
-from format_6_design import DESIGN as FORMAT_6
-from format_6_design import STATE as FORMAT_6_STATE
-from format_6_design import binding as format_6_binding
-from ommat import LoadedDesign, Parameter, Target, decide_sync, load
+from ommat import (
+    CallResult,
+    Design,
+    LoadedDesign,
+    Parameter,
+    Question,
+    ReadView,
+    Rule,
+    Source,
+    SourceCall,
+    Target,
+    Text,
+    decide_sync,
+    load,
+)
 from ommat import types as t
+from ommat._values import DESIGN_FORMAT
+from ommat.helpers import pick_with_margin
 from ommat.lens import page
 from ommat.lens.__main__ import main
+
+
+def _urgent(r: ReadView) -> object:
+    return pick_with_margin(r, "q:ask/urgent", 0.6, 0.2)
+
+
+def _act(r: ReadView) -> str:
+    return "notify" if r.read("d:urgent") == "yes" else "hold"
+
+
+URGENCY = Design(
+    name="urgency",
+    state=t.record(request=t.string),
+    sources={
+        "ask": Source(
+            {
+                "q:ask/urgent": Question(
+                    "noul",
+                    Text(
+                        "Does {request} need action today?",
+                        [{"name": "request", "origin": {"ref": "t:state.request"}}],
+                    ),
+                )
+            },
+            needs=["t:state"],
+        ),
+    },
+    rules={
+        "urgent": Rule(
+            "d:urgent", t.label("no", "yes"), _urgent, version="1", reads=["q:ask/urgent"]
+        ),
+        "act": Rule("d:act", t.label("hold", "notify"), _act, version="1", reads=["d:urgent"]),
+    },
+    policy="d:act",
+)
+URGENCY_STATE = {"request": "a cancelled flight"}
+
+
+async def urgency_binding(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+    return CallResult({"q:ask/urgent": {"yes": 0.9, "no": 0.1}})
+
 
 DESIGN = load(example.DESIGN)
 
@@ -44,6 +98,10 @@ def test_the_page_embeds_each_record_and_keys_each_design_by_its_hash() -> None:
     assert data["designs"] == {key: json.loads(DESIGN.document)}
     # The key is the hash the record's design item holds, so the page pairs them.
     assert json.loads(record)["log"][0]["hash"] == key
+
+
+def test_the_paste_placeholder_names_the_current_design_format() -> None:
+    assert f'placeholder=\'{{"format": {DESIGN_FORMAT}, "sources"' in page([])
 
 
 def test_a_sequence_of_records_is_named_by_position() -> None:
@@ -394,8 +452,8 @@ def test_the_page_traces_lineage_from_the_record_and_its_design(tmp_path: Path) 
     call = next(n for n, _ in inputs["e:q:triage/hazard"])
     assert call.startswith("c:")
     assert ("e:t:state", "design") in inputs[call]
-    # The policy reads every estimate and the registry's value.
-    assert {n for n, _ in inputs["plan"]} >= {
+    # The decision is the policy's entry, which its rule's reads link to.
+    assert {n for n, _ in inputs["e:d:route"]} >= {
         "e:d:asset",
         "e:d:hazard",
         "e:d:severity",
@@ -413,7 +471,7 @@ def test_the_page_traces_lineage_from_the_record_and_its_design(tmp_path: Path) 
 def _targeted() -> LoadedDesign:
     """The format-6 design with targets on its question and rule, and its rule's pick declared
     as boundaries over two parameters."""
-    source = FORMAT_6.sources["ask"]
+    source = URGENCY.sources["ask"]
     asked = dataclasses.replace(
         source.provides["q:ask/urgent"],
         target="tg:urgency",
@@ -421,13 +479,13 @@ def _targeted() -> LoadedDesign:
     )
     roles = {"bar": ["urgent/bar"], "thresholds": [], "margin": ["urgent/margin"], "mass": []}
     rule = dataclasses.replace(
-        FORMAT_6.rules["urgent"], target="tg:urgency", boundaries={"q:ask/urgent": roles}
+        URGENCY.rules["urgent"], target="tg:urgency", boundaries={"q:ask/urgent": roles}
     )
     return load(
         dataclasses.replace(
-            FORMAT_6,
+            URGENCY,
             sources={"ask": dataclasses.replace(source, provides={"q:ask/urgent": asked})},
-            rules={"urgent": rule},
+            rules={"urgent": rule, "act": URGENCY.rules["act"]},
             targets={
                 "tg:urgency": Target("Whether the traveller needs action today"),
                 "tg:distress": Target("How upset the traveller is"),
@@ -473,7 +531,7 @@ def test_a_design_alone_opens_on_the_design_view_with_its_declared_links(tmp_pat
           const out = { tab, kinds,
             asks: dstate.links.asks.get("tg:urgency"), bears: dstate.links.bears.get("tg:distress"),
             est: dstate.links.est.get("tg:urgency"), question: ins("e:q:ask/urgent"),
-            rule: ins("e:d:urgent"), policy: ins("plan") };
+            rule: ins("e:d:urgent"), policy: ins("e:d:act") };
           select("g:tg:urgency"); out.urgency = $("lineage").innerHTML;
           select("g:tg:cost"); out.cost = $("lineage").innerHTML;
           mode = "dim"; select("g:tg:cost"); out.costDim = $("lineage").innerHTML; mode = "filter";
@@ -490,7 +548,7 @@ def test_a_design_alone_opens_on_the_design_view_with_its_declared_links(tmp_pat
         "g:tg:urgency": "target",
         "p:urgent/bar": "param",
         "p:urgent/margin": "param",
-        "plan": "policy",
+        "e:d:act": "rule",
     }
     assert shown["asks"] == ["q:ask/urgent"]
     assert shown["bears"] == [{"ref": "q:ask/urgent", "role": "reflective"}]
@@ -511,9 +569,9 @@ def test_a_design_alone_opens_on_the_design_view_with_its_declared_links(tmp_pat
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
 def test_a_turn_shows_targets_and_the_boundaries_its_design_declares(tmp_path: Path) -> None:
     targeted = _targeted()
-    plain = load(FORMAT_6)
-    record = decide_sync(targeted, FORMAT_6_STATE, {"default": format_6_binding}).record
-    other = decide_sync(plain, FORMAT_6_STATE, {"default": format_6_binding}).record
+    plain = load(URGENCY)
+    record = decide_sync(targeted, URGENCY_STATE, {"default": urgency_binding}).record
+    other = decide_sync(plain, URGENCY_STATE, {"default": urgency_binding}).record
     identity = json.loads(record.document)["log"][3]["questions"]["q:ask/urgent"]["identity"]
     shown = _run(
         page({"a": record.document, "b": other.document}, [targeted.document, plain.document]),
@@ -564,7 +622,7 @@ def test_a_selection_ranks_its_links_first_and_its_stubs_name_why_the_rest_fold(
           const id = "tg:urgency", L = dstate.links;
           const tl = { asks: L.asks.get(id) || [], bears: L.bears.get(id) || [],
             est: L.est.get(id) || [] };
-          const up = new Set(["e:q:ask/urgent", "e:d:urgent"]), down = new Set(["plan"]);
+          const up = new Set(["e:q:ask/urgent", "e:d:urgent"]), down = new Set(["e:d:act"]);
           const rank = Object.fromEntries(rankOf(dstate, "g:" + id, tl, up, down));
           const turnish = { kind: "turn" };
           return { rank,
@@ -572,9 +630,9 @@ def test_a_selection_ranks_its_links_first_and_its_stubs_name_why_the_rest_fold(
               ["e:q:ask/urgent", "e:d:urgent", "e:t:state"], false),
             open: stubText(dstate, "g:tg:cost", ["e:t:state"], true),
             ref: stubText(dstate, "e:d:urgent", ["p:urgent/bar"], false),
-            turn: stubText(turnish, "e:d:urgent", ["e:t:state", "plan"], false) }; })()""",
+            turn: stubText(turnish, "e:d:urgent", ["e:t:state", "e:d:act"], false) }; })()""",
     )
-    assert shown["rank"] == {"g:tg:urgency": 0, "e:q:ask/urgent": 1, "e:d:urgent": 3, "plan": 4}
+    assert shown["rank"] == {"g:tg:urgency": 0, "e:q:ask/urgent": 1, "e:d:urgent": 3, "e:d:act": 4}
     # Under a target, a card with a target elsewhere and one declaring none are told apart,
     # and neither is called unrelated; the state takes no target, so it counts as unlinked.
     assert shown["target"] == "Show 3 with no link declared to tg:cost"
@@ -644,7 +702,7 @@ def test_select_orders_folds_and_opens_columns_as_the_mode_says(tmp_path: Path) 
         + """;(() => {
           const out = {};
           const { cols, on } = useColumns([["g:tg:urgency", "g:tg:distress", "g:tg:cost"],
-            ["e:t:state", "e:q:ask/urgent"], ["e:d:urgent"], ["plan"],
+            ["e:t:state", "e:q:ask/urgent"], ["e:d:urgent"], ["e:d:act"],
             ["p:urgent/bar", "p:urgent/margin"]]);
           select("g:tg:urgency"); out.filter = seen(cols); out.panel = $("lineage").innerHTML;
           openCols.add(0); select(selected); out.opened = seen(cols);
@@ -662,7 +720,7 @@ def test_select_orders_folds_and_opens_columns_as_the_mode_says(tmp_path: Path) 
     assert targets["cards"]["g:tg:urgency"] == {"order": "0", "cls": ["sel"]}
     assert asked["cards"]["e:q:ask/urgent"] == {"order": "1", "cls": ["near", "up"]}
     assert rules["cards"]["e:d:urgent"]["order"] == "3"
-    assert policy["cards"]["plan"] == {"order": "4", "cls": ["down"]}
+    assert policy["cards"]["e:d:act"] == {"order": "4", "cls": ["down"]}
     assert asked["cards"]["e:t:state"]["cls"] == ["dim", "hide"]
     assert targets["stubs"] == [
         '<button type="button" class="stub" data-open-col="0" aria-expanded="false" '
@@ -702,7 +760,7 @@ def test_a_bar_alone_does_not_stop_labels_folding_and_a_plain_bound_is_a_number(
           const bounds = { bar: [["p/bar", 0.5]], thresholds: [], margin: [], mass: [],
             null: [], confidence: [], value: [], plain: [] };
           const design = { rules: { r: { boundaries: { "t:profile.age": ["age/limit"] } } },
-            policy: {}, parameters: { "age/limit": { value: 18 } } };
+            policy: "d:p", parameters: { "age/limit": { value: 18 } } };
           return { barred: valueOnly({ value }, bounds),
             plain: valueHtml({ value: { age: 20 } }, boundsOf(design, "t:profile"), true) };
           })()""",
@@ -715,27 +773,24 @@ def test_a_bar_alone_does_not_stop_labels_folding_and_a_plain_bound_is_a_number(
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
-def test_the_design_links_its_context_block_and_candidate_valued_labels(tmp_path: Path) -> None:
+def test_the_design_links_candidate_valued_labels(tmp_path: Path) -> None:
     shown = _run(
         page([], [_targeted().document]),
         tmp_path,
         """(() => {
-          const g = buildDesign({ policy: {}, rules: {}, parameters: { p1: {} },
+          const g = buildDesign({ policy: "d:p", rules: {}, parameters: { p1: {} },
             sources: {
               s: { provides: { "q:x": { labels: { fixed: ["a"], candidates: "t:set" } } } },
-              look: { provides: { "t:set": {} } } },
-            context: { entries: [{ ref: "t:set",
-              text: { slots: [{ origin: { param: "p1" } }] } }] } });
+              look: { provides: { "t:set": {} } } } });
           const ins = (n) => (g.inputs.get(n) || []).map((x) => [x.node, x.how]);
-          return { question: ins("e:q:x"), plan: ins("plan") }; })()""",
+          return { question: ins("e:q:x"), nodes: [...g.nodes.keys()] }; })()""",
     )
     assert ["e:t:set", "its candidate-valued labels"] in shown["question"]
-    assert ["e:t:set", "a context entry"] in shown["plan"]
-    assert ["p:p1", "a context entry's wording"] in shown["plan"]
+    assert "context" not in shown["nodes"]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
-def test_the_design_links_candidate_reads_and_origins_to_their_set(tmp_path: Path) -> None:
+def test_the_design_links_candidate_reads_to_their_set(tmp_path: Path) -> None:
     shown = _run(
         page([], [_targeted().document]),
         tmp_path,
@@ -744,32 +799,99 @@ def test_the_design_links_candidate_reads_and_origins_to_their_set(tmp_path: Pat
             sources: { look: { provides: { "t:set": {} } } },
             rules: { fit: { provides: "d:fit", reads: ["candidate", "candidate.age"],
               grounded: "t:set" } },
-            policy: { form: "table", inputs: [], rows: [{ cells: [], plan: "mail" }] },
-            plans: { mail: { grounded: "t:set",
-              steps: [{ arguments: { who: { candidate: "t:set" } } }] } } });
+            policy: "d:fit" });
           const ins = (n) => (g.inputs.get(n) || []).map((x) => [x.node, x.how]);
-          return { rule: ins("e:d:fit"), plan: ins("plan") }; })()""",
+          return ins("e:d:fit"); })()""",
     )
-    assert ["e:t:set", "rule fit reads it"] in shown["rule"]
-    assert ["e:t:set", "the policy reads it"] in shown["plan"]
+    assert ["e:t:set", "rule fit reads it"] in shown
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
-def test_the_turn_links_a_set_literal_to_its_set(tmp_path: Path) -> None:
+def test_the_turn_shows_the_decision_apart(
+    tmp_path: Path,
+) -> None:
+    shown = _run(
+        page([], [_targeted().document]),
+        tmp_path,
+        """(() => {
+          const t = build({ log: [
+            { item: "design", hash: "h", format: 8, helpers: 3 },
+            { item: "settings", providers: { "d:s": "s", "d:act": "a" }, grounded: {},
+              sets: {}, policy: "d:act" },
+            { item: "entry", ref: "d:s", round: 0, call: null, value: ["a"] },
+            { item: "entry", ref: "d:act", round: 0, call: null, value: "go",
+              derivation: [{ helper: "first", refs: ["d:s"], rested_on: ["d:s"] }] }] }, null);
+          return { decision: t.decision.value, policy: t.policy,
+            round0: t.rounds.get(0).entries,
+            act: (t.inputs.get("e:d:act") || []).map((x) => [x.node, x.how]),
+            text: decisionText(t.decision) }; })()""",
+    )
+    assert shown["decision"] == "go"
+    assert shown["policy"] == "d:act"
+    assert shown["round0"] == ["d:s"]  # the decision stands in its own column
+    assert ["e:d:s", "helper first"] in shown["act"]
+    assert shown["text"] == '"go"'
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_record_before_format_8_shows_its_entries_and_calls_alone(tmp_path: Path) -> None:
     shown = _run(
         page([], [_targeted().document]),
         tmp_path,
         """(() => {
           const t = build({ log: [
             { item: "design", hash: "h", format: 7, helpers: 3 },
-            { item: "settings", providers: { "d:s": "s" }, grounded: {}, sets: { "d:s": null } },
-            { item: "entry", ref: "d:s", round: 0, call: null, value: ["a"] },
-            { item: "plan", kind: "execute", cause: null, reason: null, reply: null,
-              steps: [{ tool: "x", arguments: { a: { literal: "a", set: "d:s" } },
-                requirements: [] }] }] }, null);
-          return (t.inputs.get("plan") || []).map((x) => [x.node, x.how]); })()""",
+            { item: "settings", providers: { "d:s": "s" }, grounded: {}, sets: {} },
+            { item: "entry", ref: "d:s", round: 0, call: null, value: 1 },
+            { item: "call", round: 1, sources: ["s"], questions: {} },
+            { item: "plan", kind: "inform", context: { entries: [{ ref: "d:s" }] } },
+            { item: "verdict", kind: "passed" }] }, null);
+          return { decision: t.decision, entries: [...t.entries.keys()],
+            calls: t.calls.size, nodes: [...t.inputs.keys()] }; })()""",
     )
-    assert ["e:d:s", "a step's argument"] in shown
+    assert shown == {"decision": None, "entries": ["d:s"], "calls": 1, "nodes": []}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_the_decision_column_holds_the_policy_s_entry(tmp_path: Path) -> None:
+    ld = load(URGENCY)
+    record = decide_sync(ld, URGENCY_STATE, {"default": urgency_binding}).record
+    shown = _run(
+        page({"a": record.document}, [ld.document]),
+        tmp_path,
+        """(() => {
+          const html = $("cols").innerHTML;
+          const summary = $("summary").innerHTML;
+          setTab("design");
+          return { html, summary, design: $("cols").innerHTML }; })()""",
+    )
+    assert shown["html"].count('data-node="e:d:act"') == 1
+    assert 'data-node="context"' not in shown["html"]
+    assert "Decision" in shown["summary"]
+    assert "&quot;notify&quot;" in shown["summary"]
+    assert "the policy" in shown["design"]
+    assert 'data-node="context"' not in shown["design"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_marker_decision_shows_its_kind_and_cause_in_the_summary_and_turns(
+    tmp_path: Path,
+) -> None:
+    ld = load(URGENCY)
+    broken = decide_sync(ld, {"request": 5}, {"default": urgency_binding}).record
+    assert broken.log[2]["marker"]["cause"]["code"] == "invalid-return"  # a broken entry
+    good = decide_sync(ld, URGENCY_STATE, {"default": urgency_binding}).record
+    shown = _run(
+        page({"a": broken.document, "b": good.document}, [ld.document]),
+        tmp_path,
+        """(() => {
+          showAt(0); const summary = $("summary").innerHTML;
+          setTab("turns");
+          return { summary, turns: $("turnsView").innerHTML }; })()""",
+    )
+    assert "Unavailable (invalid-return)" in shown["summary"]
+    assert "Unavailable (invalid-return)" in shown["turns"]
+    assert "&quot;notify&quot;" in shown["turns"]  # the other turn's value decision
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
@@ -782,9 +904,9 @@ def test_a_selected_question_keeps_its_own_targets_and_a_stub_names_each_reason(
         _COLUMNS
         + """;(() => {
           const { cols } = useColumns([["g:tg:urgency", "g:tg:distress", "g:tg:cost"],
-            ["e:t:state", "e:q:ask/urgent"], ["e:d:urgent"], ["plan"]]);
+            ["e:t:state", "e:q:ask/urgent"], ["e:d:urgent"], ["e:d:act"]]);
           select("e:q:ask/urgent");
-          const g = buildDesign({ policy: {}, rules: {}, targets: { "tg:x": {}, "tg:y": {} },
+          const g = buildDesign({ policy: "d:p", rules: {}, targets: { "tg:x": {}, "tg:y": {} },
             sources: { s: { provides: { "q:a": { target: "tg:x" }, "q:b": {} } } } });
           return { cols: seen(cols),
             two: stubText(g, "g:tg:x", ["e:q:b", "e:t:state"], false),
@@ -805,8 +927,8 @@ def test_a_design_opened_again_is_one_design_and_a_turn_offers_to_compare_its_qu
     tmp_path: Path,
 ) -> None:
     targeted = _targeted()
-    one = decide_sync(targeted, FORMAT_6_STATE, {"default": format_6_binding}).record
-    two = decide_sync(targeted, {"request": "a lost bag"}, {"default": format_6_binding}).record
+    one = decide_sync(targeted, URGENCY_STATE, {"default": urgency_binding}).record
+    two = decide_sync(targeted, {"request": "a lost bag"}, {"default": urgency_binding}).record
     identity = json.loads(one.document)["log"][3]["questions"]["q:ask/urgent"]["identity"]
     shown = _run(
         page({"a": one.document, "b": two.document}, [targeted.document]),
@@ -827,10 +949,10 @@ def test_a_design_opened_again_is_one_design_and_a_turn_offers_to_compare_its_qu
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
 def test_compare_guess_legend_and_exact_leads_behave_as_the_spec_says(tmp_path: Path) -> None:
     targeted = _targeted()
-    one = decide_sync(targeted, FORMAT_6_STATE, {"default": format_6_binding}).record
-    two = decide_sync(targeted, {"request": "a lost bag"}, {"default": format_6_binding}).record
+    one = decide_sync(targeted, URGENCY_STATE, {"default": urgency_binding}).record
+    two = decide_sync(targeted, {"request": "a lost bag"}, {"default": urgency_binding}).record
     identity = json.loads(one.document)["log"][3]["questions"]["q:ask/urgent"]["identity"]
-    plain = load(FORMAT_6).document  # the only design here, and not the records' own
+    plain = load(URGENCY).document  # the only design here, and not the records' own
     shown = _run(
         page({"a": one.document, "b": two.document}, [plain]),
         tmp_path,
@@ -850,13 +972,12 @@ def test_compare_guess_legend_and_exact_leads_behave_as_the_spec_says(tmp_path: 
           out.missing = amount(undefined);
           const g = build({ log: [{ item: "design" }, { item: "settings", providers: {} },
             { item: "entry", ref: "t:set", round: 0, value: ["x"] },
-            { item: "call", round: 1, sources: ["s"], questions: {} },
-            { item: "plan", kind: "inform" }] },
-            { policy: { reads: [] }, rules: {}, context: { entries: [{ ref: "t:set" }] },
+            { item: "call", round: 1, sources: ["s"], questions: {} }] },
+            { policy: "d:p", rules: {},
               sources: { s: { needs: [],
                 provides: { "q:x": { labels: { candidates: "t:set" } } } } } });
           const ins = (n) => (g.inputs.get(n) || []).map((x) => [x.node, x.src]);
-          out.call = ins("c:3"); out.plan = ins("plan");
+          out.call = ins("c:3");
           return out; })()""".replace("IDENTITY", json.dumps(identity)),
     )
     assert shown["compared"].count("data-row=") == 2
@@ -871,7 +992,6 @@ def test_compare_guess_legend_and_exact_leads_behave_as_the_spec_says(tmp_path: 
     assert 'title="t/th = 0.7"' in shown["edge"]
     assert shown["missing"] == "\u2013"  # an en dash: no parameter, no value
     assert ["e:t:set", "design"] in shown["call"]  # a candidate-valued label set
-    assert ["e:t:set", "design"] in shown["plan"]  # the design's context entry
 
 
 # A click on an element the page's handler finds by ``closest``: the selector it asks for first
@@ -889,8 +1009,8 @@ def test_clicks_keep_a_picked_or_opened_design_and_the_jumps_and_stubs_work(
     tmp_path: Path,
 ) -> None:
     targeted = _targeted()
-    record = decide_sync(targeted, FORMAT_6_STATE, {"default": format_6_binding}).record
-    other = load(FORMAT_6).document
+    record = decide_sync(targeted, URGENCY_STATE, {"default": urgency_binding}).record
+    other = load(URGENCY).document
     shown = _run(
         page({"a": record.document}, [targeted.document, other]),
         tmp_path,
@@ -903,7 +1023,7 @@ def test_clicks_keep_a_picked_or_opened_design_and_the_jumps_and_stubs_work(
           designKey = picked; setTab("design");
           click({ tab: "turn" }); click({ tab: "design" }); out.picked = designKey === picked;
           // A design opened on the Design tab stays shown through Turn and back.
-          const bytes = new TextEncoder().encode(JSON.stringify({ policy: {}, name: "x" }));
+          const bytes = new TextEncoder().encode(JSON.stringify({ policy: "d:p", name: "x" }));
           $("desFile").files = [{ arrayBuffer: async () => bytes.buffer }];
           $("desFile").on.change();
           await new Promise((r) => setTimeout(r, 20));
@@ -912,7 +1032,7 @@ def test_clicks_keep_a_picked_or_opened_design_and_the_jumps_and_stubs_work(
           out.kept = [designKey, dstate.design.name];
           // Where the browser cannot hash, the opened design is kept under "opened".
           window.crypto = undefined;
-          const plain = new TextEncoder().encode(JSON.stringify({ policy: {}, name: "y" }));
+          const plain = new TextEncoder().encode(JSON.stringify({ policy: "d:p", name: "y" }));
           $("desFile").files = [{ arrayBuffer: async () => plain.buffer }];
           $("desFile").on.change();
           await new Promise((r) => setTimeout(r, 20));
@@ -940,17 +1060,14 @@ def test_clicks_keep_a_picked_or_opened_design_and_the_jumps_and_stubs_work(
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
-def test_a_table_shows_its_inputs_reads_and_a_mass_on_its_bound_shows_its_digits(
+def test_a_table_policy_shows_its_inputs_reads_and_a_mass_on_its_bound_shows_its_digits(
     tmp_path: Path,
 ) -> None:
     shown = _run(
         page([], [_targeted().document]),
         tmp_path,
         """(() => {
-          dstate = buildDesign({ policy: { form: "table", inputs: [{ read: "d:t" }],
-              rows: [{ cells: ["-"], plan: "p" }] },
-            plans: { p: { steps: [{ arguments: { a: { ref: "t:x" } } }], reason: null,
-              reply: { template: "{n}", slots: [{ name: "n", origin: { param: "lim" } }] } } },
+          dstate = buildDesign({ policy: "d:t",
             rules: { t: { form: "table", provides: "d:t", inputs: [{ read: "q:a" }] } },
             sources: { s: { provides: { "q:a": {} } } } });
           renderDesign();
@@ -960,8 +1077,8 @@ def test_a_table_shows_its_inputs_reads_and_a_mass_on_its_bound_shows_its_digits
             mass: valueHtml({ value: { kind: "choice", labels: ["a", "b", "c"],
               probabilities: { a: 0.3, b: 0.2, c: 0.5 } } }, mass, true) }; })()""",
     )
-    assert "reads d:t, t:x" in shown["cols"]
     assert "reads q:a" in shown["cols"]
+    assert "the policy" in shown["cols"]
     assert "reads nothing" not in shown["cols"]
     assert "mass a+b" in shown["mass"]
     assert "50.000%" in shown["mass"]
@@ -987,3 +1104,13 @@ def test_a_grounded_entry_links_its_own_candidates_reads(tmp_path: Path) -> None
     )
     assert 'e:q:x["a"]' in shown
     assert 'e:q:x["b"]' not in shown
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
+def test_a_design_whose_policy_is_not_a_ref_shows_no_policy(tmp_path: Path) -> None:
+    document = json.loads(_targeted().document)
+    document["format"] = 9
+    document["policy"] = {"rule": "act", "plans": {}}  # a design before format 10
+    shown = _run(page([], [json.dumps(document).encode()]), tmp_path, '$("summary").innerHTML')
+    assert '<span class="k">Policy</span><span class="v">?</span>' in shown
+    assert "[object Object]" not in shown

@@ -2,7 +2,7 @@
 """The read points: an axis, the answer points by kind, the exact arithmetic and its landing
 through the helpers, the fill order and the ``values`` slips, and the public ``points``. Both
 lints and question reach use them; the lints' own tests are in ``test_dead_questions.py`` and
-``test_unsure_to_execute.py``."""
+``test_dead_grounded.py``."""
 
 import math
 import sys
@@ -17,8 +17,6 @@ from ommat import (
     Design,
     LoadedDesign,
     Parameter,
-    Plan,
-    Policy,
     Question,
     Rule,
     Source,
@@ -34,8 +32,8 @@ from ommat.helpers._points import axis, fill, filled
 F = Fraction
 
 
-def plan(r: Any) -> Plan:
-    return Plan("escalate", reason="r")
+def decision(r: Any) -> str:
+    return "hold"
 
 
 def echo(r: Any) -> bool:
@@ -58,9 +56,9 @@ def design(
     return load(
         Design(
             state=state,
-            policy=Policy(plan, version="p"),
+            policy="d:decision",
             sources={k: v for k, v in sources.items() if v.provides},
-            rules={"echo": rule},
+            rules={"echo": rule, "decision": Rule("d:decision", t.string, decision, version="p")},
             parameters=parameters or {},
         )
     )
