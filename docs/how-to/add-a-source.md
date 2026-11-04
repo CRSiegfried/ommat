@@ -233,16 +233,16 @@ each answer.
 
 `decision.record.log` is the hashed log as a list of plain objects, one per item, in order;
 `decision.record.document` is the stored form, canonical JSON bytes. Each `entry` item names
-its `ref` and holds its `value`, or its `marker`. The driver reads the questions' values from
-them, for each extraction question:
+its `ref` and holds its `value`, or its `marker`, and `decision.record.entries` gives them keyed
+by ref. The driver reads each extraction question's value from them:
 
 ```python
 def answers(decision: Decision) -> dict[str, object]:
-    """Each extraction question's value, or its marker's cause, from the record's entry items."""
+    """Each extraction question's value, or its marker's cause, from the record's entries."""
     return {
-        item["ref"]: item["value"]["value"] if "value" in item else item["marker"]["cause"]["code"]
-        for item in decision.record.log
-        if item["item"] == "entry" and item["ref"].startswith("q:")
+        ref: item["value"]["value"] if "value" in item else item["marker"]["cause"]["code"]
+        for ref, item in decision.record.entries.items()
+        if ref.startswith("q:")
     }
 ```
 
@@ -633,16 +633,13 @@ A binding that passes keeps the protocol; it may still misread its model.
 `extract(r, ref, null_bar)` returns an extraction's `value`, or `Unsure` with `abstained`
 when the value is `None` or `p_null` is given and at or above `null_bar`; a `None` `p_null`
 never abstains, and the result never depends on `confidence`. `null_bar` has no default, and
-applies only to a model that gives a `p_null`. The list rule uses it:
+applies only to a model that gives a `p_null`. The list rule uses it, with its bar a parameter
+of the design:
 
 ```python
-    "streets": Rule(
-        "d:streets",
-        t.list_(t.string),
-        lambda r: extract(r, "q:places/streets", 0.5),
-        version="1",
-        reads=["q:places/streets"],
-    ),
+def streets(r: ReadView) -> object:
+    """Every street the report names, or abstain when the model likely found none."""
+    return extract(r, "q:places/streets", r.param("places/none_at"))
 ```
 
 To weigh confidence, read the answer whole. It is an `ExtractionAnswer`, or a marker:
@@ -651,15 +648,16 @@ To weigh confidence, read the answer whole. It is an `ExtractionAnswer`, or a ma
 def sure_street(r: ReadView) -> object:
     """The street the model is sure of: the answer read whole, for its confidence."""
     answer = r.read("q:places/street")
-    if isinstance(answer, MARKERS):
+    if isinstance(answer, Undetermined):
         return answer
-    if answer.value is None or answer.confidence is None or answer.confidence < 0.8:
+    sure = r.param("places/sure_at")
+    if answer.value is None or answer.confidence is None or answer.confidence < sure:
         return Unsure(Cause("abstained", ["q:places/street"]))
     return answer.value
 ```
 
-A model's score is the model's own, and need not be calibrated: a bar such as 0.8 is yours to
-set by measuring.
+A model's score is the model's own, and need not be calibrated: a bar such as
+`places/sure_at`, 0.8 here, is yours to set by measuring.
 A span model's score says how much a span looks like the label, not whether it fills the
 question's role: a recipient's name may score as high as a sender's. A score may also shift with
 the other labels asked beside it, as [The binding protocol](../spec/README.md#the-binding-protocol)
@@ -711,7 +709,7 @@ decision: Unsure(kind=<MarkerKind.unsure: 'Unsure'>, cause=Cause(code=<CauseCode
   replay findings: [] | model calls: 0
 ```
 
-In the second report the best street scores 0.7, below the rule's bar of 0.8, so `d:street`
+In the second report the best street scores 0.7, below `places/sure_at`, 0.8, so `d:street`
 is `Unsure` and the decision logs the list. The third names none: the list is `[]`, so the
 policy's estimate is an `Unsure` naming `d:streets`, and the turn is undecided. Each replay
 rebuilds its decision with no model call.
@@ -758,13 +756,16 @@ naming that candidate, and keeps each candidate's marker:
 ```python
 def out_streets(r: ReadView) -> object:
     """The streets the model is sure have a lamp out, in the set's order."""
-    picks = pick_each_with_margin(r, "q:lamps/out", 0.8, 0.2)
-    if not isinstance(picks, dict):
+    picks = pick_each_with_margin(
+        r, "q:lamps/out", r.param("lamps/out_at"), r.param("lamps/margin")
+    )
+    if isinstance(picks, Undetermined):
         return picks  # the set's own marker
     return [street for street, pick in picks.items() if pick == "yes"]
 ```
 
-Declare `reads=["q:lamps/out"]`; reading it also reads the set. No rule reads a grounded ref,
+Declare `reads=["q:lamps/out"]` and the two bars in `params`; reading the ref also reads the
+set. No rule reads a grounded ref,
 so the one-ref picks such as `pick_with_margin` take no single candidate's answer:
 `pick_each_with_margin` and `pick_each_with_thresholds` pick every candidate at once, and a
 rule may pass one candidate's `Unsure` on as its own value.

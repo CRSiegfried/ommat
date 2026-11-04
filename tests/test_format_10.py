@@ -12,6 +12,7 @@ import pytest
 
 from ommat import (
     Design,
+    FindingKind,
     InvalidDesign,
     LoadedDesign,
     Question,
@@ -138,8 +139,10 @@ def test_a_stored_format_8_record_gives_its_decision() -> None:
     assert view["decide"]["decision"] == {"value": "archive"}
 
 
-def test_a_stored_format_8_record_replays_under_its_design_with_no_finding() -> None:
-    rerun, findings = replay_sync(read_record((FORMAT_10 / "record.json").read_bytes()), stored())
-    assert findings == []
+def test_a_stored_format_8_record_replays_under_its_design_with_the_helper_version_alone() -> None:
+    record = read_record((FORMAT_10 / "record.json").read_bytes())
+    rerun, findings = replay_sync(record, stored())
+    assert findings == [{"kind": FindingKind.helpers_mismatch, "recorded": 3, "replayed": 4}]
     assert rerun is not None
-    assert rerun.record_hash == FORMAT_8_RECORD
+    assert rerun.log[0] == {**record.log[0], "helpers": 4}
+    assert rerun.log[1:] == record.log[1:]

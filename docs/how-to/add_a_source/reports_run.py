@@ -66,11 +66,11 @@ class Counted:
 
 
 def answers(decision: Decision) -> dict[str, object]:
-    """Each extraction question's value, or its marker's cause, from the record's entry items."""
+    """Each extraction question's value, or its marker's cause, from the record's entries."""
     return {
-        item["ref"]: item["value"]["value"] if "value" in item else item["marker"]["cause"]["code"]
-        for item in decision.record.log
-        if item["item"] == "entry" and item["ref"].startswith("q:")
+        ref: item["value"]["value"] if "value" in item else item["marker"]["cause"]["code"]
+        for ref, item in decision.record.entries.items()
+        if ref.startswith("q:")
     }
 
 

@@ -14,10 +14,10 @@ labels. The transcript carries the turn's values as recorded, the customer's wor
 turn, share its redacted view instead.
 
 The example's files are in `docs/how-to/hand_off_a_turn/`: `support_design.py` is the design,
-`turn_run.py` the driver, which answers with a stand-in binding, so it runs with no model, and
-`agent_run.py` a Pydantic AI agent driven by a stand-in function, which acts on the decision
-itself. Run each from that folder with `python turn_run.py`, in an environment where ommat is
-installed; `agent_run.py` needs `ommat[pydantic-ai]`.
+`turn_run.py` the driver, which answers through `ommat.bindings.fixed`, so it runs with no
+model, and `agent_run.py` a Pydantic AI agent driven by a stand-in function, which acts on the
+decision itself. Run each from that folder with `python turn_run.py`, in an environment where
+ommat is installed; `agent_run.py` needs `ommat[pydantic-ai]`.
 
 ## Give the model the turn's calls
 
@@ -26,7 +26,7 @@ call's refs and answers as recorded, the board's estimates and the decision. To 
 a source is a tool, so `to_chat_completions` renders each call as an assistant tool call and its
 `tool` result, then a `decide` call whose arguments are the board and whose result is the
 decision. In the driver, `STATE` is the turn's state, a dict of the customer's message, email
-and order, and `answering(p)` is a stand-in binding that answers the refund question `yes` with
+and order, and `answering(p)` is a `fixed` binding that answers the refund question `yes` with
 probability `p`:
 
 ```python
@@ -73,10 +73,10 @@ leaves to ask the customer and of a third turn whose source could not answer:
 
 ```text
 The turn decided refund_order.
-call om_d93f93ecb77b674cdb69e441_c1 ask {"asks":["q:refund"]}
-result om_d93f93ecb77b674cdb69e441_c1 97 bytes
-call om_d93f93ecb77b674cdb69e441_d decide {"board":{"d:refund":{"value":"yes"}}}
-result om_d93f93ecb77b674cdb69e441_d 37 bytes
+call om_99095d193e254d10ac37189b_c1 ask {"asks":["q:refund"]}
+result om_99095d193e254d10ac37189b_c1 97 bytes
+call om_99095d193e254d10ac37189b_d decide {"board":{"d:refund":{"value":"yes"}}}
+result om_99095d193e254d10ac37189b_d 37 bytes
 The turn decided ask_if_refund.
 The turn is undecided: unsupported.
 ```

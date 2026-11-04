@@ -4,7 +4,6 @@ Run it from this directory with ``python helpdesk_run.py``. The binding below re
 so the script needs no model, key or network.
 """
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -65,11 +64,11 @@ def main() -> list[tuple[object, list[Mapping[str, object]]]]:
 
         stored = decision.record.document  # the bytes you would save
         record = read_record(stored)
-        unhashed = json.loads(stored)["unhashed"]
+        calls = record.unhashed["calls"]
         for index, item in enumerate(record.log):
             if item["item"] == "call":
                 oracles = [DESIGN.sources[s].oracle or "default" for s in item["sources"]]
-                latency = unhashed["calls"][str(index)]["latency"]
+                latency = calls[str(index)]["latency"]
                 print(f"  call {index}: {item['sources']} via {oracles}, {latency:.6f} s")
 
         rerun, findings = replay_sync(record, loaded)

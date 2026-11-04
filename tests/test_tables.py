@@ -741,7 +741,7 @@ def edited(record: Record, change: Callable[[dict[str, Any]], object]) -> dict[s
 
 
 GOLDEN_DESIGN = "sha256:2ea189ff88ad7dbdbcb28ecd9fab4d4bcfdc0e7c8c54037cb4ee95b92b479515"
-GOLDEN_RECORD = "sha256:01e6a4b16429eca001a5a8435b0e9b77b51f2365cb3a0270788f433b394ff6b1"
+GOLDEN_RECORD = "sha256:bedd268b9cbb68e17e1b8f16dd082bd036abbf61b8d41acf8f3deb401c8c3592"
 
 
 def test_a_golden_table_turn() -> None:
@@ -1369,6 +1369,18 @@ def test_a_known_cell_matches_any_value_and_no_marker() -> None:
     table = tab("F", ["d:s0"], [["Known", 1], ["-", 2]])
     for kind, expected in (("value", 1), ("Unsure", 2), ("Unavailable", 2), ("Unasked", 2)):
         assert value(table, rules=srcs(kind)) == expected
+
+
+def test_a_last_row_of_known_keeps_the_table_unasked_where_a_row_of_dash_gives_a_value() -> None:
+    # d:s0 holds 1, as an earlier question's answer; d:s1 was never asked.
+    rules = srcs("value", "Unasked")
+    catch_all = tab("F", ["d:s0", "d:s1"], [[1, 2, 10], [1, "-", 20]])
+    assert value(catch_all, rules=rules) == 20
+    known = tab("F", ["d:s0", "d:s1"], [[1, 2, 10], [1, "Known", 20]])
+    assert value(known, rules=rules) == {
+        "kind": "Unasked",
+        "cause": {"code": "required", "refs": ["d:s1"]},
+    }
 
 
 def test_a_known_cell_matches_null() -> None:

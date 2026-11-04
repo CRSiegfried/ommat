@@ -30,7 +30,7 @@ from ommat._binding import OracleBinding
 from ommat._fixture import Base, FixtureBinding, RecordedCalls
 from ommat._interpret import MAX_WARNINGS
 from ommat._provenance import DETAILS
-from ommat.bindings import image_need
+from ommat.bindings import fixed, image_need
 from ommat.bindings.conformance import _default_batches, check
 
 Batch = tuple[SourceCall, ...]
@@ -187,6 +187,15 @@ def test_a_binding_that_refuses_everything_passes_with_null_provenance() -> None
         return CallResult(dict.fromkeys(refs, marker), warnings=("no provider here",))
 
     assert check(refusing) == []
+
+
+def test_fixed_passes_holding_nothing_and_holding_the_suites_answers() -> None:
+    assert check(fixed({}), deterministic=True) == []
+    # One ref is asked over several label sets across the batches, so each batch gets its own.
+    for batch in _default_batches():
+        result = asyncio.run(answering(batch, seconds=1.0))
+        assert isinstance(result, CallResult)
+        assert check(fixed(result.values), batches=[batch], deterministic=True) == []
 
 
 def _with_usage(usage: Mapping[str, object]) -> BindingFn:

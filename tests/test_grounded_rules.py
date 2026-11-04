@@ -31,6 +31,7 @@ from ommat import (
     Text,
     Undetermined,
     decide_sync,
+    defects,
     load,
     read_record,
     redact,
@@ -333,6 +334,12 @@ def test_a_raise_marks_its_own_candidates_entry_alone() -> None:
     assert e[grounded_ref(FIT, "Bo")]["value"] == "Bo:yes"
     index = record.log.index(e[zoe])
     assert str(index) in record.unhashed["exceptions"]
+
+
+def test_a_grounded_rules_defect_is_listed_at_its_own_candidates_entry_alone() -> None:
+    record = decided([BO, ZOE, ANA])
+    zoe = grounded_ref(FIT, "Zoë")
+    assert defects(record) == [record.entries[zoe]]
 
 
 def test_a_set_holding_a_marker_gives_the_declared_ref_its_need_marker() -> None:

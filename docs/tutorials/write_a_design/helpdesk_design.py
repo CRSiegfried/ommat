@@ -4,17 +4,7 @@ The tutorial at docs/tutorials/write-a-design.md builds it step by step, and hel
 decides with it.
 """
 
-from ommat import (
-    Design,
-    Question,
-    ReadView,
-    Rule,
-    Source,
-    Text,
-    Unasked,
-    Unavailable,
-    Unsure,
-)
+from ommat import Design, Parameter, Question, ReadView, Rule, Source, Text, Undetermined
 from ommat import types as t
 from ommat.helpers import extract, pick_with_margin
 
@@ -51,31 +41,55 @@ SOURCES = {
     ),
 }
 
+PARAMETERS = {
+    "desk/topic_at": Parameter(t.number(0, 1), 0.5),
+    "desk/urgent_at": Parameter(t.number(0, 1), 0.6),
+    "desk/margin": Parameter(t.number(0, 1), 0.2),
+    "desk/no_order_at": Parameter(t.number(0, 1), 0.5),
+}
+
+
+def topic_of(r: ReadView) -> object:
+    """The topic, when its answer clears the bar and the margin; else abstain."""
+    return pick_with_margin(r, "q:triage/topic", r.param("desk/topic_at"), r.param("desk/margin"))
+
+
+def urgency_of(r: ReadView) -> object:
+    """``yes`` or ``no``, when the answer clears the bar and the margin; else abstain."""
+    return pick_with_margin(r, "q:triage/urgent", r.param("desk/urgent_at"), r.param("desk/margin"))
+
+
+def order_of(r: ReadView) -> object:
+    """The order number the message quotes, or abstain."""
+    return extract(r, "q:order/number", r.param("desk/no_order_at"))
+
+
 RULES = {
     "topic": Rule(
         "d:topic",
         t.label("damaged", "delivery", "other", "return"),
-        lambda r: pick_with_margin(r, "q:triage/topic", 0.5, 0.2),
+        topic_of,
         version="1",
         reads=["q:triage/topic"],
+        params=["desk/topic_at", "desk/margin"],
     ),
     "urgent": Rule(
         "d:urgent",
         t.label("no", "yes"),
-        lambda r: pick_with_margin(r, "q:triage/urgent", 0.6, 0.2),
+        urgency_of,
         version="1",
         reads=["q:triage/urgent"],
+        params=["desk/urgent_at", "desk/margin"],
     ),
     "order": Rule(
         "d:order",
         t.string,
-        lambda r: extract(r, "q:order/number", 0.5),
+        order_of,
         version="1",
         reads=["q:order/number"],
+        params=["desk/no_order_at"],
     ),
 }
-
-MARKERS = (Unsure, Unavailable, Unasked)
 
 
 def route(r: ReadView) -> object:
@@ -83,11 +97,11 @@ def route(r: ReadView) -> object:
     topic = r.read("d:topic")
     urgent = r.read("d:urgent")
     order = r.read("d:order")
-    if isinstance(topic, MARKERS):
+    if isinstance(topic, Undetermined):
         return topic
     if urgent == "yes":
         return "answer_today"
-    if isinstance(order, MARKERS):
+    if isinstance(order, Undetermined):
         return f"route_{topic}"
     return f"route_{topic}_with_order"
 
@@ -105,5 +119,6 @@ DESIGN = Design(
     state=t.record(message=t.string),
     sources=SOURCES,
     rules=RULES,
+    parameters=PARAMETERS,
     policy="d:route",
 )

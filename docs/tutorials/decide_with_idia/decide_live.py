@@ -8,7 +8,6 @@ the environment (``OPENAI_API_KEY``, ``CLOUDFLARE_ACCOUNT_ID`` and ``CLOUDFLARE_
 """
 
 import asyncio
-import json
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
@@ -66,7 +65,7 @@ def said(estimate: object) -> str:
 def show(decision: Decision) -> None:
     """The decision, then each call: its sources, precision, attempts and warnings lines."""
     print("decision:", said(decision.estimate))
-    unhashed = json.loads(decision.record.document)["unhashed"]["calls"]
+    unhashed = decision.record.unhashed["calls"]
     for index, item in enumerate(decision.record.log):
         if item["item"] == "call":
             call = unhashed[str(index)]
@@ -80,7 +79,7 @@ def show(decision: Decision) -> None:
 
 async def run(providers: Providers = live_providers) -> list[Any]:
     """Decide each report, replay its record, then answer the first turn from its record with
-    the registry bound to the idia binding; return what each step gave."""
+    the registry bound to the idia binding; return what each turn gave."""
     loaded: LoadedDesign = load(DESIGN)
     results: list[Any] = []
     stored: list[bytes] = []

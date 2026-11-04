@@ -1,20 +1,41 @@
 """The how-to's design: a triage source, a projection of its intent, and a refund source
 gated on that projection by a source requirement, so the intent is never sent."""
 
-from ommat import Design, Question, ReadView, Rule, Source, SourceRequirement, Text
+from ommat import (
+    Design,
+    Parameter,
+    Question,
+    ReadView,
+    Rule,
+    Source,
+    SourceRequirement,
+    Text,
+    Undetermined,
+)
 from ommat import types as t
 from ommat.helpers import pick_with_margin
 
 INTENTS = ("refund", "billing", "other")
 
+PARAMETERS = {
+    "gate/bar": Parameter(t.number(0, 1), 0.7),
+    "gate/margin": Parameter(t.number(0, 1), 0.2),
+}
+BARS = ["gate/bar", "gate/margin"]
+
+
+def picked(r: ReadView, ref: str) -> object:
+    """The label at ``ref`` that clears the bar and the margin, or abstain."""
+    return pick_with_margin(r, ref, r.param("gate/bar"), r.param("gate/margin"))
+
 
 def triage(r: ReadView) -> object:
     """The intent and urgency, as one record estimate."""
-    intent = pick_with_margin(r, "q:ask/intent", 0.7, 0.2)
-    urgent = pick_with_margin(r, "q:ask/urgent", 0.7, 0.2)
-    if not isinstance(intent, str):
+    intent = picked(r, "q:ask/intent")
+    urgent = picked(r, "q:ask/urgent")
+    if isinstance(intent, Undetermined):
         return intent
-    if not isinstance(urgent, str):
+    if isinstance(urgent, Undetermined):
         return urgent
     return {"intent": intent, "urgent": urgent}
 
@@ -24,13 +45,15 @@ def intent_label(r: ReadView) -> object:
     return r.read("d:triage.intent")
 
 
-def refund_asked(r: ReadView) -> object:
-    return pick_with_margin(r, "q:refund/amount_stated", 0.7, 0.2)
+def amount_stated(r: ReadView) -> object:
+    """Whether the message states an amount, or abstain."""
+    return picked(r, "q:refund/amount_stated")
 
 
 def route(r: ReadView) -> object:
+    """Queue a refund whose amount is stated, ask for one that is not, and note the rest."""
     intent = r.read("d:intent_label")
-    if not isinstance(intent, str):
+    if isinstance(intent, Undetermined):
         return intent
     if intent != "refund":
         return "note"
@@ -55,6 +78,7 @@ RULES = {
         triage,
         version="1",
         reads=["q:ask/intent", "q:ask/urgent"],
+        params=BARS,
     ),
     "intent_label": Rule(
         "d:intent_label", t.label(*INTENTS), intent_label, version="1", reads=["d:triage.intent"]
@@ -69,9 +93,10 @@ RULES = {
     "amount_stated": Rule(
         "d:amount_stated",
         t.label("yes", "no"),
-        refund_asked,
+        amount_stated,
         version="1",
         reads=["q:refund/amount_stated"],
+        params=BARS,
     ),
 }
 
@@ -87,5 +112,6 @@ DESIGN = Design(
     state=t.record(message=t.string),
     sources={"ask": ASK, "refund": REFUND},
     rules=RULES,
+    parameters=PARAMETERS,
     policy="d:route",
 )

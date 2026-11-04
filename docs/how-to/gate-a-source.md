@@ -5,8 +5,9 @@ whether a message states an amount only when its intent is a refund, without sen
 estimate to the model. It assumes you have done [Add a source](add-a-source.md).
 
 The example's files are in `docs/how-to/gate_a_source/`: `gate_design.py` is the design and
-`gate_run.py` the driver, which answers with a stand-in binding, so it runs with no model. Run
-it from that folder with `python gate_run.py`, in an environment where ommat is installed.
+`gate_run.py` the driver, which answers through `ommat.bindings.fixed`, so it runs with no
+model. Run it from that folder with `python gate_run.py`, in an environment where ommat is
+installed.
 
 ## Why not a need or a `when`
 

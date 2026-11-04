@@ -4,6 +4,7 @@ ommat's grammar, ``bounded_warnings`` makes any lines a conforming ``warnings``,
 writes a need in record form, ``image_need`` reads an image need, ``prompt_text`` writes a
 prompt's text and ``call_result`` folds each request's provenance into the call's."""
 
+import asyncio
 import datetime as dt
 import json
 from types import MappingProxyType
@@ -13,13 +14,27 @@ import pytest
 
 import ommat._binding_kit as core
 import ommat.bindings
-from ommat import Answer, AnswerKind, CallResult, ExtractionAnswer, ValueType
+from desk_design import DESIGN as DESK  # the read-a-record how-to's design
+from ommat import (
+    Answer,
+    AnswerKind,
+    CallResult,
+    Cause,
+    ExtractionAnswer,
+    RenderedQuestion,
+    SourceCall,
+    Unavailable,
+    ValueType,
+    decide_sync,
+    load,
+)
 from ommat._interpret import MAX_WARNING_CODE_POINTS, MAX_WARNINGS, _record_form, warnings_conform
 from ommat.bindings import (
     RequestProvenance,
     bounded_warnings,
     call_result,
     extraction_value,
+    fixed,
     image_need,
     json_value,
     prompt_text,
@@ -38,6 +53,7 @@ def test_the_package_re_exports_the_core_functions() -> None:
         "call_result",
         "candidate_of",
         "extraction_value",
+        "fixed",
         "image_need",
         "json_value",
         "prompt_text",
@@ -445,3 +461,104 @@ def test_a_call_that_made_no_attempt_holds_null_attempts_and_precision(
 def test_a_provenance_checks_nothing_when_built() -> None:
     odd: Any = 3
     assert RequestProvenance(revision=odd, attempts=odd).attempts == 3
+
+
+# ---------------------------------------------------------------------------------------------
+# fixed
+
+NOUL = RenderedQuestion(AnswerKind.noul, "Is it?", ("yes", "no"))
+
+
+def _ask(binding: Any, *sources: SourceCall) -> CallResult:
+    result = asyncio.run(binding(sources, seconds=1.0))
+    assert type(result) is CallResult
+    return result
+
+
+def test_fixed_answers_each_asked_ref_it_holds_as_given() -> None:
+    today = SourceCall("clock", None, {}, ("t:today",), {})
+    ask = SourceCall("ask", None, {}, (), {"q:x": NOUL})
+    result = _ask(fixed({"t:today": "2026-11-04", "q:x": {"yes": 0.9, "no": 0.1}}), today, ask)
+    assert result.values == {"t:today": "2026-11-04", "q:x": {"yes": 0.9, "no": 0.1}}
+    assert result.warnings == ()
+    assert result.precision is None
+    assert result.attempts is None
+    assert result.provider is None
+
+
+def test_fixed_leaves_out_a_held_ref_the_batch_does_not_ask() -> None:
+    today = SourceCall("clock", None, {}, ("t:today",), {})
+    result = _ask(fixed({"t:today": "2026-11-04", "t:live": []}), today)
+    assert result.values == {"t:today": "2026-11-04"}
+
+
+def test_fixed_gives_an_asked_ref_it_does_not_hold_unsupported_with_a_line() -> None:
+    ask = SourceCall("ask", None, {}, (), {"q:x": NOUL, "q:y": NOUL})
+    result = _ask(fixed({"q:x": {"yes": 1.0, "no": 0.0}}), ask)
+    assert result.values == {
+        "q:x": {"yes": 1.0, "no": 0.0},
+        "q:y": Unavailable(Cause("unsupported")),
+    }
+    assert result.warnings == ("no fixed value for q:y",)
+
+
+def test_fixed_answers_a_grounded_ref_as_written() -> None:
+    city = SourceCall("city", None, {}, ('t:city["Ana"]', 't:city["Bo"]'), {})
+    result = _ask(fixed({'t:city["Ana"]': "Oslo"}), city)
+    assert result.values['t:city["Ana"]'] == "Oslo"
+    assert result.values['t:city["Bo"]'] == Unavailable(Cause("unsupported"))
+
+
+def test_fixed_passes_a_held_marker_through() -> None:
+    marker = Unavailable(Cause("refused"))
+    ask = SourceCall("ask", None, {}, (), {"q:x": NOUL})
+    assert _ask(fixed({"q:x": marker}), ask).values == {"q:x": marker}
+
+
+def test_fixed_holds_its_own_copy_and_returns_fresh_values() -> None:
+    folders = [{"name": "Inbox"}]
+    values: dict[str, Any] = {"t:live": folders}
+    binding = fixed(values)
+    live = SourceCall("live", None, {}, ("t:live",), {})
+    folders.append({"name": "Spam"})
+    values["t:live"] = []
+    first = _ask(binding, live).values["t:live"]
+    assert first == [{"name": "Inbox"}]
+    first.append({"name": "Trash"})  # type: ignore[union-attr]
+    assert _ask(binding, live).values["t:live"] == [{"name": "Inbox"}]
+
+
+def test_fixed_takes_any_mapping() -> None:
+    today = SourceCall("clock", None, {}, ("t:today",), {})
+    values = MappingProxyType({"t:today": "2026-11-04"})
+    assert _ask(fixed(values), today).values == {"t:today": "2026-11-04"}
+
+
+class _Key(str):
+    pass
+
+
+@pytest.mark.parametrize("values", [[("t:x", 1)], None, {1: 2}, {_Key("t:x"): 1}])
+def test_fixed_refuses_a_values_that_is_not_a_mapping_of_exact_strings(values: Any) -> None:
+    with pytest.raises(TypeError):
+        fixed(values)
+
+
+def test_fixed_bounds_its_warnings_and_writes_none_when_every_ref_is_held() -> None:
+    refs = tuple(f"t:x{n:03}" for n in range(300))
+    many = SourceCall("many", None, {}, refs, {})
+    result = _ask(fixed({}), many)
+    assert len(result.warnings) == MAX_WARNINGS
+    assert result.warnings[-1] == f"{300 - MAX_WARNINGS + 1} more lines left out"
+    assert _ask(fixed(dict.fromkeys(refs, 1)), many).warnings == ()
+
+
+def test_a_bad_fixed_value_fails_its_own_ref_alone_at_the_write() -> None:
+    state = {"message": "Refund me.", "ordered": "2026-10-30"}
+    bindings = {
+        "default": fixed({"q:refund": {"yes": 2.0, "no": -1.0}}),
+        "clock": fixed({"t:today": "2026-11-04"}),
+    }
+    record = decide_sync(load(DESK), state, bindings).record
+    assert record.entries["q:refund"]["marker"]["cause"]["code"] == "invalid-answer"
+    assert record.entries["t:today"]["value"] == "2026-11-04"

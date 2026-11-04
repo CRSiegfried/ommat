@@ -6,23 +6,20 @@ The how-to at docs/how-to/add-a-source.md shows it under "Ask a question per can
 from ommat import (
     CallResult,
     Design,
+    Parameter,
     Question,
     ReadView,
     Rule,
     Source,
     SourceCall,
     Text,
-    Unasked,
-    Unavailable,
-    Unsure,
+    Undetermined,
     decide_sync,
     load,
     replay_sync,
 )
 from ommat import types as t
 from ommat.helpers import pick_each_with_margin
-
-MARKERS = (Unsure, Unavailable, Unasked)
 
 SOURCES = {
     "lamps": Source(
@@ -42,10 +39,23 @@ SOURCES = {
 }
 
 
+PARAMETERS = {
+    "lamps/out_at": Parameter(t.number(0, 1), 0.8),
+    "lamps/margin": Parameter(t.number(0, 1), 0.2),
+}
+
+
+def streets(r: ReadView) -> object:
+    """The streets the caller names, the candidate set the lamps source is grounded over."""
+    return r.read("t:state.streets")
+
+
 def out_streets(r: ReadView) -> object:
     """The streets the model is sure have a lamp out, in the set's order."""
-    picks = pick_each_with_margin(r, "q:lamps/out", 0.8, 0.2)
-    if not isinstance(picks, dict):
+    picks = pick_each_with_margin(
+        r, "q:lamps/out", r.param("lamps/out_at"), r.param("lamps/margin")
+    )
+    if isinstance(picks, Undetermined):
         return picks  # the set's own marker
     return [street for street, pick in picks.items() if pick == "yes"]
 
@@ -54,18 +64,26 @@ RULES = {
     "streets": Rule(
         "d:streets",
         t.list_(t.string),
-        lambda r: r.read("t:state.streets"),
+        streets,
         version="1",
         reads=["t:state.streets"],
         candidates=True,
     ),
-    "out": Rule("d:out", t.list_(t.string), out_streets, version="1", reads=["q:lamps/out"]),
+    "out": Rule(
+        "d:out",
+        t.list_(t.string),
+        out_streets,
+        version="1",
+        reads=["q:lamps/out"],
+        params=["lamps/out_at", "lamps/margin"],
+    ),
 }
 
 
 def policy(r: ReadView) -> object:
+    """Log a report with a lamp out; escalate one with none, or with none settled."""
     out = r.read("d:out")
-    if isinstance(out, MARKERS) or not out:
+    if isinstance(out, Undetermined) or not out:
         return "escalate"
     return "log"
 
@@ -77,6 +95,7 @@ DESIGN = Design(
     state=t.record(text=t.string, streets=t.list_(t.string)),
     sources=SOURCES,
     rules=RULES,
+    parameters=PARAMETERS,
     policy="d:policy",
 )
 
@@ -98,6 +117,6 @@ async def binding(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResul
 
 if __name__ == "__main__":
     loaded = load(DESIGN)
-    for streets in (["Quay Street", "Elm Row"], []):
-        decision = decide_sync(loaded, {"text": "x", "streets": streets}, {"default": binding})
+    for named in (["Quay Street", "Elm Row"], []):
+        decision = decide_sync(loaded, {"text": "x", "streets": named}, {"default": binding})
         print(decision.estimate, "| replay findings:", replay_sync(decision.record, loaded)[1])

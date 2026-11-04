@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""`pick_with_thresholds`, `size` and `mass`."""
+"""`pick_with_thresholds`, `size`, `mass` and `top`."""
 
 import enum
 import inspect
@@ -10,10 +10,10 @@ from typing import Any
 
 import pytest
 
-from ommat import Answer, Cause, CauseCode, Unasked, Unavailable, Unsure
+from ommat import Answer, Cause, CauseCode, Unasked, Unavailable, Undetermined, Unsure
 from ommat._read_view import Access, ComponentKind, ReadView, Role, UndeclaredRead, _Stop
 from ommat._types import RecordOf
-from ommat.helpers import mass, pick_with_margin, pick_with_thresholds, size
+from ommat.helpers import mass, pick_with_margin, pick_with_thresholds, size, top
 from ommat.helpers._call import HelperOnWhen
 
 GONE = Unavailable(Cause(CauseCode.raised, ["d:gone"]))
@@ -36,6 +36,11 @@ BOARD: dict[str, object] = {
     "q:short": Answer("choice", ["a", "b", "c"], {"a": 0.5, "b": 0.2, "c": 0.0}),
     "q:none": Answer("choice", ["only"], {"only": 0}),
     "q:zeros": Answer("noul", ["yes", "no"], {"yes": 0, "no": 0.0}),
+    "q:coin": Answer("noul", ["yes", "no"], {"yes": 0.5, "no": 0.5}),
+    "q:late_tie": Answer("choice", ["a", "b", "c"], {"a": 0.2, "b": 0.4, "c": 0.4}),
+    "q:score_tie": Answer("score", ["low", "mid", "high"], {"low": 0.2, "mid": 0.4, "high": 0.4}),
+    "q:near": Answer("choice", ["a", "b"], {"a": 0.3, "b": 0.30000000000000004}),
+    "q:ordered": Answer("choice", ["b", "a"], {"a": 0.5, "b": 0.5}),
     "d:gone": GONE,
     "q:skipped": SKIPPED,
     "t:items": ["x", "y", "z"],
@@ -437,3 +442,99 @@ def test_an_answer_of_all_zeros_abstains_and_has_no_mass() -> None:
 def test_the_most_probable_qualifier_wins_when_it_is_not_the_first_label() -> None:
     # a and d both clear their bars; d is the later label and the more probable.
     assert pick_with_thresholds(view(), "q:quarters", {"a": 0.0, "d": 0.1}, 0.0) == "d"
+
+
+# ---------------------------------------------------------------------------------------------
+# top
+
+
+@pytest.mark.parametrize(
+    ("ref", "label"),
+    [("q:route", "refund"), ("q:sixty", "yes"), ("q:levels", "high"), ("q:one", "only")],
+)
+def test_top_gives_the_sole_top_label_and_its_probability_as_mass_does(
+    ref: str, label: str
+) -> None:
+    found = top(view(), ref)
+    assert found == (label, mass(view(), ref, [label]))
+    assert type(found) is tuple
+    assert type(found[1]) is float  # the one-label answer's int 1 included
+
+
+def test_top_gives_a_sole_top_label_alike_under_either_tie() -> None:
+    for ref in ("q:route", "q:sixty", "q:levels", "q:one"):
+        assert top(view(), ref, tie="first") == top(view(), ref)
+
+
+@pytest.mark.parametrize(
+    "ref", ["q:route", "q:tie", "q:late_tie", "q:coin", "q:zeros", "q:none", "q:over", "q:near"]
+)
+def test_top_abstains_at_a_tie_by_default_where_a_pick_at_0_and_0_does(ref: str) -> None:
+    picked = pick_with_margin(view(), ref, 0, 0)
+    found = top(view(), ref)
+    if isinstance(picked, Unsure):
+        assert found == abstained(ref) == picked
+    else:
+        assert not isinstance(found, Undetermined)
+        assert found[0] == picked
+
+
+@pytest.mark.parametrize(
+    ("ref", "label"),
+    [
+        ("q:tie", "a"),
+        ("q:late_tie", "b"),  # the tied labels are not the first in labels
+        ("q:coin", "yes"),  # a noul at a tie gives yes
+        ("q:score_tie", "mid"),  # a score at a tie gives the lower level
+        ("q:ordered", "b"),  # labels' order, not the probabilities' key order
+        ("q:none", "only"),  # a one-label answer at 0 ties the 0 it is measured against
+    ],
+)
+def test_top_gives_the_tied_label_first_in_labels_under_first(ref: str, label: str) -> None:
+    found = top(view(), ref, tie="first")
+    assert not isinstance(found, Undetermined)
+    assert found[0] == label
+
+
+def test_top_finds_a_tie_exactly() -> None:
+    assert top(view(), "q:near") == ("b", 0.30000000000000004)
+
+
+@pytest.mark.parametrize("marker", ["d:gone", "q:skipped"])
+@pytest.mark.parametrize("tie", ["abstain", "first"])
+def test_top_returns_a_marker_unchanged(marker: str, tie: str) -> None:
+    assert top(view(), marker, tie=tie) is BOARD[marker]
+
+
+@pytest.mark.parametrize("ref", ["q:route", "d:gone"])
+@pytest.mark.parametrize("bad", ["First", "", None, 0, Key("first")])
+def test_a_bad_tie_raises_even_over_a_marker(ref: str, bad: Any) -> None:
+    with pytest.raises(ValueError, match="tie is not exactly"):
+        top(view(), ref, tie=bad)
+
+
+@pytest.mark.parametrize("ref", ["t:items", "t:text"])
+def test_top_over_a_value_that_is_no_answer_raises(ref: str) -> None:
+    with pytest.raises(TypeError, match="holds no answer"):
+        top(view(), ref)
+
+
+def test_tie_is_keyword_only_and_abstains_by_default() -> None:
+    params = inspect.signature(top).parameters
+    assert params["tie"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["tie"].default == "abstain"
+
+
+def test_top_logs_its_read_and_rests_on_it() -> None:
+    r = view()
+    top(r, "q:tie", tie="first")
+    top(r, "d:gone")
+    assert items(r) == [("top", ("q:tie",), ("q:tie",)), ("top", ("d:gone",), ("d:gone",))]
+
+
+def test_top_on_a_whens_view_raises_before_its_read() -> None:
+    r = ReadView(Role(ComponentKind.when, "mail"), ("q:route",), (), BOARD, {}, state=RecordOf(()))
+    with pytest.raises(HelperOnWhen):
+        top(r, "q:route")
+    assert r.stops == ()
+    assert r.helper_log() == ()

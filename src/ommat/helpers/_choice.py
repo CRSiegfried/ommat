@@ -146,6 +146,31 @@ def pick_with_thresholds(
         return picked if picked is not None else Unsure(Cause(CauseCode.abstained, [ref]))
 
 
+_TIES = ("abstain", "first")
+
+
+def top(r: ReadView, ref: str, *, tie: str = "abstain") -> tuple[str, float] | Undetermined:
+    """The top label of the answer at ``ref`` and its probability, exact and then rounded to
+    the nearest ``float``, as ``mass`` gives it. When the top ties the next highest label, 0
+    for a one-label answer, ``tie="abstain"`` gives ``Unsure`` with ``abstained`` naming
+    ``ref``, as ``pick_with_margin`` at bar 0 and margin 0 does, and ``tie="first"`` gives
+    the tied label first in the answer's ``labels``. A marker read is returned unchanged."""
+    with called(r, "top", [ref]) as call:
+        (value,) = call.values
+        if type(tie) is not str or tie not in _TIES:
+            raise ValueError('top\'s tie is not exactly "abstain" or "first"')
+        if isinstance(value, Undetermined):
+            call.rested_on([ref])
+            return value
+        answer = _answer("top", ref, value)
+        call.rested_on([ref])
+        probs = {label: exact(answer.probabilities[label]) for label in answer.labels}
+        label = max(probs, key=probs.__getitem__)  # the first in labels at a tie
+        if tie == "abstain" and _lead(probs, label) <= 0:
+            return Unsure(Cause(CauseCode.abstained, [ref]))
+        return label, float(probs[label])
+
+
 def _candidates(helper: str, ref: str, value: object) -> dict[str, Answer | Undetermined]:
     """The read of a per-candidate question's declared ref, each candidate's entry an answer
     or a marker; anything else raises."""

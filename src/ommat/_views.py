@@ -1,17 +1,19 @@
 """The record views: pure functions from a closed record to a value, for the caller, the
 escalation target or a verifier.
 
-``escalation(record)`` returns an undecided turn's five members: the marker's kind, its cause,
-the root cause, whether that is a defect, and the record hash; ``None`` when the policy gave a
-value. ``transcript(record)``
-returns every source call and the decision, unworded. Each of the two gives ``None`` for a record
-before format 8, which holds no policy's entry, and finds the decision as ``decision_entry``
+``escalation(record)`` returns an undecided turn's five members: the marker's kind, its cause, the
+root cause, whether that is a defect, and the record hash; ``None`` when the policy gave a value.
+``defects(record)`` returns every entry whose cause is a defect by the same test, whatever the
+policy gave.
+``transcript(record)`` returns every source call and the decision, unworded. Each of the
+escalation, the defects and the transcript gives ``None`` for a record before format 8, which holds
+no policy's entry, and the escalation and the transcript find the decision as ``decision_entry``
 does. ``redact(record, root_key)`` returns the redacted view's document as canonical bytes: the
 record's ``log`` and ``unhashed`` with a keyed digest where each ``content`` or ``identifier``
 value was, ``redacted``, the record hash its key came from, and from format 3 on the document's
-``hash``, open. Each value's class is read from the ``settings`` item's class tree for its ref.
-In an answer to a candidate-valued choice, each label and ``probabilities`` key that is not a
-fixed name takes its set's class, found through the call item the answer's entry names.
+``hash``, open. Each value's class is read from the ``settings`` item's class tree for its ref. In
+an answer to a candidate-valued choice, each label and ``probabilities`` key that is not a fixed
+name takes its set's class, found through the call item the answer's entry names.
 
 This engine's record holds no origin carrying ``set``, which the ledger refuses, so every literal
 takes its JSON form's default; it holds a grounded ref only at an entry's ref, a cause's refs and
@@ -33,7 +35,7 @@ from ommat._ledger import (
 from ommat._markers import CauseCode
 from ommat._refs import code_point_sorted, declared_ref, entry_ref, grounded_ref, parse_ref
 from ommat._typed import is_a
-from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH, type_name
+from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH, POLICY_FORMAT, type_name
 
 _OPEN = "open"
 _CONTENT = "content"
@@ -90,6 +92,23 @@ def _defect(log: list[dict[str, Any]], root: dict[str, Any]) -> bool:
     rules = {rid for ref, rid in providers.items() if ref.startswith("d:")}
     first = root["refs"][0]
     return first in rules or first in (_CODEC, _STATE)
+
+
+def defects(record: Record) -> list[dict[str, Any]] | None:
+    """Every entry item whose marker's cause is a defect by the test ``escalation`` applies to
+    its root cause, in log order, whatever the policy gave; ``None`` for a record before
+    format 8. A ``required`` cause is never one, so a rule's defect is listed at its own
+    entry, not at the entries that required it."""
+    log = _closed(record).log
+    if not log or log[0].get("format", 0) < POLICY_FORMAT:
+        return None
+    return [
+        item
+        for item in log
+        if item["item"] == "entry"
+        and "marker" in item
+        and _defect(log, cast("dict[str, Any]", item["marker"]["cause"]))
+    ]
 
 
 def _root_cause(log: list[dict[str, Any]], cause: dict[str, Any]) -> dict[str, Any]:

@@ -1986,6 +1986,13 @@ class Record:
         return [_in_held_order(cast("dict[str, Any]", decode_written(d))) for d in self._items]
 
     @property
+    def entries(self) -> dict[str, dict[str, Any]]:
+        """Each entry item of the log, as ``log`` gives it, keyed by its ref, a grounded ref as
+        written, in log order, decoded afresh at each read. The ledger writes one entry per ref,
+        so nothing is lost."""
+        return {cast(str, item["ref"]): item for item in self.log if item["item"] == "entry"}
+
+    @property
     def unhashed(self) -> dict[str, Any]:
         """``unhashed`` as a plain object, decoded afresh at each read."""
         return cast("dict[str, Any]", decode_written(self._unhashed))

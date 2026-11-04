@@ -3,7 +3,8 @@ answer in the form a binding returns, its temporal values in ommat's grammar;
 ``bounded_warnings`` makes any lines a conforming ``warnings``; ``json_value`` writes a need's
 value as JSON in its record form; ``image_need`` reads an image need's media type and bytes;
 ``prompt_text`` writes a prompt as text; ``candidate_of`` reads a grounded ref's candidate;
-and ``call_result`` folds each request's ``RequestProvenance`` into the call's ``CallResult``.
+``call_result`` folds each request's ``RequestProvenance`` into the call's ``CallResult``; and
+``fixed`` is a binding to no provider, answering each asked ref from a mapping.
 
 Their public home is ``ommat.bindings``. They live here, in the core, so that ``from_record``
 calls the same functions without ``import ommat`` importing ``ommat.bindings``. Each is public
@@ -11,18 +12,20 @@ under the same deprecation rule as ``ommat.__all__``, and none changes the helpe
 version.
 """
 
+import copy
 import datetime
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import cast
 
-from ommat._binding import CallResult
+from ommat._binding import CallResult, OracleBinding, SourceCall
 from ommat._interpret import (
     MAX_WARNING_CODE_POINTS,
     MAX_WARNINGS,
     _record_form,  # pyright: ignore[reportPrivateUsage]
 )
+from ommat._markers import Cause, CauseCode, Unavailable
 from ommat._provenance import DETAILS
 from ommat._refs import parse_ref
 from ommat._values import described, escape_surrogates
@@ -306,6 +309,37 @@ def call_result(
         warnings=warnings,
     )
     return replace(result, missing=_missing(result, sent))
+
+
+def fixed(values: Mapping[str, object]) -> OracleBinding:
+    """A binding to no provider that answers each ref a batch asks, a grounded ref as
+    interpret passes it, from ``values``, in the binding's form and unchecked, a marker among
+    them as given. A held ref the batch does not ask is left out; a ref it asks that ``values``
+    does not hold is ``Unavailable`` with ``unsupported``, with a line of ``warnings``. The
+    mapping is copied when the binding is made and each value again at each call, so neither
+    a later change to ``values`` nor one to a returned value reaches the next call. It has no
+    provenance, a null ``precision``, and never waits. A ``values`` that is not a mapping, or
+    holds a key that is not exactly a ``str``, is a ``TypeError``."""
+    if not isinstance(values, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(f"fixed's values {described(values)} is not a mapping")
+    for key in values:
+        if type(key) is not str:
+            raise TypeError(f"fixed's values holds the key {described(key)}, not exactly a str")
+    held = copy.deepcopy(dict(values))
+
+    async def binding(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+        given: dict[str, object] = {}
+        lines: list[str] = []
+        for source in batch:
+            for ref in (*source.refs, *source.questions):
+                if ref in held:
+                    given[ref] = copy.deepcopy(held[ref])
+                else:
+                    given[ref] = Unavailable(Cause(CauseCode.unsupported))
+                    lines.append(f"no fixed value for {ref}")
+        return CallResult(given, warnings=bounded_warnings(lines))
+
+    return binding
 
 
 def _merged(name: str, mappings: Iterable[Mapping[str, str] | None]) -> dict[str, str] | None:

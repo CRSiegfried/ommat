@@ -98,44 +98,66 @@ Each `q:` ref maps to a `Question`: its kind, its wording as a `Text`, and any l
 A rule turns answers into an estimate, a `d:` ref the policy reads. It is a function of a
 read view, `r`.
 
-1. Find the topic rule:
+1. Find the topic rule. Its function sits at module level, so a stored design reloads it by
+   import:
+
+   ```python
+   def topic_of(r: ReadView) -> object:
+       """The topic, when its answer clears the bar and the margin; else abstain."""
+       return pick_with_margin(r, "q:triage/topic", r.param("desk/topic_at"), r.param("desk/margin"))
+   ```
 
    ```python
    RULES = {
        "topic": Rule(
            "d:topic",
            t.label("damaged", "delivery", "other", "return"),
-           lambda r: pick_with_margin(r, "q:triage/topic", 0.5, 0.2),
+           topic_of,
            version="1",
            reads=["q:triage/topic"],
+           params=["desk/topic_at", "desk/margin"],
        ),
    ```
 
    The rule provides `d:topic`, one of the four names, listed in code-point order.
 
-2. Every rule has a `version` and its `reads`. `load` refuses a rule with no version
-   string; raise it when the function changes. `reads` lists every ref the function reads;
-   an undeclared read makes the rule's ref `Unavailable` with the cause `undeclared-read`.
+2. Every rule has a `version`, its `reads` and its `params`. `load` refuses a rule with no
+   version string; raise it when the function changes. `reads` lists every ref the function
+   reads; an undeclared read makes the rule's ref `Unavailable` with the cause
+   `undeclared-read`. `params` lists the parameter paths it reads with `r.param`.
 
-3. `pick_with_margin(r, ref, bar, margin)` returns the top label when its probability is at
+3. The bars are parameters, leaves of the design's `parameters`, each a type and a value:
+
+   ```python
+   PARAMETERS = {
+       "desk/topic_at": Parameter(t.number(0, 1), 0.5),
+       "desk/urgent_at": Parameter(t.number(0, 1), 0.6),
+       "desk/margin": Parameter(t.number(0, 1), 0.2),
+       "desk/no_order_at": Parameter(t.number(0, 1), 0.5),
+   }
+   ```
+
+   A bar written into the function is one the design document cannot show and the lints
+   cannot see; as a parameter it is part of the design's hash, so a record names the bars it
+   ran under.
+
+4. `pick_with_margin(r, ref, bar, margin)` returns the top label when its probability is at
    least `bar` and leads the second by at least `margin`. Otherwise it abstains, returning
    `Unsure` with the cause `abstained` naming `ref`. A marker it reads, it returns as is.
 
-4. The urgency rule is built the same way, with `t.label("no", "yes")` and a bar of 0.6.
-   Its key, `urgent`, is the name of the `d:` ref it provides, as every rule's must be.
+5. The urgency rule is built the same way, with `t.label("no", "yes")` and the bar
+   `desk/urgent_at`. Its key, `urgent`, is the name of the `d:` ref it provides, as every
+   rule's must be.
 
-5. The order rule, `d:order` of type `t.string`, calls
-   `extract(r, "q:order/number", 0.5)`. `extract(r, ref, null_bar)` returns the answer's
-   `value`. It abstains, again with `Unsure` and `abstained`, when the value is `None` or
-   the model's `p_null`, the probability that the text holds none, is at or above
-   `null_bar`.
+6. The order rule, `d:order` of type `t.string`, calls
+   `extract(r, "q:order/number", r.param("desk/no_order_at"))`. `extract(r, ref, null_bar)`
+   returns the answer's `value`. It abstains, again with `Unsure` and `abstained`, when the
+   value is `None` or the model's `p_null`, the probability that the text holds none, is at
+   or above `null_bar`.
 
 An estimate ommat cannot settle is never `None` or a quiet `no` but a marker: `Unsure`,
-`Unavailable` or `Unasked`. Test for them with `isinstance`:
-
-```python
-MARKERS = (Unsure, Unavailable, Unasked)
-```
+`Unavailable` or `Unasked`. Each is an `Undetermined`, so one `isinstance` test catches them
+all; `if value:` on a marker raises.
 
 ## The policy rule
 
@@ -150,11 +172,11 @@ estimates and returns the name of what the caller should do.
        topic = r.read("d:topic")
        urgent = r.read("d:urgent")
        order = r.read("d:order")
-       if isinstance(topic, MARKERS):
+       if isinstance(topic, Undetermined):
            return topic
        if urgent == "yes":
            return "answer_today"
-       if isinstance(order, MARKERS):
+       if isinstance(order, Undetermined):
            return f"route_{topic}"
        return f"route_{topic}_with_order"
    ```
@@ -173,8 +195,8 @@ estimates and returns the name of what the caller should do.
 
 ## Bindings and decide
 
-A binding is the async function that answers a batch of sources. This one returns fixed
-answers, so no model is needed.
+A binding is the async function that answers a batch of sources. This one answers every
+question the same way each time, so no model is needed.
 
 1. Open `helpdesk_run.py` and read `fixed_answers`. It takes a tuple of `SourceCall`s and,
    as a keyword, `seconds`: the time the call has, which a binding over a model provider
@@ -183,7 +205,7 @@ answers, so no model is needed.
    `score` answer gives a probability to each label name, such as `{"yes": 0.2, "no": 0.8}`.
    A `t:` ref this binding does not answer is `Unavailable(Cause("unsupported"))`, never
    left out; a binding may give its reason as a line of `warnings`. This design has no `t:`
-   ref, so that loop guards what another design would send. An extraction answer has exactly
+   ref, so that loop covers what another design would send. An extraction answer has exactly
    five keys:
 
    ```python
@@ -204,7 +226,11 @@ answers, so no model is needed.
 2. A binding receives a source's questions in the code-point order of their refs, so
    `q:triage/topic` comes first; that order is part of what ran.
 
-3. Read `main`. It loads the design, binds both oracle names, and decides each message:
+3. This binding is written out to show what a binding does. For a stand-in that answers each
+   ref with one value, or a fact your code already holds, `ommat.bindings.fixed({ref: value})`
+   builds the binding for you.
+
+4. Read `main`. It loads the design, binds both oracle names, and decides each message:
 
    ```python
    loaded = load(DESIGN)
@@ -218,7 +244,7 @@ answers, so no model is needed.
    which answers an oracle's sources from a stored record while the others run live;
    `record` is a `Record` or a stored document, bytes or parsed, read through `read_record`.
 
-4. Run the driver from its directory:
+5. Run the driver from its directory:
 
    ```
    cd docs/tutorials/write_a_design
@@ -257,11 +283,11 @@ outside every hash.
    provider shows in `provider`, null here. The driver does it:
 
    ```python
-   unhashed = json.loads(stored)["unhashed"]
+   calls = record.unhashed["calls"]
    for index, item in enumerate(record.log):
        if item["item"] == "call":
            oracles = [DESIGN.sources[s].oracle or "default" for s in item["sources"]]
-           latency = unhashed["calls"][str(index)]["latency"]
+           latency = calls[str(index)]["latency"]
            print(f"  call {index}: {item['sources']} via {oracles}, {latency:.6f} s")
    ```
 

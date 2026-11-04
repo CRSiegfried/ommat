@@ -22,6 +22,7 @@ from ommat.helpers._choice import (
     pick_with_margin,
     pick_with_thresholds,
     size,
+    top,
 )
 from ommat.helpers._combinator import agree, collect, first, priority, unique
 from ommat.helpers._dead import dead_questions
@@ -46,7 +47,8 @@ __all__ = [
     "points",
     "priority",
     "size",
+    "top",
     "unique",
 ]
 
-HELPERS = 3
+HELPERS = 4

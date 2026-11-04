@@ -1,23 +1,11 @@
-"""The how-to's driver: decide three turns of the support design with a stand-in binding, and
-print the first turn's calls as Chat Completions messages and the note each turn hands on."""
+"""The how-to's driver: decide three turns of the support design with ``fixed`` standing in
+for the model, and print the first turn's calls as Chat Completions messages and the note each
+turn hands on."""
 
-from collections.abc import Awaitable, Callable
-
-from ommat import (
-    CallResult,
-    Cause,
-    Decision,
-    SourceCall,
-    Unavailable,
-    decide_sync,
-    escalation,
-    load,
-    transcript,
-)
+from ommat import Decision, decide_sync, escalation, load, transcript
+from ommat.bindings import OracleBinding, fixed
 from ommat.conversation import to_chat_completions
 from support_design import DESIGN
-
-Binding = Callable[..., Awaitable[CallResult]]
 
 STATE = {
     "message": "The blender arrived broken. I want my money back.",
@@ -26,18 +14,13 @@ STATE = {
 }
 
 
-def answering(yes: float) -> Binding:
+def answering(yes: float) -> OracleBinding:
     """A stand-in for a model: it answers the refund question with ``yes`` at ``yes``."""
-
-    async def binding(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
-        return CallResult({"q:refund": {"yes": yes, "no": round(1 - yes, 2)}})
-
-    return binding
+    return fixed({"q:refund": {"yes": yes, "no": round(1 - yes, 2)}})
 
 
-async def failing(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
-    """A stand-in for a model that cannot answer: the refund question comes back unavailable."""
-    return CallResult({"q:refund": Unavailable(Cause("unsupported"))})
+SILENT = fixed({})
+"""A stand-in for a model that cannot answer: the refund question comes back ``unsupported``."""
 
 
 def next_model_note(decision: Decision) -> str:
@@ -62,7 +45,7 @@ def main() -> None:
     unsure = decide_sync(loaded, STATE, {"default": answering(0.6)})
     print(next_model_note(unsure))
 
-    broken = decide_sync(loaded, STATE, {"default": failing})
+    broken = decide_sync(loaded, STATE, {"default": SILENT})
     print(next_model_note(broken))
 
 

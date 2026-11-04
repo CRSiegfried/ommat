@@ -165,7 +165,14 @@ def decided(
 
 
 def entries(record: Record) -> dict[str, dict[str, Any]]:
-    return {i["ref"]: i for i in record.log if i["item"] == "entry"}
+    return record.entries
+
+
+def test_a_records_entries_key_each_grounded_entry_by_its_ref_as_written() -> None:
+    found = decided().entries
+    assert set(REFS) <= set(found)
+    assert all(found[ref]["ref"] == ref for ref in REFS)
+    assert list(found) == [i["ref"] for i in decided().log if i["item"] == "entry"]
 
 
 def q_refs(record: Record) -> list[str]:

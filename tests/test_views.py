@@ -44,6 +44,7 @@ from ommat import (
     RunSettings,
     Unsure,
     decide_sync,
+    defects,
     escalation,
     load,
     read_record,
@@ -336,11 +337,12 @@ class SubRecord(Record):
 
 # Built in the test, since pytest reads a parameter at collection.
 NOT_RECORDS: list[Callable[[], Any]] = [lambda: NORMAL, lambda: None, Untouchable]
-VIEWS = [escalation, transcript]
+VIEWS = [escalation, defects, transcript]
+VIEW_IDS = ["escalation", "defects", "transcript"]
 
 
 @pytest.mark.parametrize("record", NOT_RECORDS, ids=["a log", "None", "untouchable"])
-@pytest.mark.parametrize("of", VIEWS, ids=["escalation", "transcript"])
+@pytest.mark.parametrize("of", VIEWS, ids=VIEW_IDS)
 def test_each_view_refuses_what_is_not_a_record_before_reading_it(
     record: Callable[[], Any], of: Callable[[Record], Any]
 ) -> None:
@@ -348,13 +350,53 @@ def test_each_view_refuses_what_is_not_a_record_before_reading_it(
         of(record())
 
 
-@pytest.mark.parametrize("of", VIEWS, ids=["escalation", "transcript"])
+@pytest.mark.parametrize("of", VIEWS, ids=VIEW_IDS)
 def test_each_view_refuses_a_record_subclass_by_its_exact_type(
     of: Callable[[Record], Any],
 ) -> None:
     sub = object.__new__(SubRecord)  # never initialised: refused before anything is read
     with pytest.raises(ValueError, match="takes a Record"):
         of(sub)
+
+
+# ---------------------------------------------------------------------------------------------
+# The defects
+
+
+def test_a_rule_that_raised_on_a_decided_turn_is_a_defect_the_escalation_cannot_show() -> None:
+    record = turn(send)
+    assert escalation(record) is None
+    found = defects(record)
+    assert found is not None
+    assert [item["ref"] for item in found] == ["d:gone"]  # d:mid's required cause is not one
+    assert found[0] == record.entries["d:gone"]
+
+
+@pytest.mark.parametrize("policy", [requiring, send], ids=["undecided", "decided"])
+def test_the_defects_hold_the_root_cause_of_an_escalation_that_is_a_defect(
+    policy: Callable[[Any], str],
+) -> None:
+    record = turn(policy)
+    found = escalation(record)
+    listed = [item["marker"]["cause"] for item in defects(record) or []]
+    if found is not None:
+        assert found["defect"] is (found["root_cause"] in listed)
+
+
+def test_a_broken_entrys_defect_is_its_entry_cause_at_the_state_and_the_policy() -> None:
+    record = read(fresh(BROKEN_8))
+    found = defects(record) or []
+    assert [item["ref"] for item in found] == ["t:state", record.log[1]["policy"]]
+    assert all(item["marker"]["cause"] == ENTRY_CAUSE["cause"] for item in found)
+
+
+def test_a_turn_with_no_defect_lists_none() -> None:
+    assert defects(read(fresh(NORMAL_8))) == []
+
+
+@pytest.mark.parametrize("name", ["normal", "broken", "cancelled", "extraction", "described"])
+def test_a_record_before_format_8_holds_no_defects(name: str) -> None:
+    assert defects(read(fresh(LOGS[name]))) is None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -747,6 +789,7 @@ def test_every_prefix_of_the_test_logs_redacts_and_escalates(name: str, n: int) 
     assert out.get("hash") == (record.record_hash if record.log[0]["format"] >= 3 else None)
     assert len(out["log"]) == n
     escalation(record)
+    defects(record)
 
 
 def test_a_cause_item_passes_through_and_a_design_only_record_has_nothing_digested() -> None:

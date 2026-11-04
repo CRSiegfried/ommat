@@ -1,6 +1,16 @@
 """The support design: whether a customer asks for a refund and what the turn does about it."""
 
-from ommat import Design, Question, ReadView, Rule, Source, Text, Unavailable, Undetermined
+from ommat import (
+    Design,
+    Parameter,
+    Question,
+    ReadView,
+    Rule,
+    Source,
+    Text,
+    Unavailable,
+    Undetermined,
+)
 from ommat import types as t
 from ommat.helpers import pick_with_margin
 
@@ -25,7 +35,7 @@ ASK = Source(
 
 
 def refund(r: ReadView) -> str | Undetermined:
-    return pick_with_margin(r, "q:refund", 0.7, 0.2)
+    return pick_with_margin(r, "q:refund", r.param("refund/bar"), r.param("refund/margin"))
 
 
 def policy(r: ReadView) -> str | Undetermined:
@@ -44,7 +54,14 @@ DESIGN = Design(
     state=STATE,
     sources={"ask": ASK},
     rules={
-        "refund": Rule("d:refund", t.label("no", "yes"), refund, version="1", reads=["q:refund"]),
+        "refund": Rule(
+            "d:refund",
+            t.label("no", "yes"),
+            refund,
+            version="1",
+            reads=["q:refund"],
+            params=["refund/bar", "refund/margin"],
+        ),
         "policy": Rule(
             "d:policy",
             t.label("ask_if_refund", "refund_order", "thank"),
@@ -52,6 +69,10 @@ DESIGN = Design(
             version="1",
             reads=["d:refund"],
         ),
+    },
+    parameters={
+        "refund/bar": Parameter(t.number(0, 1), 0.7),
+        "refund/margin": Parameter(t.number(0, 1), 0.2),
     },
     policy="d:policy",
 )

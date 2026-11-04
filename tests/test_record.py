@@ -95,11 +95,12 @@ def test_a_records_attributes() -> None:
     assert record.log == NORMAL
     assert record.unhashed == UNHASHED
     assert record.cause is None
+    assert record.entries == {i["ref"]: i for i in NORMAL if i["item"] == "entry"}
     assert "record_hash=" in repr(record)
 
 
 @pytest.mark.parametrize(
-    "name", ["document", "record_hash", "design_hash", "cause", "log", "unhashed"]
+    "name", ["document", "record_hash", "design_hash", "cause", "entries", "log", "unhashed"]
 )
 def test_a_records_attributes_are_read_only(name: str) -> None:
     record = closed(BROKEN)
@@ -120,6 +121,21 @@ def test_log_and_unhashed_are_decoded_afresh_at_each_read() -> None:
     assert cause is not None
     cause["code"] = "changed"
     assert closed(BROKEN).cause == BROKEN_PLAN["cause"]
+    entries = closed(NORMAL).entries
+    first = next(iter(entries))
+    entries[first]["ref"] = "changed"
+    assert closed(NORMAL).entries[first]["ref"] == first
+
+
+@pytest.mark.parametrize("log", [NORMAL, BROKEN, CANCELLED, NORMAL_8, BROKEN_8, CANCELLED_8])
+def test_the_entries_are_each_entry_item_whole_by_its_ref_in_log_order(
+    log: list[dict[str, Any]],
+) -> None:
+    for n in range(1, len(log) + 1):  # every prefix
+        record = closed(log[:n])
+        held = [item for item in record.log if item["item"] == "entry"]
+        assert list(record.entries.values()) == held  # whole, in log order, one per ref
+        assert list(record.entries) == [item["ref"] for item in held]
 
 
 def test_record_values_are_plain_canonical_data() -> None:

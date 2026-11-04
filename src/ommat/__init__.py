@@ -47,7 +47,7 @@ from ommat._markers import (
 )
 from ommat._read_view import ReadView
 from ommat._replay import FindingKind, replay, replay_sync
-from ommat._views import escalation, redact, transcript
+from ommat._views import defects, escalation, redact, transcript
 
 __version__ = _version("ommat")
 
@@ -95,6 +95,7 @@ __all__ = [
     "__version__",
     "decide",
     "decide_sync",
+    "defects",
     "escalation",
     "from_record",
     "load",

@@ -33,13 +33,14 @@ Decide returns a `Decision`: `.estimate`, the policy's estimate, `.record`, the 
 
 ## A first decision
 
-This runs as it is, with no API keys: a stand-in binding answers in place of a model. The design asks one choice question, turns its answer into a topic with one rule, and decides the route with a policy rule:
+This runs as it is, with no API keys: a fixed binding answers in place of a model. The design asks one choice question, turns its answer into a topic with one rule, and decides the route with a policy rule:
 
 <!-- demo -->
 ```python
-from ommat import CallResult, Design, Question, ReadView, Rule, Source, SourceCall, Text
+from ommat import Design, Question, ReadView, Rule, Source, Text
 from ommat import Undetermined, decide_sync, escalation, load, replay_sync
 from ommat import types as t
+from ommat.bindings import fixed
 from ommat.helpers import pick_with_margin
 
 topics = ["billing", "shipping", "other"]
@@ -71,12 +72,10 @@ DESIGN = Design(
 
 The demo keeps everything in one script; in a real project keep the design in a module (see the tutorial [Write a design](docs/tutorials/write-a-design.md)).
 
-The binding is a plain async function. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds one over a real provider. A binding receives each source's questions together, and `ommat[idia]` sends them to the provider as one request, split only where the provider's limits require:
+A binding answers a source's questions. `fixed` answers each ref it is asked from a mapping, here the probability of each topic, and stands in for a model in a test. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds a binding over a real provider: it receives each source's questions together and sends them to the provider as one request, split only where the provider's limits require. A binding of your own is a plain async function, as [Add a source](docs/how-to/add-a-source.md) shows:
 
 ```python
-async def classifier(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
-    answer = {"billing": 0.8, "shipping": 0.1, "other": 0.1}
-    return CallResult({ref: answer for call in batch for ref in call.questions})
+classifier = fixed({"q:topic": {"billing": 0.8, "shipping": 0.1, "other": 0.1}})
 ```
 
 Decide, print the decision, then replay the turn from its record:
@@ -151,6 +150,7 @@ To look at stored records, write them to `.json` files as `decision.record.docum
 - [Add a source](docs/how-to/add-a-source.md), which answers a new oracle through idia or a binding of your own.
 - [Gate a source on an earlier estimate](docs/how-to/gate-a-source.md), which asks a later question only when an estimate holds a value, without sending the estimate to the model.
 - [Hand off a turn](docs/how-to/hand-off-a-turn.md), which gives the next model in a conversation the turn's calls and decision as Chat Completions or Pydantic AI messages, with the words you choose.
+- [Read a record](docs/how-to/read-a-record.md), which reads an entry, the call that answered it, why a turn is undecided, a rule that failed on a decided turn, and the answers across turns.
 - [The spec](docs/spec/README.md), what ommat does and leaves out.
 - [CHANGELOG.md](CHANGELOG.md), each release.
 - [idia](https://github.com/CRSiegfried/idia), the library that puts the questions to the models.
