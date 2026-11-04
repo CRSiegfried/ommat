@@ -81,7 +81,7 @@ The turn decided ask_if_refund.
 The turn is undecided: unsupported.
 ```
 
-The turn ends in decide's result, with no call pending. The engine names no tool: your code
+The turn ends in decide's result, with no call pending. Here your code
 reads the decision and runs its own action when the decision says so, then tells the model
 what ran in your own message. When the decision is words for the user, send them and append
 them as the assistant's message, so the next turn's history holds what was said; no model call

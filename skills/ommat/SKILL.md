@@ -5,7 +5,7 @@ description: Use when turning LLM or decision-model answers into a replayable de
 
 # ommat
 
-ommat turns many small model answers into one decision. A model answers small questions; your rules, plain Python functions or tables, turn the answers into estimates; the policy, one of the rules, makes its estimate the decision; and a record replays the turn with no model call. ommat stops at the decision: it names no tool, step or action, and the caller acts.
+ommat turns many small model answers into one decision. A model answers small questions; your rules, plain Python functions or tables, turn the answers into estimates; the policy, one of the rules, makes its estimate the decision; and a record replays the turn with no model call. A source's binding may call any tool, one that writes included, and later rules read what it returned.
 
 This skill holds the pattern and the pitfalls. Every detail lives in the docs linked here; read them rather than guessing.
 

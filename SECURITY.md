@@ -12,7 +12,7 @@ Include what you found, how to reproduce it, and the versions affected. You can 
 
 ## What counts
 
-ommat runs code you supply (oracle bindings, function `when`s, rules, the policy, the codec, the observer, and the `functions` mapping given to `load`) in your process; it does not sandbox it. The engine stops at decide: it names no tool, step or action, and the caller acts on the decision. Reports in scope include ways ommat itself breaks a guarantee it documents, for example:
+ommat runs code you supply (oracle bindings, function `when`s, rules, the policy, the codec, the observer, and the `functions` mapping given to `load`) in your process; it does not sandbox it. Reports in scope include ways ommat itself breaks a guarantee it documents, for example:
 
 - decide returning anything but the policy's entry as the decision, or a marker entry not read as undecided
 - the model being consulted after decide returns

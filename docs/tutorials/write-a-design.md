@@ -189,8 +189,8 @@ estimates and returns the name of what the caller should do.
    `reads=["d:topic", "d:urgent", "d:order"]`, and names it in `Design` as
    `policy="d:route"`, with `state`, `sources` and `rules`.
 
-3. The engine stops at the decision. It names no tool and runs nothing: the caller reads
-   `decision.estimate` and acts on it. When the estimate is a marker, the turn is
+3. The caller reads `decision.estimate` and acts on it; a source could instead act during
+   the turn ([Add a source](../how-to/add-a-source.md#a-source-that-changes-state)). When the estimate is a marker, the turn is
    undecided, and `escalation(record)` routes it by its root cause.
 
 ## Bindings and decide

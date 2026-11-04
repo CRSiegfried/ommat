@@ -122,8 +122,7 @@ call to call, so keep no labels by ref.
 A need that holds an answer is the `Answer` or `ExtractionAnswer` itself, and an image is a
 `dict` of `media_type` and `data`, its bytes; `ommat.bindings.json_value` writes a need as JSON,
 and `image_need` reads an image.
-Treat `needs` as read-only, and change no durable state: no cache on disk, no write to a
-store.
+Treat `needs` as read-only.
 
 The order is part of what ran: a provider may answer a question differently beside other
 questions. A binding that asks one question per request, or frames its own order, names that
@@ -216,6 +215,26 @@ questions times the time of one request, and a request's time can grow faster th
 length: for one small named-entity model on a CPU, 0.14 s at 536 tokens and 18 s at 7,800. A
 call past its timeout is `Failed` with `timed-out`, but a thread started by `asyncio.to_thread`
 runs on, and `decide_sync` waits for it before it returns.
+
+## A source that changes state
+
+A binding is your code, and it may call any tool, one that writes included: create a folder,
+move a message, send a reply. What it returns is the source's `t:` value, and the sources and
+rules that need it read it in a later round, so one turn can act, then act again on what came
+back. Four things the engine does shape such a binding:
+
+- Interpret asks a source as soon as its needs are on the board. Gate an action with a `when`
+  on the estimate that says to take it ([source
+  requirements](../spec/README.md#source-requirements)), so it runs only once a rule decides it.
+- A call past its timeout is `timed-out`, and interpret discards a late return, though the
+  write may have happened. Finish within `seconds`, and make the call safe to repeat, since
+  retries are the binding's.
+- Ready sources that name one oracle go to it in one call, in no set order. Put actions under
+  an oracle of their own, and order two actions by having one need the other's ref.
+- `replay`, `intervene` and `from_record` answer every source from the record and call
+  nothing. `scenario` calls each source downstream of its interventions through the bindings
+  you pass, so an action there runs for real, on the scenario's inputs. Bind the actions'
+  oracle to a stand-in that returns what the tool would, and keep the read tools live.
 
 ## What the record keeps
 

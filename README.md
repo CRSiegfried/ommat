@@ -29,7 +29,7 @@ flowchart TD
 
 ommat's one operation is **decide**, which runs interpret. Interpret: sources fetch model answers and other outside values onto a shared board, a blackboard, in rounds, through bindings the caller supplies; rules, which are functions or tables with declared reads, turn them into estimates. An unknown stays unknown, as a marker (`Unsure`, `Unavailable` or `Unasked`), never a quiet no or a `None`. The policy is one of the rules; its estimate is the decision.
 
-Decide returns a `Decision`: `.estimate`, the policy's estimate, `.record`, the record of the turn, and `.design_hash`. It calls no tool and names no step or action; the caller acts on the decision. When the estimate is a marker the turn is undecided, and `escalation(record)` gives the marker's kind and cause, the root cause it traces to, and the record hash, to route it. `transcript(record)` gives every call of the turn and its decision, for the next model as tool calls and their results. Nothing after decide consults the model.
+Decide returns a `Decision`: `.estimate`, the policy's estimate, `.record`, the record of the turn, and `.design_hash`. A source's binding is your code and may call any tool, one that writes included; the record holds what it returned, and later sources and rules read it. When the estimate is a marker the turn is undecided, and `escalation(record)` gives the marker's kind and cause, the root cause it traces to, and the record hash, to route it. `transcript(record)` gives every call of the turn and its decision, for the next model as tool calls and their results. Nothing after decide consults the model.
 
 ## A first decision
 
@@ -99,7 +99,7 @@ replay findings: []
 ```
 <!-- /demo -->
 
-`billing` is at 0.8, at or above the bar of 0.6 and 0.7 ahead of the next label, so the topic rule picks it and the policy decides `open_billing_ticket`. Had `billing` been under 0.6, or less than 0.2 ahead, the topic rule would have returned `Unsure`, the policy would have passed it on, and the turn would be undecided: `decision.estimate` would be that marker and `escalation(decision.record)` would say why. ommat stops at the decision; the caller opens the ticket. Replay reruns the turn from the record, under the same loaded design, with no model call, and finds no difference.
+`billing` is at 0.8, at or above the bar of 0.6 and 0.7 ahead of the next label, so the topic rule picks it and the policy decides `open_billing_ticket`. Had `billing` been under 0.6, or less than 0.2 ahead, the topic rule would have returned `Unsure`, the policy would have passed it on, and the turn would be undecided: `decision.estimate` would be that marker and `escalation(decision.record)` would say why. Here the caller opens the ticket. Replay reruns the turn from the record, under the same loaded design, with no model call, and finds no difference.
 
 **The name.** Ommat and Idia come from *ommatidia*, the thousands of small hexagonal eyes that make up a compound eye and combine into one picture: *ommat-* is the Greek stem for "eye", *-idia* "little ones". Many small, cheap questions add up to one full picture. Ommat is the engine that asks them; Idia puts them to the models.
 
