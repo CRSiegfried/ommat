@@ -47,9 +47,10 @@ def held(entry: dict[str, Any]) -> object:
     return f"{entry['marker']['kind']} {entry['marker']['cause']['code']}"
 ```
 
-Use `record.entries.get(ref)` where a ref may hold no entry, such as a ref a cancelled turn
-never reached. Look entries up by ref, never by position: the log's order follows the
-turn's rounds, which a design change can move.
+`entries` decodes the log at each read, so bind it once, as `entries = record.entries`, when
+you look up several refs. Use `record.entries.get(ref)` where a ref may hold no entry, such as
+a ref a cancelled turn never reached. Look entries up by ref, never by position: the log's
+order follows the turn's rounds, which a design change can move.
 
 ## Find the call that answered
 
