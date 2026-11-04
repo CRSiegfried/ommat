@@ -2,7 +2,10 @@
 
 This guide gives the next model in a conversation what a turn settled: the calls the turn made
 and the decision it ended in, as tool calls and their results, with the words you choose beside
-them. It assumes you have done [Write your first design](../tutorials/write-a-design.md). The
+them. Use it whenever a turn hands on to a generative model, as when a design has done what it
+can and an agent finishes the request: a source that called your tool, a read or a write, is a
+call in the transcript, so the agent sees what the turn already did, and you rebuild nothing
+from the record's `t:` values. It assumes you have done [Write your first design](../tutorials/write-a-design.md). The
 spec's [transcript view](../spec/README.md#the-transcript-view),
 [escalation view](../spec/README.md#the-escalation-view) and
 [conversation renderers](../spec/README.md#the-conversation-renderers) state the rules; the guide
