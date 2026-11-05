@@ -2,23 +2,22 @@
 file, or for every ``.json`` and ``.jsonl`` record and design under a folder."""
 
 import argparse
-import hashlib
-import os
 import sys
 import webbrowser
 from pathlib import Path
-from typing import cast
 
-from ommat.lens import page, read_document
+from ommat._documents import gather, identity, note_unpaired, walk
+from ommat.lens import page
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m ommat.lens",
         description=(
-            "Write an HTML page showing an ommat design and its records: the design's lineage "
-            "by target or ref, each record round by round, and the records as a table. The page "
-            "holds the records whole, user text included: keep it as you keep them."
+            "Write an HTML page drawing an ommat design and its records from their outlines: "
+            "the dependency graph by round, each turn's entries, lineage and bounds over it, "
+            "and the turns as a table. The page holds the records' values, user text included: "
+            "keep it as you keep them."
         ),
     )
     parser.add_argument(
@@ -34,69 +33,26 @@ def main(argv: list[str] | None = None) -> int:
     output: Path = args.output
     skipped: list[str] = []
     if path.is_dir():
-        found, base = _walk(path, skipped), path
+        found, base = walk(path, skipped), path
     elif path.is_file():
         found, base = [path], path.parent
     else:
         print(f"error: {path}: no such file or folder", file=sys.stderr)
         return 1
-    if _identity(output) in {_identity(file) for file in found} - {None}:
+    if identity(output) in {identity(file) for file in found} - {None}:
         print(f"error: {output} is one of the files read; choose another output", file=sys.stderr)
         return 1
 
-    records: dict[str, bytes] = {}
-    designs: dict[str, tuple[str, bytes]] = {}
-    seen: set[object] = set()
-    for file in found:
-        identity = _identity(file)
-        if identity is not None and identity in seen:
-            continue  # a link to a file already read
-        seen.add(identity)
-        name = file.relative_to(base).as_posix()
-        try:
-            data = file.read_bytes()
-        except OSError as error:
-            print(f"skipped {name}: {error.strerror or error}", file=sys.stderr)
-            skipped.append(name)
-            continue
-        lines = (
-            [
-                (f"{name} · line {n}", line.strip())
-                for n, line in enumerate(data.split(b"\n"), 1)
-                if line.strip()
-            ]
-            if file.suffix.lower() == ".jsonl"
-            else [(name, data)]
-        )
-        for label, document in lines:
-            try:
-                value = read_document(document, label)
-            except ValueError as error:
-                reason = str(error)
-            else:
-                if isinstance(value.get("log"), list):
-                    records[label] = document
-                    continue
-                if "policy" in value:
-                    designs["sha256:" + hashlib.sha256(document).hexdigest()] = (label, document)
-                    continue
-                reason = f"{label} is not an ommat record or design"
-            print(f"skipped {reason}", file=sys.stderr)
-            skipped.append(label)
+    records, designs = gather(
+        ((file, file.relative_to(base).as_posix()) for file in found), skipped
+    )
 
     if not records and not designs:
         print(f"error: {path}: no ommat record or design found", file=sys.stderr)
         return 1
-    used = {_design_hash(document) for document in records.values()}
-    for key, (label, _) in designs.items():
-        if records and key not in used:
-            print(
-                f"note: design {label} matches no record; a record pairs with its design's exact "
-                "bytes, as loaded.document gives them",
-                file=sys.stderr,
-            )
+    note_unpaired(records, designs)
     try:
-        html = page(records, [document for _, document in designs.values()], skipped=skipped)
+        html = page(records, dict(designs.values()), skipped=skipped)
     except ValueError as error:  # read_document passed each document, so this is a defect
         print(f"error: cannot build the page: {error}", file=sys.stderr)
         return 1
@@ -109,45 +65,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.open and not webbrowser.open(output.resolve().as_uri()):
         print(f"note: no browser opened; open {output} yourself", file=sys.stderr)
     return 0
-
-
-def _walk(folder: Path, skipped: list[str]) -> list[Path]:
-    """Every .json and .jsonl file under ``folder``, by relative path; a folder it cannot open
-    is skipped and named."""
-
-    def refused(error: OSError) -> None:
-        where = Path(error.filename or folder)
-        name = where.relative_to(folder).as_posix() if where != folder else "."
-        print(f"skipped {name}/: {error.strerror or error}", file=sys.stderr)
-        skipped.append(name + "/")
-
-    found = [
-        Path(root) / name
-        for root, _, names in os.walk(folder, onerror=refused, followlinks=False)
-        for name in names
-        if Path(name).suffix.lower() in {".json", ".jsonl"} and (Path(root) / name).is_file()
-    ]
-    return sorted(found, key=lambda p: p.relative_to(folder).as_posix())
-
-
-def _identity(file: Path) -> tuple[int, int] | None:
-    """The file's device and inode, so a symbolic or hard link to it is the same file."""
-    try:
-        held = file.stat()
-    except OSError:
-        return None
-    return held.st_dev, held.st_ino
-
-
-def _design_hash(document: bytes) -> object:
-    """The hash in the record's first ``design`` item, as the page reads it, or ``None``."""
-    log: list[object] = read_document(document, "record")["log"]
-    for item in log:
-        held = cast("dict[str, object]", item) if isinstance(item, dict) else {}
-        if held.get("item") == "design":
-            found = held.get("hash")
-            return found if isinstance(found, str) else None
-    return None
 
 
 if __name__ == "__main__":

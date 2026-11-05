@@ -4,1131 +4,1747 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ommat Lens</title>
+<title>ommat lens</title>
 <style>
-/* The page loads nothing from the network: fonts are the system's, script and data inline. */
+/* Loads nothing from the network: system fonts, inline script and data. Palette: dataviz reference instance. */
 :root {
-  --bg: #f3f5f7;
-  --panel: #ffffff;
-  --ink: #17212b;
-  --muted: #5b6875;
-  --line: #d6dde3;
-  --accent: #1d6b8a;
-  --accent-soft: #dcecf3;
-  --down: #7a4fb0;
-  --down-soft: #ece4f6;
-  --good: #2f7d4f;
-  --warn: #8a5608;
-  --bad: #b23b3b;
-  --bar: #7fa8bd;
-  --display: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
-  --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.14); --wash: rgba(11,11,11,0.04);
+  --r-read: #2a78d6; --r-helper: #e87ba4;
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --neutral: #898781;
+  --ring-warning: #b77a00; /* a darker amber step for rings: 3.53:1 on the light surface */
+  --fade: .28; --fade-read: .28;
+  --sel: #0b0b0b; --cause: #0b0b0b; --branch: #52514e;
+  --body: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #11171c; --panel: #182129; --ink: #e5ebf0; --muted: #94a3b0; --line: #2a3742;
-    --accent: #5fb2d3; --accent-soft: #173445; --down: #b593e0; --down-soft: #2c2340;
-    --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #4f7d94; color-scheme: dark;
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.16); --wash: rgba(255,255,255,0.05);
+    --r-read: #3987e5; --r-helper: #cf5bb5; --ring-warning: #fab219; --fade-read: .4;
+    --sel: #f0efec; --cause: #f0efec; --branch: #c3c2b7;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #11171c; --panel: #182129; --ink: #e5ebf0; --muted: #94a3b0; --line: #2a3742;
-  --accent: #5fb2d3; --accent-soft: #173445; --down: #b593e0; --down-soft: #2c2340;
-  --good: #5fbf85; --warn: #e0a64a; --bad: #ec7b7b; --bar: #4f7d94; color-scheme: dark;
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.16); --wash: rgba(255,255,255,0.05);
+  --r-read: #3987e5; --r-helper: #cf5bb5; --ring-warning: #fab219; --fade-read: .4;
+  --sel: #f0efec; --cause: #f0efec; --branch: #c3c2b7;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--body); }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 var(--body); }
 [hidden] { display: none !important; }
-.wrap { padding-block: 20px 40px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 16px; }
-header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
-h1 { font: 600 26px/1.1 var(--display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
-.sub { color: var(--muted); margin: 4px 0 0; max-width: 65ch; }
-.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-select, button, .file { font: 500 13px var(--body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
-button:hover, .file:hover, select:hover { border-color: var(--accent); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { padding: 16px; display: grid; gap: 14px; max-width: 1600px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-start; justify-content: space-between; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h2 { font-size: 13px; margin: 0 0 8px; font-weight: 650; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+.hright { display: grid; gap: 6px; justify-items: end; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.keys { font-size: 12px; color: var(--ink2); }
+kbd { font: 11px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); color: var(--ink); }
+select, button, .file { font: 500 13px var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
 .file { position: relative; }
 .file input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
-.file:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.summary { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
-.kv { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
-.k { font: 500 11px var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-.v { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
-.chip { font: 600 11px var(--display); text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
-.chip.good { color: var(--good); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); } .chip.info { color: var(--accent); }
-.notice { color: var(--warn); font-size: 13px; }
-.main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
-@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
-.flow { overflow-x: auto; padding: 4px 4px 6px; }
-.cols { display: flex; gap: 14px; align-items: flex-start; min-width: min-content; }
-.col { width: 270px; flex: none; display: grid; gap: 8px; }
-.cols.design .col { width: 210px; } /* five columns fit beside the lineage panel */
-.colhead { font: 600 13px var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; display: grid; gap: 6px; cursor: pointer; text-align: left; width: 100%; font: inherit; color: inherit; }
-.card:hover { border-color: var(--accent); }
-.card.call { border-style: dashed; }
-.card.sel { outline: 2px solid var(--accent); outline-offset: 1px; box-shadow: inset 4px 0 0 var(--accent); }
-.card.up { background: var(--accent-soft); border-color: var(--accent); }
-.card.down { background: var(--down-soft); border-color: var(--down); }
-.card.dim { opacity: .6; }
-.ref { font: 500 12.5px var(--mono); overflow-wrap: anywhere; }
-.meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.bars { display: grid; gap: 3px; }
-.bar { display: grid; grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) 3.4em; gap: 6px; align-items: center; font-size: 12px; }
-.bar .lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar .track { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
-.bar .fill { height: 100%; background: var(--bar); }
-.bar.top .fill { background: var(--accent); }
-.bar.top .lab { font-weight: 600; }
-.pct { font-variant-numeric: tabular-nums; text-align: right; font-family: var(--mono); font-size: 11.5px; }
-.val { font: 12px var(--mono); background: var(--bg); border-radius: 4px; padding: 4px 6px; overflow-wrap: anywhere; max-height: 7.5em; overflow: auto; white-space: pre-wrap; }
-.marker { font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-aside { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; position: sticky; top: env(safe-area-inset-top, 0px); max-height: calc(100vh - 32px); overflow: auto; }
-aside h2 { font: 600 15px var(--display); letter-spacing: .04em; text-transform: uppercase; margin: 0; }
-aside h3 { font: 600 12px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 6px 0 2px; }
-aside ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 4px; }
-aside li { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
-aside li button { background: none; border: none; padding: 0; color: var(--accent); font: 500 12.5px var(--mono); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-.how { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
-.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); }
-.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid var(--muted); }
-textarea { width: 100%; min-height: 110px; font: 12px var(--mono); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
-.paste { display: grid; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-.paste .row { display: flex; gap: 8px; flex-wrap: wrap; }
-.err { color: var(--bad); font-size: 13px; }
-.pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pager select { flex: 1 1 240px; min-width: 0; max-width: 100%; }
-button:disabled { opacity: .4; cursor: default; }
-@media (prefers-reduced-motion: no-preference) { .card { transition: background .15s, border-color .15s, opacity .15s; } }
-.tabs { display: flex; flex-wrap: wrap; gap: 4px; align-items: end; border-bottom: 1px solid var(--line); }
-.tabs button { border-radius: 6px 6px 0 0; border-bottom: none; margin-bottom: -1px; }
-.tabs button[aria-current="page"] { background: var(--accent-soft); border-color: var(--accent); border-bottom: 1px solid var(--accent-soft); }
-.tabs .spacer { flex: 1; }
-.tabs select { margin-bottom: 4px; max-width: 100%; }
-.bar .track { position: relative; }
-.tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
-.tg { color: var(--accent); }
-.none { color: var(--muted); font-style: italic; }
-.tbl-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.file:focus-within, :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.notice { font-size: 13px; color: var(--ink2); border-left: 3px solid var(--ring-warning); padding: 2px 8px; }
+/* the header of the selected turn or design */
+.why { display: flex; gap: 10px; align-items: flex-start; font-size: 18px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.why .di { width: 22px; height: 22px; font-size: 13px; margin-top: 2px; }
+.meta { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12.5px; color: var(--ink2); margin-top: 6px; }
+.meta .mono { font-size: 12px; }
+.lin { font-size: 12.5px; color: var(--ink2); margin-top: 6px; overflow-wrap: anywhere; }
+.lin .main { font: 600 12.5px var(--mono); color: var(--ink); }
+.lin .br { font: 12px var(--mono); color: var(--ink2); }
+.lin .k, .meta .k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; margin-right: 6px; }
+.why .defect, .meta .defect { color: var(--critical); font-weight: 700; }
+/* decision icons: decided, undecided by marker kind, no decision */
+.di { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; font: 700 10.5px var(--body); color: #fff; flex: none; vertical-align: middle; }
+.di.decided { background: var(--good); } .di.Unsure { background: var(--warning); color: #0b0b0b; }
+.di.Unavailable { background: var(--critical); } .di.Unasked { background: var(--neutral); }
+.di.none { background: transparent; color: var(--neutral); border: 1.5px solid var(--neutral); font-size: 11px; }
+/* entry chips in the detail */
+.st { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.st i { font-style: normal; display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; font-size: 10px; font-weight: 700; color: #fff; }
+.st.value i { background: var(--good); } .st.Unsure i { background: var(--warning); color: #0b0b0b; }
+.st.Unasked i { background: var(--neutral); } .st.Unavailable i { background: var(--critical); }
+.st.absent i { background: transparent; border: 1.5px dashed var(--ink2); color: var(--ink2); }
+.st.nobounds i { background: transparent; border: 1.5px solid var(--neutral); }
+.st.det i { display: none; }
+.st.nobounds i::after { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--neutral); }
+.st.short i { background: var(--warning); color: #0b0b0b; border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); padding-top: 3px; font-size: 9px; }
+/* the legend: two muted groups, and the glossary */
+.skel-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; }
+.lgwrap { position: relative; display: flex; gap: 10px; align-items: flex-start; margin-left: auto; }
+.legend { display: grid; gap: 4px; justify-items: end; font-size: 12px; color: var(--ink2); }
+.lg-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; justify-content: flex-end; }
+.lg-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+.legend svg { vertical-align: middle; }
+.legend button.toggle { font-size: 12px; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px; color: var(--ink2); }
+.legend button.toggle[aria-pressed="true"] { color: var(--ink); }
+.gloss-btn { width: 24px; height: 24px; padding: 0; border-radius: 50%; font-weight: 700; flex: none; }
+#gloss { position: absolute; right: 0; top: 30px; z-index: 15; width: min(620px, 92vw); max-height: 70vh; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.22); padding: 8px 12px; font-size: 12.5px; }
+#gloss dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; }
+#gloss dt { font-weight: 650; } #gloss dd { margin: 0; color: var(--ink2); }
+.canvas { overflow-x: auto; overflow-y: hidden; }
+.canvas svg { display: block; font-family: var(--body); }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 900px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+.stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font: 600 11px var(--display); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-tr.group td { font: 600 12px var(--display); letter-spacing: .04em; background: var(--bg); }
-tr[data-row] { cursor: pointer; }
-tr[data-row]:hover td { background: var(--accent-soft); }
-td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-.jump { font: 500 12px var(--body); padding: 4px 8px; }
-/* Selection moves matches to the top of each column; Filter mode folds the rest into stubs. */
-.colhead { order: -1; }
-.card { content-visibility: auto; contain-intrinsic-size: auto 72px; }
-.card.hide { display: none; }
-.stub { order: 8; font: 500 12px var(--body); color: var(--muted); background: none; border: 1px dashed var(--line); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
-.stub:hover { border-color: var(--accent); color: var(--ink); }
-/* Compact: the selected card in full; every other card keeps its value on one line, its bars,
-   a call's outcome and its boundary notes; direct links keep their meta. */
-#cols.compact .card:not(.sel) .val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: none; }
-#cols.compact .card:not(.sel) .meta.labels { display: none; }
-#cols.compact .card:not(.sel):not(.near) .meta:not(.notes) { display: none; }
-/* Labels past the top few fold into one "Other" bar until the card is selected. */
-.bar.extra { display: none; }
-.card.sel .bar.extra { display: grid; }
-.card.sel .bar.other { display: none; }
-.bar.other .lab { font-style: italic; color: var(--muted); }
-.bar.other .fill { opacity: .45; } /* several labels' mass, never read as one label's */
-.card .qx { display: none; }
-.card.sel .qx { display: inline; }
-.card.sel .qmore { display: none; }
-.qmore { font-style: italic; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { font-weight: 600; color: var(--ink2); font-size: 11.5px; }
+.detail td { overflow-wrap: anywhere; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--ink2); }
+/* the turns table */
+#turns { overflow-x: auto; }
+#turns table { font-size: 12px; }
+#turns td { white-space: nowrap; }
+#turns th, #turns td { padding: 4px 4px; }
+#turns th { white-space: nowrap; }
+#turns td.wr { white-space: normal; }
+#turns .cl { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
+#turns .sub { display: block; font: 11px var(--body); color: var(--ink2); }
+#turns .nob { color: var(--muted); font-style: italic; }
+#turns tbody tr { cursor: pointer; }
+#turns tbody tr:hover { background: var(--wash); }
+#turns tbody tr[aria-selected="true"] { background: var(--wash); box-shadow: inset 3px 0 0 var(--ink); }
+#turns th button.sort { all: unset; cursor: pointer; }
+#turns th button.sort:focus-visible { outline: 2px solid var(--ink); }
+#turns th[aria-sort="ascending"] button.sort::after { content: ' ▲'; font-size: 9px; }
+#turns th[aria-sort="descending"] button.sort::after { content: ' ▼'; font-size: 9px; }
+#turns tfoot td { white-space: normal; border-bottom: none; color: var(--ink2); font-size: 12px; padding-top: 8px; }
+#turns tfoot .mono { font-size: 11.5px; }
+#turns tfoot .k { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 2px; }
+.ties { font: 600 12.5px var(--mono); margin-bottom: 4px; }
+.tbar { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; font-size: 12px; color: var(--ink2); }
+.tbar button { font-size: 12px; padding: 2px 8px; }
+.chip { cursor: pointer; } .chip:hover { text-decoration: underline; }
+/* the detail */
+.detail h3 { font-size: 15px; margin: 0 0 2px; font-family: var(--mono); }
+.detail .sub { color: var(--ink2); font-size: 12px; margin-bottom: 8px; }
+.detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 10px; margin: 0 0 8px; font-size: 12.5px; }
+.detail dt { color: var(--ink2); }
+.detail dd { margin: 0; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.detail .q { border-top: 1px solid var(--grid); padding-top: 6px; margin-top: 6px; }
+.detail tr.hit td { background: var(--wash); font-weight: 650; }
+.detail tr.hov td { background: var(--wash); }
+.detail tr.hov td:first-child { box-shadow: inset 3px 0 0 var(--ink); }
+.tblwrap { overflow-x: auto; }
+.tblwrap td, .tblwrap th { white-space: nowrap; min-width: max-content; overflow-wrap: normal; }
+.tag { display: inline-block; font: 10.5px var(--mono); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin: 0 3px 2px 0; cursor: pointer; color: var(--ink2); background: var(--surface); }
+.tag:hover { color: var(--ink); border-color: var(--ink2); }
+.intext { float: right; font-size: 11.5px; padding: 2px 8px; }
+/* the text pane */
+.text { font: 12px/1.5 var(--mono); background: var(--page); border: 1px solid var(--grid); border-radius: 6px; max-height: 560px; overflow: auto; padding: 6px 0; }
+.text div { white-space: pre; padding: 0 10px; min-height: 1.5em; }
+.text div.lin { box-shadow: inset 3px 0 0 var(--ink2); }
+.text div.hl { background: var(--wash); box-shadow: inset 3px 0 0 var(--ink); }
+.text div.hl1 { font-weight: 700; }
+.text div.node { cursor: pointer; }
+.text div.node:hover { text-decoration: underline; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.18); max-width: 460px; white-space: pre-wrap; }
+#drop { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; color: #fff; font-size: 20px; z-index: 20; }
+/* SVG marks */
+.node-box { fill: var(--surface); stroke: var(--border); stroke-width: 1; }
+.node-box.policy { stroke: var(--ink); stroke-width: 2; }
+.node-g { cursor: pointer; }
+.node-g:hover .node-box:not(.policy):not(.inner) { stroke: var(--ink2); }
+.node-g:focus { outline: none; }
+.node-g:focus-visible .node-box, .node-g.sel .node-box:not(.inner) { stroke: var(--sel); stroke-width: 2.5; }
+.cap { font-size: 10.5px; letter-spacing: .07em; fill: var(--ink2); text-transform: uppercase; }
+.name { font-size: 13px; font-weight: 650; fill: var(--ink); }
+.row-label { font-size: 12px; fill: var(--ink); }
+.row-brief { font-size: 11.5px; fill: var(--ink2); font-family: var(--mono); }
+.row-brief.strong { fill: var(--ink); font-weight: 700; }
+.badge { font-size: 10.5px; fill: var(--ink2); font-family: var(--mono); }
+.badge.warn { fill: var(--ink); font-weight: 700; }
+.tgbox { fill: none; stroke: var(--axis); }
+.tgtag { font-size: 10.5px; fill: var(--ink2); font-family: var(--mono); }
+.group-ol { fill: none; stroke: var(--ink2); stroke-dasharray: 3 3; stroke-width: 1; }
+.group-lab { font-size: 10px; font-weight: 600; letter-spacing: .02em; font-variant-caps: all-small-caps; fill: var(--ink2); }
+.group-lab-bg { fill: var(--surface); }
+.glyph { fill: var(--ink2); stroke: none; }
+.glyph.open { fill: none; stroke: var(--ink2); stroke-width: 1.3; }
+.tick { stroke: var(--ink2); stroke-width: 1.5; }
+.colhead { font-size: 10.5px; fill: var(--ink2); letter-spacing: .02em; }
+.band { fill: var(--wash); stroke: none; }
+.bandhead { font-size: 12px; font-weight: 650; fill: var(--ink); letter-spacing: .03em; }
+.bandfoot { font-size: 11px; fill: var(--ink2); font-family: var(--mono); }
+.bandfoot.cut { fill: var(--ink); font-weight: 650; }
+.pill { fill: var(--ink); stroke: none; }
+.pill-t { font-size: 10.5px; font-weight: 700; fill: var(--surface); letter-spacing: .04em; }
+.colrule { stroke: var(--grid); }
+.edge { fill: none; stroke-width: 1.6; }
+.edge.hit { stroke: transparent; stroke-width: 10; }
+.edge.state { stroke: var(--muted); stroke-width: 1; opacity: .7; }
+.edge.r-read { stroke: var(--r-read); }
+.edge.r-helper { stroke: var(--r-helper); stroke-dasharray: 7 3; }
+.edge.r-source-requirement { stroke-dasharray: 9 3 2 3; }
+.edge.r-need { stroke-dasharray: 4 3; } .edge.r-slot { stroke-dasharray: 1.5 3; }
+.edge.r-text { stroke-dasharray: 8 2 1.5 2; } .edge.r-label-set { stroke-dasharray: 4 2 1 2; }
+.edge.r-grounding { stroke-dasharray: 10 3; }
+.edge.trunk { stroke-width: 3.2; stroke-linecap: round; }
+.edge.eng-other { stroke: var(--ink2); }
+.overlay .edge:not(.hit):not(.lineage):not(.branch) { opacity: var(--fade); }
+.overlay .edge.r-read:not(.hit) { opacity: var(--fade-read); }
+.focus .edge.dim { opacity: .14; }
+.edge.lineage { stroke: var(--cause); stroke-width: 2.6; opacity: 1; stroke-dasharray: none; }
+.edge.branch { stroke: var(--branch); stroke-width: 1.5; opacity: 1; stroke-dasharray: none; }
+.canvas .edge.hov:not(.hit) { opacity: 1 !important; stroke-width: 2.4; }
+.row-path { fill: none; stroke: var(--cause); stroke-width: 1.6; pointer-events: none; }
+.strip-path { fill: var(--cause); }
+.ah { fill: var(--muted); } .ah.r-read { fill: var(--r-read); } .ah.r-helper { fill: var(--r-helper); }
+.ah.eng-other { fill: var(--ink2); } .ah.lineage { fill: var(--cause); } .ah.branch { fill: var(--branch); }
+.wash-value { fill: var(--good); } .wash-Unsure { fill: var(--warning); } .wash-Unasked { fill: var(--neutral); }
+.wash-Unavailable { fill: var(--critical); } .wash-short { fill: var(--warning); }
+.wash-nobounds { fill: var(--neutral); }
+.bar-value { fill: var(--good); } .bar-Unsure { fill: var(--warning); } .bar-Unasked { fill: var(--neutral); }
+.bar-Unavailable { fill: var(--critical); } .bar-short { fill: var(--warning); }
+.ring-Unsure, .ring-short { stroke: var(--ring-warning) !important; stroke-width: 2; }
+.ring-Unavailable { stroke: var(--critical) !important; stroke-width: 2; }
+.ring-absent { stroke-dasharray: 4 3; }
+.icon-bg { stroke: none; } .icon-t { font-size: 9px; font-weight: 700; fill: #fff; text-anchor: middle; }
+.icon-t.dark { fill: #0b0b0b; }
+.absent-ring { fill: none; stroke: var(--ink2); stroke-dasharray: 2 2; }
+.nb-ring { fill: none; stroke: var(--neutral); stroke-width: 1.5; } .nb-dot { fill: var(--neutral); }
+.side-clear { fill: var(--good); stroke: var(--good); } .side-short { fill: var(--warning); stroke: var(--warning); }
+.side-none { fill: var(--ink2); stroke: var(--ink2); }
+.strip-axis { stroke: var(--axis); } .strip-grid { stroke: var(--grid); } .strip-sep { stroke: var(--axis); }
+.strip-bound { stroke: var(--ink); stroke-width: 2; }
+.strip-t { font-size: 11px; fill: var(--ink2); } .strip-l { font-size: 12px; fill: var(--ink); font-family: var(--mono); }
+.strip-b { font-weight: 700; fill: var(--ink); font-family: var(--mono); } .strip-m { fill: var(--ink2); font-size: 11.5px; }
+.strip-row { cursor: pointer; } .strip-row:hover .strip-bg { fill: var(--wash); } .strip-bg { fill: transparent; }
+.strip-row.root .strip-bg { fill: var(--wash); } .strip-row.root .strip-l { font-weight: 700; }
+@keyframes flash { 0% { fill: var(--ring-warning); fill-opacity: .5; } 100% { fill-opacity: 0; } }
+.strip-row.flash .strip-bg { animation: flash 1.4s ease-out; }
 </style>
 </head>
 <body>
-
+<script id="lens-data" type="application/json">__OMMAT_LENS_DATA__</script>
 <div class="wrap">
   <header>
     <div>
-      <h1>ommat Lens</h1>
-      <p class="sub">A design and the turns it ran: what each target, question and rule is linked to, each turn's answers as percentages against the bars that pick them, and the turns side by side. Select any card to trace its lineage.</p>
+      <h1 id="title">ommat lens</h1>
+      <div class="muted" id="subtitle" style="font-size:13px">A design and its turns, drawn from outline JSON alone.</div>
     </div>
-    <div class="controls">
-      <label class="file" for="recFile">Open record…<input id="recFile" type="file" accept=".json,application/json"></label>
-      <label class="file" for="dirFile">Open folder…<input id="dirFile" type="file" webkitdirectory multiple></label>
-      <label class="file" for="desFile">Open design…<input id="desFile" type="file" accept=".json,application/json"></label>
-      <button id="pasteBtn" type="button">Paste JSON</button>
+    <div class="hright">
+      <div class="controls">
+        <label for="setPick" class="k" id="setPickLabel" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink2)">set</label>
+        <select id="setPick"></select>
+        <span id="designPick" class="controls"></span>
+        <button id="prev" title="Previous turn (← or k)">← prev</button>
+        <button id="next" title="Next turn (→ or j)">next →</button>
+        <label class="file" for="fileIn">Open outline JSON…<input id="fileIn" type="file" multiple accept=".json,.jsonl,application/json"></label>
+        <button id="copy" title="Copy a link to this view">copy link</button>
+        <button id="theme" title="Theme: follows the system until you pick">theme: auto</button>
+      </div>
+      <div class="keys"><kbd>←</kbd> <kbd>→</kbd> turns · <kbd>Esc</kbd> design · <kbd>Tab</kbd> nodes</div>
     </div>
   </header>
-
-  <div class="paste" id="pastePanel" hidden>
-    <label class="k" for="pasteRec">Record document (the record's <code>document</code> bytes, or its <code>log</code>)</label>
-    <textarea id="pasteRec" spellcheck="false" placeholder='{"hash": "sha256:…", "log": [ … ], "unhashed": { … }}'></textarea>
-    <label class="k" for="pasteDes">Design document, optional (the loaded design's <code>document</code>)</label>
-    <textarea id="pasteDes" spellcheck="false" placeholder='{"format": 10, "sources": { … }, "rules": { … }, "policy": "d:…"}'></textarea>
-    <div class="row"><button id="pasteGo" type="button">Show this record</button><span class="err" id="pasteErr"></span></div>
+  <div id="notice" class="notice" hidden></div>
+  <section class="panel" id="summary" aria-live="polite"></section>
+  <section class="panel">
+    <div class="skel-head">
+      <h2 id="skelTitle" style="margin:0">Dependency graph</h2>
+      <div class="lgwrap">
+        <div class="legend" id="legend"></div>
+        <button id="glossBtn" class="gloss-btn" aria-expanded="false" aria-controls="gloss" title="Glossary">?</button>
+        <div id="gloss" role="dialog" aria-label="Glossary" hidden></div>
+      </div>
+    </div>
+    <div class="canvas" id="canvas"></div>
+  </section>
+  <div class="grid2">
+    <div class="stack">
+      <section class="panel"><h2>Turns</h2><div id="turns"></div></section>
+      <section class="panel" id="stripsPanel"><h2 id="stripsTitle">Bounds by entry; the root's nearest bound is shaded</h2><div id="strips"></div></section>
+      <section class="panel"><h2 id="textTitle">Text</h2><div class="text" id="text" tabindex="0"></div></section>
+    </div>
+    <div class="stack">
+      <section class="panel detail" id="detail"></section>
+    </div>
   </div>
-
-  <nav class="tabs" id="tabs" aria-label="Views">
-    <button type="button" data-tab="design">Design</button>
-    <button type="button" data-tab="turn" aria-current="page">Turn</button>
-    <button type="button" data-tab="turns">Turns</button>
-    <span class="spacer"></span>
-    <select id="viewMode" aria-label="When a card is selected" title="What a selection does to the cards it does not reach"><option value="filter">Selection filters the rest</option><option value="dim">Selection dims the rest</option></select>
-    <select id="density" aria-label="Card density"><option value="auto">Density: auto</option><option value="full">Density: full</option><option value="compact">Density: compact</option></select>
-    <select id="designPick" aria-label="Design shown" hidden></select>
-    <select id="turnsBy" aria-label="Group turns by" hidden></select>
-  </nav>
-
-  <nav class="pager" id="pager" aria-label="Records" hidden>
-    <button id="prev" type="button">‹ Previous</button>
-    <select id="pick" aria-label="Record in this folder"></select>
-    <span class="v" id="count"></span>
-    <button id="next" type="button">Next ›</button>
-    <span class="meta" id="deckNote"></span>
-  </nav>
-
-  <div class="summary" id="summary"></div>
-  <div class="main" id="mainView">
-    <div class="flow"><div class="cols" id="cols"></div></div>
-    <aside id="lineage" aria-label="Lineage" aria-live="polite"></aside>
-  </div>
-  <div class="tbl-wrap" id="turnsView" hidden></div>
 </div>
-
-<script id="lens-data" type="application/json">__OMMAT_LENS_DATA__</script>
+<div id="tip" hidden></div>
+<div id="drop" hidden>Drop outline JSON to draw it</div>
 <script>
-"use strict";
-const $ = (id) => document.getElementById(id);
-// Any value to escaped text: a hostile record's object or array shows as JSON, never throws.
-const text = (s) => { if (typeof s === "string") return s; try { return typeof s === "object" && s !== null ? JSON.stringify(s) : String(s); } catch (e) { return "?"; } };
-const esc = (s) => text(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const pct = (p) => (typeof p === "number" ? (p * 100).toFixed(p * 100 >= 99.95 || p * 100 < 0.05 ? 0 : 1) + "%" : "–");
-const arr = (x) => (Array.isArray(x) ? x : []);
-const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
-// A component's declared reads and leaves: a function's reads and params; a table's inputs'
-// reads and the leaves its bindings, cells and outputs name.
-// A grounded component's candidate read links to its set's card (§candidate-sets).
-const isCandidateRead = (r) => r === "candidate" || (str(r) && r.startsWith("candidate."));
-const readsOf = (c) => (obj(c).form === "table"
-  ? [...new Set(arr(obj(c).inputs).map((i) => obj(i).read))]
-  : arr(obj(c).reads)).map((r) => (isCandidateRead(r) && str(obj(c).grounded) ? c.grounded : r))
-  .filter((r, i, all) => all.indexOf(r) === i);
-const paramsOf = (c) => {
-  if (obj(c).form !== "table") return obj(c).params;
-  const out = arr(obj(c).inputs).flatMap((i) => Object.values(obj(obj(i).params)));
-  for (const row of arr(obj(c).rows)) {
-    for (const cell of arr(obj(row).cells)) for (const [tag, m] of Object.entries(obj(cell))) {
-      for (const o of tag === "between" ? arr(m) : [m]) if (str(obj(o).param)) out.push(o.param);
-    }
-    if (str(obj(obj(row).output).param)) out.push(row.output.param);
-  }
-  return [...new Set(out)];
-};
-const str = (x) => typeof x === "string";
+'use strict';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]);
+function svg(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) if (attrs[k] !== null && attrs[k] !== undefined) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const enc = v => { const s = JSON.stringify(v); return s === undefined ? String(v) : s; };
+const cut = (s, n) => (s = String(s), s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s);
+const fitChars = (px, size) => Math.max(3, Math.floor(px / (size * 0.6)));
+const REF = /^([qtd]):([^.\[\]]+)/;
+const baseOf = r => { const m = typeof r === 'string' && REF.exec(r); return m ? m[1] + ':' + m[2] : null; };
+const basename = p => String(p || '').split('/').pop();
+const num = x => typeof x === 'number' ? String(+x.toPrecision(6)) : String(x);
 
-// A ref's declared base: prefix and name, without a grounded bracket or a field path.
-function parseRef(ref) {
-  const m = /^([qtd]):([^.[\]]+)/.exec(str(ref) ? ref : "");
-  if (!m) return { base: ref, candidate: null };
-  let rest = ref.slice(m[0].length), candidate = null;
-  if (rest.startsWith("[")) {
-    // The bracket holds a JSON string; read it with a JSON parser, not by searching for ].
-    let i = 1;
-    for (; i < rest.length; i++) { if (rest[i] === "\\") { i++; continue; } if (rest[i] === '"' && i > 1) break; }
-    try { candidate = JSON.parse(rest.slice(1, i + 1)); } catch (e) { candidate = rest.slice(1, i + 1); }
+/* ---------- data ---------- */
+let DATA = {sets: []};
+try {
+  const raw = $('lens-data').textContent.trim();
+  if (raw.startsWith('{')) DATA = JSON.parse(raw);
+} catch (err) { showNotice('The embedded data did not parse: ' + err.message); }
+
+// Every bound of an entry as one row; a thresholds bound gives one row per label.
+function boundRows(e) {
+  const rows = [];
+  for (const b of e.bounds || []) {
+    if (b.per_label) for (const p of b.per_label) rows.push({e, role: b.role, label: `threshold ${p.label}`, by: b.by, param: b.param, bound: p.threshold, measured: p.probability, distance: p.distance, side: p.side, measure: 'p(' + p.label + ')'});
+    else rows.push({e, role: b.role, label: b.role + (b.key ? ' ' + b.key : ''), by: b.by, param: b.param, bound: b.bound, measured: b.measured, distance: b.distance, side: b.side, measure: b.measure});
   }
-  return { base: m[1] + ":" + m[2], candidate };
+  return rows;
+}
+// An entry's mark. A value is determined: the green check when it has bounds and every one is
+// clear, the amber ! when its nearest bound is short, the neutral mark for a question whose
+// paired design declares no bound (`bounds: []`), and no mark (`det`) for any other value: a
+// state field, a tool result, a rule's value, or any value with no design paired. A marker or
+// absence is itself.
+function dispState(e) {
+  if (!e) return null;
+  if (e.holds !== 'value') return e.holds;
+  const rows = boundRows(e);
+  if (rows.some(b => b.side === 'short') || (e.nearest && e.nearest.side === 'short')) return 'short';
+  if (rows.length) return 'value';
+  return /^q:/.test(e.ref) && Array.isArray(e.bounds) && !e.bounds.length ? 'nobounds' : 'det';
+}
+const turnStart = t => { const x = t.outline.turn && t.outline.turn.start; const ms = typeof x === 'string' ? Date.parse(x) : NaN; return isFinite(ms) ? ms : null; };
+// Turns with a start walk in time; the rest follow in file order.
+function turnOrder(turns) {
+  const idx = turns.map((t, i) => i);
+  const dated = idx.filter(i => turnStart(turns[i]) !== null).sort((a, b) => turnStart(turns[a]) - turnStart(turns[b]) || a - b);
+  return dated.concat(idx.filter(i => turnStart(turns[i]) === null));
+}
+const shortOf = (D, ref) => (D && D.short && typeof D.short[ref] === 'string' && D.short[ref]) || ref;
+const hex12 = h => { const m = typeof h === 'string' && /[0-9a-f]{12}/i.exec(h.replace(/^[a-z0-9_-]+:/i, '')); return m ? m[0] : '?'; };
+
+// The lineage is a tree: each item after the first was found from its `from`. Its first branch,
+// as the outline's root_chain, runs from the policy's entry through each next item found from
+// the one before, to the root; the rest are branches.
+const lineage = T => (T && Array.isArray(T.lineage) ? T.lineage : []);
+function mainChain(path) {
+  const c = path.slice(0, 1);
+  for (const h of path.slice(1)) { if (h.from !== c[c.length - 1].ref) break; c.push(h); }
+  return c;
+}
+const rootOf = T => { const c = mainChain(lineage(T)); return c.length ? c[c.length - 1] : null; };
+
+function prepareSet(set) {
+  const all = set.docs || [];
+  const drawable = d => d && d.outline && (d.outline.kind === 'design' || d.outline.kind === 'turn');
+  // The page draws outline version 3 alone; another version is counted and left out.
+  set.other = all.filter(d => drawable(d) && d.outline.outline_version !== 3).length;
+  set.docs = all.filter(d => drawable(d) && d.outline.outline_version === 3);
+  set.designs = set.docs.filter(d => d.outline.kind === 'design');
+  set.turns = set.docs.filter(d => d.outline.kind === 'turn');
+  for (const t of set.turns) {
+    const T = t.outline;
+    // by hash; else a design of the same name in the set, drawn with a notice that the hash differs
+    t.design = set.designs.find(d => d.outline.hash && d.outline.hash === T.design_hash) || null;
+    t.pairBy = t.design ? 'hash' : null;
+    if (!t.design && T.design_name) {
+      t.design = set.designs.find(d => d.outline.name === T.design_name) || null;
+      if (t.design) t.pairBy = 'name';
+    }
+    t.idx = indexTurn(T);
+    t.sum = summarise(T, t.idx);
+  }
+  set.order = turnOrder(set.turns);
+  return set;
 }
 
-let state = null; // the Turn view's graph, from one record
-let dstate = null; // the Design view's graph, from one design document
-let tab = "turn", selected = null, designKey = null, turnsBy = "";
-let designTurn = null; // the record whose design designKey last followed
-let mode = "filter", density = "auto"; // what a selection does to the rest, and card density
-const openCols = new Set(); // the columns whose folded cards the reader opened
-const TOP_LABELS = 2; // labels shown before the rest fold into "Other": the leader and runner-up
-const known = new Map(); // every design the page holds: key (its hash, or "opened") -> {doc, name}
-const addKnown = (key, doc) => { if (!known.has(key) || key === "opened") known.set(key, { doc, name: `${text(obj(doc).name ?? "unnamed")} · ${key.startsWith("sha256:") ? key.slice(7, 15) + "…" : key}` }); };
-const keyOf = (doc) => { for (const [k, v] of known) if (v.doc === doc) return k; addKnown("opened", doc); return "opened"; };
-
-function build(record, design) {
-  const log = Array.isArray(record) ? record : obj(record).log;
-  if (!Array.isArray(log)) throw new Error("The record has no log: give the record document or its log.");
-  design = design ? obj(design) : null;
-  const items = log.map((it, idx) => [idx, it]).filter(([, it]) => it && typeof it === "object" && str(it.item));
-  const unhashed = obj(!Array.isArray(record) && record.unhashed);
-  const settings = obj((items.find(([, i]) => i.item === "settings") || [])[1]);
-  const providers = obj(settings.providers);
-  const grounded = obj(settings.grounded);
-  const entries = new Map(), calls = new Map(), rounds = new Map();
-  const policy = str(settings.policy) ? settings.policy : null; // the decision's ref, from format 8
-  const col = (n) => { const k = Number.isInteger(n) ? n : "?"; if (!rounds.has(k)) rounds.set(k, { calls: [], entries: [] }); return rounds.get(k); };
-  for (const [idx, it] of items) {
-    if (it.item === "entry" && str(it.ref) && !entries.has(it.ref)) { entries.set(it.ref, { ...it, idx }); if (it.ref !== policy) col(it.round).entries.push(it.ref); }
-    else if (it.item === "call") { calls.set(idx, { ...it, idx }); col(it.round).calls.push(idx); }
+function indexTurn(T) {
+  const byRef = new Map(), byBase = new Map(), all = [];
+  for (const r of T.rounds || []) for (const e of r.entries || []) {
+    all.push(e); byRef.set(e.ref, e);
+    const b = baseOf(e.ref);
+    if (b) { if (!byBase.has(b)) byBase.set(b, []); byBase.get(b).push(e); }
   }
-  const decision = policy ? entries.get(policy) || null : null; // the policy's entry
-  const byBase = new Map();
-  for (const r of entries.keys()) { const b = parseRef(r).base; if (!byBase.has(b)) byBase.set(b, []); byBase.get(b).push(r); }
-
-  // Node ids: "e:<ref>" for an entry, the decision's too, "c:<index>" for a call.
-  const inputs = new Map(); // node -> Map(from -> {node, how, src})
-  const add = (node, from, how, src) => {
-    if (!from || from === node) return;
-    if (!inputs.has(node)) inputs.set(node, new Map());
-    if (!inputs.get(node).has(from)) inputs.get(node).set(from, { node: from, how, src });
-  };
-  // A ref read, as the nodes holding it: its entry, or each grounded entry of a declared ref.
-  const nodesOf = (ref) => {
-    if (!str(ref)) return [];
-    if (entries.has(ref)) return ["e:" + ref];
-    const { base, candidate } = parseRef(ref);
-    // A grounded ref with a field path reads its own candidate's entry.
-    if (str(candidate) && entries.has(base + "[" + JSON.stringify(candidate) + "]")) return ["e:" + base + "[" + JSON.stringify(candidate) + "]"];
-    if (entries.has(base)) return ["e:" + base];
-    return (byBase.get(base) || []).map((r) => "e:" + r);
-  };
-  const link = (node, refs, how, src) => { for (const r of arr(refs)) for (const n of nodesOf(r)) add(node, n, how, src); };
-  const sources = obj(design && design.sources), rules = obj(design && design.rules);
-  const sourceInputs = (sid) => {
-    const s = obj(sources[sid]);
-    const refs = [...arr(s.needs)];
-    for (const q of Object.values(obj(s.provides))) {
-      const qq = obj(q);
-      for (const slot of arr(obj(qq.wording).slots)) if (str(obj(obj(slot).origin).ref)) refs.push(slot.origin.ref);
-      if (str(obj(qq.text).ref)) refs.push(qq.text.ref);
-      if (str(obj(qq.reference_date).ref)) refs.push(qq.reference_date.ref);
-      if (qq.labels && typeof qq.labels === "object" && !Array.isArray(qq.labels) && str(qq.labels.candidates)) refs.push(qq.labels.candidates);
-    }
-    if (str(s.grounded)) refs.push(s.grounded);
-    return refs;
-  };
-  for (const [ref, e] of entries) {
-    const node = "e:" + ref;
-    const { base, candidate } = parseRef(ref);
-    // A grounded entry reads its own candidate's entry of a declared ref its cause names.
-    const own = (refs) => arr(refs).map((r) => {
-      if (candidate == null || !str(r) || parseRef(r).candidate != null) return r;
-      const g = parseRef(r).base + "[" + JSON.stringify(candidate) + "]";
-      return entries.has(g) ? g : r;
-    });
-    if (calls.has(e.call)) add(node, "c:" + e.call, "asked in this call", "record");
-    if (Object.hasOwn(grounded, base) && str(grounded[base])) link(node, [grounded[base]], "its candidate set", "record");
-    for (const d of arr(e.derivation)) link(node, own(obj(d).refs), "helper " + obj(d).helper, "record");
-    link(node, own(obj(obj(e.marker).cause).refs), "named in its marker's cause", "record");
-    const provider = Object.hasOwn(providers, base) ? providers[base] : undefined;
-    if (ref.startsWith("d:") && str(provider) && Object.hasOwn(rules, provider)) link(node, own(readsOf(rules[provider])), "rule " + provider + " reads it", "design");
-  }
-  for (const [idx, c] of calls) {
-    link("c:" + idx, obj(obj(c.outcome).failed).refs, "named in its failure", "record");
-    for (const sid of arr(c.sources)) {
-      if (!str(sid) || !Object.hasOwn(sources, sid)) continue;
-      link("c:" + idx, sourceInputs(sid), "source " + sid + " needs it", "design");
-      link("c:" + idx, [obj(obj(sources[sid]).requirement).ref], "source " + sid + " is gated on it", "design");
-    }
-  }
-  const outputs = new Map();
-  for (const [node, ins] of inputs) for (const i of ins.values()) {
-    if (!outputs.has(i.node)) outputs.set(i.node, []);
-    outputs.get(i.node).push({ node, how: i.how, src: i.src });
-  }
-  const flat = new Map([...inputs].map(([k, v]) => [k, [...v.values()]]));
-  const label = (node) => node.startsWith("c:") ? "call · " + arr(obj(calls.get(+node.slice(2))).sources).join(", ") : node.slice(2);
-  return { kind: "turn", log, unhashed, settings, providers, grounded, entries, calls, policy, decision, rounds, inputs: flat, outputs, design, record, byBase, label };
+  return {byRef, byBase, all, absent: new Set(T.absent || [])};
 }
-
-// A design document alone, as a graph of declared links. Node ids: "e:<ref>" for a ref a source or
-// rule provides and for t:state, "g:<id>" a target, "p:<path>" a parameter. An "e:" id is the Turn
-// view's id for the same thing; the policy is its rule's.
-function buildDesign(doc) {
-  const design = obj(doc);
-  const sources = obj(design.sources), rules = obj(design.rules);
-  const params = obj(design.parameters), targets = obj(design.targets);
-  const nodes = new Map([["e:t:state", { kind: "state" }]]);
-  for (const [sid, s] of Object.entries(sources)) for (const [ref, q] of Object.entries(obj(obj(s).provides))) nodes.set("e:" + ref, { kind: ref.startsWith("q:") ? "question" : "tool", sid, q: obj(q) });
-  for (const [rid, r] of Object.entries(rules)) if (str(obj(r).provides)) nodes.set("e:" + r.provides, { kind: "rule", rid, r: obj(r) });
-  for (const [id, tg] of Object.entries(targets)) nodes.set("g:" + id, { kind: "target", id, t: obj(tg) });
-  for (const [path, p] of Object.entries(params)) nodes.set("p:" + path, { kind: "param", path, p: obj(p) });
-
-  const inputs = new Map();
-  const add = (node, from, how) => {
-    if (!from || from === node || !nodes.has(from)) return;
-    if (!inputs.has(node)) inputs.set(node, new Map());
-    if (!inputs.get(node).has(from)) inputs.get(node).set(from, { node: from, how, src: "design" });
-  };
-  const nodeOf = (ref) => (str(ref) ? "e:" + parseRef(ref).base : null);
-  const link = (node, refs, how) => { for (const r of arr(refs)) add(node, nodeOf(r), how); };
-  const linkParams = (node, paths, how) => { for (const p of arr(paths)) if (str(p)) add(node, "p:" + p, how); };
-  const boundaryPaths = (field) => Object.values(obj(field)).flatMap((e) => Array.isArray(e) ? e
-    : [...["bar", "thresholds", "margin", "null", "confidence", "value"].flatMap((k) => arr(obj(e)[k])), ...arr(obj(e).mass).flatMap((m) => arr(obj(m).bounds))]);
-  for (const [sid, s0] of Object.entries(sources)) {
-    const s = obj(s0);
-    for (const [ref, q0] of Object.entries(obj(s.provides))) {
-      const node = "e:" + ref, q = obj(q0);
-      link(node, s.needs, "source " + sid + " needs it");
-      for (const slot of arr(obj(q.wording).slots)) {
-        const o = obj(obj(slot).origin);
-        if (str(o.ref)) link(node, [o.ref], "a slot of its wording");
-        if (str(o.param)) linkParams(node, [o.param], "a slot of its wording");
-      }
-      link(node, [obj(q.text).ref, obj(q.reference_date).ref], "the text it reads");
-      if (str(s.grounded)) link(node, [s.grounded], "its candidate set");
-      if (q.labels && typeof q.labels === "object" && !Array.isArray(q.labels)) link(node, [q.labels.candidates], "its candidate-valued labels");
-      link(node, [obj(s.requirement).ref], "source " + sid + " is gated on it");
-    }
-  }
-  for (const [rid, r0] of Object.entries(rules)) {
-    const r = obj(r0);
-    if (!str(r.provides)) continue;
-    const node = "e:" + r.provides;
-    link(node, readsOf(r), "rule " + rid + " reads it");
-    linkParams(node, paramsOf(r), "rule " + rid + " reads it");
-    linkParams(node, boundaryPaths(r.boundaries), "a declared boundary");
-    if (str(r.grounded)) link(node, [r.grounded], "its candidate set");
-  }
-
-  const outputs = new Map();
-  for (const [node, ins] of inputs) for (const i of ins.values()) {
-    if (!outputs.has(i.node)) outputs.set(i.node, []);
-    outputs.get(i.node).push({ node, how: i.how, src: "design" });
-  }
-  const label = (node) => node.startsWith("g:") ? node.slice(2) : node.startsWith("p:") ? "parameter " + node.slice(2) : node.slice(2);
-  return { kind: "design", design, nodes, inputs: new Map([...inputs].map(([k, v]) => [k, [...v.values()]])), outputs, label, links: targetLinks(design) };
+const SEV = {Unavailable: 4, Unsure: 3, Unasked: 2, short: 1.5, value: 1, nobounds: 1, det: 1, absent: 0};
+function entriesFor(idx, ref) {
+  if (idx.byRef.has(ref)) return [idx.byRef.get(ref)];
+  return idx.byBase.get(ref) || idx.byBase.get(baseOf(ref)) || []; // a state field reads the t:state entry
 }
-
-// Per target id, the declared links: the questions asking about it, those bearing on it with a
-// role, and the rules estimating it. A missing link is undeclared, never "unrelated".
-function targetLinks(design) {
-  const asks = new Map(), bears = new Map(), est = new Map();
-  const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
-  for (const s of Object.values(obj(obj(design).sources))) for (const [ref, q] of Object.entries(obj(obj(s).provides))) {
-    if (!ref.startsWith("q:")) continue;
-    if (str(obj(q).target)) push(asks, q.target, ref);
-    for (const l of arr(obj(q).latent_targets)) if (str(obj(l).target)) push(bears, l.target, { ref, role: obj(l).role });
-  }
-  for (const r of Object.values(obj(obj(design).rules))) if (str(obj(r).target) && str(obj(r).provides)) push(est, r.target, r.provides);
-  return { asks, bears, est };
-}
-
-// The targets a design declares for one declared ref: a question's own and latent ones, a rule's
-// own; null for a ref that takes none (the state, a tool result) or that the design lacks.
-function targetsOf(design, base) {
-  for (const s of Object.values(obj(obj(design).sources))) {
-    const provides = obj(obj(s).provides);
-    if (!Object.hasOwn(provides, base)) continue;
-    if (!base.startsWith("q:")) return null;
-    const q = obj(provides[base]);
-    return { rule: false, target: str(q.target) ? q.target : null, latent: arr(q.latent_targets).map(obj) };
-  }
-  for (const r of Object.values(obj(obj(design).rules))) if (obj(r).provides === base) return { rule: true, target: str(r.target) ? r.target : null, latent: [] };
+function stateFor(idx, ref) {
+  const es = entriesFor(idx, ref);
+  if (es.length) return es.map(dispState).reduce((a, s) => (SEV[s] > SEV[a] ? s : a));
+  if (idx.absent.has(ref)) return 'absent';
   return null;
 }
 
-function targetHtml(t) {
-  if (!t) return "";
-  if (!t.target && !t.latent.length) return `<span class="none">no target declared</span>`;
-  return [t.target ? `<span class="tg">${t.rule ? "estimates" : "asks"} ${esc(t.target)}</span>` : "",
-    ...t.latent.map((l) => `<span class="tg">bears on ${esc(l.target)} (${esc(l.role)})</span>`)].join("");
-}
-
-// The values a design's boundaries fields name for one read, by role, each [path, value], a plain
-// read's also with the key it bounds, field path included; a path two components name is shown
-// once. Null when no field names the read.
-function boundsOf(design, base) {
-  const params = obj(obj(design).parameters);
-  const out = { bar: [], thresholds: [], margin: [], null: [], confidence: [], value: [], plain: [], mass: [] };
-  const seen = new Set();
-  const put = (role, p, key) => { if (str(p) && !seen.has(role + " " + key + " " + p)) { seen.add(role + " " + key + " " + p); out[role].push([p, Object.hasOwn(params, p) ? obj(params[p]).value : undefined, key]); } };
-  let any = false;
-  const fields = Object.values(obj(obj(design).rules)).map((r) => obj(r).boundaries);
-  for (const f of fields) for (const [key, entry] of Object.entries(obj(f))) {
-    if (parseRef(key).base !== base) continue;
-    any = true;
-    if (Array.isArray(entry)) { for (const p of entry) put("plain", p, key); continue; }
-    for (const role of ["bar", "thresholds", "margin", "null", "confidence", "value"]) for (const p of arr(obj(entry)[role])) put(role, p, key);
-    for (const m of arr(obj(entry).mass)) out.mass.push({ labels: arr(obj(m).labels), bounds: arr(obj(m).bounds).map((p) => [p, Object.hasOwn(params, p) ? obj(params[p]).value : undefined]) });
+function summarise(T, idx) {
+  const markers = {};
+  // Bounds are counted by side; the one nearest bound is picked as the outline's summary picks it.
+  const sides = {short: 0, clear: 0}, shortBy = {};
+  let nbounds = 0;
+  for (const e of idx.all) {
+    if (e.marker) markers[e.marker.kind] = (markers[e.marker.kind] || 0) + 1;
+    for (const b of boundRows(e)) {
+      nbounds++;
+      if (b.side in sides) sides[b.side]++;
+      if (b.side === 'short') shortBy[e.ref] = (shortBy[e.ref] || 0) + 1;
+    }
   }
-  return any ? out : null;
+  const rounds = (T.rounds || []).filter(r => r.round > 0).length;
+  let decision, dkind;
+  if (T.decision) {
+    dkind = T.decision.holds === 'value' ? 'decided' : T.decision.holds;
+    decision = T.decision.holds === 'value' ? enc(T.decision.value) : 'undecided: ' + T.decision.marker.kind + ' ' + T.decision.marker.cause.code;
+  } else { dkind = 'none'; decision = T.cause ? 'no decision: cause ' + T.cause.code : 'no decision'; }
+  if (!DI[dkind]) dkind = 'Unsure';
+  const pick = nearestPick(T, idx);
+  return {markers, sides, nbounds, pick, nearAbs: pick && typeof pick.distance === 'number' ? Math.abs(pick.distance) : null, shortBy, rounds, decision, dkind, root: rootOf(T)};
 }
-const num = (x) => typeof x === "number" && Number.isFinite(x);
+// The one nearest bound, as the outline's summary picks it: the nearest of the lineage's first
+// branch, else of the lineage, else of all; joined to the entry's bound for the tick and dot.
+function nearestPick(T, idx) {
+  const measured = (T.nearest_bounds || []).filter(m => typeof m.distance === 'number');
+  const chain = new Set(mainChain(lineage(T)).map(p => p.ref));
+  const m = measured.find(x => chain.has(x.ref)) || measured.find(x => x.on_lineage) || measured[0];
+  if (!m) return null;
+  const e = idx.byRef.get(m.ref) || {ref: m.ref};
+  const cands = e.bounds ? boundRows(e).filter(r => r.param === m.param && r.role === m.role) : [];
+  const r = cands.find(r => r.distance === m.distance) || cands[0];
+  return Object.assign(r ? Object.assign({}, r) : {e, role: m.role, label: m.role, param: m.param, bound: null, measured: null, measure: '?'}, {distance: m.distance, side: m.side, by: m.by});
+}
+// The decision's icon: decided, undecided by its marker's kind, or no decision (an unfinished turn).
+const DI = {decided: ['✓', 'decided'], Unsure: ['?', 'undecided: Unsure'], Unavailable: ['✕', 'undecided: Unavailable'], Unasked: ['–', 'undecided: Unasked'], none: ['⊘', 'no decision']};
+const decIcon = k => `<span class="di ${esc(k)}" role="img" aria-label="${esc(DI[k][1])}" title="${esc(DI[k][1])}">${DI[k][0]}</span>`;
 
-// A difference or sum of probabilities without float noise: 0.6 - 0.4 is 0.2.
-const exact = (x) => Number(x.toPrecision(12));
-// A percentage, with three decimals when it lies within rounding of a bound it is judged against.
-const pctNear = (x, bounds) => (bounds.some((b) => num(b) && Math.abs(x - b) < 0.0005) ? (x * 100).toFixed(3) + "%" : pct(x));
-// A probability as a percentage; any other bound, a count or an age, as the number it is.
-const amount = (x) => (num(x) ? String(x) : x === undefined ? "–" : JSON.stringify(x) ?? "–");
+// The why line: the text form's `why  …` line when the text is embedded, else composed as the
+// text form composes it from the decision, the lineage's first branch and the root's nearest bound.
+function whyText(doc) {
+  const m = doc.text && /^why {2}(.*)$/m.exec(doc.text);
+  if (m) return m[1];
+  const T = doc.outline, d = T.decision;
+  if (!d) return 'no decision: ' + (T.policy == null ? 'the record holds no policy' : 'no entry at ' + T.policy);
+  if (d.holds === 'value') return `decided ${cut(enc(d.value), 60)} by ${d.ref}`;
+  const chain = mainChain(lineage(T));
+  const byIndex = new Map(doc.idx.all.map(e => [e.index, e]));
+  let text = chain.map(p => `${p.ref} ${briefFull(byIndex.get(p.index))}`).join(' <- ');
+  const root = chain.length ? chain[chain.length - 1].ref : '-';
+  const rootEntry = chain.length ? byIndex.get(chain[chain.length - 1].index) : null;
+  if (rootEntry && Array.isArray(rootEntry.bounds) && !rootEntry.bounds.length) text += ` no bound declared (${rootEntry.bounds_reason})`;
+  else if (rootEntry && rootEntry.bounds == null) text += ' (no design paired)';
+  const near = (T.nearest_bounds || []).find(x => x.ref === root && typeof x.distance === 'number');
+  if (near) {
+    // the distance as the ordered encoding writes it; the tie count is the first nearest bound's, shown only when this bound lies as near
+    const first = (T.nearest_bounds || []).find(x => typeof x.distance === 'number');
+    text += ` ${near.side || 'distance'} ${near.param} by ${String(Math.abs(near.distance))}`;
+    if ((T.ties || 0) > 1 && first && Math.abs(first.distance) === Math.abs(near.distance)) text += ` (tied with ${T.ties - 1} ${T.ties === 2 ? 'other' : 'others'})`;
+  }
+  const defect = T.escalation ? (T.escalation.defect ? 'yes' : 'no') : '-';
+  return `undecided: ${text} (root ${root}, defect ${defect})`;
+}
+function briefFull(e) {
+  if (!e) return '-';
+  if (e.holds !== 'value') return e.marker ? e.marker.kind + ' ' + e.marker.cause.code : e.holds;
+  const v = e.value;
+  if (v && typeof v === 'object' && v.probabilities) {
+    let top = null; for (const k in v.probabilities) if (top === null || v.probabilities[k] > v.probabilities[top]) top = k;
+    return top === null ? enc(v) : top + ' ' + num(v.probabilities[top]);
+  }
+  return cut(enc(v && typeof v === 'object' && v.kind === 'extraction' ? v.value : v), 60);
+}
 
-function reach(map, start) {
-  const seen = new Set(), stack = [start];
-  while (stack.length) for (const x of map.get(stack.pop()) || []) if (!seen.has(x.node)) { seen.add(x.node); stack.push(x.node); }
-  seen.delete(start); // a cycle leads back to it
+/* ---------- state ---------- */
+const S = {set: 0, design: 0, turn: null, node: null, stateEdges: false, sort: null, dir: 1, undecidedOnly: false};
+const sets = (DATA.sets || []).map(prepareSet);
+let theme = 'auto';
+try { theme = localStorage.getItem('ommat-lens-theme') || 'auto'; } catch (e) { /* storage blocked */ }
+applyTheme();
+function cur() { return sets[S.set] || {designs: [], turns: [], docs: [], order: []}; }
+function curTurn() { const s = cur(); return S.turn === null ? null : s.turns[S.turn] || null; }
+function curDesign() {
+  const t = curTurn();
+  if (t) return t.design ? t.design.outline : null;
+  const d = cur().designs[S.design];
+  return d ? d.outline : null;
+}
+
+/* ---------- skeleton layout ---------- */
+const HEAD = 40, ROW = 19, ROW2 = 34, PADB = 7, GAP = 18, TOP = 46, LEFT = 18;
+const BAND_PAD = 8, BAND_GAP = 18, FOOT = 36, NARROW = 160; // band padding, the extra gap between bands, the turn's footer, a state-only column's width
+const estW = (s, size) => String(s).length * size * 0.6;
+function nodeRows(n, D) {
+  // the outline's short label when it gives one; a source's own name is not repeated inside its box
+  return nodeRows0(n).map(r => {
+    let sh = D && D.short && D.short[r.ref];
+    if (typeof sh !== 'string') return r;
+    if (n.kind === 'source' && sh.startsWith(n.name + '/')) sh = sh.slice(n.name.length + 1);
+    r.label = (r.kind === 'value' ? '→ ' : '') + sh; return r;
+  });
+}
+function nodeRows0(n) {
+  if (n.kind === 'state') {
+    const f = n.type && n.type.fields;
+    if (f && f.length) return f.map(x => ({ref: 't:state.' + x.name, label: '.' + x.name, kind: 'field', type: x.type && x.type.text}));
+    return [{ref: 't:state', label: n.type ? n.type.text : 'state', kind: 'field', type: null}];
+  }
+  if (n.kind === 'source') {
+    const strip = r => { let s = r.replace(/^[qt]:/, ''); return s.startsWith(n.name + '/') ? s.slice(n.name.length + 1) : s; };
+    return (n.questions || []).map(q => ({ref: q.ref, label: strip(q.ref), kind: q.kind, q, type: q.kind}))
+      .concat((n.tool_results || []).map(t => ({ref: t.ref, label: strip(t.ref), kind: 'tool', t, type: t.type && t.type.text})));
+  }
+  const p = n.provides || (n.refs || [])[0] || n.name;
+  return [{ref: p, label: '→ ' + p, kind: 'value', type: n.outputs && n.outputs.text}];
+}
+
+// A target with fan_in >= 4 and two or more incoming dependency edges takes them as one trunk.
+const BUNDLE_FAN_IN = 4, BUNDLE_GAP = 44;
+function bundledTargets(D) {
+  const dep = new Map();
+  for (const e of D.edges || []) if (e.dependency && e.role !== 'slot') dep.set(e.to, (dep.get(e.to) || 0) + 1);
+  return new Set((D.nodes || []).filter(n => (n.fan_in || 0) >= BUNDLE_FAN_IN && (dep.get(n.id) || 0) >= 2).map(n => n.id));
+}
+// Column and row from `layout.nodes`; each column is one (round, wavefront) of `layout.columns`.
+function placement(D) {
+  const at = (D.layout && D.layout.nodes) || {};
+  return (D.nodes || []).map((n, i) => { const p = at[n.id] || {}; return {n, i, col: typeof p.col === 'number' ? p.col : 0, row: typeof p.row === 'number' ? p.row : 1e6 + i}; })
+    .sort((a, b) => a.col - b.col || a.row - b.row || a.i - b.i);
+}
+// A sub-column's head; the band above it names the round.
+const subHead = (c, short) => c.wavefront ? (short ? 'w' : 'wavefront ') + c.wavefront : (c.kinds || []).includes('state') ? 'state' : 'sources';
+// What the design says about targets: a question that asks or bears on one, a rule that estimates one.
+function targetTags(D) {
+  const m = new Map(), put = (k, x) => { if (!m.has(k)) m.set(k, []); m.get(k).push(x); };
+  for (const n of D.nodes || []) {
+    for (const q of n.questions || []) {
+      if (typeof q.target === 'string' && q.target) put(q.ref, {target: q.target, how: 'asks', role: 'asked'});
+      for (const l of q.latent_targets || []) if (typeof l.target === 'string') put(q.ref, {target: l.target, how: 'bears on', role: l.role});
+    }
+    if (n.kind === 'rule' && typeof n.target === 'string' && n.target) put(n.id, {target: n.target, how: 'estimates', role: 'estimated'});
+  }
+  return m;
+}
+const tagText = x => x.target; // the target's id, `tg:urgent`; how and the role are on hover
+const tagW = x => estW(tagText(x), 10.5) + 8;
+const tagTip = x => `${x.how} ${x.target}${x.role ? '\nrole: ' + x.role : ''}`;
+function drawTag(g, x, cy, t) {
+  const tg = svg('g', {}, g);
+  svg('rect', {x, y: cy - 7, width: tagW(t), height: 14, rx: 3, class: 'tgbox'}, tg);
+  svg('text', {x: x + 4, y: cy + 3.6, class: 'tgtag'}, tg, tagText(t));
+  return tip(tg, () => tagTip(t));
+}
+const ROOT_W = 36;
+// One row's content: its entries, mark, text and tags. The layout reads it to know whether a
+// marker's reason needs a second line, and the drawing reads it again.
+function rowModel(n, r, ctx) {
+  const T = ctx && ctx.T, idx = ctx && ctx.idx;
+  const es = T ? entriesFor(idx, r.ref) : [], st = T ? stateFor(idx, r.ref) : null, e = es[0];
+  let text = '', strong = false, val = null;
+  if (T) {
+    if (r.kind === 'field' && e && e.holds === 'value') { // the field's type, as the design view shows it; its value on hover
+      const f = r.ref.split('.').slice(1);
+      let v = e.value; for (const k of f) v = v && typeof v === 'object' ? v[k] : undefined;
+      text = r.type || '';
+      val = v === undefined ? null : enc(v);
+    } else text = st === 'absent' ? 'absent' : es.length > 1 ? es.length + ' entries' : brief(e);
+    if (n.policy && e && e.rows && e.rows.length) text += ' row ' + e.rows.join(',');
+    strong = n.policy;
+  } else text = r.kind === 'value' || r.kind === 'field' || r.kind === 'tool' ? (r.type || '') : '';
+  const tags = n.kind === 'source' && ctx && ctx.tags ? ctx.tags.get(r.ref) || [] : [];
+  const isRoot = !!(ctx && ctx.root && (r.ref === ctx.root || es.some(x => x.ref === ctx.root)));
+  return {es, e, st, text, strong, tags, isRoot, val, marker: !!st && SEV[st] >= 2};
+}
+// A row takes a second line when its label, tags and text do not fit on one: a marker's reason in
+// full, or any other text's first 48px (a value is cut before the label is).
+const TEXT_MIN = 48;
+function rowNeedsTwo(r, m, w) {
+  if (!m.text) return false;
+  const label = r.kind === 'value' ? '→' : r.label;
+  const need = (r.kind !== 'value' ? 24 : 10) + estW(label, 12) + m.tags.reduce((a, x) => a + tagW(x) + 4, 0) + (m.isRoot ? ROOT_W : 0)
+    + 10 + (m.marker ? estW(m.text, 11.5) : Math.min(TEXT_MIN, estW(m.text, 11.5))) + (m.st ? 15 : 0) + (m.e && m.e.nearest ? 10 : 0) + 8;
+  return need > w;
+}
+function layout(D, availW, foot, ctx) {
+  const placed = placement(D);
+  const LC = (D.layout && Array.isArray(D.layout.columns)) ? D.layout.columns : [];
+  const ncol = Math.max(1, LC.length, ...placed.map(p => p.col + 1));
+  const meta = c => LC[c] || {round: 0, wavefront: 0, kinds: []};
+  // the column gap narrows as columns grow; a new round adds the band gap, and a bundled target its trunk room
+  const base = ncol <= 3 ? 46 : ncol === 4 ? 40 : ncol === 5 ? 32 : 26;
+  const bundled = bundledTargets(D);
+  const gaps = new Array(ncol).fill(0);
+  for (let c = 1; c < ncol; c++) gaps[c] = base + (meta(c).round !== meta(c - 1).round ? BAND_GAP : 0) + (placed.some(p => p.col === c && bundled.has(p.n.id)) ? BUNDLE_GAP : 0);
+  const sumGaps = gaps.reduce((a, b) => a + b, 0);
+  // a column holding only the state is narrower, so round 0's band hugs its node
+  const narrow = [...Array(ncol).keys()].map(c => { const ps = placed.filter(p => p.col === c); return ps.length > 0 && ps.every(p => p.n.kind === 'state'); });
+  const nN = narrow.filter(Boolean).length;
+  const nodeW = ncol > nN ? Math.max(132, Math.min(260, Math.floor((availW - 2 * LEFT - sumGaps - nN * NARROW) / (ncol - nN)))) : NARROW;
+  const colW = narrow.map(x => (x ? Math.min(NARROW, nodeW) : nodeW));
+  const colX = [];
+  for (let c = 0, x = LEFT; c < ncol; c++) { x += gaps[c]; colX.push(x); x += colW[c]; }
+  const colY = new Array(ncol).fill(TOP + 8);
+  const L = {nodeW, ncol, gaps, bundled, nodes: new Map(), cols: colX.map((x, c) => Object.assign({x, w: colW[c]}, meta(c))), bands: []};
+  for (const c of L.cols) {
+    const B = L.bands[L.bands.length - 1];
+    if (B && B.round === c.round) { B.x1 = c.x + c.w; B.cols.push(c); }
+    else L.bands.push({round: c.round, x0: c.x, x1: c.x + c.w, cols: [c]});
+  }
+  for (const {n, col: w} of placed) {
+    const rows = nodeRows(n, D), bw = colW[w];
+    const box = {n, c: w, x: colX[w], y: colY[w], w: bw, rows, gapL: gaps[w], ports: new Map()};
+    let y = box.y + HEAD;
+    for (const r of rows) { r.m = rowModel(n, r, ctx); r.h = rowNeedsTwo(r, r.m, bw) ? ROW2 : ROW; r.y = y; y += r.h; box.ports.set(r.ref, r.y + ROW / 2); }
+    box.h = y - box.y + PADB;
+    for (const ref of n.refs || []) if (!box.ports.has(ref)) box.ports.set(ref, box.y + HEAD / 2);
+    colY[w] = box.y + box.h + GAP;
+    L.nodes.set(n.id, box);
+  }
+  L.W = colX[ncol - 1] + colW[ncol - 1] + LEFT;
+  L.body = Math.max(...colY) + 2;
+  L.H = L.body + (foot ? FOOT : 4);
+  return L;
+}
+// The selected turn's round item under its band: its cost, and the deadline only when it cut.
+function roundFoot(T, r) {
+  const R = (T.rounds || []).find(x => x.round === r);
+  if (!R) return r === 0 ? [] : ['not reached'];
+  const out = [];
+  if (R.cost != null) out.push('cost ' + num(R.cost));
+  if (R.deadline) out.push('deadline yes: cut');
+  return out;
+}
+function drawBands(root, L, H, T) {
+  for (const B of L.bands) {
+    svg('rect', {x: B.x0 - BAND_PAD, y: 2, width: B.x1 - B.x0 + 2 * BAND_PAD, height: H - 4, rx: 8, class: 'band'}, root);
+    tip(svg('text', {x: B.x0, y: 17, class: 'bandhead'}, root, 'round ' + B.round),
+      () => B.round === 0 ? 'round 0: no source phase; the state, and the rules reachable from it alone' : `round ${B.round}: its source phase, then its rule wavefronts`);
+    for (const c of B.cols) {
+      const tt = svg('text', {x: c.x, y: 34, class: 'colhead'}, root, subHead(c, c.w < 150));
+      tip(tt, () => `round ${c.round}, wavefront ${c.wavefront}: ${(c.kinds || []).join(', ') || 'empty'}`);
+      svg('line', {x1: c.x, y1: 39, x2: c.x + c.w, y2: 39, class: 'colrule'}, root);
+    }
+    if (T) roundFoot(T, B.round).forEach((line, i) => svg('text', {x: B.x0, y: H - FOOT + 10 + i * 14, class: 'bandfoot' + (line.startsWith('deadline yes') ? ' cut' : '')}, root, line));
+  }
+}
+function portOut(box, ref) {
+  if (!box) return null;
+  let r = ref;
+  while (r) {
+    if (box.ports.has(r)) return box.ports.get(r);
+    const cut1 = Math.max(r.lastIndexOf('.'), r.lastIndexOf('['), r.lastIndexOf('/'));
+    if (cut1 <= 2) break;
+    r = r.slice(0, cut1);
+  }
+  const b = baseOf(ref);
+  if (b && box.ports.has(b)) return box.ports.get(b);
+  return box.y + HEAD / 2;
+}
+
+/* ---------- channel routing ---------- */
+// An edge leaves its row to the right and runs up or down a vertical track in the gutter after its
+// column. When columns lie between, it crosses them along a lane that is free of boxes in every one
+// of them (between two boxes, or under them all), then runs down a track in the gutter before its
+// target and enters it. Vertical runs live only in gutters, so no edge crosses a box. A wire whose
+// target sits in its own column or to its left enters the target from the right. A bundled wire
+// ends at its trunk's merge point, inside the gutter before the target column.
+const r1 = v => Math.round(v * 10) / 10;
+function roundPath(p, rad) {
+  const q = p.filter((pt, i) => i === 0 || Math.abs(pt[0] - p[i - 1][0]) + Math.abs(pt[1] - p[i - 1][1]) > 0.5);
+  let d = `M${r1(q[0][0])},${r1(q[0][1])}`;
+  for (let i = 1; i < q.length - 1; i++) {
+    const [x0, y0] = q[i - 1], [x1, y1] = q[i], [x2, y2] = q[i + 1];
+    const l1 = Math.hypot(x1 - x0, y1 - y0), l2 = Math.hypot(x2 - x1, y2 - y1), k = Math.min(rad, l1 / 2, l2 / 2);
+    if (k < 0.5) { d += ` L${r1(x1)},${r1(y1)}`; continue; }
+    d += ` L${r1(x1 - (x1 - x0) / l1 * k)},${r1(y1 - (y1 - y0) / l1 * k)} Q${r1(x1)},${r1(y1)} ${r1(x1 + (x2 - x1) / l2 * k)},${r1(y1 + (y2 - y1) / l2 * k)}`;
+  }
+  const z = q[q.length - 1];
+  return d + ` L${r1(z[0])},${r1(z[1])}`;
+}
+function route(L, wires) {
+  const cols = L.cols, n = cols.length, FREE_TOP = 42;
+  const gut = g => {
+    const left = g === 0 ? cols[0].x - 14 : cols[g - 1].x + cols[g - 1].w;
+    return {left, right: g === n ? left + 30 : cols[g].x};
+  };
+  const occ = cols.map(() => []);
+  for (const b of L.nodes.values()) occ[b.c].push([b.y - 6, b.y + b.h + 6]);
+  const freeIn = c => {
+    const out = []; let y = FREE_TOP;
+    for (const [a, b] of occ[c].slice().sort((p, q) => p[0] - q[0])) { if (a > y) out.push([y, a]); y = Math.max(y, b); }
+    out.push([y, Infinity]); return out;
+  };
+  const meet = (A, B) => { const out = []; for (const [a0, a1] of A) for (const [b0, b1] of B) { const lo = Math.max(a0, b0), hi = Math.min(a1, b1); if (hi - lo >= 4) out.push([lo, hi]); } return out; };
+  const lanes = [];
+  L.laneMax = 0; L.extraW = 0;
+  for (const w of wires) {
+    const a = w.fb.c, b = w.tb.c;
+    w.sx = w.fb.x + w.fb.w;
+    w.fwd = b > a;
+    w.gA = a + 1; w.gB = w.fwd ? b : b + 1;
+    if (w.end) { w.tx = w.end.x; w.ty = w.end.y; } else w.tx = w.fwd ? w.tb.x - 2 : w.tb.x + w.tb.w + 2;
+    if (w.gA === n || w.gB === n) L.extraW = 30;
+    w.lane = null;
+    if (w.gA === w.gB) continue;
+    const mids = [];
+    if (w.fwd) for (let c = a + 1; c < b; c++) mids.push(c); else for (let c = b + 1; c <= a; c++) mids.push(c);
+    let free = [[FREE_TOP, Infinity]];
+    for (const c of mids) free = meet(free, freeIn(c));
+    let best = null;
+    for (const [lo, hi] of free) {
+      const y = hi === Infinity ? lo + 6 : Math.min(Math.max((w.sy + w.ty) / 2, lo + 3), hi - 3);
+      const cost = Math.abs(y - w.sy) + Math.abs(y - w.ty);
+      if (!best || cost < best.cost) best = {y, lo, hi, cost};
+    }
+    const xs = [gut(w.gA).left, gut(w.gB).right].sort((p, q) => p - q);
+    let y = best.y;
+    for (let k = 0; k < 24 && lanes.some(l => Math.abs(l.y - y) < 4 && l.x0 < xs[1] && xs[0] < l.x1); k++) {
+      const up = y - 5, down = y + 5;
+      y = down <= best.hi - 2 ? down : up >= best.lo + 2 ? up : down;
+    }
+    lanes.push({y, x0: xs[0], x1: xs[1]});
+    w.lane = y;
+    if (best.hi === Infinity) L.laneMax = Math.max(L.laneMax, y);
+  }
+  // tracks: each gutter's vertical runs, spread across it; a bundled wire's last run is its trunk's
+  const runs = new Map(), put = (g, x) => { if (!runs.has(g)) runs.set(g, []); runs.get(g).push(x); };
+  for (const w of wires) {
+    if (w.gA === w.gB) { if (!w.end) put(w.gA, {w, k: 'one', y0: w.sy, y1: w.ty}); }
+    else { put(w.gA, {w, k: 'a', y0: w.sy, y1: w.lane}); if (!w.end) put(w.gB, {w, k: 'b', y0: w.lane, y1: w.ty}); }
+  }
+  for (const [g, list] of runs) {
+    const {left, right} = gut(g);
+    const trunks = wires.filter(w => w.end && w.gB === g).map(w => w.end.x);
+    const lo = left + 6, hi = (trunks.length ? Math.min(...trunks) : right) - 6;
+    list.sort((p, q) => p.y1 - q.y1 || p.y0 - q.y0);
+    const step = Math.min(7, Math.max(1, (hi - lo) / (list.length + 1)));
+    const start = (lo + hi) / 2 - step * (list.length - 1) / 2;
+    list.forEach((r, i) => { r.w['x' + r.k] = start + i * step; });
+  }
+  for (const w of wires) {
+    const xA = w.end && w.gA === w.gB ? w.tx : w.gA === w.gB ? w.xone : w.xa;
+    const xB = w.end ? w.tx : w.gA === w.gB ? xA : w.xb;
+    w.pts = w.gA === w.gB
+      ? [[w.sx, w.sy], [xA, w.sy], [xA, w.ty], [w.tx, w.ty]]
+      : [[w.sx, w.sy], [xA, w.sy], [xA, w.lane], [xB, w.lane], [xB, w.ty], [w.tx, w.ty]];
+    w.d = roundPath(w.pts, 6);
+  }
+}
+
+const ROLE_CLASS = r => 'r-' + String(r).replace(/[^a-z-]/gi, '');
+const COLORED = new Set(['read', 'helper']);
+const ROLE_ORDER = ['read', 'helper', 'source-requirement', 'need', 'slot', 'text', 'label-set', 'grounding'];
+// Ontology words for the edge roles that have one; the rest keep the outline's role name.
+const roleName = r => ({read: 'declared read', 'source-requirement': 'source requirement'})[r] || r;
+const holdsText = h => h === 'value' ? 'determined' : h === 'absent' ? 'absent' : h || 'no entry';
+const STATE_LABEL = {value: 'determined, every bound clear', short: 'determined, nearest bound short', nobounds: 'determined, no bound declared', det: 'determined',
+  Unsure: 'Unsure', Unasked: 'Unasked', Unavailable: 'Unavailable', absent: 'absent'};
+const STATE_TIP = Object.assign({}, STATE_LABEL, {
+  Unsure: 'Unsure: a rule looked at its evidence and did not settle', Unasked: 'Unasked: the design or a turn limit chose not to fetch it',
+  Unavailable: 'Unavailable: the value could not be obtained', absent: 'absent: the design provides it; the record holds no entry'});
+const GLYPH_TIP = {noul: 'noul question', choice: 'choice question', score: 'score question', extraction: 'extraction question', tool: 'tool result', field: 'state field'};
+
+function defs(root) {
+  const d = svg('defs', {}, root);
+  for (const c of ['state', 'r-read', 'r-helper', 'eng-other', 'lineage', 'branch']) for (const small of [false, true]) {
+    const k = small ? 4 : 7; // the small head sits on a bundle's stubs, which are close together
+    const m = svg('marker', {id: 'ah-' + c + (small ? '-s' : ''), viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: k, markerHeight: k, orient: 'auto-start-reverse'}, d);
+    svg('path', {d: 'M0,0 L8,4 L0,8 z', class: 'ah ' + (c === 'state' ? '' : c)}, m);
+  }
+}
+function glyph(g, kind, cx, cy) {
+  switch (kind) {
+    case 'noul': return svg('circle', {cx, cy, r: 3.6, class: 'glyph'}, g);
+    case 'choice': return svg('rect', {x: cx - 3.4, y: cy - 3.4, width: 6.8, height: 6.8, class: 'glyph'}, g);
+    case 'score': return svg('path', {d: `M${cx - 4},${cy + 3.5} L${cx + 4},${cy + 3.5} L${cx},${cy - 4} z`, class: 'glyph'}, g);
+    case 'extraction': return svg('path', {d: `M${cx},${cy - 4.4} L${cx + 4.4},${cy} L${cx},${cy + 4.4} L${cx - 4.4},${cy} z`, class: 'glyph'}, g);
+    case 'tool': return svg('rect', {x: cx - 3.4, y: cy - 3.4, width: 6.8, height: 6.8, rx: 1, class: 'glyph open'}, g);
+    case 'field': return svg('line', {x1: cx - 4, y1: cy, x2: cx + 4, y2: cy, class: 'tick'}, g);
+    default: return null;
+  }
+}
+const ICON = {value: '✓', short: '!', Unsure: '?', Unasked: '–', Unavailable: '✕', absent: '○', nobounds: '', det: ''};
+function stateIcon(parent, st, cx, cy, entry) {
+  const g = svg('g', {}, parent);
+  if (st === 'det') return g; // a determined value with no bound to speak of carries no mark
+  if (st === 'absent') svg('circle', {cx, cy, r: 5.5, class: 'absent-ring'}, g);
+  else if (st === 'nobounds') { svg('circle', {cx, cy, r: 5.5, class: 'nb-ring'}, g); svg('circle', {cx, cy, r: 1.9, class: 'nb-dot'}, g); }
+  else if (st === 'short') { // amber triangle: determined, its nearest bound short; never the green check
+    svg('path', {d: `M${cx},${cy - 6.5} L${cx + 6.5},${cy + 5} L${cx - 6.5},${cy + 5} z`, class: 'icon-bg bar-short'}, g);
+    svg('text', {x: cx, y: cy + 4, class: 'icon-t dark'}, g, '!');
+  } else {
+    svg('circle', {cx, cy, r: 6, class: 'icon-bg bar-' + st}, g);
+    svg('text', {x: cx, y: cy + 3.2, class: 'icon-t' + (st === 'Unsure' ? ' dark' : '')}, g, ICON[st]);
+  }
+  tip(g, () => st === 'nobounds' && entry && entry.bounds_reason ? entry.bounds_reason : STATE_TIP[st] || st);
+  return g;
+}
+function pill(g, x, y, text, w) {
+  svg('rect', {x, y, width: w, height: 15, rx: 3, class: 'pill'}, g);
+  svg('text', {x: x + w / 2, y: y + 11.3, class: 'pill-t', 'text-anchor': 'middle'}, g, text);
+}
+function brief(e) {
+  if (!e) return '';
+  if (e.holds !== 'value') return e.marker ? e.marker.kind + ' ' + e.marker.cause.code : e.holds;
+  const v = e.value;
+  if (v && typeof v === 'object' && !Array.isArray(v) && v.probabilities) {
+    let top = null;
+    for (const k in v.probabilities) if (top === null || v.probabilities[k] > v.probabilities[top]) top = k;
+    return top === null ? enc(v) : top + ' ' + v.probabilities[top].toFixed(2).replace(/^0/, '');
+  }
+  if (v && typeof v === 'object' && v.kind === 'extraction') return enc(v.value);
+  return enc(v);
+}
+// The warnings of the turn's calls, per source and code; a warning reads `source: code detail`.
+function callWarnings(T) {
+  const m = new Map();
+  for (const r of T.rounds || []) for (const c of r.calls || []) for (const w of (c.unhashed && c.unhashed.warnings) || []) {
+    const x = /^([^:\s]+):\s+(\S+)/.exec(String(w));
+    const srcs = x && (c.sources || []).includes(x[1]) ? [x[1]] : (c.sources || []);
+    const code = x ? x[2] : String(w).split(/\s/)[0];
+    for (const s of srcs) { if (!m.has(s)) m.set(s, new Map()); const k = m.get(s); k.set(code, (k.get(code) || 0) + 1); }
+  }
+  return m;
+}
+
+/* ---------- draw: design skeleton, with or without a turn ---------- */
+const toneOf = e => !e.dependency ? 'state' : COLORED.has(e.role) ? ROLE_CLASS(e.role) : 'eng-other';
+let LAST = null; // the last drawn geometry, for the smoke test
+function drawSkeleton(D, turnDoc) {
+  const host = $('canvas');
+  host.textContent = '';
+  const avail = Math.max(640, host.clientWidth || 1136);
+  const T = turnDoc ? turnDoc.outline : null, idx = turnDoc ? turnDoc.idx : null;
+  const path = lineage(T), main = mainChain(path);
+  const ctx = {T, idx, tags: targetTags(D), root: T && main.length ? main[main.length - 1].ref : null, warn: T ? callWarnings(T) : new Map()};
+  const L = layout(D, avail, !!T, ctx);
+  const seen = new Set(), sel = S.node;
+  // edges: the uses of t:state only when the legend toggle is on; incoming ports spread across the target's left edge
+  const edges = (D.edges || []).filter(e => e.dependency || S.stateEdges).sort((a, b) => (a.dependency === b.dependency ? 0 : a.dependency ? 1 : -1));
+  const incoming = new Map(), bundles = new Map(), G = new Map(); // per-edge geometry, kept off the outline
+  const gx = e => { if (!G.has(e)) G.set(e, {}); return G.get(e); };
+  for (const e of edges) {
+    const fb = L.nodes.get(e.from), tb = L.nodes.get(e.to);
+    if (!fb || !tb) continue;
+    gx(e).y1 = portOut(fb, e.ref);
+    if (!incoming.has(e.to)) incoming.set(e.to, []);
+    incoming.get(e.to).push(e);
+  }
+  for (const [to, list] of incoming) {
+    const tb = L.nodes.get(to);
+    const slotRow = e => {
+      if (e.role !== 'slot' || tb.n.kind !== 'source') return null;
+      const r = tb.rows.find(r => r.q && r.q.wording && (r.q.wording.slots || []).some(s => s.origin && s.origin.ref === e.ref));
+      return r ? r.y + ROW / 2 : null;
+    };
+    let free = list.filter(e => (gx(e).y2 = slotRow(e)) === null).sort((a, b) => gx(a).y1 - gx(b).y1);
+    const eng = free.filter(e => e.dependency);
+    if (L.bundled.has(to) && eng.length >= 2) {
+      // one trunk enters the node; short stubs fan from it to the ports
+      const yt = tb.y + tb.h / 2, sp = Math.min(9, (tb.h - 16) / (eng.length - 1));
+      const B = {to, tb, list: eng, yt, xm: tb.x - Math.round(tb.gapL * 0.58), xj: tb.x - 16};
+      eng.forEach((e, i) => { gx(e).bundle = B; gx(e).y2 = yt + (i - (eng.length - 1) / 2) * sp; });
+      bundles.set(to, B);
+      free = free.filter(e => !e.dependency);
+    }
+    const top = tb.y + 10, bot = tb.y + tb.h - 10;
+    free.forEach((e, i) => { gx(e).y2 = free.length === 1 ? tb.y + HEAD / 2 + 2 : top + (bot - top) * i / (free.length - 1); });
+  }
+  const wires = [];
+  for (const e of edges) {
+    const fb = L.nodes.get(e.from), tb = L.nodes.get(e.to);
+    if (fb && tb) wires.push({e, fb, tb, sy: gx(e).y1, ty: gx(e).y2, end: gx(e).bundle ? {x: gx(e).bundle.xm, y: gx(e).bundle.yt} : null});
+  }
+  // the lineage: each item joined to the item it was found from, the first branch heavy
+  const nodeOfRef = r => (D.ref_node || {})[r] || (D.ref_node || {})[baseOf(r)] || null;
+  if (T) path.slice(1).forEach((h, k) => {
+    const prev = (h.from && path.find(p => p.ref === h.from)) || path[k];
+    const fb = L.nodes.get(nodeOfRef(h.ref)), tb = L.nodes.get(nodeOfRef(prev.ref));
+    if (!fb || !tb) return;
+    let sy = portOut(fb, h.ref), ty = portOut(tb, prev.ref);
+    if (fb === tb && Math.abs(sy - ty) < 6) { sy -= 5; ty += 5; }
+    wires.push({hop: h, prev, main: k + 1 < main.length, n: k + 1, fb, tb, sy, ty, end: null});
+  });
+  route(L, wires);
+  L.wires = wires; LAST = L;
+  L.body = Math.max(L.body, L.laneMax + 8);
+  L.H = L.body + (T ? FOOT : 4);
+  const W = L.W + L.extraW;
+  const root = svg('svg', {width: W, height: L.H, viewBox: `0 0 ${W} ${L.H}`, role: 'img',
+    'aria-label': `Dependency graph of ${D.name || 'the design'}: ${(D.nodes || []).length} nodes in ${L.bands.length} rounds` + (T ? `, coloured by turn ${basename(turnDoc.path)}` : '')}, host);
+  root.classList.toggle('overlay', !!T);
+  if (sel) root.classList.add('focus');
+  defs(root);
+  drawBands(root, L, L.H, T);
+  const gE = svg('g', {}, root), gC = svg('g', {}, root);
+  for (const w of wires) {
+    if (w.hop) {
+      const cls = w.main ? 'lineage' : 'branch';
+      seen.add(cls);
+      svg('path', {d: w.d, class: 'edge ' + cls, 'marker-end': `url(#ah-${cls})`, 'data-ends': `${w.fb.n.id} ${w.tb.n.id}`}, gC);
+      tip(svg('path', {d: w.d, class: 'edge hit'}, gC), () => w.main
+        ? `lineage, first branch, hop ${w.n}\n${w.prev.ref} (${holdsText(w.prev.holds)}) ← ${w.hop.ref} (${holdsText(w.hop.holds)})\nvia ${w.hop.via}`
+        : `lineage branch, found from ${w.prev.ref}\n${w.hop.ref} (${holdsText(w.hop.holds)})\nvia ${w.hop.via}`);
+      continue;
+    }
+    const e = w.e, rc = ROLE_CLASS(e.role), tone = toneOf(e), ends = `${e.from} ${e.to}`;
+    const dim = sel && e.from !== sel && e.to !== sel ? ' dim' : '';
+    seen.add((e.dependency ? 'e:' : 's:') + e.role);
+    let d = w.d;
+    if (w.end) {
+      const B = gx(e).bundle;
+      svg('path', {d: w.d, class: `edge ${rc} ${tone}${dim}`, 'data-ends': ends}, gE);
+      svg('path', {d: `M${B.xj},${B.yt} L${w.tb.x - 2},${r1(gx(e).y2)}`, class: `edge stub ${tone}${dim}`, 'marker-end': `url(#ah-${tone}-s)`, 'data-ends': ends}, gE);
+      d = `${w.d} L${B.xj},${B.yt} L${w.tb.x - 2},${r1(gx(e).y2)}`;
+      seen.add('bundle');
+    } else svg('path', {d, class: `edge ${rc} ${tone}${dim}`, 'marker-end': `url(#ah-${tone})`, 'data-ends': ends}, gE);
+    tip(svg('path', {d, class: 'edge hit'}, gE), () => `${roleName(e.role)}  ${e.ref}\n${e.from} → ${e.to}\n${e.dependency ? 'dependency' + (gx(e).bundle ? ', bundled into the trunk' : '') : 'a use of t:state (not in the dependency graph)'}`);
+  }
+  for (const B of bundles.values()) {
+    const tones = new Set(B.list.map(toneOf)), roles = new Set(B.list.map(e => e.role));
+    const cls = (roles.size === 1 ? ROLE_CLASS(B.list[0].role) + ' ' : '') + (tones.size === 1 ? [...tones][0] : 'eng-other');
+    const dim = sel && B.to !== sel && !B.list.some(e => e.from === sel) ? ' dim' : '';
+    const d = `M${B.xm},${B.yt} L${B.xj},${B.yt}`;
+    svg('path', {d, class: `edge trunk ${cls}${dim}`, 'data-ends': [B.to, ...B.list.map(e => e.from)].join(' ')}, gE);
+    tip(svg('path', {d, class: 'edge hit'}, gE), () => `${B.list.length} dependencies bundled into ${B.to} (fan-in ${B.tb.n.fan_in})\n` + B.list.map(e => `  ${roleName(e.role)}  ${e.ref}  from ${e.from}`).join('\n'));
+  }
+  const gN = svg('g', {}, root);
+  const onPath = T ? new Set(path.map(h => h.ref)) : null;
+  for (const box of L.nodes.values()) drawNode(gN, box, D, T, ctx, onPath, seen);
   return seen;
 }
 
-// With a paired design, an entry's value then the boundaries its design declares for it, by role:
-// ticks on each bar for a bar or threshold, and the lead, mass, none and confidence against theirs.
-function valueHtml(e, b, paired) {
-  const held = valueOnly(e, b);
-  if (!paired) return held;
-  const v = e.value;
-  const asked = v && typeof v === "object" && (v.probabilities || v.kind === "extraction");
-  if (!b) return held + (asked ? `<div class="meta"><span class="none">no boundaries declared</span></div>` : "");
-  const notes = [];
-  const named = (pairs, word, shown = pct) => pairs.forEach(([p, x]) => notes.push(`<span title="${esc(p)} = ${esc(amount(x))}">${word} ${esc(num(x) ? shown(x) : amount(x))}</span> <span title="${esc(p)}">(${esc(p)})</span>`));
-  if (v && typeof v === "object" && v.probabilities && typeof v.probabilities === "object") {
-    const ps = Object.values(v.probabilities).filter(num).sort((x, y) => y - x);
-    const lead = ps.length ? exact(ps[0] - (ps[1] ?? 0)) : null; // a lone label leads by its own p
-    if (lead !== null) notes.push(`<span title="${esc(lead)}">lead ${pctNear(lead, b.margin.map(([, x]) => x))}</span>`);
-    named(b.margin, "margin");
-    named(b.bar, "bar");
-    for (const m of b.mass) {
-      const mass = Math.min(1, exact(m.labels.reduce((s, l) => s + (num(v.probabilities[l]) ? v.probabilities[l] : 0), 0)));
-      m.bounds.forEach(([p, x]) => notes.push(`mass ${esc(m.labels.join("+"))} <span title="${esc(mass)}">${pctNear(mass, [x])}</span> vs ${num(x) ? pct(x) : esc(JSON.stringify(x ?? null))} <span title="${esc(p)}">(${esc(p)})</span>`));
+function badges(n, ctx, T) {
+  const b = [], np = (n.params || []).length;
+  if (np) b.push({t: `${np} param${np > 1 ? 's' : ''}` + (n.boundaries ? ' · boundaries' : ''), tip: `${np} rule parameter${np > 1 ? 's' : ''}${n.boundaries ? ', and boundaries declared' : ''}: ${n.params.map(p => p.param + (p.via ? ' (' + p.via + ')' : '')).join(', ')}`});
+  else if (n.boundaries) b.push({t: 'bounds', tip: 'boundaries declared'});
+  if (n.requirement) b.push({t: 'requirement', tip: `source requirement: ${n.requirement.ref} in ${enc(n.requirement.values)}`});
+  if (n.when) b.push({t: 'when', tip: `when: ${n.when.module}.${n.when.qualname}`});
+  if (n.feedback) b.push({t: 'feedback', tip: 'a feedback source'});
+  const w = T && n.kind === 'source' ? ctx.warn.get(n.name) : null;
+  if (w) {
+    let k = 0; for (const v of w.values()) k += v;
+    b.push({t: '⚠ ' + k, tip: `${k} call warning${k > 1 ? 's' : ''} for ${n.name} in this turn\n` + [...w].map(([c, v]) => `  ${c} ×${v}`).join('\n'), cls: 'warn'});
+  }
+  return b;
+}
+// Hovering a node lights its edges and the parameter rows its rules use.
+function hoverNode(id, on) {
+  for (const p of document.querySelectorAll('#canvas [data-ends]')) if (p.getAttribute('data-ends').split(' ').includes(id)) p.classList.toggle('hov', on);
+  for (const tr of document.querySelectorAll('#detail tr[data-users]')) if (tr.getAttribute('data-users').split(' ').includes(id)) tr.classList.toggle('hov', on);
+}
+function drawNode(parent, box, D, T, ctx, onPath, seen) {
+  const n = box.n;
+  const g = svg('g', {class: 'node-g' + (S.node === n.id ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': `${n.policy ? 'policy rule' : n.kind} ${n.name}`, 'data-node': n.id}, parent);
+  g.addEventListener('click', () => selectNode(n.id));
+  g.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectNode(n.id); } });
+  g.addEventListener('pointerenter', () => hoverNode(n.id, true));
+  g.addEventListener('pointerleave', () => hoverNode(n.id, false));
+  let worst = null;
+  if (T) for (const r of box.rows) { const st = r.m.st; if (st && (worst === null || SEV[st] > SEV[worst])) worst = st; }
+  const rx = {state: 0, source: 9, rule: 2}[n.kind];
+  // the policy has a 2px ink border; a state ring then sits just inside it
+  svg('rect', {x: box.x, y: box.y, width: box.w, height: box.h, rx: rx === undefined ? 4 : rx, class: 'node-box' + (n.policy ? ' policy' : worst ? ' ring-' + worst : '')}, g);
+  if (n.policy && worst && ['Unsure', 'Unavailable', 'short', 'absent'].includes(worst))
+    svg('rect', {x: box.x + 3.5, y: box.y + 3.5, width: box.w - 7, height: box.h - 7, rx: 1, fill: 'none', class: 'node-box inner ring-' + worst, 'pointer-events': 'none'}, g);
+  if (n.kind === 'state') svg('rect', {x: box.x, y: box.y, width: 4, height: box.h, class: 'glyph'}, g);
+  const cap = n.kind === 'source' ? 'source' + (n.oracle ? ' · ' + n.oracle : '')
+    : n.kind === 'rule' ? 'rule · ' + (n.form || '?') + (n.hit ? ' ' + n.hit : '') : 'state';
+  const tx = box.x + 10;
+  let bx = box.x + box.w - 8;
+  for (const b of badges(n, ctx, T).reverse()) {
+    tip(svg('text', {x: bx, y: box.y + 15, class: 'badge' + (b.cls ? ' ' + b.cls : ''), 'text-anchor': 'end'}, g, b.t), () => b.tip);
+    if (b.cls) seen.add(b.cls);
+    bx -= estW(b.t, 10.5) + 8;
+  }
+  svg('text', {x: tx, y: box.y + 15, class: 'cap'}, g, cut(cap, fitChars(bx - tx - 2, 12)));
+  let nx = tx;
+  if (n.policy) { pill(g, tx, box.y + 21, 'policy', 48); nx += 54; seen.add('policy'); }
+  // a rule's target sits at the right of its name line
+  let tagX = box.x + box.w - 8;
+  for (const x of (n.kind === 'rule' ? ctx.tags.get(n.id) || [] : []).slice().reverse()) { tagX -= tagW(x); drawTag(g, tagX, box.y + 28, x); seen.add('tg'); tagX -= 4; }
+  svg('text', {x: nx, y: box.y + 32, class: 'name'}, g, cut(n.kind === 'state' ? 't:state' : n.name, fitChars(Math.min(box.w - 30, tagX - tx - 6) - (nx - tx), 13.5)));
+  box.rows.forEach(r => {
+    const m = r.m, cy = r.y + ROW / 2, two = r.h > ROW;
+    if (m.st && m.st !== 'absent' && m.st !== 'det') svg('rect', {x: box.x + 1, y: r.y, width: box.w - 2, height: r.h - 1, class: 'wash-' + m.st, 'fill-opacity': 0.13}, g);
+    if (onPath && (onPath.has(r.ref) || m.es.some(e => onPath.has(e.ref)))) svg('rect', {x: box.x + 2, y: r.y + 0.5, width: box.w - 4, height: r.h - 2, rx: 2, class: 'row-path'}, g);
+    let lx = box.x + 10;
+    if (r.kind !== 'value') { const gl = glyph(g, r.kind, box.x + 14, cy); if (gl) tip(gl, () => GLYPH_TIP[r.kind] || r.kind); lx = box.x + 24; }
+    let right = box.x + box.w - 8;
+    if (T) {
+      if (m.st) { if (m.st !== 'det') { stateIcon(g, m.st, right - 5, cy, m.e); seen.add('st:' + m.st); } right -= 15; }
+      if (m.e && m.e.nearest) {
+        const nb = m.e.nearest, side = nb.side || 'none';
+        tip(svg('rect', {x: right - 6, y: cy - 3, width: 6, height: 6, class: 'side-' + side}, g), () => `nearest bound ${side === 'none' ? '(no side)' : side}: ${nb.param} = ${num(nb.bound)}, distance ${num(nb.distance)}`);
+        seen.add('side:' + side); right -= 10;
+      }
     }
-    if (b.thresholds.length) notes.push(`thresholds ticked per label (${b.thresholds.map(([p]) => esc(p)).join(", ")})`);
-  } else {
-    named(b.null, "none bar");
-    named(b.confidence, "confidence bar");
-    named(b.value, "value bound", amount);
+    const rowLabel = T && r.kind === 'value' ? '→' : r.label;
+    const tagsW = m.tags.reduce((a, x) => a + tagW(x) + 4, 0) + (m.isRoot ? ROOT_W : 0);
+    const room = right - lx;
+    const label = cut(rowLabel, Math.min(rowLabel.length, fitChars(Math.max(24, (m.text && !two ? room - Math.min(TEXT_MIN, estW(m.text, 11.5)) - 10 : room) - tagsW), 12)));
+    svg('text', {x: lx, y: cy + 4, class: 'row-label'}, g, label);
+    let ax = lx + estW(label, 12) + 6;
+    for (const x of m.tags) { drawTag(g, ax, cy, x); seen.add('tg'); ax += tagW(x) + 4; }
+    if (m.isRoot) { const pg = svg('g', {}, g); pill(pg, ax, cy - 7.5, 'root', 32); tip(pg, () => 'the lineage\'s root: where its first branch ends'); seen.add('root'); ax += ROOT_W; }
+    if (m.text) {
+      const cls = 'row-brief' + (m.strong ? ' strong' : '');
+      // a marker's reason too long for the row wraps to a second line inside it
+      if (two) svg('text', {x: box.x + box.w - 8, y: r.y + ROW + 10, class: cls, 'text-anchor': 'end'}, g, cut(m.text, fitChars(box.w - 30, 11.5)));
+      else {
+        const vt = svg('text', {x: right, y: cy + 4, class: cls, 'text-anchor': 'end'}, g, cut(m.text, fitChars(right - ax - 2, 11.5)));
+        if (m.val !== null) tip(vt, () => `${r.ref} = ${m.val}\ntype ${m.text}`);
+      }
+    }
+  });
+  for (const grp of D.groups || []) {
+    const rs = box.rows.filter(r => (grp.refs || []).includes(r.ref));
+    if (!rs.length) continue;
+    const y0 = Math.min(...rs.map(r => r.y)) - 1, y1 = Math.max(...rs.map(r => r.y + r.h));
+    const why = grp.reason ? [].concat(grp.reason).join(', ') : '';
+    const gtip = () => `group ${grp.name}: ${(grp.refs || []).join(', ')}${why ? ' (' + why + ')' : ''}`;
+    tip(svg('rect', {x: box.x + 4, y: y0, width: box.w - 8, height: y1 - y0, rx: 3, class: 'group-ol'}, g), gtip);
+    // a small cap label on its top edge: the group's name and reason
+    const lab = cut(grp.name + (why ? ' · ' + why : ''), fitChars(box.w - 24, 9.5)), lw = estW(lab, 9.5) + 8;
+    const lg = svg('g', {}, g);
+    svg('rect', {x: box.x + box.w - 12 - lw, y: y0 - 5, width: lw, height: 10, class: 'group-lab-bg'}, lg);
+    svg('text', {x: box.x + box.w - 16, y: y0 + 3.2, class: 'group-lab', 'text-anchor': 'end'}, lg, lab);
+    tip(lg, gtip);
+    seen.add('group');
   }
-  for (const [p, x, key] of b.plain) notes.push(`${esc(key)} compared with ${esc(amount(x))} <span title="${esc(p)}">(${esc(p)})</span>`);
-  return held + (notes.length ? `<div class="meta notes">${notes.map((n) => `<span>${n}</span>`).join("")}</div>` : "");
+  tip(g, () => {
+    const lines = [`${n.id}${n.policy ? '  policy' : ''}  (round ${n.round}, wavefront ${n.wavefront}, fan-in ${n.fan_in}, fan-out ${n.fan_out})`];
+    for (const r of box.rows) {
+      let s = `  ${r.ref}${shortOf(D, r.ref) !== r.ref ? ' "' + shortOf(D, r.ref) + '"' : ''}  ${r.kind === 'value' ? '' : GLYPH_TIP[r.kind] || r.kind}${r.type && r.type !== r.kind ? '  ' + r.type : ''}`;
+      if (T) {
+        s += `  ${STATE_LABEL[r.m.st] || holdsText(r.m.st)}  ${r.m.val !== null ? '= ' + r.m.val : r.m.es.map(brief).join(' | ')}`;
+        const off = [...new Set(r.m.es.map(e => e.round).filter(x => typeof x === 'number' && x !== n.round))];
+        if (off.length) s += `  (entry in round ${off.join(', ')})`;
+      }
+      lines.push(s);
+    }
+    lines.push('click for detail');
+    return lines.join('\n');
+  });
 }
 
-// A long list of items as its first few, the rest folded behind "+n more" until the card is
-// selected; each item is already escaped HTML.
-function foldList(items, keep, sep = "") {
-  if (items.length <= keep + 1) return items.join(sep);
-  return items.slice(0, keep).join(sep) + items.slice(keep).map((x) => `<span class="qx">${sep}${x}</span>`).join("") + `<span class="qmore">${sep}+${items.length - keep} more</span>`;
+/* ---------- draw: a record with no paired design ---------- */
+function drawUnpaired(turnDoc) {
+  const host = $('canvas'); host.textContent = '';
+  const T = turnDoc.outline, idx = turnDoc.idx, seen = new Set();
+  const rounds = (T.rounds || []).filter(r => (r.entries || []).length);
+  const colW = 260, w = 220, h = 42, gap = 10;
+  const L = {cols: rounds.map((r, c) => ({x: LEFT + c * colW, w, round: r.round})), nodes: new Map()};
+  rounds.forEach((r, c) => r.entries.slice().sort((a, b) => a.index - b.index).forEach((e, i) =>
+    L.nodes.set(e.ref, {c, x: LEFT + c * colW, y: TOP + 8 + i * (h + gap), w, h, e, n: {id: e.ref}})));
+  const path = lineage(T), main = mainChain(path), rootRef = main.length ? main[main.length - 1].ref : null;
+  const at = r => L.nodes.get(r) || L.nodes.get(baseOf(r));
+  const wires = [];
+  path.slice(1).forEach((hop, k) => {
+    const prev = (hop.from && path.find(p => p.ref === hop.from)) || path[k], fb = at(hop.ref), tb = at(prev.ref);
+    if (!fb || !tb) return;
+    const same = fb === tb ? 8 : 0;
+    wires.push({hop, prev, main: k + 1 < main.length, n: k + 1, fb, tb, sy: fb.y + h / 2 - same, ty: tb.y + h / 2 + same, end: null});
+  });
+  route(L, wires);
+  L.wires = wires; LAST = L;
+  const bottom = Math.max(TOP + 8, ...[...L.nodes.values()].map(b => b.y + h));
+  const H = Math.max(bottom, L.laneMax + 4) + 6 + FOOT;
+  const W = LEFT * 2 + Math.max(0, rounds.length - 1) * colW + w + 40 + L.extraW;
+  const root = svg('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', class: 'overlay',
+    'aria-label': `Record ${basename(turnDoc.path)} with no paired design: ${idx.all.length} entries in ${rounds.length} rounds`}, host);
+  defs(root);
+  // one band per round, holding its entries in log order; the round item's cost and deadline cut under it
+  rounds.forEach((r, c) => {
+    const x0 = LEFT + c * colW;
+    svg('rect', {x: x0 - BAND_PAD, y: 2, width: w + 2 * BAND_PAD, height: H - 4, rx: 8, class: 'band'}, root);
+    svg('text', {x: x0, y: 17, class: 'bandhead'}, root, 'round ' + r.round);
+    svg('text', {x: x0, y: 34, class: 'colhead'}, root, r.calls && r.calls.length ? `${r.calls.length} call${r.calls.length > 1 ? 's' : ''}` : 'no calls');
+    svg('line', {x1: x0, y1: 39, x2: x0 + w, y2: 39, class: 'colrule'}, root);
+    roundFoot(T, r.round).forEach((line, i) => svg('text', {x: x0, y: H - FOOT + 10 + i * 14, class: 'bandfoot' + (line.startsWith('deadline yes') ? ' cut' : '')}, root, line));
+  });
+  const gC = svg('g', {}, root);
+  for (const x of wires) {
+    const cls = x.main ? 'lineage' : 'branch';
+    seen.add(cls);
+    svg('path', {d: x.d, class: 'edge ' + cls, 'marker-end': `url(#ah-${cls})`, 'data-ends': `${x.fb.n.id} ${x.tb.n.id}`}, gC);
+    tip(svg('path', {d: x.d, class: 'edge hit'}, gC), () => `${x.main ? 'lineage, first branch, hop ' + x.n : 'lineage branch'}\n${x.prev.ref} ← ${x.hop.ref}\nvia ${x.hop.via}`);
+  }
+  const onPath = new Set(path.map(x => x.ref));
+  for (const b of L.nodes.values()) {
+    const e = b.e, st = dispState(e);
+    const g = svg('g', {class: 'node-g' + (S.node === e.ref ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': `${e.ref} ${STATE_LABEL[st] || st}`, 'data-node': e.ref}, root);
+    g.addEventListener('click', () => selectNode(e.ref));
+    g.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectNode(e.ref); } });
+    svg('rect', {x: b.x, y: b.y, width: w, height: h, rx: e.policy ? 2 : 6, class: 'node-box' + (e.policy ? ' policy' : ' ring-' + st)}, g);
+    if (e.policy && ['Unsure', 'Unavailable', 'short'].includes(st)) svg('rect', {x: b.x + 3.5, y: b.y + 3.5, width: w - 7, height: h - 7, rx: 1, fill: 'none', class: 'node-box inner ring-' + st, 'pointer-events': 'none'}, g);
+    if (st !== 'det') svg('rect', {x: b.x + 1, y: b.y + 1, width: w - 2, height: h - 2, class: 'wash-' + st, 'fill-opacity': 0.13}, g);
+    if (onPath.has(e.ref)) svg('rect', {x: b.x + 2, y: b.y + 2, width: w - 4, height: h - 4, rx: 4, class: 'row-path'}, g);
+    let nx = b.x + 10;
+    if (e.policy) { pill(g, nx, b.y + 6, 'policy', 48); nx += 54; seen.add('policy'); }
+    const isRoot = e.ref === rootRef;
+    svg('text', {x: nx, y: b.y + 17, class: 'name'}, g, cut(e.ref, fitChars(w - 40 - (nx - b.x - 10) - (isRoot ? ROOT_W : 0), 13.5)));
+    if (isRoot) { pill(g, b.x + w - 22 - ROOT_W, b.y + 6, 'root', 32); seen.add('root'); }
+    stateIcon(g, st, b.x + w - 14, b.y + 13, e); if (st !== 'det') seen.add('st:' + st);
+    svg('text', {x: b.x + 10, y: b.y + 34, class: 'row-brief' + (e.policy ? ' strong' : '')}, g, cut(brief(e) + (e.call !== null ? `  (call ${e.call})` : ''), fitChars(w - 20, 11.5)));
+    tip(g, () => `${e.ref}  log item ${e.index}, round ${e.round}\n${STATE_LABEL[st] || st}  ${brief(e)}`);
+  }
+  return seen;
 }
 
-// The labels to fold into "Other": none for a short list, else every label past the top few by
-// probability, except one a threshold or a mass bound names, which always shows. A bar ticks every
-// label alike, so it exempts none.
-function foldedLabels(labels, probs, bounded) {
-  if (labels.length <= TOP_LABELS + 1) return new Set();
-  const shown = new Set([...labels].sort((a, c) => (num(probs[c]) ? probs[c] : -1) - (num(probs[a]) ? probs[a] : -1)).slice(0, TOP_LABELS));
-  return new Set(labels.filter((l) => !shown.has(l) && !bounded(l)));
+/* ---------- tooltip ---------- */
+// One delegated tooltip: the nearest element under the pointer that carries one shows it.
+const TIP = $('tip');
+function tip(el, fn) { if (el) el.__tip = fn; return el; }
+function tipAt(ev) {
+  let el = ev.target;
+  while (el && !el.__tip) el = el.parentNode;
+  if (!el) { TIP.hidden = true; return; }
+  TIP.textContent = el.__tip(); TIP.hidden = false; moveTip(ev);
+}
+function moveTip(ev) {
+  const pad = 14, r = TIP.getBoundingClientRect();
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - pad;
+  if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - pad;
+  TIP.style.left = Math.max(4, x) + 'px'; TIP.style.top = Math.max(4, y) + 'px';
 }
 
-function valueOnly(e, b) {
-  if (e.marker) {
-    const m = obj(e.marker), c = obj(m.cause);
-    const tone = m.kind === "Unavailable" ? "bad" : "warn";
-    return `<div class="marker"><span class="chip ${tone}">${esc(m.kind ?? "marker")}</span><span class="v">${esc(c.code ?? "")}</span>${arr(c.refs).length ? `<span class="meta">${arr(c.refs).map(esc).join(", ")}</span>` : ""}</div>`;
-  }
-  const v = e.value;
-  if (v === undefined) return `<div class="val">–</div>`;
-  if (v && typeof v === "object" && v.probabilities && typeof v.probabilities === "object") {
-    const probs = v.probabilities;
-    const labels = arr(v.labels).length ? arr(v.labels) : Object.keys(probs);
-    const top = labels.reduce((a, b) => ((probs[b] ?? -1) > (probs[a] ?? -1) ? b : a), labels[0]);
-    const ticks = (l) => (b ? [...b.bar.map(([p, x]) => [x, p]), ...b.thresholds.map(([p, x]) => [num(x) ? x : obj(x)[l], p])].filter(([x]) => num(x)) : []);
-    const bound = (l) => !!b && (b.thresholds.some(([, x]) => num(x) || num(obj(x)[l])) || b.mass.some((m) => m.labels.includes(l)));
-    const folded = foldedLabels(labels, probs, bound);
-    const barHtml = (l, p, extra, other) => {
-      const w = typeof p === "number" ? Math.max(0, Math.min(100, p * 100)) : 0;
-      const marks = other ? "" : ticks(l).map(([x, path]) => `<span class="tick" style="left:calc(${Math.max(0, Math.min(100, x * 100))}% - 1px)" title="${esc(path)} = ${esc(x)}"></span>`).join("");
-      return `<div class="bar${l === top && !other ? " top" : ""}${extra ? " extra" : ""}${other ? " other" : ""}${!other && bound(l) ? " bound" : ""}"><span class="lab" title="${esc(l)}">${esc(l)}</span><span class="track"><span class="fill" style="display:block;width:${w}%"></span>${marks}</span><span class="pct" title="${esc(amount(p))}">${pct(p)}</span></div>`;
-    };
-    const rest = folded.size ? barHtml(`+${folded.size} label${folded.size === 1 ? "" : "s"}`, exact([...folded].reduce((s, l) => s + (num(probs[l]) ? probs[l] : 0), 0)), false, true) : "";
-    return `<div class="bars">${labels.map((l) => barHtml(l, probs[l], folded.has(l), false)).join("")}${rest}</div>`;
-  }
-  if (v && typeof v === "object" && v.kind === "extraction") {
-    const shown = v.value === null ? "none found" : v.value === undefined ? "–" : JSON.stringify(v.value);
-    return `<div class="val">${esc(shown)}</div><div class="meta notes"><span>confidence ${pct(v.confidence)}</span><span>none: ${pct(v.p_null)}</span>${v.guess != null ? `<span>guess ${esc(JSON.stringify(v.guess))}</span>` : ""}</div>`;
-  }
-  return `<div class="val">${esc(JSON.stringify(v, null, 1))}</div>`;
-}
-
-// A marker as its kind and cause code, or a value as JSON: the decision in one line.
-const decisionText = (e) => (e.marker ? `${text(obj(e.marker).kind ?? "marker")} (${text(obj(obj(e.marker).cause).code ?? "")})` : text(JSON.stringify(e.value) ?? "–"));
-
-function render() {
-  const s = state;
-  const entryCard = (ref) => {
-    const e = s.entries.get(ref);
-    const { base, candidate } = parseRef(ref);
-    const who = (Object.hasOwn(s.providers, base) && s.providers[base]) || (ref === "t:state" ? "the state" : "");
-    return `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="e:${esc(ref)}"><span class="ref">${esc(ref)}</span>
-        <span class="meta">${who ? `<span>from ${esc(who)}</span>` : ""}${candidate != null ? `<span>candidate ${esc(candidate)}</span>` : ""}${s.design ? targetHtml(targetsOf(s.design, base)) : ""}</span>${valueHtml(e, s.design ? boundsOf(s.design, base) : null, !!s.design)}</div>`;
+/* ---------- legend and glossary ---------- */
+// Only the marks the view draws, in two groups; what a glyph or badge means is on its own hover.
+function drawLegend(D, T, seen) {
+  const host = $('legend'); host.textContent = '';
+  const group = name => { const r = document.createElement('div'); r.className = 'lg-row'; const k = document.createElement('span'); k.className = 'lg-k'; k.textContent = name; r.appendChild(k); r.n = 0; return r; };
+  const item = (row, draw, label, w = 26) => {
+    const span = document.createElement('span');
+    const s = svg('svg', {width: w, height: 14, 'aria-hidden': 'true'}, span);
+    draw(s); span.appendChild(document.createTextNode(' ' + label)); row.appendChild(span); row.n++;
   };
-  const design = obj((s.log.find((i) => obj(i).item === "design")));
-  const decision = s.decision;
-  const designName = s.design && s.design.name;
-  const hash = (h) => (str(h) ? esc(h.slice(0, 19)) + "…" : "–");
-  $("summary").innerHTML = [
-    designName ? `<div class="kv"><span class="k">Design</span><span class="v">${esc(designName)}</span></div>` : "",
-    `<div class="kv"><span class="k">Design hash</span><span class="v">${hash(design.hash)}</span></div>`,
-    s.record && str(s.record.hash) ? `<div class="kv"><span class="k">Record</span><span class="v">${hash(s.record.hash)}</span></div>` : "",
-    `<div class="kv"><span class="k">Format</span><span class="v">${esc(design.format ?? "?")}</span></div>`,
-    decision ? `<div class="kv"><span class="k">Decision</span><span class="v">${esc(decisionText(decision))}</span></div>` : "",
-    s.design ? "" : `<div class="notice">No design loaded: lineage shows only what the record holds. Open the design to see what each rule and source read.</div>`,
-  ].join("");
-
-  const order = [...s.rounds.keys()].sort((a, b) => (a === "?") - (b === "?") || a - b);
-  let html = "";
-  for (const n of order) {
-    const r = s.rounds.get(n);
-    html += `<section class="col"><div class="colhead"><span>${n === "?" ? "No round" : "Round " + esc(n)}</span><span>${r.entries.length} entr${r.entries.length === 1 ? "y" : "ies"}</span></div>`;
-    for (const idx of r.calls) {
-      const c = s.calls.get(idx);
-      const un = obj(obj(s.unhashed.calls)[idx]);
-      const failed = obj(c.outcome).failed;
-      html += `<div role="button" tabindex="0" aria-pressed="false" class="card call" data-node="c:${idx}"><span class="k">Call · ${esc(arr(c.sources).join(", "))}</span>
-        <span class="meta notes">${failed ? `<span class="chip bad">failed ${esc(obj(failed).code ?? "")}</span>` : `<span>returned</span>`}${c.provider ? `<span>${esc(c.provider)}</span>` : ""}${c.model_reported || c.model_requested ? `<span>${esc(c.model_reported || c.model_requested)}</span>` : ""}${typeof un.latency === "number" ? `<span>${un.latency.toFixed(2)} s</span>` : ""}${c.precision != null ? `<span>precision ${esc(JSON.stringify(c.precision))}</span>` : ""}</span>
-        <span class="meta">${foldList(Object.entries(obj(c.questions)).map(([r, q]) => `<span title="question identity ${esc(obj(q).identity ?? "none")}">${esc(r)}${str(obj(q).identity) ? " · " + esc(q.identity.slice(7, 15)) + "…" : ""}</span>`), 4)}</span></div>`;
+  const er = group('edges'), nr = group('entries'), mr = group('marks');
+  if (D) {
+    const roles = new Map();
+    for (const e of D.edges || []) { const k = (e.dependency ? 'e:' : 's:') + e.role; if (seen.has(k)) roles.set(k, e); }
+    const keys = [...roles.keys()].sort((a, b) => (a[0] === b[0] ? ROLE_ORDER.indexOf(a.slice(2)) - ROLE_ORDER.indexOf(b.slice(2)) : a[0] === 'e' ? -1 : 1));
+    for (const key of keys) {
+      const e = roles.get(key), rc = ROLE_CLASS(e.role), tone = toneOf(e);
+      item(er, s => svg('line', {x1: 1, y1: 7, x2: 25, y2: 7, class: `edge ${rc} ${tone}`}, s), (e.dependency ? '' : 't:state ') + roleName(e.role));
     }
-    for (const ref of r.entries) html += entryCard(ref);
-    html += `</section>`;
-  }
-  if (decision) {
-    html += `<section class="col"><div class="colhead"><span>Decision</span><span></span></div>${entryCard(s.policy)}</section>`;
-  }
-  $("cols").classList.toggle("design", false);
-  $("cols").innerHTML = html;
-  select(null);
-}
-
-// The Design view: one design document's targets, sources, rules, policy and parameters.
-function renderDesign() {
-  const g = dstate;
-  const d = g.design;
-  const key = designKey && known.has(designKey) ? designKey : null;
-  const count = (k) => [...g.nodes.values()].filter((n) => n.kind === k).length;
-  $("summary").innerHTML = [
-    `<div class="kv"><span class="k">Design</span><span class="v">${esc(d.name ?? "unnamed")}</span></div>`,
-    key && key.startsWith("sha256:") ? `<div class="kv"><span class="k">Design hash</span><span class="v">${esc(key.slice(0, 19))}…</span></div>` : "",
-    `<div class="kv"><span class="k">Format</span><span class="v">${esc(d.format ?? "?")}</span></div>`,
-    `<div class="kv"><span class="k">Targets</span><span class="v">${count("target")}</span></div>`,
-    `<div class="kv"><span class="k">Questions</span><span class="v">${count("question")}</span></div>`,
-    `<div class="kv"><span class="k">Rules</span><span class="v">${count("rule")}</span></div>`,
-    `<div class="kv"><span class="k">Policy</span><span class="v">${str(d.policy) ? esc(d.policy) : "?"}</span></div>`,
-    state && state.guess && key && known.get(key).doc === state.design ? `<div class="notice">${GUESSES[state.guess]}</div>` : "",
-  ].join("");
-  const card = (node, body) => `<div role="button" tabindex="0" aria-pressed="false" class="card" data-node="${esc(node)}">${body}</div>`;
-  const column = (title, cards) => `<section class="col"><div class="colhead"><span>${title}</span><span>${cards.length}</span></div>${cards.join("") || `<p class="meta">None declared</p>`}</section>`;
-  const of = (k) => [...g.nodes].filter(([, n]) => n.kind === k);
-  const links = g.links;
-  const targets = of("target").map(([node, n]) => card(node, `<span class="ref">${esc(n.id)}</span><span>${esc(n.t.statement ?? "")}</span>
-    ${n.t.values != null ? `<span class="meta">values: ${esc(n.t.values)}</span>` : ""}
-    <span class="meta"><span>asked by ${(links.asks.get(n.id) || []).length}</span><span>borne on by ${new Set((links.bears.get(n.id) || []).map((x) => x.ref)).size}</span><span>estimated by ${(links.est.get(n.id) || []).length}</span></span>`));
-  const asked = [card("e:t:state", `<span class="ref">t:state</span><span class="meta"><span>the input state</span></span>${d.state != null ? `<div class="val">${esc(d.state)}</div>` : ""}`),
-    ...[...g.nodes].filter(([, n]) => n.kind === "question" || n.kind === "tool").map(([node, n]) => {
-      const s = obj(obj(d.sources)[n.sid]);
-      const ref = node.slice(2);
-      const head = `<span class="ref">${esc(ref)}</span><span class="meta"><span>source ${esc(n.sid)}</span>${n.kind === "question" ? `<span>${esc(n.q.kind ?? "?")}</span>` : `<span>tool result</span>`}${s.when ? `<span>when: ${esc(obj(s.when).form ?? "declared")}</span>` : ""}${s.requirement ? `<span>gated on ${esc(obj(s.requirement).ref)}</span>` : ""}${str(s.grounded) ? `<span>over ${esc(s.grounded)}</span>` : ""}</span>`;
-      if (n.kind === "tool") return card(node, head);
-      const lab = (l) => (str(l) ? l : obj(l).name);
-      const cv = n.q.labels && typeof n.q.labels === "object" && !Array.isArray(n.q.labels) ? n.q.labels : null;
-      const labels = Array.isArray(n.q.labels) ? n.q.labels.map(lab).filter(str)
-        : cv ? [...arr(cv.fixed).map(lab).filter(str), `(the candidates of ${text(cv.candidates ?? "?")}${num(cv.at) ? " after label " + cv.at : ""})`] : [];
-      return card(node, `${head}${str(obj(n.q.wording).template) ? `<div class="val">${esc(n.q.wording.template)}</div>` : ""}
-        ${labels.length ? `<span class="meta labels"><span>${foldList(labels.map(esc), 6, " · ")}</span></span>` : ""}<span class="meta">${targetHtml(targetsOf(d, ref))}</span>`);
-    })];
-  const ruleCard = ([node, n]) => card(node, `<span class="ref">${esc(node.slice(2))}</span>
-    <span class="meta"><span>rule ${esc(n.rid)}</span><span>${esc(n.r.form ?? "?")}</span>${n.r.outputs != null ? `<span>${esc(n.r.outputs)}</span>` : ""}${node.slice(2) === d.policy ? `<span>the policy</span>` : ""}</span>
-    <span class="meta">reads ${arr(readsOf(n.r)).map(esc).join(", ") || "nothing"}</span>
-    <span class="meta">${targetHtml(targetsOf(d, node.slice(2)))}${n.r.boundaries ? `<span>boundaries declared</span>` : `<span class="none">no boundaries declared</span>`}</span>`);
-  const ruleCards = of("rule").filter(([node]) => node.slice(2) !== d.policy).map(ruleCard);
-  const decide = of("rule").filter(([node]) => node.slice(2) === d.policy).map(ruleCard);
-  const paramCards = of("param").map(([node, n]) => card(node, `<span class="ref">${esc(n.path)}</span><span class="meta">${esc(n.p.type ?? "")}</span><div class="val">${esc(JSON.stringify(n.p.value ?? null))}</div>`));
-  $("cols").classList.toggle("design", true);
-  $("cols").innerHTML = column("Targets", targets) + column("State and sources", asked) + column("Rules", ruleCards) + column("Decision", decide) + column("Parameters", paramCards);
-}
-
-const graph = () => (tab === "design" ? dstate : state);
-const label = (node) => graph().label(node);
-const cardOf = (node) => [...$("cols").querySelectorAll("[data-node]")].find((el) => el.dataset.node === node);
-
-// Each card's place under a selection: 0 the selection, then its direct links, then the rest of
-// its lineage, each kind together; a node absent from the map is not linked to it.
-function rankOf(g, node, tlinks, up, down) {
-  const rank = new Map();
-  if (!node) return rank;
-  const put = (n, r) => { if (!rank.has(n)) rank.set(n, r); };
-  put(node, 0);
-  if (tlinks) {
-    tlinks.asks.forEach((r) => put("e:" + r, 1));
-    tlinks.bears.forEach((x) => put("e:" + x.ref, 2));
-    tlinks.est.forEach((r) => put("e:" + r, 3));
-  } else {
-    // A question's or rule's own targets are declared links too, though no read joins them.
-    const t = g.kind === "design" && node.startsWith("e:") ? targetsOf(g.design, node.slice(2)) : null;
-    if (t && t.target) put("g:" + t.target, 1);
-    if (t) t.latent.forEach((l) => put("g:" + text(l.target), 2));
-    (g.inputs.get(node) || []).forEach((i) => put(i.node, 1));
-    (g.outputs.get(node) || []).forEach((i) => put(i.node, 2));
-    up.forEach((n) => put(n, 3));
-  }
-  down.forEach((n) => put(n, 4));
-  return rank;
-}
-
-// What a stub says it folded: under a target, the cards declaring no target at all apart from
-// those declaring others, so a missing link never reads as "unrelated".
-function stubText(g, node, folded, open) {
-  const verb = open ? "Hide" : "Show";
-  const onTarget = g.kind === "design" && node.startsWith("g:");
-  const targets = folded.filter((n) => n.startsWith("g:")).length, rest = folded.filter((n) => !n.startsWith("g:"));
-  const parts = targets ? [onTarget ? `${targets} other target${targets === 1 ? "" : "s"}` : `${targets} target${targets === 1 ? "" : "s"} it declares no link to`] : [];
-  if (rest.length && onTarget) {
-    const none = rest.filter((n) => { if (!n.startsWith("e:")) return false; const t = targetsOf(g.design, n.slice(2)); return t && !t.target && !t.latent.length; }).length;
-    if (rest.length - none) parts.push(`${rest.length - none} with no link declared to ${node.slice(2)}`);
-    if (none) parts.push(`${none} declaring no target link`);
-  } else if (rest.length) parts.push(`${rest.length} ${g.kind === "design" ? "with no declared link to it" : "not on its lineage"}`);
-  return parts.length > 1 ? `${verb} ${folded.length}: ${parts.join(", ")}` : `${verb} ${parts[0]}`;
-}
-
-// A target's selection lights its declared links and all that follows them; any other card lights
-// what it came from and what it fed. Each column's matches come first, and in Filter mode the rest
-// fold into the column's stub.
-function select(node) {
-  const g = graph();
-  if (!g || (g.kind === "design" && node && !g.nodes.has(node))) node = null;
-  if (node !== selected) openCols.clear();
-  selected = node;
-  let up = new Set(), down = new Set(), tlinks = null;
-  if (node && g.kind === "design" && node.startsWith("g:")) {
-    const id = node.slice(2), L = g.links;
-    tlinks = { asks: L.asks.get(id) || [], bears: L.bears.get(id) || [], est: L.est.get(id) || [] };
-    up = new Set([...tlinks.asks, ...tlinks.bears.map((x) => x.ref), ...tlinks.est].map((r) => "e:" + r));
-    for (const n of up) for (const x of reach(g.outputs, n)) if (!up.has(x)) down.add(x);
-  } else if (node) {
-    up = reach(g.inputs, node);
-    down = reach(g.outputs, node);
-  }
-  const rank = rankOf(g, node, tlinks, up, down);
-  let hidden = 0;
-  const active = document.activeElement, refocus = active && active.dataset ? active.dataset.openCol : undefined;
-  [...$("cols").querySelectorAll("section.col")].forEach((col, i) => {
-    for (const old of col.querySelectorAll(".stub")) old.remove();
-    const folded = [];
-    for (const el of col.querySelectorAll("[data-node]")) {
-      const n = el.dataset.node, r = rank.get(n);
-      el.classList.toggle("sel", n === node);
-      el.setAttribute("aria-pressed", String(n === node));
-      el.classList.toggle("up", up.has(n));
-      el.classList.toggle("down", down.has(n));
-      el.classList.toggle("near", r === 1 || r === 2 || (!!tlinks && r === 3));
-      el.classList.toggle("dim", !!node && r === undefined);
-      el.style.order = node ? String(r ?? 9) : "";
-      const fold = !!node && r === undefined && mode === "filter";
-      el.classList.toggle("hide", fold && !openCols.has(i));
-      if (fold) folded.push(n);
-    }
-    if (folded.length) {
-      hidden += openCols.has(i) ? 0 : folded.length;
-      // Open, the stub stands between the matches and the cards it let out, so it can close them.
-      col.insertAdjacentHTML("beforeend", `<button type="button" class="stub" data-open-col="${i}" aria-expanded="${openCols.has(i)}"${openCols.has(i) ? "" : ' style="order:1000"'}>${esc(stubText(g, node, folded, openCols.has(i)))}</button>`);
-      if (refocus === String(i)) col.querySelector(".stub").focus();
-    }
-  });
-  applyDensity();
-  const go = (n, how) => `<li><button type="button" data-go="${esc(n)}">${esc(label(n))}</button>${how ? `<span class="how">${esc(how)}</span>` : ""}</li>`;
-  const list = (items) => items && items.length ? `<ul>${items.map((i) => go(i.node, i.how + " · " + i.src)).join("")}</ul>` : `<p class="meta">${g && g.kind === "design" ? "None declared" : "None"}</p>`;
-  // A target link names a target the design may not declare; only a declared one is a card.
-  const goTarget = (id, how) => (g.nodes.has("g:" + id) ? go("g:" + id, how) : `<li><span class="v">${esc(id)}</span><span class="how">${esc(how)} · not declared in targets</span></li>`);
-  const refs = (rs, how) => rs.length ? `<ul>${rs.map((r) => go("e:" + r, how)).join("")}</ul>` : `<p class="meta">None declared</p>`;
-  const dimWord = g && g.kind === "design" ? "no link declared" : "not on its lineage";
-  const dimmed = node && (mode === "dim" || openCols.size) ? `<span><span class="sw" style="background:var(--line)"></span>dimmed: ${dimWord}</span>` : "";
-  const legend = `<div class="legend"><span><span class="sw" style="background:var(--accent)"></span>${tlinks ? "linked" : "came from"}</span><span><span class="sw" style="background:var(--down)"></span>fed into</span>${dimmed}</div>`;
-  let jump = "";
-  if (node && g.kind === "turn" && g.design && node.startsWith("e:")) jump = `<button type="button" class="jump" data-jump="design">Open in Design</button>`;
-  if (node && g.kind === "design" && state && turnNode(node)) jump = `<button type="button" class="jump" data-jump="turn">Show in this turn</button>`;
-  const asked = node && g.kind === "turn" && node.startsWith("e:q:") ? identityOf(g, node.slice(2)) : null;
-  if (asked && deck.length > 1) jump += `${jump ? " " : ""}<button type="button" class="jump" data-compare="${esc(asked)}">Compare across turns</button>`;
-  let body;
-  if (!node) body = `<p class="meta">Select a card to see what it came from and what it fed.${g && g.kind === "design" ? " Select a target to see every question and rule declared against it." : " The decision is the last column."}</p>`;
-  else if (tlinks) {
-    const all = [...g.nodes.values()];
-    const untargeted = all.filter((n) => n.kind === "question" && !str(n.q.target) && !arr(n.q.latent_targets).length).length
-      + all.filter((n) => n.kind === "rule" && !str(n.r.target)).length;
-    body = `<h3>Asked about by</h3>${refs(tlinks.asks, "asks about it")}
-      <h3>Borne on by</h3>${tlinks.bears.length ? `<ul>${tlinks.bears.map((x) => go("e:" + x.ref, x.role)).join("")}</ul>` : `<p class="meta">None declared</p>`}
-      <h3>Estimated by</h3>${refs(tlinks.est, "a rule estimates it")}
-      <p class="meta">${down.size} downstream through declared reads. Links are only those declared: ${untargeted} of this design's questions and rules declare no target link, which says nothing about whether they bear on it.</p>`;
-  } else {
-    const t = g.kind === "design" && node.startsWith("e:") ? targetsOf(g.design, node.slice(2)) : null;
-    body = `${t ? `<h3>Targets</h3>${t.target || t.latent.length ? `<ul>${t.target ? goTarget(t.target, t.rule ? "estimates" : "asks about") : ""}${t.latent.map((l) => goTarget(text(l.target), "bears on · " + text(l.role))).join("")}</ul>` : `<p class="meta">None declared</p>`}` : ""}
-      <h3>Came from, directly</h3>${list(g.inputs.get(node))}
-      <h3>Fed into, directly</h3>${list(g.outputs.get(node))}
-      <p class="meta">${up.size} upstream and ${down.size} downstream in all. "record" links are in the record itself; "design" links come from the design document, as declared.</p>`;
-  }
-  const filtered = hidden ? `<p class="notice">Filtered: ${hidden} card${hidden === 1 ? "" : "s"} folded into the columns' stubs.</p>` : "";
-  $("lineage").innerHTML = `<h2>Lineage</h2>${node ? `<div class="ref">${esc(label(node))}</div>` : ""}${legend}${filtered}${jump}${body}`;
-}
-
-// The question identity a turn's call recorded for one of its entries, or null.
-function identityOf(g, ref) {
-  const e = g.entries.get(ref), q = obj(obj(g.calls.get(e && e.call)).questions);
-  const id = obj(q[ref] ?? q[parseRef(ref).base]).identity;
-  return str(id) ? id : null;
-}
-
-// Compact when asked, or by default once a column holds more than 40 cards.
-function applyDensity() {
-  const most = Math.max(0, ...[...$("cols").querySelectorAll("section.col")].map((c) => c.querySelectorAll("[data-node]").length));
-  const compact = density === "compact" || (density === "auto" && most > 40);
-  $("cols").classList.toggle("compact", compact);
-  const auto = $("density").options && $("density").options[0];
-  if (auto) auto.text = "Density: auto" + (density === "auto" ? (compact ? " (compact)" : " (full)") : "");
-}
-
-// The same thing's node in the other view: a turn's grounded entry is its declared ref's card in
-// the design, and a declared ref is its first grounded entry in the turn.
-function designNode(node) {
-  if (!str(node) || !node.startsWith("e:")) return null;
-  return "e:" + parseRef(node.slice(2)).base; // showDesign drops one its design lacks
-}
-function turnNode(node) {
-  if (!state) return null;
-  if (!str(node) || !node.startsWith("e:")) return null;
-  const ref = node.slice(2);
-  if (state.entries.has(ref)) return node;
-  const first = (state.byBase.get(ref) || [])[0];
-  return first ? "e:" + first : null;
-}
-
-// A problem with something the reader opened: said once at the top, the view left as it was.
-function flash(message) {
-  const old = $("flash"); if (old) old.remove();
-  $("summary").insertAdjacentHTML("afterbegin", `<span class="err" id="flash" role="alert">${message}</span>`);
-}
-
-function clearView(message) {
-  state = null;
-  $("cols").innerHTML = "";
-  $("summary").innerHTML = message;
-  select(null);
-}
-
-// The tab bar, the pager and the two layouts, shown for the current tab.
-function chrome() {
-  for (const b of $("tabs").querySelectorAll("[data-tab]")) { if (b.dataset.tab === tab) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); }
-  $("pager").hidden = !(tab === "turn" && deck.length);
-  $("mainView").hidden = tab === "turns";
-  $("turnsView").hidden = tab !== "turns";
-  $("turnsBy").hidden = tab !== "turns";
-  $("designPick").hidden = !(tab === "design" && known.size > 1);
-  $("viewMode").hidden = $("density").hidden = tab === "turns";
-}
-
-function setTab(next, node = null) {
-  tab = next;
-  openCols.clear(); // column indices belong to the view they were opened in
-  chrome();
-  if (tab === "design") showDesign(node);
-  else if (tab === "turns") renderTurns();
-  else if (deck.length) { showAt(at); if (node) select(node); }
-  else if (state) { render(); if (node) select(node); }
-  else clearView(`<span>No record yet. Open a record file, or a folder of records and their designs, with the buttons above.</span>`);
-}
-
-// The design shown: the one picked, else the current turn's, else the first the page holds.
-function showDesign(node) {
-  const k = (designKey && known.has(designKey) && designKey) || (state && state.design && keyOf(state.design)) || (known.size ? known.keys().next().value : null);
-  if (!k) {
-    dstate = null;
-    $("cols").innerHTML = "";
-    $("summary").innerHTML = `<span>No design yet. Open a design document (the loaded design's <code>document</code>), or a folder holding one.</span>`;
-    select(null);
-    return;
-  }
-  designKey = k;
-  $("designPick").innerHTML = [...known].map(([key, v]) => `<option value="${esc(key)}">${esc(v.name)}</option>`).join("");
-  $("designPick").value = k;
-  dstate = buildDesign(known.get(k).doc);
-  renderDesign();
-  select(node && dstate.nodes.has(node) ? node : null);
-}
-
-// The Turns view: every record a row, grouped by design hash, or for one question identity every
-// answer to it with what read it.
-function renderTurns() {
-  const rows = deck.map((d, i) => { let g = null; try { g = build(d.record, d.design); } catch (e) { /* listed as unreadable */ } return { i, d, g, hash: designHash(d.record) }; });
-  const ids = new Map();
-  for (const r of rows) if (r.g) for (const c of r.g.calls.values()) for (const [ref, q] of Object.entries(obj(c.questions))) {
-    const id = obj(q).identity;
-    if (!str(id)) continue;
-    if (!ids.has(id)) ids.set(id, { refs: new Set(), turns: new Set() });
-    ids.get(id).refs.add(ref);
-    ids.get(id).turns.add(r.i);
-  }
-  $("turnsBy").innerHTML = [`<option value="">Group by design hash</option>`,
-    ...[...ids].map(([id, x]) => `<option value="${esc(id)}" title="${esc(id)}">Question ${esc([...x.refs].join(", "))} (${x.turns.size} turn${x.turns.size === 1 ? "" : "s"})</option>`)].join("");
-  if (!ids.has(turnsBy)) turnsBy = "";
-  $("turnsBy").value = turnsBy;
-  const designs = new Set(rows.map((r) => r.hash).filter(str));
-  $("summary").innerHTML = `<div class="kv"><span class="k">Turns</span><span class="v">${rows.length}</span></div><div class="kv"><span class="k">Design hashes</span><span class="v">${designs.size}</span></div><div class="kv"><span class="k">Question identities</span><span class="v">${ids.size}</span></div>`;
-  if (!rows.length) { $("turnsView").innerHTML = `<p class="meta" style="padding:12px">${state ? "The Turns view lists a folder's records; this record was opened on its own." : "No records yet."} Open a folder of records to compare turns.</p>`; return; }
-  const short = (h) => (str(h) ? esc(h.slice(0, 19)) + "…" : "no design hash");
-  const markOf = (e) => `${esc(obj(e.marker).kind ?? "marker")} ${esc(obj(obj(e.marker).cause).code ?? "")}`;
-  let html;
-  if (!turnsBy) {
-    const groups = new Map();
-    for (const r of rows) { const k = str(r.hash) ? r.hash : ""; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-    html = `<table><thead><tr><th>File</th><th>Decision</th><th>Rounds</th><th>Failed calls</th><th>Markers by cause</th></tr></thead><tbody>`;
-    for (const [k, rs] of groups) {
-      const name = known.has(k) ? esc(known.get(k).name) : "design not loaded";
-      html += `<tr class="group"><td colspan="5">${short(k)} · ${name} · ${rs.length} turn${rs.length === 1 ? "" : "s"}</td></tr>`;
-      for (const r of rs) {
-        if (!r.g) { html += `<tr data-row="${r.i}"><td>${esc(r.d.name)}</td><td colspan="4" class="err">unreadable record</td></tr>`; continue; }
-        const g = r.g, marks = new Map();
-        for (const e of g.entries.values()) if (e.marker) { const m = markOf(e); marks.set(m, (marks.get(m) || 0) + 1); }
-        const failed = [...g.calls.values()].filter((c) => obj(c.outcome).failed).length;
-        const rounds = [...g.rounds.keys()].filter((n) => Number.isInteger(n) && n > 0).length;
-        html += `<tr data-row="${r.i}"><td>${esc(r.d.name)}</td><td>${g.decision ? esc(decisionText(g.decision)) : "none"}</td>
-          <td class="num">${rounds}</td><td class="num">${failed}</td><td>${[...marks].map(([m, n]) => `${m}${n > 1 ? " ×" + n : ""}`).join("<br>") || "–"}</td></tr>`;
-      }
-    }
-  } else {
-    html = `<table><thead><tr><th>File</th><th>Ref</th><th>Leading, or value</th><th>p, or confidence</th><th>Runner-up, or none</th><th>Lead</th><th>Read by (derivation)</th></tr></thead><tbody>`;
-    for (const r of rows) {
-      if (!r.g || !ids.get(turnsBy).turns.has(r.i)) continue;
-      for (const [ref, e] of r.g.entries) {
-        // The answer's own call names its identity: one turn may ask another question at this ref.
-        if (identityOf(r.g, ref) !== turnsBy) continue;
-        const named = [ref, parseRef(ref).base]; // a per-candidate pick names the declared ref
-        const readers = [...r.g.entries].filter(([dr, de]) => dr.startsWith("d:") && arr(de.derivation).some((x) => arr(obj(x).refs).some((n) => named.includes(n))))
-          .map(([dr, de]) => `${esc(dr)} = ${de.marker ? markOf(de) : esc(JSON.stringify(de.value) ?? "–")}`).join("<br>") || "–";
-        let cells;
-        const v = e.value;
-        if (e.marker) cells = `<td colspan="4">${markOf(e)}</td>`;
-        else if (v && typeof v === "object" && v.probabilities && typeof v.probabilities === "object") {
-          const ranked = Object.entries(v.probabilities).filter(([, p]) => num(p)).sort((a, b) => b[1] - a[1]);
-          const [a, b] = [ranked[0] || ["–", null], ranked[1] || ["–", null]];
-          const lead = a[1] == null ? "–" : pct(exact(a[1] - (b[1] ?? 0))); // a lone label leads by its own p
-          cells = `<td>${esc(a[0])}</td><td class="num">${pct(a[1])}</td><td>${esc(b[0])} ${b[1] != null ? pct(b[1]) : ""}</td><td class="num">${lead}</td>`;
-        } else if (v && typeof v === "object" && v.kind === "extraction") {
-          cells = `<td>${esc(v.value === null ? "none found" : JSON.stringify(v.value))}</td><td class="num">${pct(v.confidence)}</td><td>none ${pct(v.p_null)}</td><td>–</td>`;
-        } else cells = `<td colspan="4">${esc(JSON.stringify(v) ?? "–")}</td>`;
-        html += `<tr data-row="${r.i}" data-at="e:${esc(ref)}"><td>${esc(r.d.name)}</td><td>${esc(ref)}</td>${cells}<td>${readers}</td></tr>`;
-      }
+    if (seen.has('bundle')) item(er, s => { for (const y of [2, 7, 12]) svg('line', {x1: 1, y1: y, x2: 9, y2: 7, class: 'edge eng-other'}, s); svg('line', {x1: 9, y1: 7, x2: 19, y2: 7, class: 'edge trunk eng-other'}, s); for (const y of [4, 10]) svg('line', {x1: 19, y1: 7, x2: 25, y2: y, class: 'edge eng-other'}, s); }, `fan-in ≥ ${BUNDLE_FAN_IN}, bundled`);
+    const nState = (D.edges || []).filter(e => !e.dependency).length;
+    if (nState) { // the uses of t:state are hidden until this toggle turns them on; the hash remembers it
+      const b = document.createElement('button');
+      b.className = 'toggle'; b.setAttribute('aria-pressed', String(S.stateEdges)); b.title = 'Show or hide the uses of t:state, which are not in the dependency graph';
+      const sv = svg('svg', {width: 22, height: 10, 'aria-hidden': 'true'}, b);
+      svg('line', {x1: 1, y1: 5, x2: 21, y2: 5, class: 'edge state'}, sv);
+      b.appendChild(document.createTextNode(`uses of t:state (${nState}): ${S.stateEdges ? 'shown' : 'hidden'}`));
+      b.addEventListener('click', () => { S.stateEdges = !S.stateEdges; render(); });
+      er.appendChild(b); er.n++;
     }
   }
-  $("turnsView").innerHTML = html + `</tbody></table>`;
+  if (seen.has('lineage') || seen.has('branch')) item(er, s => {
+    if (seen.has('lineage')) svg('line', {x1: 1, y1: seen.has('branch') ? 4 : 7, x2: 25, y2: seen.has('branch') ? 4 : 7, class: 'edge lineage'}, s);
+    if (seen.has('branch')) svg('line', {x1: 1, y1: seen.has('lineage') ? 11 : 7, x2: 25, y2: seen.has('lineage') ? 11 : 7, class: 'edge branch'}, s);
+  }, 'lineage (bold: first branch)');
+  if (T) {
+    for (const st of ['value', 'short', 'nobounds', 'Unsure', 'Unasked', 'Unavailable', 'absent']) if (seen.has('st:' + st)) item(nr, s => stateIcon(s, st, 13, 7), STATE_LABEL[st]);
+    const sides = ['clear', 'short'].filter(x => seen.has('side:' + x));
+    if (sides.length) item(nr, s => sides.forEach((x, i) => svg('rect', {x: 4 + i * 11, y: 4, width: 6, height: 6, class: 'side-' + x}, s)), 'nearest bound ' + sides.join(' / '));
+    if (seen.has('root')) item(nr, s => pill(s, 0, 0, 'root', 32), 'the lineage\'s root', 34);
+  }
+  if (seen.has('group')) item(mr, s => svg('rect', {x: 2, y: 2, width: 22, height: 10, rx: 2, class: 'group-ol'}, s), 'group');
+  if (seen.has('warn')) item(mr, s => svg('text', {x: 1, y: 11, class: 'badge warn'}, s, '⚠ n'), 'call warnings', 28);
+  for (const r of [er, nr, mr]) if (r.n) host.appendChild(r);
+}
+const GLOSSARY = [
+  ['round', 'A round asks the sources that are ready, then runs the rules that become ready, wavefront by wavefront. Round 0 asks no source: it holds the state and the rules that read only the state.', '§round-numbering'],
+  ['wavefront', 'One step of a round\'s rules: every rule whose inputs are all in hand runs together; the rules that this makes ready run in the next wavefront.', '§dependency-graph'],
+  ['lineage', 'The entries from the decision back to what it rests on. Its first branch, from the policy to the root, is drawn heavy; the other items branch from the entry they were found from.', 'outline'],
+  ['nearest bound', 'A bound the design declares for an entry, with the signed distance from what the entry measures to it; the outline lists them nearest first.', 'outline'],
+  ['bar', 'A bound on an answer\'s top probability: a reject threshold.', 'outline'],
+  ['margin', 'A bound on the lead.', 'outline'],
+  ['threshold', 'A bound on one label\'s probability; a thresholds bound has one per label.', 'outline'],
+  ['lead', 'The top probability minus the runner-up\'s; what a margin is measured on.', 'outline'],
+  ['short / clear', 'Short: the measure falls short of clearing the bound. Clear: it clears it. A plain bound has no side.', 'outline'],
+  ['determined', 'The entry holds a value, not a marker.', '§dependency-graph'],
+  ['⊙', 'Determined, no bound declared: a question\'s value whose paired design declares no bound on it; hover shows the design\'s reason. A state field, a tool result or a rule\'s value carries no mark.', 'outline'],
+  ['root', 'Where the lineage\'s first branch ends: the entry an undecided decision rests on.', 'outline'],
+  ['ties', 'How many of the nearest bounds lie as far from their parameter as the nearest one.', 'outline'],
+  ['marker', 'What a read returns when there is no value: Unsure, Unavailable or Unasked, each with one cause.', '§absence-markers'],
+  ['Unsure', 'A rule looked at its evidence and did not settle.', '§absence-markers'],
+  ['Unasked', 'The design or a turn limit chose not to fetch it.', '§absence-markers'],
+  ['Unavailable', 'The value could not be obtained; a failed call is unknown, never a no.', '§absence-markers'],
+  ['absent', 'A ref the design provides that has no entry in the record.', 'outline'],
+  ['declared read', 'A ref a rule declares it reads; DMN\'s information requirement. The record holds no read set, so these come from the design.', 'ontology'],
+  ['source requirement', 'The data form of a source\'s when.', '§source-requirement'],
+  ['tg:', 'A target, by its id: the one a question asks or bears on, or a rule estimates. How, and the role, are on hover.', '§targets'],
+  ['params · boundaries', 'On a rule: how many rule parameters it reads, and "· boundaries" when it declares boundaries. The parameters are on hover.', 'outline'],
+  ['⚠ n', 'n warnings on this turn\'s calls to the source; the codes are on hover.', 'outline'],
+  ['group', 'Refs a design declares to be considered together, with its reason, such as convergent; drawn as a dashed box with a small label.', '§groups'],
+  ['policy', 'The rule the design names whose estimate is the turn\'s decision.', '§policy'],
+  ['finished', 'The record holds the policy\'s entry: the turn reached its decision, decided or undecided.', 'outline'],
+  ['unfinished', 'The log ends at a cause item, or holds no entry at the policy\'s ref.', 'outline'],
+];
+function fillGlossary() {
+  $('gloss').innerHTML = '<dl>' + GLOSSARY.map(([t, d, s]) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`).join('') + '</dl>';
 }
 
-document.addEventListener("click", (ev) => {
-  const tabBtn = ev.target.closest("[data-tab]");
-  if (tabBtn) {
-    // The Design tab follows the turn on show, unless the reader picked a design since it changed.
-    if (tabBtn.dataset.tab === "design" && state && state.design && state.record !== designTurn) { designKey = keyOf(state.design); designTurn = state.record; }
-    setTab(tabBtn.dataset.tab, tab === "turn" && tabBtn.dataset.tab === "design" ? designNode(selected) : tab === "design" && tabBtn.dataset.tab === "turn" ? turnNode(selected) : null);
-    return;
-  }
-  const jump = ev.target.closest("[data-jump]");
-  if (jump) {
-    if (jump.dataset.jump === "design") { const node = designNode(selected); designKey = keyOf(state.design); designTurn = state.record; setTab("design", node); }
-    else setTab("turn", turnNode(selected));
-    return;
-  }
-  const compare = ev.target.closest("[data-compare]");
-  if (compare) { turnsBy = compare.dataset.compare; setTab("turns"); return; }
-  const stub = ev.target.closest("[data-open-col]");
-  if (stub) {
-    const i = +stub.dataset.openCol;
-    if (openCols.has(i)) openCols.delete(i); else openCols.add(i);
-    select(selected);
-    return;
-  }
-  const row = ev.target.closest("[data-row]");
-  if (row) { at = +row.dataset.row; setTab("turn", row.dataset.at || null); return; }
-  const go = ev.target.closest("[data-go]");
-  if (go) {
-    const node = go.dataset.go;
-    select(node);
-    const el = cardOf(node);
-    if (el) { el.scrollIntoView({ block: "nearest", inline: "nearest" }); el.focus({ preventScroll: true }); }
-    return;
-  }
-  const card = ev.target.closest("[data-node]");
-  if (card) select(card.classList.contains("sel") ? null : card.dataset.node);
-});
-
-function show(record, design) { state = build(record, design || null); render(); }
-
-
-// A folder: every record in it, each paired with its design by hash when the design is there too.
-let deck = [], at = 0, deckNote = "", loadedDesign = null; // {doc, hash}, the design opened in the page
-async function sha(data) {
-  if (!(window.crypto && crypto.subtle)) return null;
-  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-  const b = await crypto.subtle.digest("SHA-256", bytes);
-  return "sha256:" + [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+/* ---------- summary ---------- */
+const stChip = (st, label) => `<span class="st ${esc(st)}"><i>${ICON[st] || ''}</i>${esc(label || st)}</span>`;
+// The design fingerprint: its hash's first 12 hex.
+const fp = D => { const f = D && D.fingerprint; return f && typeof f.hash === 'string' && hex12(f.hash) !== '?' ? hex12(f.hash) : null; };
+const fpHtml = D => { const x = fp(D); if (!x) return ''; const roles = D.fingerprint.roles; return `<span title="${esc('fingerprint ' + D.fingerprint.hash + (roles ? '\nroles ' + enc(roles) : ''))}">fingerprint <span class="mono">${esc(x)}</span></span>`; };
+// The lineage's other branches, after the first (which the why line already gives), grouped by
+// how and from where they were found: `+ q:tone, t:ticket (cause, from d:act)`.
+function branchesHtml(T) {
+  const path = lineage(T), rest = path.slice(mainChain(path).length);
+  if (!rest.length) return '';
+  const ref = p => `<span title="${esc(holdsText(p.holds) + (p.via ? ', via ' + p.via : '') + (typeof p.index === 'number' ? ', log item ' + p.index : ''))}">${esc(p.ref)}</span>`;
+  const by = new Map();
+  for (const p of rest) { const k = `${p.via || '?'}, from ${p.from || '?'}`; if (!by.has(k)) by.set(k, []); by.get(k).push(p); }
+  return '<span class="br">+ ' + [...by].map(([k, ps]) => ps.map(ref).join(', ') + ` (${esc(k)})`).join('; ') + '</span>';
 }
-const isRecord = (j) => (j && Array.isArray(j.log)) || (Array.isArray(j) && j.some((i) => i && i.item === "design"));
-// As the command reads them: an object with a policy and no log list.
-const isDesign = (j) => j && typeof j === "object" && !Array.isArray(j) && !Array.isArray(j.log) && "policy" in j;
-const designHash = (rec) => { const d = (Array.isArray(rec) ? rec : arr(obj(rec).log)).find((i) => i && i.item === "design"); return d && d.hash; };
-
-async function openFolder(files) {
-  const list = [...files].filter((f) => /\.(json|jsonl)$/i.test(f.name))
-    .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name));
-  const recs = [], designs = new Map(), skipped = [], unhashed = [];
-  for (const f of list) {
-    const name = f.webkitRelativePath || f.name;
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    const text = new TextDecoder().decode(bytes);
-    const docs = [];
-    if (/\.jsonl$/i.test(f.name)) {
-      text.split("\n").forEach((line, i) => { if (!line.trim()) return; try { docs.push([name + " · line " + (i + 1), JSON.parse(line), line.trim()]); } catch (e) { skipped.push(name + " · line " + (i + 1)); } });
-    } else {
-      try { docs.push([name, JSON.parse(text), bytes]); } catch (e) { skipped.push(name); continue; }
-    }
-    for (const [n, j, raw] of docs) {
-      if (isRecord(j)) recs.push({ name: n, record: j });
-      else if (isDesign(j)) { const h = await sha(raw); if (h && !designs.has(h)) designs.set(h, j); else if (!h) unhashed.push(j); }
-      else skipped.push(n);
-    }
-  }
-  // Without crypto.subtle nothing pairs by hash; a lone design still serves, marked.
-  if (!designs.size && unhashed.length === 1) designs.set("unhashed", unhashed[0]);
-  deckFrom(recs, designs, skipped, list.length, unhashed.length ? "This browser cannot hash files here, so no design pairs by hash." : "");
+// The why line as the header shows it: "defect no" is left out, "defect yes" is red.
+const whyHtml = w => esc(w).replace(/, defect no\)/g, ')').replace(/defect yes/g, '<span class="defect">defect yes</span>');
+function drawSummary() {
+  const host = $('summary'), t = curTurn(), D = curDesign();
+  let h = '';
+  if (t) {
+    const T = t.outline;
+    const why = whyText(t).replace(/ <- /g, ' ← ');
+    h += `<div class="why" title="${esc(why + (typeof T.summary === 'string' ? '\n' + T.summary : ''))}">${decIcon(t.sum.dkind)}<span>${whyHtml(why)}</span></div>`;
+    const br = branchesHtml(T);
+    if (br) h += `<div class="lin">${br}</div>`;
+    const dz = t.design ? t.design.outline : null;
+    const pair = t.pairBy === 'hash' ? 'paired, hash matches' : t.pairBy === 'name' ? 'paired by name, hash differs' : 'no design paired';
+    h += '<div class="meta">' + [
+      `<span title="${esc(T.status_reason || '')}">${esc(T.status)}</span>`,
+      `<span title="${esc(T.record_hash || '')}">record <span class="mono">${esc(hex12(T.record_hash))}</span></span>`,
+      `<span title="${esc(T.design_hash || '')}">design ${esc(T.design_name || (dz && dz.name) || '?')} <span class="mono">${esc(hex12(T.design_hash))}</span></span>`,
+      dz ? fpHtml(dz) : '',
+      `<span>${t.sum.rounds} round${t.sum.rounds === 1 ? '' : 's'}</span>`,
+      `<span>${esc(pair)}${t.design && !T.paired ? '; outlined without its design' : ''}</span>`,
+      `<span>format ${esc(T.record_format)}</span>`,
+      T.escalation ? `<span>escalation ${esc(`${T.escalation.kind}, root ${T.escalation.root_cause ? T.escalation.root_cause.code + ' (' + (T.escalation.root_cause.refs || []).join(', ') + ')' : '?'}`)}</span>` : '',
+      T.escalation && T.escalation.defect ? '<span class="defect">defect yes</span>' : '',
+      T.defects && T.defects.length ? `<span>defects ${esc(T.defects.join(', '))}</span>` : '',
+      T.absent && T.absent.length ? `<span>absent <span class="mono">${esc(T.absent.join(', '))}</span></span>` : '',
+      T.cause ? `<span>cause ${esc(T.cause.code + (T.cause.refs && T.cause.refs.length ? ' (' + T.cause.refs.join(', ') + ')' : ''))}</span>` : ''].filter(Boolean).join('') + '</div>';
+  } else if (D) {
+    h += `<div class="why"><span>design ${esc(D.name || '(unnamed)')}</span></div>`;
+    h += '<div class="meta">' + [
+      `<span>format ${esc(D.format)}</span>`,
+      `<span title="${esc(D.hash || '')}">hash <span class="mono">${esc(hex12(D.hash))}</span></span>`, fpHtml(D),
+      `<span>policy <span class="mono">${esc(D.policy || D.policy_node || '?')}</span></span>`,
+      `<span>${(D.nodes || []).length} nodes in ${new Set((D.nodes || []).map(n => n.round)).size} rounds</span>`,
+      `<span>${(D.edges || []).filter(e => e.dependency).length} dependencies, ${(D.edges || []).filter(e => !e.dependency).length} uses of t:state</span>`,
+      `<span>${(D.parameters || []).length} parameters</span>`,
+      (D.groups || []).length ? `<span>groups ${esc(D.groups.map(g => g.name).join(', '))}</span>` : '',
+      (D.targets || []).length ? `<span>targets <span class="mono">${esc(D.targets.map(g => g.id).join(', '))}</span></span>` : '',
+      `<span>${cur().turns.filter(x => x.design && x.design.outline === D).length} turns</span>`].filter(Boolean).join('') + '</div>';
+  } else h = '<span class="muted">Nothing to draw. Open or drop outline JSON (the output of <code>python -m ommat.outline PATH --json</code>).</span>';
+  host.innerHTML = h;
 }
 
-function deckFrom(recs, designs, skipped, read, warning = "") {
-  if (!recs.length && designs.size) { // a folder of designs alone opens on the Design view
-    for (const [k, doc] of designs) addKnown(k, doc);
-    designKey = [...designs.keys()][0];
-    designTurn = state ? state.record : null;
-    setTab("design");
-    return;
-  }
-  if (!recs.length) {
-    const message = `No ommat records found in that folder (${esc(read)} JSON file${read === 1 ? "" : "s"} read). A record is a JSON object with a <code>log</code> list.`;
-    if (state || dstate || tab !== "turn") flash(message);
-    else { leaveDeck(); clearView(`<span class="err">${message}</span>`); }
-    return;
-  }
-  // One object per design: a design the page already holds keeps its object, so keyOf finds it.
-  for (const [k, doc] of [...designs]) { addKnown(k, doc); if (known.has(k)) designs.set(k, known.get(k).doc); }
-  const distinct = [...new Set(designs.values())];
-  const only = distinct.length === 1 ? distinct[0] : null;
-  deck = recs.map((r) => {
-    const h = designHash(r.record);
-    const exact = (str(h) && designs.get(h)) || (loadedDesign && str(h) && loadedDesign.hash === h ? loadedDesign.doc : null);
-    if (exact) return { ...r, design: exact, guess: null };
-    if (only) return { ...r, design: only, guess: "folder" };
-    if (loadedDesign) return { ...r, design: loadedDesign.doc, guess: "loaded" };
-    return { ...r, design: null, guess: null };
-  });
-  $("pick").innerHTML = deck.map((d, i) => `<option value="${i}">${esc(d.name)}</option>`).join("");
-  deckNote = (skipped.length ? ` · ${skipped.length} file${skipped.length === 1 ? "" : "s"} skipped` : "") + (warning ? " · " + warning : "");
-  $("deckNote").title = skipped.join("\n");
-  at = 0;
-  turnsBy = "";
-  setTab("turn");
-}
-
-const GUESSES = {
-  folder: "No design here matches this record's design hash, so lineage uses the only design there is, which may differ.",
-  loaded: "The design you opened does not match this record's design hash, so its lineage may differ.",
+/* ---------- turns table ---------- */
+const sideBox = side => `<svg width="8" height="8" aria-hidden="true"><rect width="8" height="8" class="side-${esc(side || 'none')}"/></svg>`;
+const boundKey = b => [b.e.ref, b.param, b.role, b.label].join('|');
+const DORD = {decided: 0, Unsure: 1, Unasked: 2, Unavailable: 3, none: 4};
+const SORTS = {
+  record: t => basename(t.path), decision: t => [DORD[t.sum.dkind], t.sum.decision], rounds: t => t.sum.rounds,
+  short: t => (t.sum.nbounds ? t.sum.sides.short : null), root: t => (t.sum.root ? t.sum.root.ref : null), nearest: t => t.sum.nearAbs,
 };
-
-// One record shown on its own, with the design opened in the page, marked when the hashes differ.
-function showOne(rec) {
-  leaveDeck();
-  tab = "turn";
-  chrome();
-  show(rec, loadedDesign && loadedDesign.doc);
-  const h = designHash(rec);
-  if (loadedDesign && !(str(h) && loadedDesign.hash === h)) { state.guess = "loaded"; $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES.loaded}</div>`); }
+const cmpKey = (a, b) => {
+  if (Array.isArray(a)) { for (let i = 0; i < a.length; i++) { const c = cmpKey(a[i], b[i]); if (c) return c; } return 0; }
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+// The table's rows, and what prev and next walk: the set's turn order, filtered, then sorted when a column is chosen. Empty keys sort last.
+function visibleOrder() {
+  const s = cur();
+  let o = (s.order || []).slice();
+  if (S.undecidedOnly) o = o.filter(i => s.turns[i].sum.dkind !== 'decided');
+  if (S.sort && SORTS[S.sort]) {
+    const key = SORTS[S.sort];
+    o = o.map((i, k) => ({i, k, v: key(s.turns[i])}))
+      .sort((a, b) => (a.v === null) - (b.v === null) || (a.v === null ? 0 : cmpKey(a.v, b.v) * S.dir) || a.k - b.k).map(x => x.i);
+  }
+  return o;
+}
+function drawTurns() {
+  const host = $('turns'), s = cur();
+  if (!s.turns.length) { host.innerHTML = '<span class="muted">No records in this set.</span>'; return; }
+  const showDesign = s.designs.length > 1;
+  const th = (k, label, cls, title) => `<th${cls ? ` class="${cls}"` : ''}${title ? ` title="${esc(title)}"` : ''}${k ? ` aria-sort="${S.sort === k ? (S.dir > 0 ? 'ascending' : 'descending') : 'none'}"` : ''}>${k ? `<button class="sort" data-k="${k}">${esc(label)}</button>` : esc(label)}</th>`;
+  const order = visibleOrder();
+  let h = `<div class="tbar"><button id="undOnly" aria-pressed="${S.undecidedOnly}">undecided only</button><span>${order.length} of ${s.turns.length} turns${S.sort ? ' · sorted by ' + esc(S.sort) : ' · in time order'}</span></div>`;
+  h += '<table id="turnsTable"><thead><tr>' + th(null, '', '', 'the decision') + th('record', 'record') + (showDesign ? th(null, 'design') : '') + th('decision', 'decision')
+    + th('rounds', 'rounds', 'num', 'rounds after round 0') + th(null, 'markers') + th('root', 'root', '', 'the lineage\'s root: where its first branch ends')
+    + th('short', 'short', 'num', 'bounds short of their parameter') + th(null, 'clear', 'num', 'bounds clear of their parameter')
+    + th('nearest', 'nearest bound', '', 'the nearest bound as the outline\'s summary picks it: the nearest on the lineage\'s first branch, else on the lineage, else of all; "(tied with n-1 others)" when n bounds lie as near. Sorts by its |distance|.') + '</tr></thead><tbody>';
+  for (const i of order) {
+    const t = s.turns[i], T = t.outline, m = t.sum.markers, D = t.design && t.design.outline;
+    const marks = Object.keys(m).sort().map(k => `${k} ${m[k]}`).join(' · ') || '—';
+    const nb = t.sum.nbounds;
+    const nb0 = (T.nearest_bounds || []).find(x => typeof x.distance === 'number');
+    const b = t.sum.pick, ties = b && nb0 && Math.abs(nb0.distance) === Math.abs(b.distance) ? T.ties || 0 : 0;
+    const near = b ? `<span class="cl"><span class="cl chip" data-key="${esc(boundKey(b))}" data-i="${i}" title="${esc(`${b.e.ref}  ${b.label}\n${b.param} = ${b.bound === null ? '?' : num(b.bound)}, ${b.measure} ${b.measured === null ? '?' : num(b.measured)}, ${b.side || 'no side'}  (by ${b.by})${ties > 1 ? `\n${ties} bounds tie at ${num(b.distance)}, ${b.side || 'no side'}` : ''}\nclick: show it in the bounds panel`)}">${sideBox(b.side)}<span class="muted">${esc(b.role)}</span> ${esc((b.distance >= 0 ? '+' : '') + num(b.distance))} ${esc(shortOf(D, b.e.ref))}</span>${ties > 1 ? ` <span class="muted">(tied with ${ties - 1} ${ties === 2 ? 'other' : 'others'})</span>` : ''}</span>` : '';
+    const pairNote = t.pairBy === 'name' ? ' · hash differs' : t.design ? '' : ' · unpaired';
+    const stTitle = T.status + (T.status_reason ? ': ' + T.status_reason : '');
+    h += `<tr data-i="${i}" tabindex="0" aria-selected="${S.turn === i}"><td>${decIcon(t.sum.dkind)}</td>`
+      + `<td class="mono" title="${esc(t.path + '\n' + stTitle + (T.turn && T.turn.start ? '\nstart ' + T.turn.start : ''))}">${esc(basename(t.path).replace(/(\.record)?\.jsonl?$/, ''))}<span class="sub">${esc(T.status + pairNote)}</span></td>`
+      + (showDesign ? `<td>${t.design ? esc(t.design.outline.name || '?') : '<span class="muted">unpaired</span>'}</td>` : '')
+      + `<td class="mono wr">${esc(t.sum.decision)}</td><td class="num">${t.sum.rounds}</td><td class="wr">${esc(marks)}</td>`
+      + `<td class="mono">${t.sum.root ? esc(t.sum.root.ref) : '—'}</td>`
+      + (nb ? `<td class="num">${t.sum.sides.short}</td><td class="num">${t.sum.sides.clear}</td><td class="mono">${near || '—'}</td>` : '<td colspan="3" class="nob">no bounds</td>') + '</tr>';
+  }
+  // across the set: which questions fall short, and which refs undecided turns rest on
+  const tally = (pick) => { const c = {}; for (const t of s.turns) pick(t, c); return Object.entries(c).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)); };
+  const shortQ = tally((t, c) => { for (const [r, n] of Object.entries(t.sum.shortBy)) c[r] = (c[r] || 0) + n; });
+  // the root of an undecided turn is counted when it is a question; a state field or any other ref is listed apart
+  const roots = tally((t, c) => { const r = t.sum.root; if (t.sum.dkind !== 'decided' && r && /^q:/.test(r.ref)) c[r.ref] = (c[r.ref] || 0) + 1; });
+  const others = tally((t, c) => { const r = t.sum.root; if (t.sum.dkind !== 'decided' && r && !/^q:/.test(r.ref)) c[r.ref] = (c[r.ref] || 0) + 1; });
+  const fmt = xs => xs.length ? xs.map(([r, n]) => `<span class="mono">${esc(r)}</span> ${n}`).join(' · ') : '<span class="muted">none</span>';
+  const ncol = 9 + (showDesign ? 1 : 0);
+  h += `</tbody><tfoot><tr><td colspan="${ncol}"><span class="k">counts over the ${s.turns.length} loaded turns, not record data</span>short bounds by question: ${fmt(shortQ)}<br>root of the undecided turns: ${fmt(roots)}${others.length ? ` <span class="muted">· root not a question:</span> ${fmt(others)}` : ''}</td></tr></tfoot></table>`;
+  host.innerHTML = h;
+  host.querySelectorAll('tbody tr').forEach(tr => {
+    const i = +tr.dataset.i;
+    tr.addEventListener('click', () => selectTurn(i));
+    tr.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectTurn(i); } });
+  });
+  host.querySelectorAll('.chip').forEach(c => c.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const i = +c.dataset.i, key = c.dataset.key;
+    if (S.turn !== i) selectTurn(i);
+    flashStrip(key);
+  }));
+  host.querySelectorAll('button.sort').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.k;
+    if (S.sort !== k) { S.sort = k; S.dir = 1; } else if (S.dir > 0) S.dir = -1; else { S.sort = null; S.dir = 1; }
+    render();
+  }));
+  const u = $('undOnly');
+  if (u && u.addEventListener) u.addEventListener('click', () => { S.undecidedOnly = !S.undecidedOnly; render(); });
+}
+function flashStrip(key) {
+  for (const g of document.querySelectorAll('#strips .strip-row')) if (g.getAttribute('data-key') === key) {
+    g.scrollIntoView({block: 'center', behavior: 'smooth'});
+    g.classList.remove('flash'); void g.getBoundingClientRect(); g.classList.add('flash');
+    setTimeout(() => g.classList.remove('flash'), 1500);
+    if (g.focus) g.focus({preventScroll: true});
+    return;
+  }
 }
 
-function showAt(i) {
-  if (!deck.length) return;
-  at = Math.max(0, Math.min(deck.length - 1, i));
-  const d = deck[at];
-  try { show(d.record, d.design); state.guess = d.guess; } catch (e) { clearView(`<span class="err">${esc(d.name)}: ${esc(e.message)}</span>`); }
-  $("summary").insertAdjacentHTML("afterbegin", `<div class="kv"><span class="k">File</span><span class="v">${esc(d.name)}</span></div>`);
-  if (d.guess && state) $("summary").insertAdjacentHTML("beforeend", `<div class="notice">${GUESSES[d.guess]}</div>`);
-  $("deckNote").textContent = `${deck.filter((d) => d.design && !d.guess).length} of ${deck.length} paired with their design by hash` + deckNote;
-  $("pick").value = String(at);
-  $("count").textContent = `${at + 1} of ${deck.length}`;
-  // A pager button about to be disabled hands focus to its pair, so the keyboard keeps its place.
-  const focused = document.activeElement;
-  $("prev").disabled = at === 0;
-  $("next").disabled = at === deck.length - 1;
-  if (focused && focused.disabled) (focused === $("prev") ? $("next") : $("prev")).focus();
-}
-function leaveDeck() { deck = []; $("pager").hidden = true; }
-
-$("dirFile").addEventListener("change", () => { const files = $("dirFile").files; if (files && files.length) openFolder(files).catch((e) => flash(`Couldn't read that folder: ${esc(e.message)}`)); $("dirFile").value = ""; });
-$("prev").addEventListener("click", () => showAt(at - 1));
-$("next").addEventListener("click", () => showAt(at + 1));
-$("pick").addEventListener("change", () => showAt(+$("pick").value));
-document.addEventListener("keydown", (ev) => {
-  const card = ev.target.closest && ev.target.closest("[data-node]");
-  if (card && ev.target === card && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); if (!ev.repeat) card.click(); return; }
-  if (tab !== "turn" || deck.length < 2 || ev.altKey || ev.ctrlKey || ev.metaKey) return;
-  // Leave the arrows to anything that scrolls or takes text.
-  if (ev.target.closest && ev.target.closest("input, textarea, select, .flow, .val, aside")) return;
-  if (ev.key === "ArrowLeft") { ev.preventDefault(); showAt(at - 1); }
-  else if (ev.key === "ArrowRight") { ev.preventDefault(); showAt(at + 1); }
-});
-
-// A file the reader opens: its bytes, their hash and its parsed JSON, or a message on failure.
-async function readJson(file) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  return { json: JSON.parse(new TextDecoder().decode(bytes)), hash: await sha(bytes) };
-}
-const onFile = (input, cb) => input.addEventListener("change", () => {
-  const f = input.files && input.files[0];
-  input.value = "";
-  if (!f) return;
-  readJson(f).then(cb, (e) => flash(`Couldn't read ${esc(f.name)}: ${esc(e.message)}`));
-});
-onFile($("recFile"), ({ json }) => { try { build(json, null); } catch (e) { flash(esc(e.message)); return; } showOne(json); });
-onFile($("desFile"), ({ json: read, hash }) => {
-  if (!isDesign(read)) { flash("That file is not a design: a design has a policy and no log."); return; }
-  const json = hash && known.has(hash) ? known.get(hash).doc : read; // one object per design, so keyOf finds it
-  loadedDesign = { doc: json, hash };
-  designTurn = null; // the turn's design may have changed: the Design tab follows it again
-  addKnown(hash || "opened", json);
-  try {
-    // One rule whatever the order: an exact match, then the folder's only design, then this one.
-    deck.forEach((d) => {
-      if (d.design && !d.guess) return;
-      if (hash && hash === designHash(d.record)) { d.design = json; d.guess = null; return; }
-      if (d.guess === "folder") return;
-      d.design = json;
-      d.guess = "loaded";
-    });
-    if (tab === "design" || (!deck.length && !state)) { designKey = hash || "opened"; designTurn = state ? state.record : null; setTab("design"); }
-    else if (tab === "turns") setTab("turns");
-    else if (deck.length) showAt(at);
-    else if (state) showOne(state.record);
-  } catch (e) { clearView(`<span class="err">${esc(e.message)}</span>`); }
-});
-$("pasteBtn").addEventListener("click", () => { $("pastePanel").hidden = !$("pastePanel").hidden; });
-$("pasteGo").addEventListener("click", async () => {
-  $("pasteErr").textContent = "";
-  let rec, des = null;
-  try {
-    rec = JSON.parse($("pasteRec").value);
-    const raw = $("pasteDes").value.trim();
-    if (raw) {
-      const doc = JSON.parse(raw);
-      if (!isDesign(doc)) throw new Error("the design has no policy, or holds a log");
-      const hash = await sha(raw);
-      des = { doc: hash && known.has(hash) ? known.get(hash).doc : doc, hash };
+/* ---------- bounds strips ---------- */
+const ROLE_RANK = r => { const k = ['bar', 'margin', 'thresholds', 'mass', 'null', 'plain'].indexOf(r); return k < 0 ? 99 : k; };
+// Each bound as one row, in the outline's nearest order, then grouped by entry (in the order of each
+// entry's nearest row) and within an entry by role. The root's nearest bound is marked.
+function stripRows(t) {
+  let rows = [].concat(...t.idx.all.map(boundRows));
+  const nm = Array.isArray(t.outline.nearest_bounds) ? t.outline.nearest_bounds : null;
+  const onLin = new Set(lineage(t.outline).map(h => h.ref));
+  if (nm) { // the nearest bounds in their order, joined to the entries' bounds for the tick and dot; any others after
+    const used = new Set(), out = [];
+    for (const m of nm) {
+      const cands = rows.filter(r => !used.has(r) && r.e.ref === m.ref && r.param === m.param && r.role === m.role);
+      const r = cands.find(r => r.distance === m.distance) || cands[0];
+      if (r) { used.add(r); out.push(Object.assign({}, r, {distance: m.distance, side: m.side, by: m.by || r.by, onPath: !!m.on_lineage})); }
+      else {
+        const e = t.idx.byRef.get(m.ref) || {ref: m.ref};
+        out.push({e, role: m.role, label: m.role, by: m.by, param: m.param, bound: null, measured: null, distance: typeof m.distance === 'number' ? m.distance : null, side: m.side, measure: '?', onPath: !!m.on_lineage});
+      }
     }
-    build(rec, des && des.doc); // check it before anything on screen changes
-  } catch (e) { $("pasteErr").textContent = "Couldn't read that: " + e.message; return; }
-  if (des) { loadedDesign = des; addKnown(des.hash || "opened", des.doc); }
-  showOne(rec);
-  $("pastePanel").hidden = true;
-});
+    rows = out.concat(rows.filter(r => !used.has(r)).map(r => Object.assign({}, r, {rest: true, onPath: onLin.has(r.e.ref)})));
+  } else rows = rows.map(r => Object.assign({}, r, {onPath: onLin.has(r.e.ref)})).sort((a, b) => Math.abs(a.distance ?? Infinity) - Math.abs(b.distance ?? Infinity));
+  const root = rootOf(t.outline);
+  const rootRow = root ? rows.find(r => r.e.ref === root.ref && typeof r.distance === 'number') : null;
+  if (rootRow) rootRow.isRoot = true;
+  const refs = [];
+  for (const r of rows) if (!refs.includes(r.e.ref)) refs.push(r.e.ref);
+  rows = refs.flatMap(ref => rows.map((r, k) => ({r, k})).filter(x => x.r.e.ref === ref).sort((a, b) => ROLE_RANK(a.r.role) - ROLE_RANK(b.r.role) || a.k - b.k).map(x => x.r));
+  return {rows, nm};
+}
+function drawStrips() {
+  const host = $('strips'); host.textContent = '';
+  const t = curTurn();
+  if (!t) { host.innerHTML = '<span class="muted">Select a turn to see its bounds by entry.</span>'; return; }
+  const D = t.design && t.design.outline;
+  const {rows, nm} = stripRows(t);
+  if (!rows.length) {
+    const reasons = [...new Set(t.idx.all.filter(e => e.bounds_reason && /^[q]/.test(e.ref)).map(e => `${e.ref}: ${e.bounds_reason}`))];
+    host.innerHTML = `<span class="muted">${t.design ? 'No bounds derived for this turn.' : 'No design is paired, so no bounds.'}</span>` + (reasons.length ? '<ul class="muted" style="font-size:12px;margin:6px 0 0;padding-left:18px">' + reasons.map(r => `<li>${esc(r)}</li>`).join('') + '</ul>' : '');
+    return;
+  }
+  const vals = rows.flatMap(r => [r.bound, r.measured]).filter(v => typeof v === 'number');
+  let lo = Math.min(0, ...vals), hi = Math.max(1, ...vals);
+  if (lo === hi) hi = lo + 1;
+  const W = Math.max(440, host.clientWidth || 520), LW = 230, RW = 150, PW = W - LW - RW - 10, RH = 24, AX = 34;
+  const X = v => LW + (v - lo) / (hi - lo) * PW;
+  const ties = t.outline.ties || 0, first = nm && nm.find(m => typeof m.distance === 'number');
+  host.innerHTML = (ties > 1 && first ? `<div class="ties">${ties} bounds tie at ${esc(num(first.distance).replace('-', '\u2212'))}, ${esc(first.side || 'no side')}</div>` : '')
+    + `<div class="muted" style="font-size:12px;margin-bottom:6px">${rows.length} bound${rows.length === 1 ? '' : 's'}${rows.some(r => r.rest) ? ' (the outline\'s nearest, then the entries\' others)' : ''}, grouped by entry, then by role${rows.some(r => r.isRoot) ? '; the root\'s nearest bound is shaded' : ''}. A tick is the bound, a dot the measure, the line between them the distance; a bar on the left marks the lineage's rows.</div>`;
+  const H = rows.length * RH + AX;
+  const root = svg('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${rows.length} bounds; each tick is a bound and each dot the measure`}, host);
+  const ticks = hi - lo <= 1 ? [lo, lo + (hi - lo) / 2, hi] : [lo, hi];
+  for (const v of ticks) {
+    svg('line', {x1: X(v), y1: 2, x2: X(v), y2: rows.length * RH + 2, class: 'strip-grid'}, root);
+    svg('text', {x: X(v), y: rows.length * RH + 15, class: 'strip-t', 'text-anchor': 'middle'}, root, num(v));
+  }
+  svg('text', {x: LW + PW / 2, y: rows.length * RH + 29, class: 'strip-t', 'text-anchor': 'middle'}, root, 'probability or lead (0–1)' + (lo < 0 || hi > 1 ? ', widened to fit' : ''));
+  let prev = null;
+  rows.forEach((r, i) => {
+    const y = 2 + i * RH, cy = y + RH / 2;
+    if (prev !== null && r.e.ref !== prev) svg('line', {x1: 0, y1: y, x2: W, y2: y, class: 'strip-sep'}, root);
+    const nodeId = (t.design && ((t.design.outline.ref_node || {})[r.e.ref] || (t.design.outline.ref_node || {})[baseOf(r.e.ref)])) || r.e.ref;
+    const g = svg('g', {class: 'strip-row' + (r.isRoot ? ' root' : ''), tabindex: 0, role: 'button', 'data-key': boundKey(r), 'aria-label': `${r.e.ref} ${r.label} ${r.side || ''}`}, root);
+    g.addEventListener('click', () => selectNode(nodeId));
+    g.addEventListener('keydown', ev => { if (ev.key === 'Enter') selectNode(nodeId); });
+    svg('rect', {x: 0, y, width: W, height: RH, class: 'strip-bg'}, g);
+    if (r.onPath) svg('rect', {x: 0, y: y + 1, width: 3, height: RH - 2, class: 'strip-path'}, g);
+    const tx = svg('text', {x: 10, y: cy + 4, class: 'strip-t'}, g);
+    const first = r.e.ref !== prev, lab = first ? cut(shortOf(D, r.e.ref), 18) : '';
+    if (lab) svg('tspan', {class: 'strip-b'}, tx, lab + ' ');
+    svg('tspan', {class: 'strip-m', x: first ? null : 10 + Math.min(estW(cut(shortOf(D, r.e.ref), 18), 12) + 7, 140)}, tx, cut(`${r.label} · ${r.param}`, fitChars(LW - 20 - (lab ? estW(lab, 12) : 0), 11.5)));
+    prev = r.e.ref;
+    svg('line', {x1: LW, y1: cy, x2: LW + PW, y2: cy, class: 'strip-axis'}, g);
+    const side = r.side || 'none';
+    if (typeof r.bound === 'number' && typeof r.measured === 'number')
+      svg('line', {x1: X(r.bound), y1: cy, x2: X(r.measured), y2: cy, class: 'side-' + side, 'stroke-width': 3, 'stroke-linecap': 'round'}, g);
+    if (typeof r.bound === 'number') svg('line', {x1: X(r.bound), y1: cy - 7, x2: X(r.bound), y2: cy + 7, class: 'strip-bound'}, g);
+    if (typeof r.measured === 'number') svg('circle', {cx: X(r.measured), cy, r: 4.5, class: 'side-' + side, stroke: 'var(--surface)', 'stroke-width': 2}, g);
+    svg('text', {x: LW + PW + 10, y: cy + 4, class: 'strip-l'}, g, `${r.distance === null ? '?' : (r.distance >= 0 ? '+' : '') + num(r.distance)} ${r.side || 'no side'}${r.isRoot ? ' · root' : ''}`);
+    tip(g, () => `${r.e.ref}  ${r.label}${r.onPath ? '  · on the lineage' : ''}${r.isRoot ? '  · the root\'s nearest bound' : ''}${nm ? (r.rest ? '\nnot among the nearest bounds' : '\nnearest bound') : ''}\nbound ${r.param} = ${num(r.bound)}  (by ${r.by})\n${r.measure} ${r.measured === null ? '?' : num(r.measured)}\ndistance ${r.distance === null ? '?' : num(r.distance)}  ${r.side || 'no side (plain bound: the rule gives the direction)'}`);
+  });
+}
 
-const DATA = JSON.parse($("lens-data").textContent);
-$("designPick").addEventListener("change", () => { designKey = $("designPick").value; setTab("design"); });
-$("turnsBy").addEventListener("change", () => { turnsBy = $("turnsBy").value; renderTurns(); });
-$("viewMode").addEventListener("change", () => { mode = $("viewMode").value; select(selected); });
-$("density").addEventListener("change", () => { density = $("density").value; applyDensity(); });
-if (DATA.records.length) deckFrom(DATA.records, new Map(Object.entries(DATA.designs)), DATA.skipped, DATA.read);
-else if (Object.keys(DATA.designs).length) { for (const [k, doc] of Object.entries(DATA.designs)) addKnown(k, doc); setTab("design"); }
-else clearView(`<span>No record yet. Open a record file, or a folder of records and their designs, with the buttons above.</span>`);
+/* ---------- detail ---------- */
+function dl(pairs) {
+  const p = pairs.filter(([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length));
+  return p.length ? '<dl>' + p.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${typeof v === 'string' ? esc(v) : esc(enc(v))}</dd>`).join('') + '</dl>' : '';
+}
+function paramValue(D, path) { const p = (D.parameters || []).find(x => x.path === path); return p ? ` = ${enc(p.value)}` : ''; }
+const CHIP_NOTE = {short: ' · nearest bound short', nobounds: ' · no bounds known', value: ' · every bound clear'};
+function entryHtml(e) {
+  if (!e) return '';
+  const st = dispState(e);
+  const pairs = [['entry', `${e.ref}  (log item ${e.index}, round ${e.round}${e.call !== null ? ', call ' + e.call : ''})`],
+    ['holds', e.holds === 'value' ? 'a value: determined' : e.holds], ['value', e.holds === 'value' ? cut(enc(e.value), 400) : null],
+    ['marker', e.marker ? `${e.marker.kind} ${e.marker.cause.code} (${(e.marker.cause.refs || []).join(', ')})` : null],
+    ['derivation', e.derivation ? e.derivation.map(d => `${d.helper} refs ${(d.refs || []).join(', ')} rested on ${(d.rested_on || []).join(', ')}`).join('; ') : null],
+    ['rows', e.rows ? e.rows.map(r => 'row ' + r).join(', ') : null],
+    ['nearest bound', e.nearest ? `${e.nearest.param} = ${num(e.nearest.bound)} by ${e.nearest.by}, distance ${num(e.nearest.distance)} ${e.nearest.side || ''}` : null],
+    ['no bounds', e.bounds && !e.bounds.length ? e.bounds_reason : null]];
+  return `<div class="q">${stChip(st, e.ref + (CHIP_NOTE[st] || ''))}${dl(pairs)}</div>`;
+}
+function tableHtml(n, hitRows) {
+  if (!n.rows) return '';
+  const hits = new Set(hitRows || []);
+  let h = '<div class="tblwrap"><table><thead><tr><th class="num">row</th>' + (n.inputs || []).map(i => `<th class="mono">${esc(i.text)}</th>`).join('') + '<th class="mono">→ out</th></tr></thead><tbody>';
+  for (const r of n.rows) h += `<tr class="${hits.has(r.n) ? 'hit' : ''}"><td class="num">${hits.has(r.n) ? '✓ ' : ''}${r.n}</td>` + r.cells.map(c => `<td class="mono">${esc(c.text)}</td>`).join('') + `<td class="mono">${r.output ? esc(r.output.text) : '<span class="muted">C#</span>'}</td></tr>`;
+  return h + '</tbody></table></div>';
+}
+// Each parameter with the rules whose `params` name it, as tags that select the rule.
+function paramsHtml(D) {
+  if (!(D.parameters || []).length) return '';
+  const users = p => (D.nodes || []).filter(n => (n.params || []).some(x => x.param === p.path));
+  return '<table><thead><tr><th>parameter</th><th>type</th><th>value</th><th>used by</th></tr></thead><tbody>' + D.parameters.map(p => {
+    const us = users(p);
+    return `<tr data-users="${esc(us.map(n => n.id).join(' '))}"><td class="mono" style="white-space:nowrap">${esc(p.path)}</td><td class="mono">${esc(p.type ? p.type.text : '')}</td><td class="mono">${esc(cut(enc(p.value), 60))}</td><td>${us.map(n => `<span class="tag" data-node="${esc(n.id)}" title="select ${esc(n.id)}">${esc(n.name)}</span>`).join('') || '<span class="muted">—</span>'}</td></tr>`;
+  }).join('') + '</tbody></table>';
+}
+const inTextChip = () => '<button class="intext" data-intext="1" title="Scroll the text pane to this">↓ in text</button>';
+function drawDetail() {
+  const host = $('detail'), D = curDesign(), t = curTurn();
+  const idx = t ? t.idx : null;
+  if (t && !t.design) {
+    const e = S.node ? t.idx.byRef.get(S.node) : null;
+    host.innerHTML = `<h2>Entry</h2>` + (e ? (t.text ? inTextChip() : '') + entryHtml(e) : '<span class="muted">Click an entry to see it.</span>');
+    return;
+  }
+  const n = D && S.node ? (D.nodes || []).find(x => x.id === S.node) : null;
+  if (!n) {
+    if (!D) { host.innerHTML = '<h2>Detail</h2><span class="muted">No design.</span>'; return; }
+    let h = `<h2>Design</h2><h3>${esc(D.name || '(unnamed)')}</h3><div class="sub">Click a node for its detail; hover one to light the parameters it uses.</div>`;
+    h += paramsHtml(D);
+    h += dl([['types', (D.types || []).map(x => `${x.name} = ${x.type.text}`).join('; ')],
+      ['groups', (D.groups || []).map(g => `${g.name}: ${g.refs.join(', ')} (${[].concat(g.reason).join(', ')})`).join('; ')],
+      ['targets', (D.targets || []).map(x => `${x.id}: ${x.statement}${x.values_text ? ' [' + x.values_text + ']' : ''}`).join('; ')],
+      ['classes', (D.classes || []).map(c => `${c.ref} ${c.class}`).join('; ')],
+      ['not drawn', (D.other_members || []).join(', ')]]);
+    host.innerHTML = h; return;
+  }
+  const doc = t || cur().designs[S.design];
+  let h = `${doc && doc.text ? inTextChip() : ''}<h2>${n.policy ? 'rule · the policy' : esc(n.kind)}</h2><h3>${esc(n.id)}</h3><div class="sub">round ${n.round} · wavefront ${n.wavefront} · fan-in ${n.fan_in} · fan-out ${n.fan_out}${n.predecessors.length ? ' · predecessors ' + esc(n.predecessors.join(', ')) : ''}</div>`;
+  h += dl([['type', n.type ? n.type.text : null], ['refs', (n.refs || []).join(', ')], ['oracle', n.oracle], ['needs', (n.needs || []).join(', ')],
+    ['requirement', n.requirement ? `${n.requirement.ref} in ${enc(n.requirement.values)}` : null], ['cost', n.cost], ['timeout', n.timeout],
+    ['feedback', n.feedback ? 'yes' : null], ['grounded', n.grounded], ['payload', n.payload], ['when', n.when ? `${n.when.module}.${n.when.qualname} v${n.when.version}` : null],
+    ['form', n.form ? n.form + (n.hit ? ' hit ' + n.hit : '') + (n.order ? ' order ' + enc(n.order) : '') : null],
+    ['provides', n.provides], ['outputs', n.outputs ? n.outputs.text : null],
+    ['declared reads', n.reads ? n.reads.map(r => `${r.ref} (${r.via})`).join(', ') : null],
+    ['rule parameters', n.params ? n.params.map(p => `${p.param}${paramValue(D, p.param)} (${p.via})`).join(', ') : null],
+    ['function boundaries', n.boundaries], ['candidates', n.candidates ? 'yes' : null], ['estimates', n.target],
+    ['function', n.module ? `${n.module}.${n.qualname} v${n.version}` : null], ['source', n.source], ['body', n.body]]);
+  for (const q of n.questions || []) {
+    h += `<div class="q"><b class="mono">${esc(q.ref)}</b> <span class="muted">${esc(q.kind)}</span>` + dl([
+      ['wording', q.wording ? q.wording.template : null],
+      ['slots', q.wording ? q.wording.slots.map(s => `${s.name} ← ${s.origin.ref || ('param ' + s.origin.param)}`).join(', ') : null],
+      ['labels', q.labels ? q.labels.map(l => l.name + (l.description ? ` "${l.description}"` : '')).join(', ') : null],
+      ['label set', q.label_set], ['value type', q.value_type ? q.value_type + (q.is_list ? ' list' : '') : null], ['text', q.text], ['reference date', q.reference_date],
+      ['asks', q.target], ['bears on', q.latent_targets ? q.latent_targets.map(l => `${l.target} (${l.role})`).join(', ') : null]]);
+    if (idx) for (const e of entriesFor(idx, q.ref)) h += entryHtml(e);
+    h += '</div>';
+  }
+  for (const tr of n.tool_results || []) {
+    h += `<div class="q"><b class="mono">${esc(tr.ref)}</b> <span class="muted">tool result ${esc(tr.type ? tr.type.text : '')}</span></div>`;
+    if (idx) for (const e of entriesFor(idx, tr.ref)) h += entryHtml(e);
+  }
+  if (n.inputs && n.inputs.some(i => i.helper)) h += dl([['inputs', n.inputs.map(i => i.text).join(' | ')]]);
+  const own = idx && n.kind !== 'source' ? [].concat(...(n.refs || []).map(r => entriesFor(idx, r))) : [];
+  h += tableHtml(n, own.length ? own[0].rows : null);
+  for (const e of own) h += entryHtml(e);
+  host.innerHTML = h;
+}
+
+/* ---------- text pane ---------- */
+function linesFor(text, D, T, nodeId) {
+  const lines = text.split('\n'), hl = new Map(), lin = new Set();
+  if (T) { // the lineage's lines keep the same 3px bar: its entries (starred) and its own block
+    let inBlock = false;
+    lines.forEach((l, i) => {
+      if (/^ {2}\S+ \*( |$)/.test(l)) lin.add(i);
+      if (l === 'lineage') { inBlock = true; lin.add(i); return; }
+      if (inBlock && /^ {2}/.test(l)) lin.add(i); else inBlock = false;
+    });
+  }
+  if (!nodeId) return {lines, hl, lin};
+  const mark = (i, strong) => { hl.set(i, strong || hl.get(i) || false); };
+  const block = i => { mark(i, true); for (let j = i + 1; j < lines.length && /^ {2,}/.test(lines[j]) && !(T && /^ {2}\S/.test(lines[j])); j++) mark(j, false); };
+  const blockT = i => { mark(i, true); for (let j = i + 1; j < lines.length && /^ {4,}/.test(lines[j]); j++) mark(j, false); };
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const n = D ? (D.nodes || []).find(x => x.id === nodeId) : null;
+  if (!T) {
+    if (!n) return {lines, hl, lin};
+    // the text form heads the policy `[rule]` or `[policy]`; either is matched
+    const re = new RegExp('^\\[' + (n.policy ? '(?:rule|policy)' : n.kind) + '\\]\\s+' + reEsc(n.kind === 'state' ? 't:state' : n.name) + '(\\s|$)');
+    lines.forEach((l, i) => { if (re.test(l)) block(i); });
+    return {lines, hl, lin};
+  }
+  const refs = n ? (n.refs || []) : [nodeId];
+  lines.forEach((l, i) => {
+    for (const r of refs) {
+      if (r === 't:state' && /^state {2}/.test(l)) mark(i, true);
+      if (new RegExp('^ {2}' + reEsc(r) + '( \\*)?( {2}|$)').test(l)) blockT(i); // the text form marks an entry on the lineage `*`
+      if (new RegExp('^decision {2}' + reEsc(r) + '\\b').test(l)) mark(i, true);
+    }
+  });
+  return {lines, hl, lin};
+}
+function drawText() {
+  const host = $('text'), t = curTurn(), s = cur();
+  const doc = t || s.designs[S.design];
+  host.textContent = '';
+  $('textTitle').textContent = doc ? `Text · ${basename(doc.path)}` : 'Text';
+  if (!doc) return;
+  if (!doc.text) { host.innerHTML = '<div class="muted"> No text embedded for this document. python -m ommat.lens embeds the outline\'s text form;</div><div class="muted"> a dropped outline JSON carries none.</div>'; return; }
+  const D = t ? (t.design && t.design.outline) : doc.outline;
+  const {lines, hl, lin} = linesFor(doc.text, D, t ? t.outline : null, S.node);
+  const frag = document.createDocumentFragment();
+  let first = null;
+  const nodeByLine = textNodeOf(lines, D, !!t);
+  lines.forEach((l, i) => {
+    const div = document.createElement('div');
+    div.textContent = l;
+    if (lin.has(i)) div.classList.add('lin');
+    if (hl.has(i)) { div.classList.add('hl'); if (hl.get(i)) div.classList.add('hl1'); if (first === null) first = div; }
+    const id = nodeByLine.get(i);
+    if (id) { div.classList.add('node'); div.title = 'select ' + id; div.addEventListener('click', () => selectNode(id)); }
+    frag.appendChild(div);
+  });
+  host.appendChild(frag);
+  if (first) host.scrollTop = Math.max(0, first.offsetTop - host.offsetTop - 40);
+}
+function scrollTextToSelection() {
+  const host = $('text'), first = host.querySelector('.hl');
+  if (!first) return;
+  host.scrollTop = Math.max(0, first.offsetTop - host.offsetTop - 40);
+  host.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+}
+function textNodeOf(lines, D, isTurn) {
+  const m = new Map();
+  const refNode = (D && D.ref_node) || {};
+  lines.forEach((l, i) => {
+    let x;
+    if (!isTurn && D && (x = /^\[(state|source|rule|policy)\]\s+(\S+)/.exec(l))) {
+      const n = (D.nodes || []).find(n => x[1] === 'state' ? n.kind === 'state' : n.name === x[2] && (n.kind === x[1] || (x[1] === 'policy' && n.policy)));
+      if (n) m.set(i, n.id);
+    } else if (isTurn && (x = /^ {2}([qtd]:\S+)/.exec(l))) {
+      m.set(i, D ? (refNode[x[1]] || refNode[baseOf(x[1])] || null) : x[1]);
+    }
+  });
+  for (const [k, v] of m) if (!v) m.delete(k);
+  return m;
+}
+
+/* ---------- selection and render ---------- */
+function render() {
+  const s = cur(), t = curTurn(), D = curDesign();
+  $('setPick').hidden = $('setPickLabel').hidden = sets.length < 2;
+  $('title').textContent = s.name ? `ommat lens · ${s.name}` : 'ommat lens';
+  const skipped = [];
+  if (s.other) skipped.push(`skipped ${s.other} outline${s.other === 1 ? '' : 's'} of another version`);
+  if ((s.skipped || []).length) skipped.push(`${s.skipped.length} file${s.skipped.length === 1 ? '' : 's'} skipped`);
+  const sub = $('subtitle');
+  sub.textContent = 'A design and its turns, drawn from outline JSON alone.' + (skipped.length ? ' · ' + skipped.join(' · ') : '');
+  sub.title = (s.skipped || []).join('\n');
+  // design picker
+  const dp = $('designPick'); dp.textContent = '';
+  s.designs.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.textContent = 'design ' + (d.outline.name || basename(d.path));
+    b.setAttribute('aria-pressed', String(S.turn === null && S.design === i));
+    b.title = 'Show the design alone (Esc)';
+    b.addEventListener('click', () => { S.design = i; S.turn = null; S.node = null; render(); });
+    dp.appendChild(b);
+  });
+  $('prev').disabled = !s.turns.length; $('next').disabled = !s.turns.length;
+  drawSummary();
+  const notice = [];
+  if (t && !t.design) notice.push('No design in the set has this record\'s design hash or name: its entries are drawn alone, in log order in their round, and the lineage joins the entries it names.');
+  if (t && t.pairBy === 'name') notice.push(`Hash differs: no design in the set has this record's design hash (${hex12(t.outline.design_hash)}), so it is drawn over the design of the same name, "${t.design.outline.name}" (${hex12(t.design.outline.hash)}). Rows may not match what the record ran.`);
+  else if (t && t.design && t.outline.design_hash_matches === false) notice.push('The record names this design but its hash does not match.');
+  if (t && t.design && !t.outline.paired) notice.push('This record\'s outline was made without its design, so it holds no bounds or declared reads.');
+  showNotice(notice.join(' '));
+  let seen = new Set();
+  if (t && !t.design) { $('skelTitle').textContent = 'Entries by round'; seen = drawUnpaired(t); drawLegend(null, t.outline, seen); }
+  else if (D) { $('skelTitle').textContent = t ? 'Dependency graph, with the turn\'s entries' : 'Dependency graph'; seen = drawSkeleton(D, t); drawLegend(D, t ? t.outline : null, seen); }
+  else { $('canvas').innerHTML = '<span class="muted">No design in this set.</span>'; $('legend').textContent = ''; $('skelTitle').textContent = 'Dependency graph'; }
+  drawTurns(); drawStrips(); drawDetail(); drawText();
+  writeHash();
+}
+function selectTurn(i) { S.turn = i; S.node = null; render(); const tr = document.querySelector(`#turns tr[data-i="${i}"]`); if (tr) tr.focus({preventScroll: true}); }
+function selectNode(id) { S.node = S.node === id ? null : id; render(); }
+// prev and next walk the table's rows (the turn order, filtered and sorted as shown); S.turn stays the file index
+function step(d) {
+  const o = visibleOrder(), n = o.length; if (!n) return;
+  const p = o.indexOf(S.turn);
+  selectTurn(p < 0 ? (d > 0 ? o[0] : o[n - 1]) : o[(p + d + n) % n]);
+}
+function writeHash() {
+  try {
+    const h = new URLSearchParams();
+    if (sets.length > 1 || cur().name) h.set('set', cur().name || String(S.set));
+    if (S.turn !== null) h.set('turn', String(S.turn));
+    if (S.node) h.set('node', S.node);
+    if (S.stateEdges) h.set('state', '1');
+    if (S.undecidedOnly) h.set('und', '1');
+    if (S.sort) h.set('sort', (S.dir < 0 ? '-' : '') + S.sort);
+    if (theme !== 'auto') h.set('theme', theme);
+    const next = '#' + h.toString();
+    if (location.hash !== next) history.replaceState(null, '', next);
+  } catch (e) { /* no location or history (file sandbox, test stub) */ }
+}
+function showNotice(msg) { const n = $('notice'); n.textContent = msg || ''; n.hidden = !msg; }
+function applyTheme() {
+  if (theme === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', theme);
+  const b = $('theme'); if (b) b.textContent = 'theme: ' + theme;
+}
+/* ---------- loading files ---------- */
+function parseOutlines(text, name) {
+  let objs = [];
+  try { const j = JSON.parse(text); objs = Array.isArray(j) ? j : [j]; }
+  catch (e) { for (const line of text.split('\n')) if (line.trim()) objs.push(JSON.parse(line)); }
+  const out = [];
+  for (const o of objs) {
+    if (o && Array.isArray(o.sets)) { for (const s of o.sets) for (const d of s.docs || []) out.push(d); continue; }
+    if (o && o.outline && o.outline.outline_version === 3) out.push({path: o.path || name, outline: o.outline, text: o.text || null});
+    else if (o && o.outline_version === 3) out.push({path: name, outline: o, text: null});
+  }
+  return out;
+}
+async function loadFiles(files) {
+  const docs = [], bad = [];
+  for (const f of files) {
+    try { const got = parseOutlines(await f.text(), f.name); if (!got.length) bad.push(f.name); docs.push(...got); }
+    catch (e) { bad.push(f.name + ' (' + e.message + ')'); }
+  }
+  if (!docs.length) { showNotice('Nothing drawable in ' + bad.join(', ') + ': expected outline JSON from python -m ommat.outline --json.'); return; }
+  sets.push(prepareSet({name: 'opened: ' + [...files].map(f => f.name).join(', '), docs}));
+  fillSetPick(); S.set = sets.length - 1; S.design = 0; S.turn = null; S.node = null; render();
+  if (bad.length) showNotice('Skipped ' + bad.join(', ') + '.');
+}
+function fillSetPick() {
+  const p = $('setPick'); p.textContent = '';
+  sets.forEach((s, i) => { const o = document.createElement('option'); o.value = i; o.textContent = s.name || 'set ' + (i + 1); p.appendChild(o); });
+  p.value = S.set;
+}
+
+/* ---------- wiring ---------- */
+$('setPick').addEventListener('change', ev => { S.set = +ev.target.value; S.design = 0; S.turn = null; S.node = null; render(); });
+$('prev').addEventListener('click', () => step(-1));
+$('next').addEventListener('click', () => step(1));
+$('fileIn').addEventListener('change', ev => { if (ev.target.files.length) loadFiles(ev.target.files); ev.target.value = ''; });
+$('theme').addEventListener('click', () => {
+  theme = {auto: 'light', light: 'dark', dark: 'auto'}[theme] || 'auto';
+  try { localStorage.setItem('ommat-lens-theme', theme); } catch (e) { /* storage blocked */ }
+  applyTheme(); writeHash();
+});
+$('copy').addEventListener('click', () => {
+  writeHash();
+  const b = $('copy'), done = ok => { b.textContent = ok ? 'link copied' : 'copy failed'; setTimeout(() => { b.textContent = 'copy link'; }, 1400); };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(location.href).then(() => done(true), () => done(false));
+    else { const a = document.createElement('textarea'); a.value = location.href; document.body.appendChild(a); a.select(); done(document.execCommand('copy')); a.remove(); }
+  } catch (e) { done(false); }
+});
+$('glossBtn').addEventListener('click', () => { const g = $('gloss'); g.hidden = !g.hidden; $('glossBtn').setAttribute('aria-expanded', String(!g.hidden)); });
+$('detail').addEventListener('click', ev => {
+  const el = ev.target && ev.target.closest ? ev.target.closest('[data-node], [data-intext]') : null;
+  if (!el) return;
+  if (el.hasAttribute('data-intext')) scrollTextToSelection(); else selectNode(el.getAttribute('data-node'));
+});
+document.addEventListener('pointerover', tipAt);
+document.addEventListener('pointermove', ev => { if (!TIP.hidden) moveTip(ev); });
+document.addEventListener('pointerleave', () => { TIP.hidden = true; });
+document.addEventListener('keydown', ev => {
+  const tag = (ev.target && ev.target.tagName) || '';
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag) || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (ev.key === 'ArrowRight' || ev.key === 'j') { ev.preventDefault(); step(1); }
+  else if (ev.key === 'ArrowLeft' || ev.key === 'k') { ev.preventDefault(); step(-1); }
+  else if (ev.key === 'Escape') { if (!$('gloss').hidden) { $('gloss').hidden = true; $('glossBtn').setAttribute('aria-expanded', 'false'); } else if (S.node) S.node = null; else S.turn = null; render(); }
+});
+let dragDepth = 0;
+addEventListener('dragenter', ev => { ev.preventDefault(); dragDepth++; $('drop').hidden = false; });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('drop').hidden = true; } });
+addEventListener('dragover', ev => ev.preventDefault());
+addEventListener('drop', ev => { ev.preventDefault(); dragDepth = 0; $('drop').hidden = true; if (ev.dataTransfer && ev.dataTransfer.files.length) loadFiles(ev.dataTransfer.files); });
+let resizeT = null;
+addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(render, 150); });
+
+// A hash such as #turn=2&node=rule:act&theme=dark&sort=-nearest&und=1 opens that view.
+try {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.has('set')) { const i = sets.findIndex(s => s.name === h.get('set')); S.set = i >= 0 ? i : Math.min(+h.get('set') || 0, sets.length - 1); }
+  if (h.has('turn')) S.turn = Math.min(+h.get('turn'), cur().turns.length - 1);
+  if (h.has('node')) S.node = h.get('node');
+  if (h.has('theme')) { theme = h.get('theme'); applyTheme(); }
+  if (h.has('state')) S.stateEdges = h.get('state') === '1';
+  if (h.has('und')) S.undecidedOnly = h.get('und') === '1';
+  if (h.has('sort')) { const k = h.get('sort'); S.dir = k.startsWith('-') ? -1 : 1; S.sort = SORTS[k.replace(/^-/, '')] ? k.replace(/^-/, '') : null; }
+} catch (e) { /* no usable hash */ }
+fillGlossary();
+fillSetPick();
+render();
 </script>
 </body>
 </html>

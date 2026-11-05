@@ -123,7 +123,10 @@ answer q:refund unsupported
 ## Look around a record
 
 For questions none of these answers, `record.document` is the record's canonical JSON, which
-`jq` reads as it stands. To see a turn's rounds, calls and each value's lineage, write the
-document to a `.json` file with `loaded.document` beside it and run
+`jq` reads as it stands. To see a turn drawn over its design, each entry against its bounds
+and the lineage from the decision to its root, write the document to a `.json` file with
+`loaded.document` beside it and run
 `python -m ommat.lens <file> --open`. The record holds no read set: what a rule read is in the
-design, which is why the lens takes both.
+design, which is why the lens takes both. `python -m ommat.outline <file or folder>` prints
+the same turn as text, each entry with its declared reads and the distance to each bound its
+design declares, or as JSON with `--json`.

@@ -12,7 +12,7 @@ def test_version_matches_metadata() -> None:
     assert ommat.__version__ == version("ommat")
 
 
-@pytest.mark.parametrize("module", ["ommat", "ommat.conversation", "ommat.lens"])
+@pytest.mark.parametrize("module", ["ommat", "ommat.conversation", "ommat.lens", "ommat.outline"])
 def test_core_imports_only_the_standard_library(module: str) -> None:
     # A fresh interpreter, so modules loaded by pytest or plugins don't count.
     probe = (
@@ -99,7 +99,10 @@ def test_the_public_names_are_exactly_the_decisions() -> None:
     public = {n for n in vars(ommat) if not n.startswith("_")}
     # Submodules imported by tests appear as attributes; `types`, `helpers`, `evaluation` and
     # `bindings` are public subpackages, not names in `ommat.__all__`.
-    assert public - {"types", "helpers", "evaluation", "bindings", "conversation", "lens"} == PUBLIC
+    assert (
+        public - {"types", "helpers", "evaluation", "bindings", "conversation", "lens", "outline"}
+        == PUBLIC
+    )
 
 
 BINDINGS = {
@@ -145,6 +148,28 @@ def test_import_ommat_imports_no_conversation_module() -> None:
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "[]"
+
+
+def test_import_ommat_imports_no_outline_module() -> None:
+    probe = (
+        "import sys, ommat; print(sorted(m for m in sys.modules if m.startswith('ommat.outline')))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "[]"
+
+
+def test_ommat_outline_exports_exactly_its_builders_and_renderers() -> None:
+    import ommat.outline
+
+    assert "outline" not in ommat.__all__
+    assert ommat.outline.__all__ == [
+        "design_outline",
+        "render_design",
+        "render_turn",
+        "turn_outline",
+    ]
 
 
 def test_ommat_conversation_exports_exactly_its_renderers() -> None:
