@@ -25,7 +25,7 @@ provides, each with its type. Name a port for what the workflow needs, under its
 the selector's:
 
 ```python
-    ports={"d:email/chosen": t.boolean, "d:email/urgent": YES_NO},
+EMAIL_PORTS = {"d:email/chosen": t.boolean, "d:email/urgent": YES_NO}
 ```
 
 The workflow's own policy, `d:email/outcome`, becomes an ordinary rule of the combined design.
@@ -73,6 +73,7 @@ which the idia binding sends as one request. The driver runs two turns and repla
 'File the invoice under Billing': calls [['email/ask', 'router']]; decision file; findings []
 'What is the weather like?': calls [['email/ask', 'router']]; decision pass; findings []
 email alone, chosen and not urgent: decision ask_folder
+email alone, chosen this turn: decision ask_folder
 ```
 
 The workflow's question is asked on the second turn too, though the selector picks `other`:
@@ -88,10 +89,29 @@ and decides the workflow with no selector:
     alone = load(standalone(EMAIL, {"d:email/chosen": True, "d:email/urgent": "no"}))
 ```
 
+To run a part alone in production, with a port's value set each turn rather than fixed in the
+design, name it in `given`. `standalone` adds the source `ports`, under the oracle `ports`,
+providing `t:email/chosen` for `d:email/chosen`, and you bind it at decide:
+
+```python
+    given = load(standalone(EMAIL, {"d:email/urgent": "no"}, given=["d:email/chosen"]))
+    ports = fixed({"t:email/chosen": True})
+    decision = decide_sync(given, {"message": "Move it"}, {"default": model, "ports": ports})
+```
+
+The record holds the value as the source's tool result, so the turn replays.
+
 ## What combine refuses
 
 `combine` raises `InvalidCombination`, listing every failure, for parts whose states differ; an
-id, parameter path, type name, group id or target id two parts declare, or two different class
-trees at one ref; a port some part provides; a port left unbound; and a bind key that is no port.
-It renames nothing, so give each part's ids and refs a prefix of its own, as `email/` here.
-Everything else, such as a read with no provider, is load's to refuse.
+id or a parameter path two parts declare; a type, group, target or class tree two parts declare
+differently; a port some part provides; a port left unbound; and a bind key that is no port. A
+type, group, target or class tree two parts declare alike is kept once, so each part keeps what
+it reads. A parameter is never shared: give each part its own, as `email/bar` here, so tuning one
+part never moves another. It renames nothing, so give each part's ids and refs a prefix of its
+own, as `email/` here. Everything else, such as a read with no provider, is load's to refuse.
+
+An oracle name is shared across parts as it is within one design: the sources under it in a
+round are one call. A binding under a name several parts use answers every part's sources
+under it, so a `context` oracle that gives one part an account and another a date is one
+`fixed` holding both values.

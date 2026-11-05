@@ -325,6 +325,43 @@ def test_standalone_refuses_a_missing_or_an_extra_port_value() -> None:
     ]
 
 
+@pytest.mark.parametrize(("chosen", "outcome"), [(True, "file"), (False, "skip")])
+def test_a_given_port_takes_its_value_each_turn_from_the_ports_source(
+    chosen: bool, outcome: str
+) -> None:
+    loaded = load(standalone(EMAIL, given=["d:email/chosen"]))
+    source = loaded._design.sources["ports"]
+    assert (source.oracle, list(source.provides)) == ("ports", ["t:email/chosen"])
+    bindings = {
+        "default": fixed({"q:email/sure": SURE}),
+        "ports": fixed({"t:email/chosen": chosen}),
+    }
+    decision = decide_sync(loaded, {"message": "hi"}, bindings)
+    assert decision.estimate == outcome
+    _, findings = replay_sync(decision.record, loaded)
+    assert findings == []
+
+
+def test_standalone_refuses_a_port_in_both_or_given_that_is_no_port() -> None:
+    with pytest.raises(InvalidCombination) as caught:
+        standalone(EMAIL, {"d:email/chosen": True}, given=["d:email/chosen", "d:other"])
+    assert [f.message for f in caught.value.failures] == [
+        'the port "d:email/chosen" is in both ports and given',
+        'given names "d:other", which is no port',
+    ]
+
+
+def test_standalone_refuses_a_ports_source_or_t_ref_the_part_declares() -> None:
+    sources = {**EMAIL.design.sources, "ports": Source({"t:email/chosen": t.boolean})}
+    part = Part(dataclasses.replace(EMAIL.design, sources=sources), EMAIL.ports)
+    with pytest.raises(InvalidCombination) as caught:
+        standalone(part, given=["d:email/chosen"])
+    assert [f.message for f in caught.value.failures] == [
+        'the given port "d:email/chosen" needs "t:email/chosen", which the part provides',
+        'the source for the given ports takes the id "ports", which part 1 ("email") declares',
+    ]
+
+
 def test_standalone_refuses_a_port_the_part_provides() -> None:
     part = Part(SELECTOR, {"d:route": t.label(*ROUTES)})
     with pytest.raises(InvalidCombination, match="is provided by part 1"):
@@ -341,26 +378,58 @@ def test_parts_whose_states_differ_are_refused() -> None:
     assert '"record{request: string}"' in message
 
 
-def test_a_repeated_id_parameter_type_group_or_target_is_refused() -> None:
-    def extra(design: Design) -> Design:
-        return dataclasses.replace(
-            design,
-            types={"yes_no": YES_NO},
-            groups={"g": Group([design.policy], ["convergent"])},
-            targets={"tg:x": Target("x")},
-            parameters={**design.parameters, "shared/bar": Parameter(BAR, 0.5)},
-        )
+def _extra(design: Design, **changes: Any) -> Design:
+    fields: dict[str, Any] = {
+        "types": {"yes_no": YES_NO},
+        "groups": {"g": Group(["d:route"], ["convergent"])},
+        "targets": {"tg:x": Target("x")},
+    }
+    fields.update(changes)
+    return dataclasses.replace(design, **fields)
 
+
+def test_a_repeated_id_or_parameter_path_is_refused_even_when_alike() -> None:
     selector = dataclasses.replace(
-        extra(SELECTOR), sources={**SELECTOR.sources, "email/ask": SELECTOR.sources["router"]}
+        SELECTOR,
+        sources={**SELECTOR.sources, "email/ask": SELECTOR.sources["router"]},
+        parameters={**SELECTOR.parameters, "shared/bar": Parameter(BAR, 0.5)},
     )
-    email = Part(extra(EMAIL.design), EMAIL.ports)
+    email = Part(
+        dataclasses.replace(
+            EMAIL.design, parameters={**EMAIL.design.parameters, "shared/bar": Parameter(BAR, 0.5)}
+        ),
+        EMAIL.ports,
+    )
     assert refused(Part(selector), email, CALENDAR) == [
         'the id "email/ask" is declared by part 1 ("selector") and part 2 ("email")',
-        'the group id "g" is declared by part 1 ("selector") and part 2 ("email")',
         'the parameter path "shared/bar" is declared by part 1 ("selector") and part 2 ("email")',
-        'the target id "tg:x" is declared by part 1 ("selector") and part 2 ("email")',
-        'the type name "yes_no" is declared by part 1 ("selector") and part 2 ("email")',
+    ]
+
+
+def test_types_groups_and_targets_declared_alike_are_kept_once() -> None:
+    email = Part(_extra(EMAIL.design), EMAIL.ports)
+    calendar = Part(_extra(CALENDAR.design), CALENDAR.ports)
+    design = combine(Part(_extra(SELECTOR)), email, calendar, bind=BIND, policy=ACT)
+    assert dict(design.types) == {"yes_no": YES_NO}
+    assert list(design.groups) == ["g"]
+    assert list(design.targets) == ["tg:x"]
+    load(design)
+
+
+def test_types_groups_and_targets_declared_differently_are_refused() -> None:
+    email = Part(
+        _extra(
+            EMAIL.design,
+            types={"yes_no": t.string},
+            groups={"g": Group(["d:route", "d:email/sure"], ["convergent"])},
+            targets={"tg:x": Target("y")},
+        ),
+        EMAIL.ports,
+    )
+    assert refused(Part(_extra(SELECTOR)), email, CALENDAR) == [
+        'part 1 ("selector") and part 2 ("email") declare different groups with the id "g"',
+        'part 1 ("selector") and part 2 ("email") declare different targets with the id "tg:x"',
+        'part 1 ("selector") and part 2 ("email") declare different types named "yes_no"',
     ]
 
 

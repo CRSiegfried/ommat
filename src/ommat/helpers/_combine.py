@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, cast
 
-from ommat._design import Design, Input, Rule, Table
+from ommat._design import Design, Input, Rule, Source, Table
 from ommat._refs import _RefError, parse_ref
 from ommat._types import TypeFailure, check_definitions, conforms, parse_type
 from ommat._values import quote, type_name
@@ -188,6 +188,25 @@ def _repeats(
             failures.add([key], f"{what} {_q(key)} is declared by {_listed(labels)}")
 
 
+def _shared(
+    labelled: Sequence[tuple[str, Part]],
+    what: str,
+    member: Callable[[Design], Mapping[str, Any]],
+    failures: _Failures,
+) -> dict[str, Any]:
+    """Each declaration at ``member`` by key, one copy of those two parts declare alike, and a
+    failure for each key two parts declare differently."""
+    held: dict[str, tuple[str, Any]] = {}
+    for label, part in labelled:
+        for key, value in member(part.design).items():
+            if key in held and held[key][1] != value:
+                failures.add(
+                    [key], f"{held[key][0]} and {label} declare different {what} {_q(key)}"
+                )
+            held.setdefault(key, (label, value))
+    return {key: value for key, (_, value) in held.items()}
+
+
 def _conforms(outputs: str, port: str, types: Mapping[str, str]) -> bool:
     """Whether ``outputs`` conforms to the port's type; ``True`` when either type or a
     definition does not parse or resolve, which load reports."""
@@ -282,20 +301,12 @@ def combine(
         failures.add([], f"the parts' states differ: {shown}")
     _repeats(labelled, "the id", lambda d: [*d.sources, *d.rules], failures)
     _repeats(labelled, "the parameter path", lambda d: d.parameters, failures)
-    _repeats(labelled, "the type name", lambda d: d.types, failures)
-    _repeats(labelled, "the group id", lambda d: d.groups, failures)
-    _repeats(labelled, "the target id", lambda d: d.targets, failures)
-    classes: dict[str, tuple[str, Any]] = {}
-    for label, part in labelled:
-        for key, tree in part.design.classes.items():
-            if key in classes and classes[key][1] != tree:
-                failures.add(
-                    [key], f"{classes[key][0]} and {label} declare different classes at {_q(key)}"
-                )
-            classes.setdefault(key, (label, tree))
+    types = _shared(labelled, "types named", lambda d: d.types, failures)
+    groups = _shared(labelled, "groups with the id", lambda d: d.groups, failures)
+    targets = _shared(labelled, "targets with the id", lambda d: d.targets, failures)
+    classes = _shared(labelled, "classes at", lambda d: d.classes, failures)
 
     ports, refused = _port_failures(labelled, failures)
-    types = _merged(designs, "types")
     added: dict[str, Rule | Table] = {}
     for ref, provider in bind.items():
         if ref in refused:
@@ -356,35 +367,77 @@ def combine(
         rules=rules,
         parameters=_merged(designs, "parameters"),
         types=types,
-        groups=_merged(designs, "groups"),
-        classes={key: tree for key, (_, tree) in classes.items()},
+        groups=groups,
+        classes=classes,
         name=name,
-        targets=_merged(designs, "targets"),
+        targets=targets,
     )
 
 
-def standalone(part: Part, ports: Mapping[str, object]) -> Design:
-    """The part's design with each port provided by a table with no input that outputs the
-    value ``ports`` gives it, a value of the port's type or ``Unsure``; or
-    ``InvalidCombination`` listing every failure. Each table is keyed by its port's name."""
+PORTS = "ports"
+"""The id of the source ``standalone`` adds for the ports it is given each turn, and the oracle
+it names."""
+
+
+def standalone(
+    part: Part, ports: Mapping[str, object] | None = None, *, given: Iterable[str] = ()
+) -> Design:
+    """The part's design with each port provided, or ``InvalidCombination`` listing every
+    failure. A port in ``ports`` is a table with no input that outputs the value given, a value
+    of the port's type or ``Unsure``. A port in ``given`` takes its value each turn: the source
+    ``ports``, under the oracle ``ports``, provides ``t:<name>`` for each, of the port's type,
+    and a pass-through table carries it to the port, so the caller binds ``ports`` at decide.
+    Each table is keyed by its port's name; every port is in exactly one of the two."""
     _check_part(part, "part")
+    ports = {} if ports is None else ports
     if not isinstance(ports, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"ports are a {type_name(ports)}, not a mapping")
+    if isinstance(given, str):
+        raise TypeError("given is a str, not a collection of ports")
+    each = list(dict.fromkeys(given))
     failures = _Failures()
     labelled = [(_label(1, part), part)]
     declared, refused = _port_failures(labelled, failures)
-    for ref in ports:
-        if ref not in part.ports and ref not in refused:
-            failures.add([ref], f"ports names {_shown(ref)}, which is no port")
+    for what, refs in (("ports", list(ports)), ("given", each)):
+        for ref in refs:
+            if ref not in part.ports and ref not in refused:
+                failures.add([ref], f"{what} names {_shown(ref)}, which is no port")
     for ref in declared:
-        if ref not in ports:
+        if ref in ports and ref in each:
+            failures.add([ref], f"the port {_q(ref)} is in both ports and given")
+        elif ref not in ports and ref not in each:
             failures.add([ref], f"the port {_q(ref)} is given no value")
-    added = {ref: _constant(ref, declared[ref], ports[ref]) for ref in declared if ref in ports}
-    ids = {ref: cast(str, _whole_d_ref(ref)) for ref in added}
-    _added_ids(ids, _ids(labelled), failures)
+    names = {ref: cast(str, _whole_d_ref(ref)) for ref in declared}
+    added: dict[str, Table] = {}
+    for ref in declared:
+        if ref in each:
+            added[ref] = _pass_through(ref, declared[ref], f"t:{names[ref]}")
+        elif ref in ports:
+            added[ref] = _constant(ref, declared[ref], ports[ref])
+    ids = {ref: names[ref] for ref in added}
+    taken = _ids(labelled)
+    _added_ids(ids, taken, failures)
+    sources = dict(part.design.sources)
+    live = [ref for ref in declared if ref in each]
+    if live:
+        if PORTS in taken:
+            failures.add(
+                [PORTS],
+                f"the source for the given ports takes the id {_q(PORTS)}, which "
+                f"{_listed(taken[PORTS])} declares",
+            )
+        provided = _provided(part.design)
+        for ref in live:
+            if f"t:{names[ref]}" in provided:
+                failures.add(
+                    [ref],
+                    f"the given port {_q(ref)} needs {_q('t:' + names[ref])}, which the "
+                    "part provides",
+                )
+        sources[PORTS] = Source({f"t:{names[ref]}": declared[ref] for ref in live}, oracle=PORTS)
     if failures:
         raise InvalidCombination(failures)
     rules = dict(part.design.rules)
     for ref, table in added.items():
         rules[ids[ref]] = table
-    return dataclasses.replace(part.design, rules=rules)
+    return dataclasses.replace(part.design, sources=sources, rules=rules)

@@ -49,6 +49,8 @@ SELECTOR = Design(
 )
 
 # --- the email workflow, with its ports ---------------------------------------------------
+EMAIL_PORTS = {"d:email/chosen": t.boolean, "d:email/urgent": YES_NO}
+"""The workflow's ports: whether the selector chose it, and the selector's urgency."""
 EMAIL = Part(
     Design(
         name="email",
@@ -77,7 +79,7 @@ EMAIL = Part(
         parameters=bars("email"),
         policy="d:email/outcome",
     ),
-    ports={"d:email/chosen": t.boolean, "d:email/urgent": YES_NO},
+    ports=EMAIL_PORTS,
 )
 
 # --- the combined design -----------------------------------------------------------------

@@ -28,6 +28,11 @@ def main() -> None:
     decision = decide_sync(alone, {"message": "Move it"}, {"default": model})
     print(f"email alone, chosen and not urgent: decision {decision.estimate}")
 
+    given = load(standalone(EMAIL, {"d:email/urgent": "no"}, given=["d:email/chosen"]))
+    ports = fixed({"t:email/chosen": True})
+    decision = decide_sync(given, {"message": "Move it"}, {"default": model, "ports": ports})
+    print(f"email alone, chosen this turn: decision {decision.estimate}")
+
 
 if __name__ == "__main__":
     main()
