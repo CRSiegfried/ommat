@@ -2,8 +2,9 @@
 
 Decide runs interpret, which gathers evidence from a decision model onto a blackboard and
 fires the rules; the policy's estimate is the decision. It returns the decision and a
-replayable record. A source's binding may call any tool, one that writes included. Replay reruns a record under any loaded design and reports how the rerun
-differs. The core imports only the standard library.
+replayable record. A source's binding may call any tool, one that writes included. Replay
+reruns a record under any loaded design and reports how the rerun differs. The core imports
+only the standard library.
 """
 
 from importlib.metadata import version as _version
