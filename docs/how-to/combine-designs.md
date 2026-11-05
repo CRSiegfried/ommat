@@ -77,19 +77,31 @@ email alone, chosen this turn: decision ask_folder
 ```
 
 The workflow's question is asked on the second turn too, though the selector picks `other`:
-that is the price of asking every question at once. What else to put in the first round
-follows from what each source waits for:
+that is the price of asking every question at once.
 
-- A question: never gate it on the selector, which would ask it a round later in a call of its
-  own.
-- A read that needs nothing but the state or the account, such as listing the mail folders:
-  leave it ungated, so it runs in round 1 and anything grounded on it is asked in round 2.
-  Every turn then makes the call, and its result is in every record.
-- A read whose arguments come from round-1 answers: gate it on the port. It waits for those
-  answers anyway, and the port is decided in the same round, so the gate costs no round and
-  saves the call on another workflow's turn.
-- A write: always gate it on a decided value and on the port, under an oracle of its own,
-  needing only the call it makes ([A source that changes state](add-a-source.md#a-source-that-changes-state)).
+Interpret asks a source in the first round after everything it depends on is on the board:
+its needs, its requirement's ref and, for a grounded source, its candidate set. So give each
+source every dependency it really has and no others: one it lacks only delays it, and a need
+it lacks is also sent to its binding. A source that depends on nothing but the state is asked
+in round 1. A call that should happen only when decided depends on that decision: a source
+requirement on the one estimate that says to make it, with every other condition, such as a
+combined part's port, folded into that estimate, and needs that are only the call's
+arguments, as a rule writes them. A need alone does not hold a source back once it holds a
+value, `null` included. Every write is such a call, and so is a read that is costly,
+rate-limited, sensitive or has a side effect.
+
+So in a combined design:
+
+- A question depends on the state alone. Gated on the selector, it would be asked a round
+  later in a call of its own.
+- A read that needs nothing but the state or the account, such as listing the mail folders,
+  has no other dependency, so it runs in round 1 and anything grounded on it is asked in round
+  2. Every turn then makes the call, and its result is in every record.
+- A read whose arguments come from round-1 answers needs them, and should happen only on its
+  workflow's turn, so its requirement's estimate reads the port too. Both are decided in round
+  1, so it runs in round 2 either way.
+- A write depends on the decision to make it, the port folded in, under an oracle of its own
+  ([A source that changes state](add-a-source.md#a-source-that-changes-state)).
 
 ## Test a part alone
 

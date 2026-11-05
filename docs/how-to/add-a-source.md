@@ -224,19 +224,23 @@ move a message, send a reply. What it returns is the source's `t:` value, and th
 rules that need it read it in a later round, so one turn can act, then act again on what came
 back. Six things the engine does shape such a binding:
 
-- Interpret asks a source as soon as its needs are on the board. Gate an action with a `when`
-  on the estimate that says to take it ([source
-  requirements](../spec/README.md#source-requirements)), so it runs only once a rule decides it.
+- Interpret asks a source in the first round after everything it depends on is on the board:
+  its needs, its requirement's ref and, for a grounded source, its candidate set. A call that
+  should happen only when decided takes a [source
+  requirement](../spec/README.md#source-requirements) on the one estimate that says to make
+  it, every other condition folded into that estimate; a `when` reads only the source's needs
+  and the state, and a need with a value, `null` included, holds nothing back. Every write is
+  such a call, and so is a read that is costly, rate-limited, sensitive or has a side effect.
 - A call past its timeout is `timed-out`, and interpret discards a late return, though the
   write may have happened. Finish within `seconds`, and make the call safe to repeat, since
   retries are the binding's.
-- Ready sources that name one oracle go to it in one call, in no set order. Put actions under
-  an oracle of their own, and order two actions by having one need the other's ref.
+- Ready sources that name one oracle go to it in one call, in no set order. Put writes under
+  an oracle of their own, and order two writes by having one need the other's ref.
 - `replay`, `intervene` and `from_record` answer every source from the record and call
   nothing. `scenario` calls each source downstream of its interventions through the bindings
-  you pass, so an action there runs for real, on the scenario's inputs. Bind the actions'
+  you pass, so a write there runs for real, on the scenario's inputs. Bind the writes'
   oracle to a stand-in that returns what the tool would, and keep the read tools live.
-- Give an action source only the call it makes as its need, a rule's `{tool, args}`, not the
+- Give a source that changes state only the call it makes as its need, a rule's `{tool, args}`, not the
   estimate that chose it. A need that holds probabilities differs under any rerun that moves
   them, so the recorded write can no longer answer it.
 - Each link in a chain of actions is a round. `RunSettings.round_bound`, 8 by default, stops a
@@ -290,7 +294,8 @@ def idia_bindings(provider: idia.Dispatcher) -> dict[str, OracleBinding]:
     return {"spans": oracle_binding(provider)}
 ```
 
-`oracle_binding` sends each source as one idia request, writes the record's provenance and
+`oracle_binding` sends the sources of a call that share an equal state and options as one idia
+request, and any other source as a request of its own, writes the record's provenance and
 marks what idia cannot ask `unsupported`; [The idia binding](../spec/README.md#the-idia-binding)
 states what it does and which dispatchers it refuses. It is outside ommat's compatibility
 promise: while idia is 0.x it may change in any minor release when idia changes, and the
@@ -352,7 +357,7 @@ their own.
 trims nor splits a text. One longer than the provider's input does not fit, and the request is
 refused before any call: every ref of the source is `unsupported`, with a line such as
 `places: unsupported: the state alone is estimated at 346 tokens, over the limit of 256`. The
-idia binding sends each source as one request, so the caller splits the text and decides each
+idia binding sends a source's text whole, packed only with sources that share it, so the caller splits the text and decides each
 part in a turn of its own.
 
 ### Run it offline

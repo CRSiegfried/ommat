@@ -7,8 +7,10 @@ as the README shows:
 ``import ommat`` never imports it. Each oracle names one leaf, so a design that asks label kinds and
 extractions of different models binds one dispatcher per oracle.
 
-The binding is a map between the two libraries' shapes. Each source of a batch is one idia
-``Request``: its questions in the order received, keyed by their refs, each label carrying its
+The binding is a map between the two libraries' shapes. The sources of a call that send an equal
+state with equal options go as one idia ``Request``, a source whose joined request the provider's
+preflight refuses, or whose state differs, as one of its own. Each source's questions go in the
+order received, keyed by their refs, each label carrying its
 description; a source asking an extraction sends the text its spans index as the state's first part,
 its reference date in the request's options, and a source asking only label kinds sends its needs as
 one JSON part keyed by ommat's refs, or, when the binding is built with ``state`` naming the

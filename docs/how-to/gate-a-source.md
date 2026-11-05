@@ -65,6 +65,21 @@ A requirement gates every question of its source. When only some questions shoul
 those in a source of their own and gate that one. A source may have both a requirement and a
 function `when`: both must hold, the requirement tested first.
 
+## When to gate
+
+Interpret asks a source in the first round after everything it depends on is on the board, so a
+requirement is a dependency: the source waits for the estimate it names. Give a source that
+dependency when the call should happen only once decided: every write, and every read that is
+costly, rate-limited, sensitive or has a side effect. Put the requirement on the one estimate
+that says to make the call, every other condition folded into it, and give the source only the
+call's arguments as needs.
+
+A question is usually cheaper asked in round 1 beside the rest, since it rides in the same
+request, than a round later in a call of its own. This guide gates one to show the mechanism;
+gate a question only when asking it would cost more than the round. Never gate a question on
+another part of a combined design: read that part's decision through a port, as [Combine small
+designs into one](combine-designs.md) shows.
+
 ## What the gated source gets
 
 The requirement's ref counts as a need when its entry is a marker, so what the gated source

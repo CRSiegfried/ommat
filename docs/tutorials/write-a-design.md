@@ -43,7 +43,8 @@ it needs, and the oracle that answers it.
 
 2. `needs=["t:state"]` hands the source the turn's state. `oracle="classifier"` names the
    binding that answers it: at decide you give one binding per oracle name. A source with no
-   `oracle` is answered by the binding named `default`.
+   `oracle` is answered by the binding named `default`, and all such sources ready in a round
+   go to it in one call.
 
 3. Find the second source, `lookup`, with the same `needs` and `oracle="reader"`. Its one
    question, `q:order/number`, comes in the next section.
