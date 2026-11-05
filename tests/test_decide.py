@@ -63,6 +63,8 @@ from scripted import (
     NotACoroutine,
     Scripted,
     clashing,
+    apart,
+    bound_all,
     generator_coroutine,
     returns,
     started_raising_on_close,
@@ -421,7 +423,7 @@ def test_settings_in_force_are_recorded() -> None:
 
 
 def test_shuffled_latencies_give_identical_records() -> None:
-    sources = {f"s{i}": Source({f"t:v{i}": t.string}) for i in range(5)}
+    sources = apart({f"s{i}": Source({f"t:v{i}": t.string}) for i in range(5)})
     loaded = load(minimal(state=t.record(), sources=sources))
     hashes: set[str] = set()
     orders: set[tuple[str, ...]] = set()
@@ -440,7 +442,8 @@ def test_shuffled_latencies_give_identical_records() -> None:
             finished.append(batch[0].id)
             return returns(dict.fromkeys(batch[0].refs, "v"))
 
-        decision = decide_sync(loaded, {}, {"default": Scripted(dict.fromkeys(sources, reply))})
+        binding = Scripted(dict.fromkeys(sources, reply))
+        decision = decide_sync(loaded, {}, bound_all(binding, sources))
         hashes.add(decision.record.record_hash)
         orders.add(tuple(finished))
     assert len(orders) > 1

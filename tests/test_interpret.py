@@ -56,6 +56,8 @@ from scripted import (
     MetaRaising,
     NotACoroutine,
     Scripted,
+    apart,
+    bound_all,
     clashing,
     generator_coroutine,
     ignoring_cancel,
@@ -409,7 +411,23 @@ def test_the_identity_does_not_hash_the_source_id_or_the_ref() -> None:
     assert ident("ask", "q:spam", "Is it?") != ident("ask", "q:spam", "Is it so?")
 
 
-def test_each_source_with_no_oracle_is_its_own_call_through_default_run_concurrently() -> None:
+def test_the_sources_with_no_oracle_are_one_call_through_default() -> None:
+    sources = {"zeta": Source({"t:zeta": t.string}), "alpha": Source({"t:alpha": t.string})}
+    both = returns({"t:alpha": "v", "t:zeta": "v"})
+    record, binding = run(make(sources), {"alpha": both})
+    assert [[c.id for c in b] for b in binding.batches] == [["alpha", "zeta"]]
+    assert kinds(record) == [
+        ("entry", "d:decision"),
+        ("call", 1),
+        ("entry", "t:alpha"),
+        ("entry", "t:zeta"),
+        ("round", 1),
+    ]
+    assert entry(record, "t:alpha")["call"] == 4
+    assert entry(record, "t:zeta")["call"] == 4
+
+
+def test_sources_under_oracles_of_their_own_are_calls_run_concurrently() -> None:
     started: list[str] = []
     both = asyncio.Event()
 
@@ -420,17 +438,10 @@ def test_each_source_with_no_oracle_is_its_own_call_through_default_run_concurre
         await asyncio.wait_for(both.wait(), 2)
         return returns({f"t:{batch[0].id}": "v"})
 
-    sources = {"zeta": Source({"t:zeta": t.string}), "alpha": Source({"t:alpha": t.string})}
-    record, binding = run(make(sources), {"zeta": reply, "alpha": reply})
+    sources = apart({"zeta": Source({"t:zeta": t.string}), "alpha": Source({"t:alpha": t.string})})
+    binding = Scripted({"zeta": reply, "alpha": reply})
+    record = turn(make(sources), bound_all(binding, sources), STATE)
     assert [len(b) for b in binding.batches] == [1, 1]
-    assert kinds(record) == [
-        ("entry", "d:decision"),
-        ("call", 1),
-        ("call", 1),
-        ("entry", "t:alpha"),
-        ("entry", "t:zeta"),
-        ("round", 1),
-    ]
     assert [i["sources"] for i in body(record)[1:3]] == [["alpha"], ["zeta"]]
     assert [i["outcome"] for i in body(record)[1:3]] == ["returned", "returned"]
     assert entry(record, "t:alpha")["call"] == 4
@@ -1522,7 +1533,7 @@ def test_a_task_that_cancels_itself_is_re_raised_before_its_rounds_first_append(
 def test_a_cancellation_of_interpret_cancels_the_frontier_and_appends_nothing_of_its_round() -> (
     None
 ):
-    sources = {"alpha": Source({"t:a": t.string}), "zeta": Source({"t:z": t.string})}
+    sources = apart({"alpha": Source({"t:a": t.string}), "zeta": Source({"t:z": t.string})})
     loaded = make(sources)
     run_ = settings()
     ledger = open_ledger(loaded, STATE, run_)
@@ -1541,7 +1552,11 @@ def test_a_cancellation_of_interpret_cancels_the_frontier_and_appends_nothing_of
     async def main() -> None:
         task = asyncio.ensure_future(
             interpret_on(
-                ledger, loaded, STATE, {"default": Scripted({"alpha": wait, "zeta": wait})}, run_
+                ledger,
+                loaded,
+                STATE,
+                bound_all(Scripted({"alpha": wait, "zeta": wait}), sources),
+                run_,
             )
         )
         await started.wait()
@@ -1828,13 +1843,15 @@ def test_a_rule_returning_an_object_whose_class_raises_is_invalid_return() -> No
 
 
 def test_a_bindings_base_exception_propagates_bare_with_no_item_of_its_round() -> None:
-    sources = {"alpha": Source({"t:a": t.string}), "zeta": Source({"t:z": t.string})}
+    sources = apart({"alpha": Source({"t:a": t.string}), "zeta": Source({"t:z": t.string})})
     loaded = make(sources)
     run_ = settings()
     ledger = open_ledger(loaded, STATE, run_)
     replies = {"alpha": returns({"t:a": "a"}), "zeta": raising(Interrupt())}
     with pytest.raises(Interrupt):
-        asyncio.run(interpret_on(ledger, loaded, STATE, {"default": Scripted(replies)}, run_))
+        asyncio.run(
+            interpret_on(ledger, loaded, STATE, bound_all(Scripted(replies), sources), run_)
+        )
     assert len(ledger.close().log) == 4
 
 
@@ -2095,7 +2112,7 @@ def gating(
         minimal(state=GATE_STATE_T, sources=sources, rules=rules or {}, **changes),
     )
     binding = Scripted(dict.fromkeys(sources, answers) | dict(replies or {}))
-    return turn(loaded, {"default": binding, "mail": binding}, GATE_STATE), binding
+    return turn(loaded, {"mail": binding, **bound_all(binding, sources)}, GATE_STATE), binding
 
 
 async def answers(batch: Batch, *, seconds: float) -> object:
@@ -2411,7 +2428,7 @@ def test_a_ready_sources_when_is_called_once_and_whens_run_in_source_id_order() 
         "alpha": gated(counting(calls, "alpha", lambda r: True), None, "t:out_z", tag="_a"),
         "mid": gated(counting(calls, "mid", lambda r: True), tag="_m"),
     }
-    gating(sources)
+    gating(apart(sources))
     assert calls == ["mid", "zed", "alpha"]
 
 
@@ -2912,7 +2929,7 @@ def test_a_keyed_batch_is_one_call_through_its_keys_binding_in_source_id_order()
     assert body(record)[-1] == {"item": "round", "round": 1, "cost": 3.5, "deadline": False}
 
 
-def test_call_items_go_by_first_source_id_sources_with_no_oracle_alone_through_default() -> None:
+def test_call_items_go_by_first_source_id_the_sources_with_no_oracle_one_through_default() -> None:
     sources = {
         **paired("b", "k"),
         **paired("a", None),
@@ -2921,18 +2938,17 @@ def test_call_items_go_by_first_source_id_sources_with_no_oracle_alone_through_d
         **paired("e", None),
     }
     record, binds = keyed_run(sources)
-    # A source with no oracle is a call of its own, so a and at, e and et are four calls.
+    # The sources with no oracle are one call through default, placed by its first source id.
     assert [i["sources"] for i in calls_of(record)] == [
-        ["a"], ["at"], ["b", "bt", "c", "ct"], ["d", "dt"], ["e"], ["et"],
+        ["a", "at", "e", "et"], ["b", "bt", "c", "ct"], ["d", "dt"],
     ]  # fmt: skip
-    alone = [[c.id for c in b] for b in binds["default"].batches]
-    assert sorted(alone) == [["a"], ["at"], ["e"], ["et"]]
+    assert [[c.id for c in b] for b in binds["default"].batches] == [["a", "at", "e", "et"]]
     assert [[c.id for c in b] for b in binds["j"].batches] == [["d", "dt"]]
     # Entries by source id after every call item, not batch by batch.
     assert [i.get("ref") for i in body(record) if i["item"] == "entry"] == [
         "d:decision", "q:a", "t:a", "q:b", "t:b", "q:c", "t:c", "q:d", "t:d", "q:e", "t:e",
     ]  # fmt: skip
-    assert [entry(record, f"t:{s}")["call"] for s in "abcde"] == [5, 6, 6, 7, 9]
+    assert [entry(record, f"t:{s}")["call"] for s in "abcde"] == [4, 5, 5, 6, 4]
 
 
 def test_a_keyed_source_that_is_not_ready_is_left_out_of_its_batch() -> None:
@@ -3194,8 +3210,11 @@ def test_a_zero_cost_frontier_is_asked_under_a_budget_of_0() -> None:
 
 def test_the_budget_compares_the_exact_sum_of_its_tags() -> None:
     # In floats 0.1 + 0.2 exceeds 0.3; taken exactly it equals it, so it is asked.
-    sources = {"a": Source({"t:a": t.string}, cost=0.1), "b": Source({"t:b": t.string}, cost=0.2)}
-    record, binding = run(make(sources), {s: returns({f"t:{s}": "v"}) for s in sources}, budget=0.3)
+    sources = apart(
+        {"a": Source({"t:a": t.string}, cost=0.1), "b": Source({"t:b": t.string}, cost=0.2)}
+    )
+    binding = Scripted({s: returns({f"t:{s}": "v"}) for s in sources})
+    record = turn(make(sources), bound_all(binding, sources), STATE, budget=0.3)
     assert len(binding.batches) == 2
     assert rounds(record)[0]["cost"] == float(Fraction("0.1") + Fraction("0.2")) == 0.3
 
@@ -3258,12 +3277,17 @@ def test_a_deadline_never_reached_cuts_nothing() -> None:
     assert all(not i["deadline"] for i in rounds(record))
 
 
-def deadline_design() -> LoadedDesign:
-    sources = {
+DEADLINE_SOURCES = apart(
+    {
         "fast": Source({"t:f": t.string}, cost=1),
         "slow": Source({"t:s": t.string}, cost=2),
         "next": Source({"t:n": t.string}, needs=["t:f"]),
     }
+)
+
+
+def deadline_design() -> LoadedDesign:
+    sources = DEADLINE_SOURCES
     rules = {"after": rule("after", lambda r: True, "t:n", "t:s")}
     return make(sources, rules)
 
@@ -3277,7 +3301,7 @@ DEADLINE_REPLIES: dict[str, object] = {
 
 def test_a_call_the_deadline_cuts_is_timed_out_and_charged_and_the_rest_stand() -> None:
     binding = Scripted(DEADLINE_REPLIES)
-    record = turn(deadline_design(), {"default": binding}, STATE, deadline=0.1)
+    record = turn(deadline_design(), bound_all(binding, DEADLINE_SOURCES), STATE, deadline=0.1)
     # The slow call's timeout of 60 is cut to the 0.1 left, so the turn ends at once.
     slow = next(i for i in calls_of(record) if i["sources"] == ["slow"])
     assert slow["outcome"] == {"failed": {"code": "timed-out", "refs": ["t:s"]}}
@@ -3322,7 +3346,9 @@ def test_a_call_the_deadline_expired_cuts_its_round_though_the_clock_reads_under
         full = settings(deadline=0.05)
         ledger = open_ledger(loaded, STATE, full)
         start = asyncio.get_running_loop().time()
-        await interpret_on(ledger, loaded, STATE, {"default": binding}, full, clock=start)
+        await interpret_on(
+            ledger, loaded, STATE, bound_all(binding, DEADLINE_SOURCES), full, clock=start
+        )
         return ledger.close()
 
     record = asyncio.run(main())
@@ -3351,7 +3377,7 @@ def test_a_binding_blocking_past_the_deadline_is_cut_and_the_next_call_not_made(
         return returns({"t:f": "f"})
 
     binding = Scripted({**DEADLINE_REPLIES, "fast": blocking, "slow": returns({"t:s": "s"})})
-    record = turn(deadline_design(), {"default": binding}, STATE, deadline=0.05)
+    record = turn(deadline_design(), bound_all(binding, DEADLINE_SOURCES), STATE, deadline=0.05)
     # fast returned past its end, so it expired; slow's task started with no time left, so
     # it was never called, yet is a call the deadline cut, charged.
     assert [b[0].id for b in binding.batches] == ["fast"]
@@ -3497,7 +3523,7 @@ def test_shuffled_latencies_give_identical_bytes_over_keys_slots_and_a_budget_cu
     wording = Text("Is {s} {i} at {bar}?", [SLOTS[0], slot("i", ref="t:seed"), SLOTS[1]])
     sources: dict[str, Source] = {}
     for i in range(6):
-        oracle = None if i == 5 else f"key{i % 2}"
+        oracle = "key5" if i == 5 else f"key{i % 2}"
         sources[f"s{i}"] = Source(
             {f"q:k{i}": Question("noul", wording)}, needs=["t:seed"], oracle=oracle, cost=1
         )
@@ -3528,14 +3554,14 @@ def test_shuffled_latencies_give_identical_bytes_over_keys_slots_and_a_budget_cu
             return returns(answering(batch))
 
         scripted_ = Scripted(dict.fromkeys(sources, reply))
-        binds = {"default": scripted_, "key0": scripted_, "key1": scripted_}
+        binds = bound_all(scripted_, sources)
         # Round 1 asks seed (1), round 2 the six asking sources (6), round 3 late is over a
-        # budget of 7. s5 and t5 name no oracle, so each is a call of its own.
+        # budget of 7. s5 and t5 name an oracle of their own, so they are one call.
         record = turn(loaded, binds, STATE, budget=7)
         hashes.add(record.record_hash)
         orders.add(tuple(finished))
         assert entry(record, "t:late")["marker"] == mark("over-budget", kind="Unasked")
-        assert [len(i["sources"]) for i in calls_of(record)] == [1, 6, 4, 1, 1]
+        assert [len(i["sources"]) for i in calls_of(record)] == [1, 6, 4, 2]
     assert len(orders) > 1
     assert len(hashes) == 1
 

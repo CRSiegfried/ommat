@@ -10,8 +10,8 @@ source id order before the live frontier's calls start. The live frontier's call
 ``asyncio.TaskGroup``, each task holding its call's timeout and the binding's await alone; every
 classification and append happens after the group closes, call items by first source id, then the
 source entries by source id, then each rule wavefront sorted by id, then the ``round`` item. A batch
-is the ready sources of one live frontier naming one oracle, called through that oracle's binding; a
-source with no oracle is a batch of one through ``default``.
+is the ready sources of one live frontier naming one oracle, called through that oracle's binding;
+the sources that name none are one batch through ``default``.
 
 Three ends share one path: at the round bound after the rule phase, and at the budget or the
 deadline in the source phase with no rule phase first, the pending sources are ``Unasked`` and
@@ -1215,16 +1215,15 @@ class _Turn:
         labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]],
         expanded: Mapping[str, "_Expanded"],
     ) -> list[_Batch]:
-        """The live frontier's batches: the ready sources naming one oracle form one, each
-        source with no oracle one of its own, in order of their first source id. ``ready`` is in
-        source id order."""
+        """The live frontier's batches: the ready sources naming one oracle form one, and those
+        naming none one more under ``default``, in order of their first source id. ``ready`` is
+        in source id order."""
         groups: list[list[str]] = []
         keyed: dict[str, list[str]] = {}
         for sid in ready:
-            key = self.sources[sid].oracle
-            if key is None:
-                groups.append([sid])
-            elif key in keyed:
+            oracle = self.sources[sid].oracle
+            key = _DEFAULT if oracle is None else oracle  # load refuses ``default`` as a name
+            if key in keyed:
                 keyed[key].append(sid)
             else:
                 keyed[key] = [sid]

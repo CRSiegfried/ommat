@@ -1058,7 +1058,8 @@ GATED = slice_design(
     }
 )
 GATED_REPLIES = {
-    "mail": returns({"t:mail": "m"}),
+    # look and mail name no oracle and are ready in round 1, so they are one call, look first.
+    "look": returns({"t:size": 4, "t:mail": "m"}),
     "held": returns({"t:held": "h"}),
     "skip": raising(AssertionError("skip is never asked")),
     "unheld": raising(AssertionError("unheld is never asked")),
@@ -1162,7 +1163,7 @@ def test_a_when_that_moves_a_source_to_another_round_still_finds_its_call() -> N
             ),
         }
     )
-    record = live(before, mail=returns({"t:mail": "m"}))
+    record = live(before, look=returns({"t:size": 4, "t:mail": "m"}))
     assert entry(record.log, "t:mail")["round"] == 1
     rerun, found = run(record, after)
     assert rerun is not None

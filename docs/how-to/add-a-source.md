@@ -91,8 +91,9 @@ names none. A name missing from the mapping, or a key other than `default` that 
 does not declare, is an `EntryRefusal` before the turn starts.
 
 Each round, the ready sources that share an oracle go to its binding as one batch, in one
-call; a source that names none is a batch of its own. The binding may split a batch into as
-many provider requests as it likes. A round's calls run at once, so one binding bound under
+call, and the ready sources that name none go to `default` as one more. The idia binding
+sends a batch's sources that share one state as one request; another binding may split a
+batch into as many provider requests as it likes. A round's calls run at once, so one binding bound under
 several names, or as `default`, is called concurrently with itself.
 [The binding protocol](../spec/README.md#the-binding-protocol) states the batching and the
 timeout each batch takes.

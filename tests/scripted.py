@@ -15,6 +15,7 @@ ledger, as decide does, and checks the record so too.
 
 import asyncio
 import contextlib
+import dataclasses
 import types
 import warnings
 from collections.abc import Generator, Mapping
@@ -167,6 +168,21 @@ async def interpret_on(
         cut=cut,
         carried=frozenset(),
     )
+
+
+def apart(sources: Mapping[str, Any]) -> dict[str, Any]:
+    """Each source that names no oracle under one of its own, named by its id, so it is a
+    batch and a call of its own; the sources that name none are otherwise one batch."""
+    return {
+        sid: dataclasses.replace(s, oracle=sid) if s.oracle is None else s
+        for sid, s in sources.items()
+    }
+
+
+def bound_all(binding: object, sources: Mapping[str, Any]) -> dict[str, object]:
+    """``binding`` under ``default`` and under every oracle a source names."""
+    names = {s.oracle for s in sources.values() if s.oracle is not None}
+    return {"default": binding, **dict.fromkeys(names, binding)}
 
 
 def turn(

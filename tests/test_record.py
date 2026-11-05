@@ -43,7 +43,7 @@ from ommat import (
 from ommat import types as t
 from ommat._canonical import _DecodeError, encode, hash_value
 from ommat._ledger import Ledger, _LedgerError, record_prefix_hash
-from scripted import Scripted, returns, sleeping
+from scripted import Scripted, apart, bound_all, returns, sleeping
 
 UNHASHED: dict[str, Any] = {
     "turn": {"start": "2026-10-20T00:00:00Z", "end": "2026-10-20T00:00:01Z"},
@@ -390,6 +390,14 @@ def test_read_record_refuses_a_grounded_ref() -> None:
 
 
 def test_a_decided_record_with_a_deadline_cut_reads_back_with_its_hash_and_log() -> None:
+    SOURCES = apart(
+        {
+            "fast": Source({"t:f": t.string}),
+            "slow": Source({"t:s": t.string}),
+            "next": Source({"t:n": t.string}, needs=["t:f"]),
+        }
+    )
+
     def after(r: Any) -> str:
         return "yes"
 
@@ -398,11 +406,7 @@ def test_a_decided_record_with_a_deadline_cut_reads_back_with_its_hash_and_log()
 
     design = minimal(
         state=t.record(),
-        sources={
-            "fast": Source({"t:f": t.string}),
-            "slow": Source({"t:s": t.string}),
-            "next": Source({"t:n": t.string}, needs=["t:f"]),
-        },
+        sources=SOURCES,
         rules={
             "after": Rule(
                 "d:after", t.label("no", "yes"), after, version="1", reads=["t:n", "t:s"]
@@ -418,7 +422,9 @@ def test_a_decided_record_with_a_deadline_cut_reads_back_with_its_hash_and_log()
             "next": returns({"t:n": "n"}),
         }
     )
-    record = decide_sync(load(design), {}, {"default": binding}, RunSettings(deadline=0.1)).record
+    record = decide_sync(
+        load(design), {}, bound_all(binding, SOURCES), RunSettings(deadline=0.1)
+    ).record
     cut = [i for i in record.log if i["item"] == "round" and i["deadline"]]
     assert cut == [{"item": "round", "round": 1, "cost": 0, "deadline": True}]
     unasked: dict[str, Any] = {"kind": "Unasked", "cause": {"code": "deadline", "refs": []}}
