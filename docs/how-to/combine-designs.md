@@ -77,8 +77,19 @@ email alone, chosen this turn: decision ask_folder
 ```
 
 The workflow's question is asked on the second turn too, though the selector picks `other`:
-that is the price of asking every question at once. Gate a source whose question is costly, or
-that calls a tool that writes, on the selector instead.
+that is the price of asking every question at once. What else to put in the first round
+follows from what each source waits for:
+
+- A question: never gate it on the selector, which would ask it a round later in a call of its
+  own.
+- A read that needs nothing but the state or the account, such as listing the mail folders:
+  leave it ungated, so it runs in round 1 and anything grounded on it is asked in round 2.
+  Every turn then makes the call, and its result is in every record.
+- A read whose arguments come from round-1 answers: gate it on the port. It waits for those
+  answers anyway, and the port is decided in the same round, so the gate costs no round and
+  saves the call on another workflow's turn.
+- A write: always gate it on a decided value and on the port, under an oracle of its own,
+  needing only the call it makes ([A source that changes state](add-a-source.md#a-source-that-changes-state)).
 
 ## Test a part alone
 
