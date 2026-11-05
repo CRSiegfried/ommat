@@ -116,6 +116,11 @@ def test_helpers_is_not_in_the_engines_api() -> None:
         "priority",
         "collect",
         "dead_questions",
+        "combine",
+        "standalone",
+        "Part",
+        "InvalidCombination",
+        "CombineFailure",
     }
     # HELPERS is a module attribute the record's design item reads, not an exported name.
     assert {n for n in vars(ommat.helpers) if not n.startswith("_")} == {*names, "HELPERS"}

@@ -150,6 +150,7 @@ To look at stored records, write them to `.json` files as `decision.record.docum
 - [Add a source](docs/how-to/add-a-source.md), which answers a new oracle through idia or a binding of your own.
 - [Gate a source on an earlier estimate](docs/how-to/gate-a-source.md), which asks a later question only when an estimate holds a value, without sending the estimate to the model.
 - [Hand off a turn](docs/how-to/hand-off-a-turn.md), which gives the next model in a conversation the turn's calls and decision as Chat Completions or Pydantic AI messages, with the words you choose.
+- [Combine small designs into one](docs/how-to/combine-designs.md), which rolls a workflow selector and its workflows up into one design, so their questions go to the model in one call.
 - [Read a record](docs/how-to/read-a-record.md), which reads an entry, the call that answered it, why a turn is undecided, a rule that failed on a decided turn, and the answers across turns.
 - [The spec](docs/spec/README.md), what ommat does and leaves out.
 - [CHANGELOG.md](CHANGELOG.md), each release.
