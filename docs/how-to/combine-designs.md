@@ -103,6 +103,30 @@ So in a combined design:
 - A write depends on the decision to make it, the port folded in, under an oracle of its own
   ([A source that changes state](add-a-source.md#a-source-that-changes-state)).
 
+## When parts were measured on different states
+
+A combined design has one state, but a part's questions may have been worded and their bars
+measured on another shape: a workflow measured on `{"request": ...}` beside a selector
+measured on `{"earlier_turns": [...], "current_turn": ...}`. Under the idia binding, the state
+a source needs is what the model reads, so asking that part's questions on the combined state
+moves their answers. Keep the shape each part was measured on instead:
+
+- Add a rule that builds the part's view from the state alone, such as `d:email/view`, whose
+  value is `{"request": current_turn}`. A rule over the state alone fires in round 0, so
+  a source that needs it is still asked in round 1.
+- Give the part's questions `needs=["d:email/view"]` in place of `t:state`, under an oracle
+  of their own, such as `jev_request` beside the selector's `jev`.
+- Bind that oracle to its own binding over the same model, naming the view as its state:
+  `oracle_binding(provider, state="d:email/view")`, the selector's staying at
+  `state="t:state"`. The binding sends the view's value unwrapped, so the model reads exactly
+  the measured shape.
+
+Round 1 then makes two calls, each one request, run concurrently, so the turn waits for the
+slower; the round's rules fire once both return, and one failing leaves the other's answers
+standing. The cost is the packing between the two parts. Replay recomputes the view. A
+source that builds the view as a tool result would instead push the part's questions to
+round 2.
+
 ## Test a part alone
 
 `standalone` gives a part a constant for each port, as a table with no input, so a test loads
