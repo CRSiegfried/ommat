@@ -29,7 +29,7 @@ with idia's reasons and claims under the same names.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 try:
@@ -124,23 +124,20 @@ class _Binding:
                 refused = Unavailable(Cause("unsupported"))  # spec: The idia binding
                 values.update(dict.fromkeys((*source.refs, *source.questions), refused))
                 lines.append(f"{source.id}: unsupported: {reason}")
+        packs = _packed(self.provider, requests)
         async with asyncio.TaskGroup() as group:
-            tasks = {
-                sid: group.create_task(_answer(self.provider, request))
-                for sid, request in requests.items()
-            }
+            tasks = [group.create_task(_answer(self.provider, request)) for _, request in packs]
         outcomes: list[idia.Outcome] = []
-        for source in batch:
-            if source.id not in tasks:
-                continue
-            response = tasks[source.id].result()
+        for (sids, request), task in zip(packs, tasks, strict=True):
+            response = task.result()
             outcomes += response.outcomes
-            lines += _lines(source.id, response)
+            lines += _lines("+".join(sids), response)
             failed = {key: o.error for o in response.outcomes if o.error for key in o.keys}
-            for ref in (q.key for q in requests[source.id].questions):  # the questions sent
+            owner = {q.key: sid for sid in sids for q in requests[sid].questions}
+            for ref in (q.key for q in request.questions):  # the questions sent
                 error = failed.get(ref)
                 if error is None:
-                    values[ref] = _value(source.id, ref, response.answers[ref], lines)
+                    values[ref] = _value(owner[ref], ref, response.answers[ref], lines)
                 elif isinstance(error, idia.DeadlineExceeded):
                     values[ref] = Unavailable(Cause("timed-out"))  # spec: The binding protocol
                 else:
@@ -251,6 +248,30 @@ def _request(
         first = idia.JsonPart(value=_tuples(written))
     state = idia.State(parts=(first, *images))
     return idia.Request(state=state, questions=questions, deadline=deadline, options=options)
+
+
+def _packed(
+    provider: idia.Dispatcher, requests: dict[str, idia.Request]
+) -> list[tuple[list[str], idia.Request]]:
+    """The requests to send: each source's request joined to the first earlier one with an
+    equal state and options whose joined request the provider still plans, its questions after
+    that one's; otherwise sent alone. Each pack names its sources in batch order."""
+    # spec: The idia binding: the sources of a batch that send one state go as one request
+    packs: list[tuple[list[str], idia.Request]] = []
+    for sid, request in requests.items():
+        for index, (sids, packed) in enumerate(packs):
+            if packed.state != request.state or dict(packed.options) != dict(request.options):
+                continue
+            joined = replace(packed, questions=(*packed.questions, *request.questions))
+            try:
+                provider.plan(joined)
+            except (idia.DoesNotFit, ValueError):
+                continue
+            packs[index] = ([*sids, sid], joined)
+            break
+        else:
+            packs.append(([sid], request))
+    return packs
 
 
 def _uncarried(rendered: RenderedQuestion, capabilities: idia.Capabilities) -> str | None:

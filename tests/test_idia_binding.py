@@ -69,6 +69,8 @@ ASSET = RenderedQuestion(
 )
 LEVEL = RenderedQuestion(AnswerKind.score, "How serious?", ("minor", "serious"))
 TEXT = "The lamp on Elm Row has been out since 3 March; seen at 9 pm on Quay Street too."
+#: A need unlike ``source()``'s, so a source holding it is sent as a request of its own.
+OTHER = {"t:state.street": "Quay Street"}
 
 
 def extraction(
@@ -645,7 +647,7 @@ def test_a_source_that_fails_inside_the_deadline_is_raised_and_its_sibling_stand
 ) -> None:
     error = ProviderError("HTTP 500: busy", status_code=500, is_retryable=retryable)
     binding, _ = built(failing(error), max_questions=UNBOUNDED)
-    result = call(binding, source(), source("fails", {"q:fails/x": NOUL}))
+    result = call(binding, source(), source("fails", {"q:fails/x": NOUL}, OTHER))
     assert code(result, "q:fails/x") == "raised"
     assert isinstance(result.values["q:triage/hazard"], dict)
     assert "fails: no answer for q:fails/x: ProviderError status 500: HTTP 500: busy" in (
@@ -664,7 +666,10 @@ def test_a_wire_request_the_deadline_cannot_hold_is_timed_out_and_its_sibling_st
     binding, leaf = built(stall, max_questions=1)
     questions = {"q:triage/asset": ASSET, "q:triage/hazard": NOUL}
     result = call(
-        binding, source(questions=questions), source("other", {"q:other/x": NOUL}), seconds=0.3
+        binding,
+        source(questions=questions),
+        source("other", {"q:other/x": NOUL}, OTHER),
+        seconds=0.3,
     )
     assert code(result, "q:triage/hazard") == "timed-out"
     # The stall's retry cannot fit the deadline either, so it ends in DeadlineExceeded too.
@@ -752,7 +757,7 @@ def test_the_sources_run_concurrently_and_their_provenance_is_joined_and_summed(
         return Reply(answers=answer_all(wire_request, deadline), usage=usage)
 
     binding, _ = built(script)
-    result = call(binding, source(), source("other", {"q:other/x": NOUL}))
+    result = call(binding, source(), source("other", {"q:other/x": NOUL}, OTHER))
     assert result.usage == {"input_tokens": 20, "output_tokens": 4, "passes": 2}
     assert result.attempts == 2
     assert result.precision == 2
@@ -1030,7 +1035,7 @@ def test_a_call_whose_requests_name_one_package_at_two_versions_is_invalid_retur
         return Reply(answers=answer_all(wire_request, deadline), versions={"torch": next(seen)})
 
     binding, _ = built(script)
-    other = source("second", {"q:second/hazard": NOUL})
+    other = source("second", {"q:second/hazard": NOUL}, OTHER)
     result = asyncio.run(binding((source(), other), seconds=60.0))
     assert result == Failed(Cause("invalid-return"))
 
@@ -1042,7 +1047,7 @@ def test_a_call_of_an_answered_and_a_failed_request_keeps_the_answered_ones_deta
         return Reply(answers=answer_all(wire_request, deadline), claimed=frozenset({"snapshot"}))
 
     binding, _ = built(script)
-    other = source("second", {"q:second/hazard": NOUL})
+    other = source("second", {"q:second/hazard": NOUL}, OTHER)
     result = asyncio.run(binding((source(), other), seconds=60.0))
     assert code(result, "q:second/hazard") == "raised"
     assert result.revision == "scripted-1"  # the answered request's
@@ -1062,3 +1067,52 @@ def test_idias_details_and_reasons_are_ommats_under_the_binding_names() -> None:
     assert {"calibrated"} == _UNRECORDED
     assert set(idia.DETAILS) >= _UNRECORDED
     assert set(idia.REASONS) == REASONS
+
+
+# ---------------------------------------------------------------------------------------------
+# Packed: the sources of a batch that send one state go as one request
+
+
+def test_the_sources_of_a_batch_with_equal_needs_go_as_one_request() -> None:
+    binding, leaf = built()
+    result = call(binding, source(), source("other", {"q:other/x": NOUL}))
+    assert [[q.key for q in c.wire_request.questions] for c in leaf.calls] == [
+        ["q:triage/hazard", "q:other/x"]
+    ]
+    assert isinstance(result.values["q:triage/hazard"], dict)
+    assert isinstance(result.values["q:other/x"], dict)
+    assert result.attempts == 1
+
+
+def test_sources_whose_needs_differ_go_as_requests_of_their_own() -> None:
+    binding, leaf = built()
+    call(binding, source(), source("other", {"q:other/x": NOUL}, OTHER))
+    assert sorted(q.key for c in leaf.calls for q in c.wire_request.questions) == [
+        "q:other/x",
+        "q:triage/hazard",
+    ]
+    assert len(leaf.calls) == 2
+
+
+def test_a_packed_requests_failure_fails_every_source_it_holds() -> None:
+    error = ProviderError("HTTP 500: busy", status_code=500, is_retryable=False)
+    binding, _ = built(lambda wire_request, deadline: error)
+    result = call(binding, source(), source("other", {"q:other/x": NOUL}))
+    assert code(result, "q:triage/hazard") == "raised"
+    assert code(result, "q:other/x") == "raised"
+    assert (
+        "triage+other: no answer for q:triage/hazard, q:other/x: ProviderError status 500: "
+        "HTTP 500: busy"
+    ) in result.warnings
+
+
+def test_sources_a_joined_request_would_not_fit_go_as_requests_of_their_own() -> None:
+    binding, leaf = built(max_total_options=3)
+    result = call(
+        binding,
+        source(questions={"q:triage/asset": ASSET}),
+        source("other", {"q:other/asset": ASSET}),
+    )
+    assert len(leaf.calls) == 2
+    assert isinstance(result.values["q:triage/asset"], dict)
+    assert isinstance(result.values["q:other/asset"], dict)
