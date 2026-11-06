@@ -152,6 +152,7 @@ To look at stored records, write them to `.json` files as `decision.record.docum
 - [Hand off a turn](docs/how-to/hand-off-a-turn.md), which gives the next model in a conversation the turn's calls and decision as Chat Completions or Pydantic AI messages, with the words you choose.
 - [Combine small designs into one](docs/how-to/combine-designs.md), which rolls a workflow selector and its workflows up into one design, so their questions go to the model in one call.
 - [Read a record](docs/how-to/read-a-record.md), which reads an entry, the call that answered it, why a turn is undecided, a rule that failed on a decided turn, and the answers across turns.
+- [Lay out a design module so it reads](docs/how-to/lay-out-a-design.md), which orders a design's module, names its rules, tables and bars, and checks its docstring map and a tidy in its tests.
 - [The spec](docs/spec/README.md), what ommat does and leaves out.
 - [CHANGELOG.md](CHANGELOG.md), each release.
 - [idia](https://github.com/CRSiegfried/idia), the library that puts the questions to the models.

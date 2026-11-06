@@ -4,6 +4,8 @@ shape, edges are the loaded design's graph, bounds and margins measure as the ch
 compare, the views it holds are the engine's, and the command pairs and skips as the lens's."""
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -682,6 +684,22 @@ def test_the_command_skips_what_is_no_document(
     assert f"skipped {(folder / 'broken.json').as_posix()} is not JSON" in captured.err
     assert f"skipped {(folder / 'classifier.json').as_posix()}" in captured.err
     assert "notes.json" not in captured.out
+
+
+def test_the_command_stops_quietly_when_the_reader_closes_the_pipe(tmp_path: Path) -> None:
+    folder = _folder(tmp_path)
+    for i in range(200):
+        (folder / f"turn{i}.json").write_bytes((FORMAT_10 / "record.json").read_bytes())
+    command = [sys.executable, "-m", "ommat.outline", str(folder)]
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+        assert child.stdout is not None
+        assert child.stderr is not None
+        child.stdout.readline()
+        child.stdout.close()
+        error = child.stderr.read().decode()
+        child.wait(timeout=60)
+    assert "Traceback" not in error
+    assert "BrokenPipeError" not in error
 
 
 def test_the_command_exits_1_on_nothing_printable(

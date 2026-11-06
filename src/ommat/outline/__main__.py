@@ -3,6 +3,7 @@ of each record and design file, or of every ``.json`` and ``.jsonl`` record and 
 folder."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -83,7 +84,14 @@ def main(argv: list[str] | None = None) -> int:
         chunks.append(_shown(label, outline, turn_text, json=args.json))
     text = ("" if args.json or args.oneline else "\n").join(chunks)
     if output is None:
-        sys.stdout.write(text)
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            # The reader closed the pipe (``| head``): stop quietly. Point stdout at devnull so
+            # the flush at exit does not fail again.
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            return 1
         return 0
     try:
         output.write_text(text, encoding="utf-8")
