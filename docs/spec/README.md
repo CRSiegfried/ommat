@@ -236,6 +236,28 @@ Table(
 
 **The grid.** A table's parameter comparisons and helper bindings are its boundaries: a pick's bindings under its read, `extract`'s `null_bar` and comparisons over its input under its read's `null` and `value` roles, a comparison over a `mass` input under its read's `mass` with the set its `labels` leaf holds, and a comparison over a bare `d:` or `t:` read under that read, an integer literal by its value. A cell over a `size` input adds nothing, so the lint probes a count table only over the lists `values` gives. An integer value cell over a bare numeric read is a boundary too. A function rule's `boundaries` field may not repeat a boundary a table already declares.
 
+**A function rule's boundaries.** A table's comparisons are in its cells, but a function's are in its code, so a function rule declares them in `boundaries`, keyed by its reads, a `candidate` read never. A `d:` or `t:` read, a field path allowed, of a type that conforms to `number`, takes the list of `number` leaves it is compared against. A `q:` read of a `choice`, `score` or `noul` question takes all four roles, each a list, empty when unused: `bar` and `margin`, `number [0, 1]` leaves for `pick_with_margin`'s arguments; `thresholds`, `mapping<string, number [0, 1]>` leaves for `pick_with_thresholds`'s; and `mass`, each `{"labels", "bounds"}`, label names of the question and the `number [0, 1]` leaves their summed probability is compared against. An extraction read takes `null`, `confidence` and `value` instead, `value` only over a scalar `number` question. The field changes nothing the rule computes: the lint, the switching values and the outline read it.
+
+```python
+Rule(
+    "d:refund",
+    'label{"no", "yes"}',
+    refund,
+    version="1",
+    reads=["q:reason", "t:order_age"],
+    params=["bars/reason_at", "bars/reason_lead", "bars/fault_mass", "bars/window_days"],
+    boundaries={
+        "q:reason": {
+            "bar": ["bars/reason_at"],
+            "thresholds": [],
+            "margin": ["bars/reason_lead"],
+            "mass": [{"labels": ["damaged", "late"], "bounds": ["bars/fault_mass"]}],
+        },
+        "t:order_age": ["bars/window_days"],
+    },
+)
+```
+
 ## The escalation view
 
 `escalation(record)` takes any closed `Record` and returns `None` when the policy gave a value, when the log holds no entry at the policy's ref, and for a record before format 8. Otherwise it returns a plain dict of the undecided turn's members, in this order: `kind`, the policy's marker's kind; `cause`, its cause, `{"code", "refs"}`; `root_cause`, the cause its `required` chain ends at (see [Decide](#decide)); `defect`, a `bool`, true when the root cause's code is `raised`, `invalid-return` or `undeclared-read` and its first ref names a rule, a `d:` ref the `settings` item's `providers` gives, or the codec, `codec` or `t:state`, and false otherwise, as for an oracle's failure naming `q:` or `t:` refs, a source's `when`, or any other code; and `record_hash`. It raises `ValueError` for a `record` that is not exactly a `Record`. The view performs nothing: what the caller does with an undecided turn is its own. Both views read the policy's entry wherever the record holds one and do not test that the turn finished, so a record cancelled after the policy fired still shows its decision.

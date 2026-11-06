@@ -3,14 +3,16 @@
 clauses of checks 1, 3, 7, 8, 9 and 10 on it, and the answer grid load derives from it."""
 
 import dataclasses
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
 import pytest
 
 import designs
+import refund_design
 from designs import bounded, full, roles
-from ommat import Design, DesignFailure, InvalidDesign, Parameter, load
+from ommat import Design, DesignFailure, InvalidDesign, Parameter, Rule, load
 from ommat import types as t
 from ommat._canonical import decode
 
@@ -399,3 +401,30 @@ def test_a_boundary_type_refusal_names_the_type_as_written(
 ) -> None:
     found = only(design, check)
     assert any(says in f.message for f in found), found
+
+
+def test_the_specs_function_rule_example_loads() -> None:
+    spec = (Path(__file__).parent.parent / "docs" / "spec" / "README.md").read_text()
+    after = spec.split("**A function rule's boundaries.**", 1)[1]
+    block = after.split("```python\n", 1)[1].split("```", 1)[0]
+
+    def refund(r: Any) -> Any:
+        return "no"
+
+    rule = eval(block, {"Rule": Rule, "refund": refund})  # the spec's own text
+    design = refund_design.DESIGN
+    design = dataclasses.replace(
+        design,
+        parameters={**design.parameters, "bars/fault_mass": Parameter(t.number(0, 1), 0.5)},
+        rules={**design.rules, "refund": rule},
+    )
+    doc = decode(load(design).document)
+    assert doc["rules"]["refund"]["boundaries"] == {
+        "q:reason": {
+            "bar": ["bars/reason_at"],
+            "margin": ["bars/reason_lead"],
+            "mass": [{"bounds": ["bars/fault_mass"], "labels": ["damaged", "late"]}],
+            "thresholds": [],
+        },
+        "t:order_age": ["bars/window_days"],
+    }
