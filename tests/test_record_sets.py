@@ -41,6 +41,8 @@ from ommat._refs import grounded_ref
 from ommat.helpers import pick_each_with_margin
 from test_views import ROOT, digest
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 PERSON = t.record(name=t.string, age=t.integer(), tags=t.list_(t.string), note=t.nullable(t.string))
 PEOPLE = t.list_(PERSON)
 SET = "d:people"

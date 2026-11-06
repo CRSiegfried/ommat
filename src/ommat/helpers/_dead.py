@@ -3,14 +3,15 @@
 question's answer changing the decision.
 
 It fills the exogenous values, every ref a source provides and ``t:state``, by the read points,
-and runs ``decide_sync`` once per point with the default run settings, no codec, the point's
-``t:state`` as the state and one binding, under ``default`` and every declared oracle name,
-that answers each asked ref from the point. So the ``d:`` values, ``Unasked`` and ``Unsure``
-come from the rules and the ``when``s, which decide runs. Two runs differ when the canonical
-bytes of the policy's whole entry, cause included, differ. Each point runs once, and every
-question is judged from those runs. A candidate-valued question is answered over the labels
-each run renders, each fixed label on top and then a candidate; it is never on the grid, and
-a witness shows it as that run's record wrote its entry.
+and runs a turn as ``decide_sync`` does, with no ``DefectWarning``, once per point with the
+default run settings, no codec, the point's ``t:state`` as the state and one binding, under
+``default`` and every declared oracle name, that answers each asked ref from the point. So the
+``d:`` values, ``Unasked`` and ``Unsure`` come from the rules and the ``when``s, which decide
+runs. Two runs differ when the canonical bytes of the policy's whole entry, cause included,
+differ. Each point runs once, and every question is judged from those runs. A candidate-valued
+question is answered over the labels each run renders, each fixed label on top and then a
+candidate; it is never on the grid, and a witness shows it as that run's record wrote its
+entry.
 
 A per-candidate question is no read of its own. At each assignment of the other reads its
 set's value is fixed, a ``t:`` set's by the point and a ``d:`` set's by a probe run with every
@@ -178,11 +179,11 @@ def _run(
         return CallResult(values)
 
     bindings = {_DEFAULT: binding, **dict.fromkeys(keys, binding)}
-    decision = _decide.decide_sync(loaded, fresh(point[_STATE].live), bindings)
+    decision = _decide._decided_sync(loaded, fresh(point[_STATE].live), bindings)
     log = decision.record.log
     _refuse_broken(point, log)
     run = decision_bytes(log)
-    assert run is not None  # decide_sync returned, so the log holds the policy's entry
+    assert run is not None  # the turn returned, so the log holds the policy's entry
     written = {
         i["ref"]: i["value"] if "value" in i else i["marker"] for i in log if i["item"] == "entry"
     }

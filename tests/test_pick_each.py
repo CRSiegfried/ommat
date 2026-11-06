@@ -36,6 +36,8 @@ from ommat import types as t
 from ommat._refs import grounded_ref
 from ommat.helpers import determined, pick_each_with_margin, pick_each_with_thresholds
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 OUT = "q:lamps/out"
 SET = "d:streets"
 STREETS = ["Quay Street", "Elm Row", "Bridge Lane", "Back Lane"]

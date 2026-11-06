@@ -1,38 +1,41 @@
-"""The conversation renderers: a view rendered for an LLM conversation, outside the
-compatibility promise while they are validated.
+"""The conversation renderers: a record rendered as its turn history for the next model in an
+LLM conversation, outside the compatibility promise.
 
-``to_chat_completions(view)`` renders a ``transcript`` view as Chat Completions messages: each
-source call and decide as a tool call and its result. A renderer words nothing.
+``to_chat_completions(record, design)`` renders a turn as Chat Completions messages: each source
+call and decide as a tool call and its result, minimal. A renderer words nothing.
 ``is_bookkeeping`` and ``drop_earlier_bookkeeping`` tell ommat's bookkeeping, its source calls
-and decide, from the model's own messages, by the transcript's ids.
-``ommat.conversation.pydantic_ai`` renders a transcript as Pydantic AI messages. ``import ommat``
+and decide, from the model's own messages, by their ids.
+``ommat.conversation.pydantic_ai`` renders a turn as Pydantic AI messages. ``import ommat``
 does not import this package, and this module takes nothing beyond the standard library.
 """
 
 from typing import Any, cast
 
 from ommat._canonical import ordered
-from ommat.conversation._exchanges import BOOKKEEPING_ID, check_turn, exchanges
+from ommat._design import LoadedDesign
+from ommat._ledger import Record
+from ommat.conversation._exchanges import BOOKKEEPING_ID, check_turn, history
 
 __all__ = ["drop_earlier_bookkeeping", "is_bookkeeping", "to_chat_completions"]
 
 
 def to_chat_completions(
-    view: dict[str, Any] | None, *, turn: str | int | None = None
+    record: Record, design: LoadedDesign | None = None, *, turn: str | int | None = None
 ) -> list[dict[str, Any]]:
-    """A ``transcript`` view as Chat Completions messages, ``[]`` for ``None``: per group of calls
-    an assistant message with null ``content`` and its ``tool_calls``, then a ``tool`` message per
-    call. Every argument and result is in the ordered encoding, each object in the order the
-    record holds it, so a record renders to the same bytes each time. Raises ``ValueError`` for a
-    tool name no provider takes: a source named ``decide`` or a name over 64 characters. ``turn``,
-    exactly a ``str`` or an ``int`` the canonical encoding takes, else ``ValueError``, gives every
-    id a stem hashed from the record hash and the turn, so one record rendered for two turns of a
-    conversation repeats no id; ``None`` keeps the transcript's ids."""
+    """A record's turn history as Chat Completions messages, ``[]`` for a record before format 8
+    or one with no entry at the policy's ref: per group of calls an assistant message with null
+    ``content`` and its ``tool_calls``, then a ``tool`` message per call. With ``design``, the
+    record's loaded design, decide's arguments are the board entries the policy reads and every
+    marker; without it, the whole board. Every argument and result is in the ordered encoding,
+    so a record renders to the same bytes each time. Raises ``ValueError`` for a ``record`` that
+    is not exactly a ``Record``, a ``design`` that is not its ``LoadedDesign``, or a tool name no
+    provider takes: a source named ``decide`` or a name over 64 characters. ``turn``, exactly a
+    ``str`` or an ``int`` the canonical encoding takes, else ``ValueError``, gives every id a stem
+    hashed from the record hash and the turn, so one record rendered for two turns of a
+    conversation repeats no id; ``None`` keeps the record's ids."""
     check_turn(turn)
-    if view is None:
-        return []
     messages: list[dict[str, Any]] = []
-    for group in exchanges(view, turn):
+    for group in history(record, design, turn).groups:
         calls = [
             {
                 "id": call.id,
@@ -50,7 +53,7 @@ def to_chat_completions(
 
 def is_bookkeeping(message: dict[str, Any]) -> bool:
     """Whether a Chat Completions ``message`` is ommat's bookkeeping, a source call or decide or
-    its result, read from the transcript's ids: an assistant message with no text whose every
+    its result, read from their ids: an assistant message with no text whose every
     tool call has one, or a ``tool`` message answering one."""
     if message.get("role") == "tool":
         return _bookkept(message.get("tool_call_id"))

@@ -63,6 +63,8 @@ from test_replay import (
     rule_of,
 )
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 K = FindingKind
 R = RefusalReason
 HAM = {**SPAM, "q:spam": {"yes": 0.1, "no": 0.9}}

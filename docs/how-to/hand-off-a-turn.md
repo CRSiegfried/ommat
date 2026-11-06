@@ -3,18 +3,20 @@
 This guide gives the next model in a conversation what a turn settled: the calls the turn made
 and the decision it ended in, as tool calls and their results, with the words you choose beside
 them. Use it whenever a turn hands on to a generative model, as when a design has done what it
-can and an agent finishes the request: a source that called your tool, a read or a write, is a
-call in the transcript, so the agent sees what the turn already did, and you rebuild nothing
-from the record's `t:` values. It assumes you have done [Write your first design](../tutorials/write-a-design.md). The
-spec's [transcript view](../spec/README.md#the-transcript-view),
+can and an agent finishes the request. The renderers give the turn as an agent's workflow: a
+source that called your tool, a read or a write, is a call in the history, so the agent sees
+what the turn already did, and you rebuild nothing from the record's `t:` values. It assumes
+you have done [Write your first design](../tutorials/write-a-design.md). The spec's
 [escalation view](../spec/README.md#the-escalation-view) and
-[conversation renderers](../spec/README.md#the-conversation-renderers) state the rules; the guide
-shows them at work.
+[conversation renderers](../spec/README.md#the-conversation-renderers) state the rules; the
+guide shows them at work.
 
-The transcript is not an audit trail, and a renderer says nothing of its own beyond fixed
-labels. The transcript carries the turn's values as recorded, the customer's words and any
-`identifier` field among them. Only the record keeps the provenance and the prompts. To share a
-turn, share its redacted view instead.
+The turn history is not an audit trail, and a renderer says nothing of its own beyond fixed
+labels. It is minimal: what the next model needs to carry on, not every value the turn wrote.
+Each `t:` value is carried whole, the customer's words and any `identifier` field among them,
+so a binding's values set most of the history's size ([Shape a tool's
+value](add-a-source.md#shape-a-tools-value)). For the whole turn, read the record, its outline
+or the record lens; to share a turn, share its redacted view.
 
 The example's files are in `docs/how-to/hand_off_a_turn/`: `support_design.py` is the design,
 `turn_run.py` the driver, which answers through `ommat.bindings.fixed`, so it runs with no
@@ -24,18 +26,20 @@ ommat is installed; `agent_run.py` needs `ommat[pydantic-ai]`.
 
 ## Give the model the turn's calls
 
-`transcript(record)` gives every source call of the turn and its decision, unworded: each
-call's refs and answers as recorded, the board's estimates and the decision. To the next model
-a source is a tool, so `to_chat_completions` renders each call as an assistant tool call and its
-`tool` result, then a `decide` call whose arguments are the board and whose result is the
-decision. In the driver, `STATE` is the turn's state, a dict of the customer's message, email
+To the next model a source is a tool, so `to_chat_completions(record, loaded)` renders each
+source call as an assistant tool call with empty arguments and its `tool` result, then a
+`decide` call. A result gives each ref's answer: a question's top label and its probability, a
+`t:` value whole, and a marker as its kind and cause code. Decide's arguments are the board
+entries the policy reads, and any marker; leave out `loaded` and they are the whole board.
+Decide's result is the decision, or for an undecided turn why: its kind, root cause and the
+refs it names. In the driver, `STATE` is the turn's state, a dict of the customer's message, email
 and order, and `answering(p)` is a `fixed` binding that answers the refund question `yes` with
 probability `p`:
 
 ```python
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
     print(next_model_note(decision))
-    for message in to_chat_completions(transcript(decision.record)):
+    for message in to_chat_completions(decision.record, loaded):
         if message["role"] == "assistant":
             for call in message["tool_calls"]:
                 print("call", call["id"], call["function"]["name"], call["function"]["arguments"])
@@ -46,7 +50,8 @@ probability `p`:
 Append the messages after your own user message for the turn. Each id comes from the record
 hash, so one record always renders to the same messages, byte for byte. The same design, state
 and answers give the same record: when a turn can repeat one exactly, as a retry does, pass
-each rendering its own `turn`, such as the turn's number, `to_chat_completions(view, turn=3)`,
+each rendering its own `turn`, such as the turn's number,
+`to_chat_completions(record, loaded, turn=3)`,
 so no tool-call id appears twice in the conversation, which a provider may refuse. A source's
 tool name is its name with each `/` as `-`; the renderers raise `ValueError` for one a provider
 would refuse.
@@ -76,10 +81,10 @@ leaves to ask the customer and of a third turn whose source could not answer:
 
 ```text
 The turn decided refund_order.
-call om_99095d193e254d10ac37189b_c1 ask {"asks":["q:refund"]}
-result om_99095d193e254d10ac37189b_c1 97 bytes
-call om_99095d193e254d10ac37189b_d decide {"board":{"d:refund":{"value":"yes"}}}
-result om_99095d193e254d10ac37189b_d 37 bytes
+call om_99095d193e254d10ac37189b_c1 ask {}
+result om_99095d193e254d10ac37189b_c1 24 bytes
+call om_99095d193e254d10ac37189b_d decide {"d:refund":"yes"}
+result om_99095d193e254d10ac37189b_d 27 bytes
 The turn decided ask_if_refund.
 The turn is undecided: unsupported.
 ```
@@ -107,7 +112,7 @@ Run the agent with the history and no new prompt, after the caller's action:
 
 ```python
     history: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(str(STATE["message"]))])]
-    history += to_model_messages(transcript(decision.record), model_name="ommat")
+    history += to_model_messages(decision.record, loaded, model_name="ommat")
     if decision.estimate == "refund_order":
         refund_order(str(STATE["order"]["id"]))  # type: ignore[index]
     result = asyncio.run(agent.run(None, message_history=history))

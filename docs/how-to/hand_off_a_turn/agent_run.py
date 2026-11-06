@@ -10,7 +10,7 @@ from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from ommat import decide_sync, load, transcript
+from ommat import decide_sync, load
 from ommat.conversation.pydantic_ai import (
     drop_earlier_bookkeeping,
     is_bookkeeping,
@@ -38,7 +38,7 @@ def main() -> None:
     loaded = load(DESIGN)
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
     history: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(str(STATE["message"]))])]
-    history += to_model_messages(transcript(decision.record), model_name="ommat")
+    history += to_model_messages(decision.record, loaded, model_name="ommat")
     if decision.estimate == "refund_order":
         refund_order(str(STATE["order"]["id"]))  # type: ignore[index]
     result = asyncio.run(agent.run(None, message_history=history))
@@ -49,7 +49,7 @@ def main() -> None:
     unsure = decide_sync(loaded, again, {"default": answering(0.6)})
     history = result.all_messages()
     history.append(ModelRequest(parts=[UserPromptPart(said)]))
-    history += to_model_messages(transcript(unsure.record), model_name="ommat")
+    history += to_model_messages(unsure.record, loaded, model_name="ommat")
     if unsure.estimate == "ask_if_refund":
         reply = "Would you like a refund for this order?"
         history.append(ModelResponse(parts=[TextPart(reply)], model_name="ommat"))

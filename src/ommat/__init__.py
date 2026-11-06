@@ -11,7 +11,14 @@ from importlib.metadata import version as _version
 
 from ommat._answer import Answer, AnswerKind, ExtractionAnswer, ValueType
 from ommat._binding import CallResult, RenderedQuestion, SourceCall
-from ommat._decide import Decision, EntryRefusal, RunSettings, decide, decide_sync
+from ommat._decide import (
+    Decision,
+    DefectWarning,
+    EntryRefusal,
+    RunSettings,
+    decide,
+    decide_sync,
+)
 from ommat._design import (
     Design,
     DesignFailure,
@@ -58,6 +65,7 @@ __all__ = [
     "Cause",
     "CauseCode",
     "Decision",
+    "DefectWarning",
     "Design",
     "DesignFailure",
     "EntryRefusal",

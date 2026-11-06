@@ -39,7 +39,7 @@ from ledger_logs import (
     rehashed,
     round_item,
 )
-from ommat import InvalidRecord, escalation, read_record, redact, transcript
+from ommat import InvalidRecord, escalation, read_record, redact
 from ommat._canonical import encode, hash_value
 from ommat._ledger import (
     Ledger,
@@ -50,6 +50,7 @@ from ommat._ledger import (
     record_prefix_hash,
 )
 from ommat._refs import grounded_ref
+from ommat.conversation import to_chat_completions
 from test_views import ROOT, digest
 
 
@@ -1934,7 +1935,7 @@ def test_a_format_7_grounded_plan_reads_to_its_own_hash() -> None:
 
 def test_a_format_7_grounded_plan_has_no_view() -> None:
     record = read_log(grounded_plan_log())
-    assert (escalation(record), transcript(record)) == (None, None)
+    assert (escalation(record), to_chat_completions(record)) == (None, [])
 
 
 def test_the_ledger_refuses_a_set_naming_no_set() -> None:

@@ -69,6 +69,7 @@ PUBLIC = {
     "ReadView",
     "RunSettings",
     "Decision",
+    "DefectWarning",
     "EntryRefusal",
     "decide",
     "decide_sync",

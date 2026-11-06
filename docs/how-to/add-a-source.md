@@ -246,8 +246,23 @@ back. Six things the engine does shape such a binding:
 - Each link in a chain of actions is a round. `RunSettings.round_bound`, 8 by default, stops a
   runaway turn, not the depth you expect: set it well above the longest chain.
 
-When the turn ends and a generative model takes over, hand it `transcript(record)`: each
-action is a tool call there with its result ([Hand off a turn](hand-off-a-turn.md)).
+When the turn ends and a generative model takes over, render the record with
+`ommat.conversation`: each action is a tool call there with its result ([Hand off a
+turn](hand-off-a-turn.md)).
+
+## Shape a tool's value
+
+A `t:` value is what your rules read, what replay and the evaluation jobs answer from, and,
+whole, what the next model reads of the call. So its shape sets most of a hand-off's size.
+Three habits keep it lean without losing anything a reader needs:
+
+- Return the tool's result as a structured value, not as a JSON string. A string payload is
+  escaped again at every layer that encodes it, and a rule must parse it to read it.
+- Return each fact once. Don't keep a listing both as the provider's raw payload and as
+  the parsed list your rules read.
+- Drop the transport around the result, such as a status the call already signals or fields
+  that are always empty, but keep every field a rule reads, or that a what-if may need to
+  read again. The record answers every replay, so a field left out can't be read later.
 
 ## What the record keeps
 

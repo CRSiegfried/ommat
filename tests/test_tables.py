@@ -44,6 +44,8 @@ from ommat import types as t
 from ommat._canonical import encode
 from ommat.helpers import dead_questions
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 STATE = t.record(
     n=t.integer(),
     m=t.integer(),

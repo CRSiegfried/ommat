@@ -5,15 +5,16 @@ escalation target or a verifier.
 root cause, whether that is a defect, and the record hash; ``None`` when the policy gave a value.
 ``defects(record)`` returns every entry whose cause is a defect by the same test, whatever the
 policy gave.
-``transcript(record)`` returns every source call and the decision, unworded. Each of the
-escalation, the defects and the transcript gives ``None`` for a record before format 8, which holds
-no policy's entry, and the escalation and the transcript find the decision as ``decision_entry``
-does. ``redact(record, root_key)`` returns the redacted view's document as canonical bytes: the
-record's ``log`` and ``unhashed`` with a keyed digest where each ``content`` or ``identifier``
-value was, ``redacted``, the record hash its key came from, and from format 3 on the document's
-``hash``, open. Each value's class is read from the ``settings`` item's class tree for its ref. In
-an answer to a candidate-valued choice, each label and ``probabilities`` key that is not a fixed
-name takes its set's class, found through the call item the answer's entry names.
+``transcript(record)``, deprecated, returns every source call and the decision, unworded. Each
+of the escalation, the defects and the transcript gives ``None`` for a record before format 8,
+which holds no policy's entry, and the escalation and the transcript find the decision as
+``decision_entry`` does. ``redact(record, root_key)`` returns the redacted view's document as
+canonical bytes: the record's ``log`` and ``unhashed`` with a keyed digest where each
+``content`` or ``identifier`` value was, ``redacted``, the record hash its key came from, and
+from format 3 on the document's ``hash``, open. Each value's class is read from the
+``settings`` item's class tree for its ref. In an answer to a candidate-valued choice, each
+label and ``probabilities`` key that is not a fixed name takes its set's class, found through
+the call item the answer's entry names.
 
 This engine's record holds no origin carrying ``set``, which the ledger refuses, so every literal
 takes its JSON form's default; it holds a grounded ref only at an entry's ref, a cause's refs and
@@ -23,6 +24,7 @@ every other ref passes unchanged. Each view raises ``ValueError`` before reading
 here.
 """
 
+import warnings
 from copy import deepcopy
 from typing import Any, cast
 
@@ -102,9 +104,14 @@ def defects(record: Record) -> list[dict[str, Any]] | None:
     log = _closed(record).log
     if not log or log[0].get("format", 0) < POLICY_FORMAT:
         return None
+    return [item for _, item in _defect_items(log)]
+
+
+def _defect_items(log: list[dict[str, Any]]) -> list[tuple[int, dict[str, Any]]]:
+    """Each entry item ``defects`` lists, with its log index, for a log of format 8 or later."""
     return [
-        item
-        for item in log
+        (index, item)
+        for index, item in enumerate(log)
         if item["item"] == "entry"
         and "marker" in item
         and _defect(log, cast("dict[str, Any]", item["marker"]["cause"]))
@@ -148,7 +155,13 @@ def transcript(record: Record) -> dict[str, Any] | None:
     ``board``, each ``d:`` entry but the policy's, and the ``decision``, the policy's entry.
     ``None`` for a record before format 8, or one with no entry at the policy's ref. Each value
     and marker is tagged, and each id is ``om_``, the record hash's first 24 hex digits and
-    ``_c<n>`` or ``_d``."""
+    ``_c<n>`` or ``_d``. Deprecated: it warns, and leaves ``ommat`` in a later minor release;
+    render the record with ``ommat.conversation`` instead."""
+    warnings.warn(
+        "transcript is deprecated; pass the record to an ommat.conversation renderer",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     closed = _closed(record)
     log = closed.log
     decision = decision_entry(log)

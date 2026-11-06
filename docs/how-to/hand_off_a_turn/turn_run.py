@@ -2,7 +2,7 @@
 for the model, and print the first turn's calls as Chat Completions messages and the note each
 turn hands on."""
 
-from ommat import Decision, decide_sync, escalation, load, transcript
+from ommat import Decision, decide_sync, escalation, load
 from ommat.bindings import OracleBinding, fixed
 from ommat.conversation import to_chat_completions
 from support_design import DESIGN
@@ -35,7 +35,7 @@ def main() -> None:
     loaded = load(DESIGN)
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
     print(next_model_note(decision))
-    for message in to_chat_completions(transcript(decision.record)):
+    for message in to_chat_completions(decision.record, loaded):
         if message["role"] == "assistant":
             for call in message["tool_calls"]:
                 print("call", call["id"], call["function"]["name"], call["function"]["arguments"])

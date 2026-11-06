@@ -54,6 +54,8 @@ from test_targets import STATE as TARGET_STATE
 from test_targets import binding as target_binding
 from test_targets import targeted
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 R = RefusalReason
 NO = {"yes": 0.1, "no": 0.9}
 

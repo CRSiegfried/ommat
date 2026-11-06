@@ -95,6 +95,22 @@ The traceback is in `unhashed["exceptions"]`, keyed by the entry's log index as 
 JSON keys are. Route on the views' test rather than a copy of it, so a new defect rule reaches
 your code.
 
+`decide` also emits one `ommat.DefectWarning` for such a turn once its record is closed, naming
+each defect and its traceback, with the record as its `record` and the view's list as its
+`defects`. The driver captures it:
+
+```python
+    (warned,) = caught
+    assert isinstance(warned.message, DefectWarning)
+    print("warned", warned.category.__name__, [d["ref"] for d in warned.message.defects])
+```
+
+A warning prints by default and the turn returns as usual. To make every such turn raise
+instead, set a filter: `warnings.simplefilter("error", ommat.DefectWarning)` in a service, or
+`filterwarnings = ["error::ommat.DefectWarning"]` under `[tool.pytest.ini_options]` in a test
+suite. The raise comes after the record is closed, and `except DefectWarning as w` reaches it as
+`w.record`.
+
 ## Read the answers across turns
 
 `ommat.evaluation.answers(records, loaded)` gives one row per question a call answered in each
@@ -114,6 +130,7 @@ d:days_open 5
 q:refund {'yes': 0.9, 'no': 0.1} from ['ask'] None
 defect d:days_open Unavailable raised estimate refund_order
 tracebacks at ['7']
+warned DefectWarning ['d:days_open']
 undecided Unavailable unsupported
 answer q:refund yes
 answer q:refund yes

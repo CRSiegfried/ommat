@@ -52,6 +52,8 @@ from ommat._ledger import Ledger, _LedgerError
 from ommat.helpers import HELPERS, dead_questions
 from ommat.helpers._points import filled
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 Values = dict[str, Any]
 FORMAT_1 = Path(__file__).parent / "format_1"
 

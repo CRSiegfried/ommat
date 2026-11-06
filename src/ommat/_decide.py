@@ -26,7 +26,8 @@ import contextlib
 import functools
 import inspect
 import math
-from collections.abc import Callable, Mapping
+import warnings
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import version
 from types import FunctionType, MethodType
@@ -42,6 +43,7 @@ from ommat._refs import code_point_sorted
 from ommat._typed import is_a, typed
 from ommat._values import (
     MAX_INTEGER,
+    POLICY_FORMAT,
     RECORD_FORMAT,
     UNREPRESENTABLE,
     described,
@@ -49,6 +51,7 @@ from ommat._values import (
     string_data,
     type_name,
 )
+from ommat._views import _defect_items  # pyright: ignore[reportPrivateUsage]
 from ommat.helpers import HELPERS
 
 _ENGINE = version("ommat")
@@ -62,6 +65,49 @@ Codec = Callable[[Any], object]
 
 class EntryRefusal(ValueError):
     """A wrong caller argument at decide's entry, refused before any record is written."""
+
+
+class DefectWarning(UserWarning):
+    """The warning a turn decide returns emits once its record is closed, when the record holds
+    a defect: an entry ``defects`` lists. ``record`` is the closed record and ``defects`` the
+    view's list; a filter that makes it an error makes decide raise it instead of returning."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        record: Record | None = None,
+        defects: Sequence[dict[str, Any]] = (),
+    ) -> None:
+        super().__init__(message)
+        self.record = record
+        self.defects = list(defects)
+
+
+def _warn_defects(record: Record, stacklevel: int) -> None:
+    """One ``DefectWarning`` for a closed record holding a defect, naming each defect's ref,
+    marker kind, cause and the exception text recorded at its index; nothing otherwise."""
+    log = record.log
+    if not log or log[0].get("format", 0) < POLICY_FORMAT:
+        return
+    found = _defect_items(log)
+    if not found:
+        return
+    texts = cast("dict[str, dict[str, str]]", record.unhashed.get("exceptions", {}))
+    lines = [f"the turn's record holds {len(found)} defect{'' if len(found) == 1 else 's'}:"]
+    for index, item in found:
+        marker = item["marker"]
+        cause = marker["cause"]
+        naming = f" naming {', '.join(cause['refs'])}" if cause["refs"] else ""
+        lines.append(f"  {item['ref']}: {marker['kind']}, {cause['code']}{naming}")
+        text = texts.get(str(index))
+        if text is not None:
+            shown = text["traceback"]
+            if shown == UNREPRESENTABLE:
+                shown = f"{text['type']}: {text['message']}"
+            lines.extend(f"    {line}" for line in shown.rstrip().splitlines())
+    warning = DefectWarning("\n".join(lines), record=record, defects=[i for _, i in found])
+    warnings.warn(warning, stacklevel=stacklevel + 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +189,23 @@ async def decide(
 ) -> Decision:
     """Run one turn: the entry refusals, then the body over a ledger opened with ``observer``;
     return the decision, or propagate a cancellation or the observer's exception with the
-    record so far as its ``record``."""
+    record so far as its ``record``. A returned turn whose record holds a defect emits one
+    ``DefectWarning`` once the record is closed."""
+    decision = await _decided(loaded, state, bindings, settings, codec=codec, observer=observer)
+    _warn_defects(decision.record, stacklevel=2)
+    return decision
+
+
+async def _decided(
+    loaded: LoadedDesign,
+    state: object,
+    bindings: Mapping[str, OracleBinding],
+    settings: RunSettings | None = None,
+    *,
+    codec: Codec | None = None,
+    observer: Observer | None = None,
+) -> Decision:
+    """``decide`` without its warning, for the lint's runs."""
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     _callable_or_none(codec, "codec")
@@ -181,14 +243,29 @@ def decide_sync(
     observer: Observer | None = None,
 ) -> Decision:
     """``decide`` run to completion; ``RuntimeError`` inside a running event loop, raised
-    before the coroutine is built."""
+    before the coroutine is built. It warns of a defect as ``decide`` does, at its caller."""
+    decision = _decided_sync(loaded, state, bindings, settings, codec=codec, observer=observer)
+    _warn_defects(decision.record, stacklevel=2)
+    return decision
+
+
+def _decided_sync(
+    loaded: LoadedDesign,
+    state: object,
+    bindings: Mapping[str, OracleBinding],
+    settings: RunSettings | None = None,
+    *,
+    codec: Codec | None = None,
+    observer: Observer | None = None,
+) -> Decision:
+    """``decide_sync`` without its warning, for the lint's runs."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         pass
     else:
         raise RuntimeError("decide_sync was called inside a running event loop; await decide")
-    return asyncio.run(decide(loaded, state, bindings, settings, codec=codec, observer=observer))
+    return asyncio.run(_decided(loaded, state, bindings, settings, codec=codec, observer=observer))
 
 
 # ---------------------------------------------------------------------------------------------

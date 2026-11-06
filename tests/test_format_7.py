@@ -14,8 +14,8 @@ from ommat import (
     load,
     read_record,
     replay_sync,
-    transcript,
 )
+from ommat.conversation import to_chat_completions
 
 FORMAT_7 = Path(__file__).parent / "format_7"
 FORMAT_6_RECORD = "sha256:1615a18d3512a71062293d65f48876c4aa58ae55e87202155c66cdc33121bf07"
@@ -40,7 +40,7 @@ def test_a_stored_format_6_record_reads_to_its_own_hash_with_no_sets() -> None:
 def test_a_stored_format_6_record_has_no_view() -> None:
     record = read_record((FORMAT_7 / "record.json").read_bytes())
     assert escalation(record) is None
-    assert transcript(record) is None
+    assert to_chat_completions(record) == []
 
 
 def test_a_stored_format_6_record_replays_as_the_wrong_design() -> None:

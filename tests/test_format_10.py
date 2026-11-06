@@ -24,9 +24,9 @@ from ommat import (
     load,
     read_record,
     replay_sync,
-    transcript,
 )
 from ommat import types as t
+from ommat.conversation import to_chat_completions
 from ommat.helpers import pick_with_margin
 
 FORMAT_9 = Path(__file__).parent / "format_9"
@@ -134,9 +134,7 @@ def test_a_stored_format_7_record_reads_to_its_bytes_and_its_hash(path: str) -> 
 def test_a_stored_format_8_record_gives_its_decision() -> None:
     record = read_record((FORMAT_10 / "record.json").read_bytes())
     assert escalation(record) is None
-    view = transcript(record)
-    assert view is not None
-    assert view["decide"]["decision"] == {"value": "archive"}
+    assert json.loads(to_chat_completions(record)[-1]["content"]) == {"decision": "archive"}
 
 
 def test_a_stored_format_8_record_replays_under_its_design_with_the_helper_version_alone() -> None:

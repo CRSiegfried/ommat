@@ -48,7 +48,10 @@ from ommat import (
 from ommat import types as t
 from ommat._canonical import decode
 from ommat._refs import code_point_sorted, grounded_ref
+from ommat.conversation import to_chat_completions
 from test_views import ROOT, digest
+
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
 
 OUT = "q:lamps/out"
 URGENT = "q:lamps/urgent"
@@ -818,6 +821,7 @@ def test_redact_passes_a_grounded_ref_whose_set_is_open() -> None:
     assert refs == q_refs(record)
 
 
+@pytest.mark.filterwarnings("ignore:transcript is deprecated:DeprecationWarning")
 def test_the_transcript_asks_each_grounded_ref() -> None:
     record = decided(STREETS[:3])
     shown = transcript(record)
@@ -825,6 +829,13 @@ def test_the_transcript_asks_each_grounded_ref() -> None:
     ((call,),) = shown["rounds"]
     assert call["asks"] == code_point_sorted([*REFS[:3], URGENT])
     assert list(call["answers"]) == call["asks"]
+
+
+def test_the_turn_history_answers_each_grounded_ref_under_its_source() -> None:
+    record = decided(STREETS[:3])
+    calls, result, *_ = to_chat_completions(record)
+    assert len(calls["tool_calls"]) == 1
+    assert list(json.loads(result["content"])) == code_point_sorted([*REFS[:3], URGENT])
 
 
 # ---------------------------------------------------------------------------------------------

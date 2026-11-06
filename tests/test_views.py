@@ -57,6 +57,11 @@ from ommat._refs import grounded_ref
 from ommat._values import MAX_DOCUMENT_DEPTH
 from ommat._views import _defect
 
+pytestmark = [
+    pytest.mark.filterwarnings("ignore::ommat.DefectWarning"),  # defects are the point here
+    pytest.mark.filterwarnings("ignore:transcript is deprecated:DeprecationWarning"),
+]
+
 ROOT = bytes(range(32))
 
 

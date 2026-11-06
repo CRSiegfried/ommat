@@ -60,6 +60,8 @@ from ommat.helpers._points import filled
 from scripted import sleeping, unsupported
 from test_views import digest
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 FORMAT_2 = Path(__file__).parent / "format_2"
 FORMAT_2_DESIGN = "sha256:56f74e4909ca929686a9ec747af56e98ced7a47774c2a43463113a6a61e0a9f4"
 FORMAT_2_RECORD = "sha256:b0a8c2aa57a346234e343b9e0945141b4670b4a354686e34dae874c9c10aedc7"

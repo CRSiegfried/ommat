@@ -70,6 +70,8 @@ from test_decide import (
     undecided_policy,
 )
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 K = FindingKind
 CHANGED = slice_design(name="changed")
 """The slice design under another name: another design hash, the same turn."""

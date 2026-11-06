@@ -46,6 +46,8 @@ from scripted import Scripted, returns
 from test_decide import ASK, BODY, LOADED, RULES, act_rule, slice_design
 from test_use_answers import CHANGED, broken, format_7, live, unfinished
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 R = RefusalReason
 
 

@@ -31,6 +31,8 @@ from ommat import (
 )
 from ommat import types as t
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 SET = "t:sender_candidates"
 FIXED = ["none", "several"]
 

@@ -48,6 +48,8 @@ from test_deciding_inputs import records_in
 from test_replay import edited, entry
 from test_use_answers import format_7, live
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 R = RefusalReason
 
 

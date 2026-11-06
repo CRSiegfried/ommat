@@ -1,10 +1,11 @@
 """The how-to's driver: decide three turns of the desk design, with ``fixed`` standing in for
 the model and the clock, and print what each question of the guide reads from the records."""
 
+import warnings
 from typing import Any
 
 from desk_design import DESIGN
-from ommat import Decision, decide_sync, defects, escalation, load
+from ommat import Decision, DefectWarning, decide_sync, defects, escalation, load
 from ommat.bindings import fixed
 from ommat.evaluation import answers
 
@@ -28,7 +29,9 @@ def held(entry: dict[str, Any]) -> object:
 
 def main() -> None:
     sure = turn("It arrived broken. Refund me.", "2026-10-30", {"yes": 0.9, "no": 0.1})
-    late = turn("It arrived broken. Refund me.", "last week", {"yes": 0.9, "no": 0.1})
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DefectWarning)
+        late = turn("It arrived broken. Refund me.", "last week", {"yes": 0.9, "no": 0.1})
     silent = turn("It arrived broken.", "2026-10-30", None)
 
     record = sure.record
@@ -41,6 +44,9 @@ def main() -> None:
     for found in defects(late.record) or []:
         print("defect", found["ref"], held(found), "estimate", late.estimate)
     print("tracebacks at", sorted(late.record.unhashed["exceptions"]))
+    (warned,) = caught
+    assert isinstance(warned.message, DefectWarning)
+    print("warned", warned.category.__name__, [d["ref"] for d in warned.message.defects])
 
     escalated = escalation(silent.record)
     assert escalated is not None

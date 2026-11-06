@@ -384,12 +384,12 @@ def _malformed(_state: object) -> object:
 def test_a_broken_entry_raises_naming_the_point(
     monkeypatch: pytest.MonkeyPatch, codec: Any, code: str
 ) -> None:
-    real = _decide.decide_sync
+    real = _decide._decided_sync  # pyright: ignore[reportPrivateUsage]
 
     def broken(*args: Any, **kwargs: Any) -> Any:
         return real(*args, **{**kwargs, "codec": codec})
 
-    monkeypatch.setattr("ommat._decide.decide_sync", broken)
+    monkeypatch.setattr("ommat._decide._decided_sync", broken)
     with pytest.raises(ValueError, match=re.escape(f"cause {code!r}")) as caught:
         dead_questions(LOADED)
     assert "broken entry" in str(caught.value)

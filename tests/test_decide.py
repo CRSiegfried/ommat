@@ -30,6 +30,7 @@ from ommat import (
     Cause,
     CauseCode,
     Decision,
+    DefectWarning,
     EntryRefusal,
     LoadedDesign,
     Question,
@@ -70,6 +71,8 @@ from scripted import (
     started_raising_on_close,
     stop,
 )
+
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
 
 # ---------------------------------------------------------------------------------------------
 # The slice design. The golden hashes below cover these functions' source: change one and the
@@ -942,7 +945,9 @@ def test_an_async_codecs_coroutine_is_a_broken_entry_and_no_warning_leaks() -> N
         decision = go(state=object(), codec=cast(Any, codec))
         gc.collect()
     assert decision.record.log[2:] == broken_items(INVALID)
-    assert [str(w.message) for w in caught_warnings] == []
+    others = [str(w.message) for w in caught_warnings if w.category is not DefectWarning]
+    assert others == []
+    assert [w.category for w in caught_warnings].count(DefectWarning) == 1
 
 
 @pytest.fixture
@@ -970,7 +975,9 @@ def test_a_sync_codec_returning_a_coroutine_is_a_broken_entry_and_no_warning_lea
         gc.collect()
     assert decision.record.cause == INVALID
     assert "exceptions" not in decision.record.unhashed
-    assert [str(w.message) for w in caught_warnings] == []
+    others = [str(w.message) for w in caught_warnings if w.category is not DefectWarning]
+    assert others == []
+    assert [w.category for w in caught_warnings].count(DefectWarning) == 1
 
 
 @pytest.mark.usefixtures("untyped")
@@ -1184,7 +1191,8 @@ def test_the_observer_sees_every_item_and_the_record_is_the_same_without_one() -
 
 
 NORMAL_LOG = go().record.log
-BROKEN_LOG = go(codec=Counting(raises=ValueError("bad"))).record.log
+with warnings.catch_warnings(action="ignore", category=DefectWarning):
+    BROKEN_LOG = go(codec=Counting(raises=ValueError("bad"))).record.log
 
 
 @pytest.mark.parametrize("at", range(len(NORMAL_LOG)))

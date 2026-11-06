@@ -73,6 +73,8 @@ from test_extraction_turn import ran as extraction_ran
 from test_replay import entry
 from test_use_answers import CHANGED, HAM, broken, diff, format_7, live, unfinished
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 K = FindingKind
 R = RefusalReason
 NO = {"yes": 0.1, "no": 0.9}

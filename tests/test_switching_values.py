@@ -56,6 +56,8 @@ from scripted import Scripted, returns
 from test_decide import LOADED
 from test_use_answers import broken, format_7, unfinished
 
+pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
+
 R = RefusalReason
 KIND = "switching-value"
 YES_NO = 'label{"no", "yes"}'

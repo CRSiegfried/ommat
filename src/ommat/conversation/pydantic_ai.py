@@ -1,8 +1,8 @@
-"""The Pydantic AI renderer: a ``transcript`` view as Pydantic AI messages, outside the
-compatibility promise while it is validated. Install it with ``ommat[pydantic-ai]``.
+"""The Pydantic AI renderer: a record's turn history as Pydantic AI messages, outside the
+compatibility promise. Install it with ``ommat[pydantic-ai]``.
 
-``to_model_messages(view)`` gives each source call and decide as a ``ModelResponse`` of tool
-calls and a ``ModelRequest`` of their returns, each message marked as ommat's bookkeeping in its
+``to_model_messages(record, design)`` gives each source call and decide as a ``ModelResponse``
+of tool calls and a ``ModelRequest`` of their returns, each marked as ommat's bookkeeping in its
 ``metadata``, which Pydantic AI never sends to a model. ``is_bookkeeping(message)``
 reads the mark, and ``drop_earlier_bookkeeping`` is a history processor that keeps the latest
 record's bookkeeping and drops every earlier record's, each return with its call.
@@ -20,7 +20,9 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from ommat.conversation._exchanges import BOOKKEEPING, check_turn, exchanges
+from ommat._design import LoadedDesign
+from ommat._ledger import Record
+from ommat.conversation._exchanges import BOOKKEEPING, check_turn, history
 
 __all__ = ["drop_earlier_bookkeeping", "is_bookkeeping", "to_model_messages"]
 
@@ -28,26 +30,27 @@ _MARK = "ommat"
 
 
 def to_model_messages(
-    view: dict[str, Any] | None,
+    record: Record,
+    design: LoadedDesign | None = None,
     *,
     model_name: str | None = None,
     provider_name: str | None = None,
     turn: str | int | None = None,
 ) -> list[ModelMessage]:
-    """A ``transcript`` view as Pydantic AI messages, ``[]`` for ``None``: per group of calls a
-    ``ModelResponse`` of ``ToolCallPart``s, then a ``ModelRequest`` of a ``ToolReturnPart`` per
-    call, a failed source call's with ``outcome="failed"`` and decide's with ``metadata``
+    """A record's turn history as Pydantic AI messages, with the board ``to_chat_completions``
+    gives and ``[]`` where it gives none: per group of calls a ``ModelResponse`` of
+    ``ToolCallPart``s, then a ``ModelRequest`` of a ``ToolReturnPart`` per call, a failed source
+    call's with ``outcome="failed"`` and decide's with ``metadata``
     ``{"record_hash", "design_hash"}``. Every message carries ``metadata``
     ``{"ommat": "bookkeeping", "record_hash"}``, with ``turn`` when given. Every response carries
     ``model_name`` and ``provider_name``. ``turn`` stems every id, and is held in the mark, as
-    ``to_chat_completions`` says. Raises ``ValueError`` for a tool name no provider takes, as
-    ``to_chat_completions`` does."""
+    ``to_chat_completions`` says. Raises ``ValueError`` as ``to_chat_completions`` does."""
     check_turn(turn)
-    if view is None:
-        return []
-    stamp = {"record_hash": view["record_hash"], "design_hash": view["design"]["hash"]}
+    turn_history = history(record, design, turn)
+    record_hash = turn_history.record_hash
+    stamp = {"record_hash": record_hash, "design_hash": turn_history.design_hash}
     messages: list[ModelMessage] = []
-    for group in exchanges(view, turn):
+    for group in turn_history.groups:
         calls = [
             ToolCallPart(call.name, deepcopy(call.arguments), tool_call_id=call.id)
             for call in group
@@ -57,7 +60,7 @@ def to_model_messages(
                 parts=calls,
                 model_name=model_name,
                 provider_name=provider_name,
-                metadata=_marked(view["record_hash"], turn),
+                metadata=_marked(record_hash, turn),
             )
         )
         returns = [
@@ -70,7 +73,7 @@ def to_model_messages(
             )
             for call in group
         ]
-        messages.append(ModelRequest(parts=returns, metadata=_marked(view["record_hash"], turn)))
+        messages.append(ModelRequest(parts=returns, metadata=_marked(record_hash, turn)))
     return messages
 
 
