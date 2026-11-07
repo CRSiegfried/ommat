@@ -97,7 +97,8 @@ class TargetRole(enum.StrEnum):
 @dataclass(frozen=True, slots=True)
 class Target:
     """A property of the state a design's questions and rules are about, for a reader:
-    ``statement`` says what it is, ``values`` describes its value space, or ``None``."""
+    ``statement`` says what the design is trying to determine and what counts,
+    ``values`` describes its value space, or ``None``."""
 
     statement: str
     values: str | None = None

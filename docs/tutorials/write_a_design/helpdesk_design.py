@@ -4,7 +4,7 @@ The tutorial at docs/tutorials/write-a-design.md builds it step by step, and hel
 decides with it.
 """
 
-from ommat import Design, Parameter, Question, ReadView, Rule, Source, Text, Undetermined
+from ommat import Design, Parameter, Question, ReadView, Rule, Source, Target, Text, Undetermined
 from ommat import types as t
 from ommat.helpers import extract, pick_with_margin
 
@@ -15,12 +15,27 @@ TOPICS = [
     {"name": "other", "description": "Anything that is not delivery, a return or damage"},
 ]
 
+TARGETS = {
+    "tg:urgent": Target(
+        "Determine whether the customer needs an answer today: a deadline, a missed delivery or "
+        "a safety issue counts; impatience alone does not.",
+        values="yes or no",
+    ),
+    "tg:topic": Target(
+        "Determine what the customer's message is mainly about; when it raises several things, "
+        "the one it most asks to have dealt with.",
+        values="one of delivery, return, damaged or other",
+    ),
+}
+
 SOURCES = {
     "triage": Source(
         {
-            "q:triage/urgent": Question("noul", Text("Does the customer need an answer today?")),
+            "q:triage/urgent": Question(
+                "noul", Text("Does the customer need an answer today?"), target="tg:urgent"
+            ),
             "q:triage/topic": Question(
-                "choice", Text("What is the customer's message about?"), TOPICS
+                "choice", Text("What is the customer's message about?"), TOPICS, target="tg:topic"
             ),
         },
         needs=["t:state"],
@@ -120,5 +135,6 @@ DESIGN = Design(
     sources=SOURCES,
     rules=RULES,
     parameters=PARAMETERS,
+    targets=TARGETS,
     policy="d:route",
 )

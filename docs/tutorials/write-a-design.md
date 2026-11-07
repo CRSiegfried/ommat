@@ -94,6 +94,29 @@ Each `q:` ref maps to a `Question`: its kind, its wording as a `Text`, and any l
 5. The `text` ref joins the source's needs: `lookup` declared only `t:state`, but its
    binding also receives `t:state.message`.
 
+6. Say what each question is for. A target is what the design is trying to determine about
+   the state, and its statement says what counts, so a reader can judge how a question's
+   answer bears on it:
+
+   ```python
+   TARGETS = {
+       "tg:urgent": Target(
+           "Determine whether the customer needs an answer today: a deadline, a missed delivery or "
+           "a safety issue counts; impatience alone does not.",
+           values="yes or no",
+       ),
+       "tg:topic": Target(
+           "Determine what the customer's message is mainly about; when it raises several things, "
+           "the one it most asks to have dealt with.",
+           values="one of delivery, return, damaged or other",
+       ),
+   }
+   ```
+
+   `q:triage/urgent` names `target="tg:urgent"`, `q:triage/topic` names `target="tg:topic"`,
+   and the design declares `targets=TARGETS`. Targets gate nothing: they tell a reader what
+   each question is for.
+
 ## Rules
 
 A rule turns answers into an estimate, a `d:` ref the policy reads. It is a function of a

@@ -206,7 +206,7 @@ Load refuses a requirement whose ref is not a `d:` ref, `t:state` and a `q:` ans
 
 ## Targets
 
-A design may declare `targets={id: Target(statement, values=None)}`, the properties of the state its questions and rules are about, keyed by target id. An id is any string, `tg:` then a name by convention, and is neither a ref nor a declared name; `statement` says what the property is and `values` describes its value space, or is null.
+A design may declare `targets={id: Target(statement, values=None)}`, the properties of the state its questions and rules are about, keyed by target id. An id is any string, `tg:` then a name by convention, and is neither a ref nor a declared name; `statement` says what the design is trying to determine about the state, with what counts and what does not, so that a reader can judge how a question's answer bears on it; `values` describes its value space, or is null.
 
 A `Question` may name `target`, the one target it asks about, and `latent_targets`, the targets it is known to bear on without asking about them, each `{"target": id, "role": role}`, the role a `TargetRole`: `reflective`, the answer alone is evidence for or against the target; `formative`, the answer supplies a part of it; or `unknown`, not yet judged. One answer may bear on one target in several ways, so a target may stand under several roles. A `Rule` may name `target`, the target it estimates.
 
