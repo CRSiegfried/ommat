@@ -217,6 +217,8 @@ EVALUATION = {
     "intervene_sync",
     "question_reach",
     "question_reach_sync",
+    "rescore",
+    "rescore_sync",
     "scenario",
     "scenario_sync",
     "switching_values",

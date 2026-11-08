@@ -25,10 +25,10 @@ from typing import Any, cast
 from ommat._answer import AnswerKind, ValueType
 from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
 from ommat._binding_kit import bounded_warnings
-from ommat._canonical import _CanonicalError, decode, encode, ordered
+from ommat._canonical import _CanonicalError, encode, ordered
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
-from ommat._interpret import _record_form, question_identity, warnings_conform
+from ommat._interpret import _record_form, held_identity, warnings_conform
 from ommat._ledger import Record, read_record
 from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
@@ -111,7 +111,6 @@ class Base:
         self._loaded = loaded
         self._design = loaded if design is None else design
         self._asked = asked
-        self._sources = cast("dict[str, Any]", decode(loaded.document))["sources"]
 
     def check(self, source: SourceCall) -> tuple[Stale | None, dict[str, Stale]]:
         """Whether ``source`` is stale whole, and why, else each stale ref of it, by the first
@@ -175,7 +174,7 @@ class Base:
         why = _differing(asked, held, self.entries, self._sets)
         if why or held is None:
             return why
-        if question_identity(self._loaded, self._sources, declared) != held["identity"]:
+        if held_identity(self._loaded, declared) != held["identity"]:
             return "its identity differs from the stored question's"
         return ""
 

@@ -817,7 +817,7 @@ class _Turn:
         self.left_out: dict[str, Undetermined] = {}
         """Each candidate-valued question left out of its batch, with its own marker."""
         self.spent = Fraction(0)
-        self.document = _sources(loaded)
+        self.document = design_sources(loaded)
 
     async def run(self) -> dict[str, object]:
         """Run the rounds and return the live board, which decide reads."""
@@ -1416,14 +1416,8 @@ class _Turn:
         return values
 
     def identity(self, ref: str) -> str:
-        """The question identity of ``ref`` under the turn's design (``question_identity``),
-        computed once per design hash."""
-        key = (self.loaded.design_hash, ref)
-        found = _IDENTITIES.get(key)
-        if found is None:
-            found = question_identity(self.loaded, self.document, ref)
-            _remember(_IDENTITIES, key, found, _IDENTITIES_HELD)
-        return found
+        """The question identity of ``ref`` under the turn's design (``held_identity``)."""
+        return held_identity(self.loaded, ref)
 
     def slot_key(self, origin: str, candidate: str | None) -> str:
         """A slot ref's needs key: a ref on a grounded declared ref, in a per-candidate
@@ -1612,13 +1606,23 @@ def _remember(cache: dict[Any, Any], key: Any, value: Any, held: int) -> None:
     cache[key] = value
 
 
-def _sources(loaded: LoadedDesign) -> dict[str, Any]:
-    """The design document's ``sources`` object, decoded once per design hash; a turn only
-    reads it."""
+def design_sources(loaded: LoadedDesign) -> dict[str, Any]:
+    """The design document's ``sources`` object, decoded once per design hash. Every caller
+    only reads it."""
     found = _SOURCES.get(loaded.design_hash)
     if found is None:
         found = cast("dict[str, Any]", decode(loaded.document))["sources"]
         _remember(_SOURCES, loaded.design_hash, found, _SOURCES_HELD)
+    return found
+
+
+def held_identity(loaded: LoadedDesign, ref: str) -> str:
+    """``question_identity`` of declared ``q:`` ref ``ref``, computed once per design hash."""
+    key = (loaded.design_hash, ref)
+    found = _IDENTITIES.get(key)
+    if found is None:
+        found = question_identity(loaded, design_sources(loaded), ref)
+        _remember(_IDENTITIES, key, found, _IDENTITIES_HELD)
     return found
 
 

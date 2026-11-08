@@ -25,12 +25,15 @@ alone at each of its read points by an entry set, in every ``q:`` entry a return
 records given, and reports a question ``live`` with its first witness when some trial changes the
 decision, else ``not-determined``, ``no-change-found`` or ``never-asked``. ``DesignStore`` keeps a
 loaded design's document under its design hash and fetches it back through ``load``;
-``EvaluationStore`` keeps write-once entries by kind and key. A job or a store refuses with
+``EvaluationStore`` keeps write-once entries by kind and key. ``rescore`` decides recorded turns
+again under each of several designs, from their own answers, building no record, for a grid of
+settings scored by decision alone. A job or a store refuses with
 ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
 
 ``intervene`` and ``scenario`` are in ``_edit``, the answers table in ``_answers``, the deciding
 inputs, tried through it, in ``_deciding``, the switching-value job in ``_switching``, the
-gold-answers job in ``_gold``, the question-reach job in ``_reach``, ``use_answers`` and the record
+gold-answers job in ``_gold``, the question-reach job in ``_reach``, the rescoring job in
+``_rescore``, ``use_answers`` and the record
 checks and replay they share in ``_diff``, the stores in ``_store`` and the refusal in
 ``_refusal``.
 """
@@ -42,6 +45,7 @@ from ommat.evaluation._edit import intervene, intervene_sync, scenario, scenario
 from ommat.evaluation._gold import gold_record, gold_record_sync, write_gold_answers
 from ommat.evaluation._reach import question_reach, question_reach_sync
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
+from ommat.evaluation._rescore import rescore, rescore_sync
 from ommat.evaluation._store import DesignStore, EvaluationStore
 from ommat.evaluation._switching import switching_values, switching_values_sync
 
@@ -59,6 +63,8 @@ __all__ = [
     "intervene_sync",
     "question_reach",
     "question_reach_sync",
+    "rescore",
+    "rescore_sync",
     "scenario",
     "scenario_sync",
     "switching_values",
