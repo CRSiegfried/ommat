@@ -11,7 +11,7 @@ import pickle
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from types import MappingProxyType
@@ -2359,3 +2359,139 @@ def test_a_source_grounded_over_the_policy_loads() -> None:
     )
     loaded = load(with_source(minimal(rules={"decision": CANDIDATE_POLICY}), "s", asked))
     assert loaded._grounded == {"q:x": "d:decision"}
+
+
+# ---------------------------------------------------------------------------------------------
+# with_parameters: a loaded design with other leaf values, equal to a fresh load's
+
+
+def _reparameterised(design: Design, values: dict[str, Any]) -> Design:
+    parameters = {
+        **design.parameters,
+        **{p: Parameter(design.parameters[p].type, v) for p, v in values.items()},
+    }
+    return dataclasses.replace(design, parameters=parameters)
+
+
+def _parts(loaded: LoadedDesign) -> dict[str, Any]:
+    """Every slot of a loaded design as plain, comparable data."""
+
+    def plain(v: Any) -> Any:
+        if isinstance(v, MappingProxyType | dict):
+            return {k: plain(x) for k, x in cast("Mapping[Any, Any]", v).items()}
+        if isinstance(v, tuple | list):
+            return [plain(x) for x in cast("Sequence[Any]", v)]
+        if isinstance(v, frozenset):
+            return sorted(plain(x) for x in cast("frozenset[Any]", v))
+        return v
+
+    return {name: plain(getattr(loaded, name)) for name in LoadedDesign.__slots__}
+
+
+BOUNDED_VALUES: dict[str, Any] = {
+    "age/limit": 21,
+    "blob": b"\x02\x03",
+    "intent/bar": 0.75,
+    "list/cap": ["c"],
+    "score/cut": 0.25,
+    "tone/thresholds": {"cold": 0.4, "warm": 0.3},  # keys out of canonical order: held
+    "weights": {"b": 2.5, "a": 1},
+}
+
+
+@pytest.mark.parametrize("path", sorted(BOUNDED_VALUES))
+def test_with_parameters_equals_a_fresh_load_slot_for_slot(path: str) -> None:
+    design = designs.bounded()
+    loaded = load(design)
+    values = {path: BOUNDED_VALUES[path]}
+    variant = loaded.with_parameters(values)
+    fresh = load(_reparameterised(design, values))
+    assert variant.document == fresh.document
+    assert variant.design_hash == fresh.design_hash
+    assert _parts(variant) == _parts(fresh)
+    assert variant._leaf_value(path) == BOUNDED_VALUES[path]
+    assert loaded._leaf_value(path) != BOUNDED_VALUES[path]  # the given design is untouched
+
+
+def test_with_parameters_sets_several_leaves_and_hops_from_a_variant() -> None:
+    design = designs.bounded()
+    loaded = load(design)
+    variant = loaded.with_parameters(BOUNDED_VALUES)
+    fresh = load(_reparameterised(design, BOUNDED_VALUES))
+    assert _parts(variant) == _parts(fresh)
+    hop = variant.with_parameters({"score/cut": 0.9})
+    assert _parts(hop) == _parts(
+        load(_reparameterised(design, {**BOUNDED_VALUES, "score/cut": 0.9}))
+    )
+    assert hop.with_parameters({}).design_hash == hop.design_hash
+
+
+def test_with_parameters_on_a_table_named_leaf_takes_the_load_path_and_agrees() -> None:
+    design = minimal(
+        state=t.record(n=t.number()),
+        rules={
+            "tb": Table(
+                "d:tb",
+                'label{"big", "small"}',
+                "F",
+                ["t:state.n"],
+                [[">= lim/n", "big"], ["-", "small"]],
+            )
+        },
+        parameters={"lim/n": Parameter(t.number(), 5.0)},
+    )
+    loaded = load(design)
+    variant = loaded.with_parameters({"lim/n": 6.0})
+    fresh = load(_reparameterised(design, {"lim/n": 6.0}))
+    assert variant.document == fresh.document
+    assert variant.design_hash == fresh.design_hash
+    assert variant._leaf_value("lim/n") == 6.0
+
+
+def test_with_parameters_refuses_as_load_refuses() -> None:
+    design = designs.bounded()
+    loaded = load(design)
+    for values in ({"intent/bar": 1.5}, {"tone/thresholds": {"warm": 0.5, "tepid": 0.2}}):
+        with pytest.raises(InvalidDesign) as mine:
+            loaded.with_parameters(values)
+        with pytest.raises(InvalidDesign) as fresh:
+            load(_reparameterised(design, values))
+        assert mine.value.failures == fresh.value.failures
+    with pytest.raises(ValueError, match="names no parameter leaf"):
+        loaded.with_parameters({"nope": 1})
+    with pytest.raises(TypeError):
+        loaded.with_parameters(cast(Any, [("intent/bar", 0.5)]))
+
+
+def test_a_record_decided_under_a_fresh_load_replays_cleanly_under_the_variant() -> None:
+    from ommat import decide_sync, replay_sync
+
+    design = minimal(
+        state=t.record(n=t.number()),
+        rules={
+            "tb": Table(
+                "d:tb",
+                'label{"big", "small"}',
+                "F",
+                ["t:state.n"],
+                [[">= lim/n", "big"], ["-", "small"]],
+            )
+        },
+        parameters={"lim/n": Parameter(t.number(), 5.0)},
+    )
+    loaded = load(design)
+    variant = loaded.with_parameters({"lim/n": 6.5})
+    fresh = load(_reparameterised(design, {"lim/n": 6.5}))
+    record = decide_sync(fresh, {"n": 7.0}, {}).record
+    assert record.design_hash == variant.design_hash
+    rerun, found = replay_sync(record, variant)
+    assert rerun is not None
+    assert found == []
+    assert rerun.record_hash == record.record_hash
+    assert rerun.entries["d:tb"]["value"] == "big"
+    assert (
+        decide_sync(loaded.with_parameters({"lim/n": 8.0}), {"n": 7.0}, {}).record.entries["d:tb"][
+            "value"
+        ]
+        == "small"
+    )

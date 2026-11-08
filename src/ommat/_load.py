@@ -18,7 +18,7 @@ import importlib
 import inspect
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from graphlib import CycleError, TopologicalSorter
 from types import MappingProxyType
@@ -3676,6 +3676,84 @@ def _each(value: object, build: Callable[[Any], Any]) -> Any:
     if not isinstance(value, dict):
         return value
     return {k: build(v) for k, v in cast("dict[str, Any]", value).items()}
+
+
+def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> LoadedDesign:
+    """``loaded`` with each leaf in ``values`` holding the value given: the loaded design a
+    fresh ``load`` of the design with those leaf values gives, its document and design hash
+    that load's. A path naming no leaf of the design is refused ``ValueError``. The load
+    checks that read a leaf's value (check 8's conformance, check 10's domain, check 9's
+    clauses on a table naming the leaf and on a ``thresholds`` leaf's keys) are what a value
+    can fail: where none can, the loaded design is rebuilt from the one given, every
+    value-free part shared; elsewhere ``loaded``'s document with the leaves replaced is
+    loaded with its own callables, as the switching-value job loads a value's design, and
+    that load's ``InvalidDesign`` stands."""
+    if type(loaded) is not LoadedDesign:
+        raise TypeError(f"loaded is a {type(loaded).__name__}, not a LoadedDesign")
+    if not isinstance(values, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError("values is a mapping from a leaf's path to its value")
+    design = loaded._design
+    for path in values:
+        if type(path) is not str or path not in loaded._leaf_types:
+            raise ValueError(f"{path!r} names no parameter leaf of the design")
+    fast = _values_pass(loaded, values)
+    doc = cast("dict[str, Any]", decode(loaded._document))
+    parameters = cast("dict[str, Any]", doc["parameters"])
+    for path, value in values.items():
+        t = loaded._leaf_types[path]
+        written = document_value(value, t) if value_conforms(value, t, {}, form="live") else value
+        try:
+            order = order_of(written)
+        except (TypeError, ValueError, RecursionError):  # a value no document holds
+            order = {}
+        parameters[path] = {"type": design.parameters[path].type, "value": written, "order": order}
+    if not fast:  # a failure, or a check only a load runs: that load's refusal stands
+        return load(doc, functions=loaded._callables)
+    document = encode(doc, MAX_DOCUMENT_DEPTH)
+    parts = {name[1:]: getattr(loaded, name) for name in LoadedDesign.__slots__}
+    parts.update(
+        design=replace(
+            design,
+            parameters={
+                **design.parameters,
+                **{p: Parameter(design.parameters[p].type, v) for p, v in values.items()},
+            },
+        ),
+        document=document,
+        hash=sha256_ref(document),
+        grid=_grid(doc),
+        leaf_bytes=MappingProxyType(
+            {p: _held_bytes(v["value"], v.get("order")) for p, v in parameters.items()}
+        ),
+    )
+    return LoadedDesign(_BUILT_BY_LOAD, **parts)
+
+
+def _values_pass(loaded: LoadedDesign, values: Mapping[str, object]) -> bool:
+    """Whether every value in ``values`` passes each load check that reads a leaf's value, so
+    that the loaded design can be rebuilt without a load: in the domain and conforming to its
+    leaf's type; named by no table, whose check 9 clauses read the values it compares; and,
+    under a ``thresholds`` role, keyed by labels of the question alone."""
+    tables = set(loaded._table_bytes)
+    for path, value in values.items():
+        t = loaded._leaf_types[path]
+        if not value_conforms(value, t, {}, form="live"):
+            return False
+        if domain_error(document_value(value, t)) is not None:  # as the document holds it
+            return False
+        if any(path in loaded._params.get(rid, ()) for rid in tables):
+            return False
+        if type(value) is not dict:
+            continue
+        keys = set(cast("dict[str, object]", value))
+        for key, entry in loaded._grid.items():
+            roles = cast("Mapping[str, Any]", entry)
+            if not key.startswith("q:") or "thresholds" not in roles:
+                continue
+            thresholds = cast("tuple[str, ...]", roles["thresholds"])
+            if path in thresholds and keys - set(loaded._labels.get(key, ((), ()))[0]):
+                return False  # a key that is no label of the question
+    return True
 
 
 def _object(value: object) -> dict[str, Any] | None:

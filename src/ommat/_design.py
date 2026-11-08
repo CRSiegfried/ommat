@@ -683,6 +683,15 @@ class LoadedDesign:
         """The design's canonical bytes."""
         return self._document
 
+    def with_parameters(self, values: Mapping[str, object]) -> "LoadedDesign":
+        """This design with each leaf in ``values`` holding the value given: the loaded design
+        a fresh ``load`` of the design so changed gives, with the same document and design
+        hash; ``InvalidDesign`` as load raises it for a value load refuses, ``ValueError`` for
+        a path naming no leaf."""
+        from ommat._load import with_parameters  # load imports this module
+
+        return with_parameters(self, values)
+
     @property
     def _classes(self) -> dict[str, Any]:
         """Each ref's class tree in full, keyed by ``t:state`` and every provided ref."""
