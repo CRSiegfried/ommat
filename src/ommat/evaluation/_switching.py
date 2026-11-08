@@ -66,13 +66,17 @@ from fractions import Fraction
 from typing import Any, cast
 
 from ommat._axis import numeric_axis
-from ommat._canonical import decode, encode
+from ommat._canonical import decode, decode_written, encode, encode_checked
+from ommat._decide import _bound, _opening, run_settings
 from ommat._design import InvalidDesign, LoadedDesign
-from ommat._ledger import decision_bytes
+from ommat._fixture import Base, FixtureBinding, RecordedCalls
+from ommat._interpret import interpret
+from ommat._ledger import _ORDERED, _copy, _in_held_order, _with_held_order, decision_bytes
 from ommat._load import load
 from ommat._read_view import _ViewError, is_candidate_read, walk
 from ommat._refs import _RefError, code_point_sorted, parse_ref
-from ommat._replay import _replay_with
+from ommat._replay import _cut
+from ommat._typed import decoded, typed
 from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
 from ommat._values import MAX_INTEGER, type_name
 from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, outcome, own_functions
@@ -93,6 +97,8 @@ _Compared = dict[Fraction, set[str]]  # each compared value to the components co
 KIND = "switching-value"
 FORMAT = 2
 _NOT_DETERMINED = "not-determined"
+_STATE = "t:state"
+_DEFAULT = "default"
 
 
 async def switching_values(
@@ -421,11 +427,9 @@ class _Job:
             components = _components(self.document)
             self.late |= {n for f in design for n in f["names"] if n in components}
             return {"not-loading": design}, []
-        rerun, found, fixture = await _replay_with(
-            self.log, design, self.log, observer=None, findings=False
-        )
+        rerun, found, fixture = await _rerun(self.log, design, self.log)
         rerun_log = rerun.log
-        # The stale refs are the fixture's; a finding of one, given findings, says the same.
+        # The stale refs are the fixture's; a finding of one, were any given, says the same.
         outside = bool(fixture.stale) or any(f["kind"] in OUTSIDE for f in found)
         run = _Run(
             rerun_log, self.mine, self.carrying(rerun_log), decision_bytes(rerun_log), outside
@@ -454,6 +458,79 @@ class _Job:
                 if _contains(table["rows"][n - 1]["output"], {"param": self.path}):
                     out.add(ref)
         return out
+
+
+class _Light:
+    """The ledger surface interpret writes to for a probe's rerun, which no record holds: each
+    item kept as the record's log would read it, an ordered item through the ledger's held
+    order and canonical bytes, with none of the record's checks or hash."""
+
+    observer_error = None
+
+    def __init__(self) -> None:
+        self.log: _Log = []
+
+    def append(self, item: dict[str, Any]) -> int:
+        copy = cast("dict[str, Any]", _copy(item))
+        if copy.get("item") in _ORDERED:
+            copy = _in_held_order(decode_written(encode_checked(_with_held_order(copy))))
+        self.log.append(copy)
+        return len(self.log) - 1
+
+    def write_unhashed(self, member: str, value: object, index: int | None = None) -> None:
+        pass
+
+
+class _Rerun:
+    """A probe's rerun: its log alone."""
+
+    __slots__ = ("log",)
+
+    def __init__(self, log: _Log) -> None:
+        self.log = log
+
+
+async def _rerun(
+    log: _Log, loaded: LoadedDesign, answers: _Log
+) -> tuple[_Rerun, list[dict[str, Any]], FixtureBinding]:
+    """``log``'s turn rerun under ``loaded`` as replay reruns it, the fixture built from
+    ``answers``' calls and each source checked against them under ``loaded`` itself, writing
+    to no record: the rerun, no findings, and the fixture, whose ``stale`` names the stale
+    refs. The record checks found a value at the state entry, and the baseline replayed it."""
+    state = next(i for i in log if i["item"] == "entry" and i["ref"] == _STATE)
+    settings = cast("dict[str, Any]", log[1]["settings"])
+    run = run_settings(
+        settings["round_bound"],
+        settings["timeout"],
+        settings["budget"],
+        settings["deadline"],
+        settings["certificate_cap"],
+    )
+    base = Base(answers, loaded)
+    fixture = FixtureBinding(RecordedCalls(answers), loaded, base)
+    keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
+    bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))
+    kept = _Light()
+    for item in _opening(loaded, run.item()):
+        kept.append(item)
+    forms = typed(decoded(state["value"], loaded._types[_STATE]), loaded._types[_STATE])
+    if forms is None:  # pragma: no cover - the baseline replayed this state under these types
+        raise RuntimeError("the probe's state does not type under the value's design")
+    kept.append({"item": "entry", "ref": _STATE, "round": 0, "call": None, "value": forms[0]})
+    await interpret(
+        cast(Any, kept),
+        loaded,
+        forms[1],
+        bindings,
+        round_bound=run.round_bound,
+        timeout=run.timeout,
+        budget=run.budget,
+        deadline=None,
+        clock=None,
+        cut=_cut(log),
+        carried=frozenset(),
+    )
+    return _Rerun(kept.log), [], fixture
 
 
 def _result(run: _Run | _Result, ref: str, mine: Mapping[str, Any]) -> _Result:

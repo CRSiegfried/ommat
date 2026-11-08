@@ -218,7 +218,7 @@ def no_replay(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("replayed")
 
     monkeypatch.setattr(_diff, "_replay_with", replayed)
-    monkeypatch.setattr(_switching, "_replay_with", replayed)
+    monkeypatch.setattr(_switching, "_rerun", replayed)
 
 
 def refusal(*args: Any, **kwargs: Any) -> EvaluationRefusal:
@@ -627,7 +627,7 @@ def test_a_held_key_is_refused_before_any_replay(
         raise AssertionError("replayed")
 
     monkeypatch.setattr(_diff, "_replay_with", replayed)
-    monkeypatch.setattr(_switching, "_replay_with", replayed)
+    monkeypatch.setattr(_switching, "_rerun", replayed)
     exc = refusal(record, TABLES, "lim/k", tmp_path)
     assert exc.reason is R.held_key
     assert exc.key == [first["key"]]
@@ -723,13 +723,13 @@ def over(r: Any) -> bool:
 
 def counting_replays(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     seen = [0]
-    real = _switching._replay_with
+    real = _switching._rerun
 
     async def counted(*args: Any, **kwargs: Any) -> Any:
         seen[0] += 1
         return await real(*args, **kwargs)
 
-    monkeypatch.setattr(_switching, "_replay_with", counted)
+    monkeypatch.setattr(_switching, "_rerun", counted)
     return seen
 
 
@@ -1147,14 +1147,14 @@ def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
     )
     binding = Scripted({"a": returns({"t:a": "x"})})
     record = decide_sync(loaded, STATE, {"o": binding, "default": binding}).record
-    real = _switching._replay_with
+    real = _switching._rerun
     stale = {"kind": FindingKind.stale_question, "ref": "t:a", "source": "a", "clause": "needs"}
 
     async def staled(*args: Any, **kwargs: Any) -> Any:
         rerun, found, fixture = await real(*args, **kwargs)
         return rerun, [*found, stale], fixture
 
-    monkeypatch.setattr(_switching, "_replay_with", staled)
+    monkeypatch.setattr(_switching, "_rerun", staled)
     big = run(record, loaded, "lim/n", tmp_path)["value"]["entries"]["d:big"]
     # Its own value's result is the record's, not replayed; every other value's is undetermined.
     assert [value_of(c["result"]) for c in big["classes"]] == ["big", "not-determined"]
