@@ -40,7 +40,7 @@ from ommat import (
     read_record,
 )
 from ommat import types as t
-from ommat._canonical import decode
+from ommat._canonical import decode, encode
 from ommat._replay import FindingKind
 from ommat.evaluation import (
     EvaluationRefusal,
@@ -1416,3 +1416,88 @@ def test_an_aggregate_whose_one_row_is_param_is_not_unseen(hit: str, tmp_path: P
     value = run(record, loaded, "lim/n", tmp_path)["value"]
     assert value["entries"]["d:tab"] == "carries"
     assert value["unseen"] == ["act"]  # the policy reads d:tab, which holds the leaf
+
+
+# ---------------------------------------------------------------------------------------------
+# The batch form: many records and leaves on one loop, the single job's entries
+
+
+def test_the_batch_gives_the_single_jobs_entries_in_record_then_path_order(tmp_path: Path) -> None:
+    for record, ld, ps in (
+        (tables_record(), TABLES, ["lim/n", "lim/k"]),
+        (mood_record(), MOOD, ["mood/th"]),
+    ):
+        singles = [run(record, ld, p, tmp_path / "single" / p.replace("/", "_")) for p in ps]
+        batch = _switching.switching_values_batch_sync(
+            [record, record],
+            ld,
+            ps,
+            results=EvaluationStore(tmp_path / "batch" / ps[0].replace("/", "_")),
+        )
+        # The second record is the first again: its entries are held, and come back as held.
+        assert [encode(e) for e in batch] == [encode(s) for s in [*singles, *singles]]
+
+
+def test_the_batch_returns_a_held_entry_rather_than_refusing(tmp_path: Path) -> None:
+    record = tables_record()
+    store = EvaluationStore(tmp_path)
+    first = run(record, TABLES, "lim/n", tmp_path)
+    with pytest.raises(EvaluationRefusal) as raised:
+        run(record, TABLES, "lim/n", tmp_path)
+    assert raised.value.reason is R.held_key
+    [again] = _switching.switching_values_batch_sync([record], TABLES, ["lim/n"], results=store)
+    assert again == first
+
+
+def test_the_batch_checks_every_record_and_path_before_any_replay(
+    tmp_path: Path, no_replay: None
+) -> None:
+    store = EvaluationStore(tmp_path)
+    with pytest.raises(EvaluationRefusal) as raised:
+        _switching.switching_values_batch_sync(
+            [tables_record(), {"not": "a record"}], TABLES, ["lim/n"], results=store
+        )
+    assert raised.value.reason is R.invalid_record
+    with pytest.raises(EvaluationRefusal) as raised:
+        _switching.switching_values_batch_sync(
+            [tables_record()], TABLES, ["lim/n", "text"], results=store
+        )
+    assert raised.value.reason is R.unsupported_leaf
+    assert (
+        store.lookup(
+            KIND,
+            {
+                "record": tables_record().record_hash,
+                "design": TABLES.design_hash,
+                "parameter": "lim/n",
+            },
+        )
+        is None
+    )
+
+
+def test_the_batch_refuses_what_is_not_a_sequence(tmp_path: Path) -> None:
+    store = EvaluationStore(tmp_path)
+    with pytest.raises(TypeError, match="records are a"):
+        _switching.switching_values_batch_sync(
+            cast(Any, tables_record()), TABLES, ["lim/n"], results=store
+        )
+    with pytest.raises(TypeError, match="paths are a"):
+        _switching.switching_values_batch_sync(
+            [tables_record()], TABLES, cast(Any, "lim/n"), results=store
+        )
+
+
+def test_the_batch_is_exported_and_its_sync_twin_refuses_a_running_loop(tmp_path: Path) -> None:
+    from ommat.evaluation import switching_values_batch, switching_values_batch_sync
+
+    store = EvaluationStore(tmp_path)
+    record = tables_record()
+
+    async def inside() -> None:
+        with pytest.raises(RuntimeError, match="switching_values_batch_sync was called inside"):
+            switching_values_batch_sync([record], TABLES, ["lim/n"], results=store)
+        [entry] = await switching_values_batch([record], TABLES, ["lim/n"], results=store)
+        assert entry["key"]["parameter"] == "lim/n"
+
+    asyncio.run(inside())

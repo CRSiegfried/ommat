@@ -47,7 +47,12 @@ from ommat.evaluation._reach import question_reach, question_reach_sync
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._rescore import rescore, rescore_sync
 from ommat.evaluation._store import DesignStore, EvaluationStore
-from ommat.evaluation._switching import switching_values, switching_values_sync
+from ommat.evaluation._switching import (
+    switching_values,
+    switching_values_batch,
+    switching_values_batch_sync,
+    switching_values_sync,
+)
 
 __all__ = [
     "DesignStore",
@@ -68,6 +73,8 @@ __all__ = [
     "scenario",
     "scenario_sync",
     "switching_values",
+    "switching_values_batch",
+    "switching_values_batch_sync",
     "switching_values_sync",
     "use_answers",
     "use_answers_sync",

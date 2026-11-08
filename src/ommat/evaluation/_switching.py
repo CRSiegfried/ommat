@@ -61,7 +61,7 @@ written is returned, plain data reaching no ``Record``.
 
 import itertools
 import math
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from fractions import Fraction
 from typing import Any, cast
 
@@ -72,17 +72,10 @@ from ommat._ledger import decision_bytes
 from ommat._load import load
 from ommat._read_view import _ViewError, is_candidate_read, walk
 from ommat._refs import _RefError, code_point_sorted, parse_ref
-from ommat._replay import FindingKind, _replay_with
+from ommat._replay import _replay_with
 from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
-from ommat._values import MAX_INTEGER
-from ommat.evaluation._diff import (
-    OUTSIDE,
-    _run_sync,
-    baseline,
-    changed,
-    outcome,
-    own_functions,
-)
+from ommat._values import MAX_INTEGER, type_name
+from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, outcome, own_functions
 from ommat.evaluation._edit import _checked, _declared
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
@@ -90,7 +83,6 @@ from ommat.helpers._choice import _lead
 from ommat.helpers._numbers import exact
 
 _R = RefusalReason
-_K = FindingKind
 _Log = list[dict[str, Any]]
 _Doc = dict[str, Any]
 _Functions = Mapping[str, Callable[..., Any]] | None
@@ -117,23 +109,80 @@ async def switching_values(
     reads the held entry with ``results.lookup("switching-value", key)``, the key being the one
     the refusal carries."""
     read, log = _checked(record, loaded)
-    functions = own_functions(loaded, functions)
     t = _leaf_type(path, loaded)
-    try:
-        load(loaded.document, functions=functions)
-    except InvalidDesign as exc:
-        raise EvaluationRefusal(
-            f"the loaded design's document does not load with functions: {exc}",
-            reason=_R.invalid_design,
-            error=exc,
-        ) from exc
+    shared = _Shared(loaded, own_functions(loaded, functions))
     key = {"record": read.record_hash, "design": loaded.design_hash, "parameter": path}
     if results.lookup(KIND, key) is not None:
         raise EvaluationRefusal(
             f"the store holds a {KIND} entry under {key!r}", reason=_R.held_key, key=[key]
         )
     await baseline(log, loaded)
-    job = _Job(log, loaded, path, functions)
+    entry = await _entry(log, shared, path, t, key)
+    results.write(entry)
+    return entry
+
+
+async def switching_values_batch(
+    records: Sequence[object],
+    loaded: LoadedDesign,
+    paths: Sequence[str],
+    *,
+    functions: _Functions = None,
+    results: EvaluationStore,
+) -> list[dict[str, Any]]:
+    """``switching_values`` for each record and each path, on one loop, the design's
+    value-free work done once: the entries in record order, then path order. Each record is
+    read and checked, and each path's type, before any replay. An entry the store holds
+    already is returned as held, not refused: the job is deterministic for its key."""
+    if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(f"records are a {type_name(records)}, not a sequence of records")
+    if isinstance(paths, str | bytes) or not isinstance(paths, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(f"paths are a {type_name(paths)}, not a sequence of leaf paths")
+    checked = [_checked(record, loaded) for record in records]
+    types = [_leaf_type(path, loaded) for path in paths]
+    shared = _Shared(loaded, own_functions(loaded, functions))
+    out: list[dict[str, Any]] = []
+    for read, log in checked:
+        based = False
+        for path, t in zip(paths, types, strict=True):
+            key = {"record": read.record_hash, "design": loaded.design_hash, "parameter": path}
+            held = results.lookup(KIND, key)
+            if held is not None:
+                out.append(held)
+                continue
+            if not based:
+                await baseline(log, loaded)
+                based = True
+            entry = await _entry(log, shared, path, t, key)
+            results.write(entry)
+            out.append(entry)
+    return out
+
+
+def switching_values_batch_sync(
+    records: Sequence[object],
+    loaded: LoadedDesign,
+    paths: Sequence[str],
+    *,
+    functions: _Functions = None,
+    results: EvaluationStore,
+) -> list[dict[str, Any]]:
+    """``switching_values_batch`` run to completion; ``RuntimeError`` inside a running event
+    loop."""
+    return _run_sync(
+        "switching_values_batch",
+        lambda: switching_values_batch(
+            records, loaded, paths, functions=functions, results=results
+        ),
+    )
+
+
+async def _entry(
+    log: _Log, shared: "_Shared", path: str, t: Type, key: dict[str, str]
+) -> dict[str, Any]:
+    """The entry for one record and leaf, every replay done."""
+    job = _Job(log, shared, path)
+    loaded = shared.loaded
     value: dict[str, Any]
     if isinstance(t, MappingOf):
         held = cast("dict[str, Any]", loaded._leaf_value(path))
@@ -142,9 +191,7 @@ async def switching_values(
     else:
         summary = await job.summary(t, loaded._leaf_value(path), None)
         value = {"unseen": job.unseen(t), **summary}
-    entry = {"kind": KIND, "format": FORMAT, "key": key, "value": value}
-    results.write(entry)
-    return entry
+    return {"kind": KIND, "format": FORMAT, "key": key, "value": value}
 
 
 def switching_values_sync(
@@ -208,12 +255,14 @@ def _finite(t: Type) -> list[_Value] | None:
 
 
 class _Run:
-    """One run: each changed entry's item by ref, the decision's ``decision_bytes``, and
-    whether it asked a stale question, so that it determines nothing."""
+    """One run: the rerun's entry item by ref, ``None`` where the record holds one it does
+    not, each ref whose entry changed, the decision's ``decision_bytes``, and whether it asked
+    a stale question, so that it determines nothing."""
 
     def __init__(
         self,
-        found: list[dict[str, Any]],
+        rerun: _Log,
+        mine: Mapping[str, Any],
         carrying: set[str],
         decision: bytes | None,
         outside: bool = False,
@@ -221,8 +270,69 @@ class _Run:
         self.outside = outside
         self.decision = decision
         self.carrying = carrying  # each ref whose output passed the leaf
-        self.entries = {f["ref"]: f["replayed"] for f in found if f["kind"] is _K.entry}
-        self.changed = {f["ref"] for f in found if f["kind"] is _K.entry and changed(f)}
+        theirs = {i["ref"]: i for i in rerun if i["item"] == "entry"}
+        self.entries = {ref: theirs.get(ref) for ref in {*mine, *theirs}}
+        self.changed = {
+            ref for ref, entry in self.entries.items() if _changed(mine.get(ref), entry)
+        }
+
+
+def _changed(recorded: dict[str, Any] | None, replayed: dict[str, Any] | None) -> bool:
+    """Whether two entries differ in value, or in marker kind and code; a side with none
+    differs."""
+    return recorded is None or replayed is None or outcome(recorded) != outcome(replayed)
+
+
+class _Shared:
+    """What every job under one loaded design and ``functions`` shares: the design each
+    value's design is built from, loaded from the document with ``functions``; the decoded
+    document; each rule by the ref it provides; the hidden components per leaf; and the
+    designs built, by leaf and value."""
+
+    def __init__(self, loaded: LoadedDesign, functions: _Functions) -> None:
+        self.loaded = loaded
+        try:
+            self.base = load(loaded.document, functions=functions)
+        except InvalidDesign as exc:
+            raise EvaluationRefusal(
+                f"the loaded design's document does not load with functions: {exc}",
+                reason=_R.invalid_design,
+                error=exc,
+            ) from exc
+        self.document = cast("_Doc", decode(loaded.document))
+        self.rules: dict[str, dict[str, Any]] = {
+            r["provides"]: r for r in self.document["rules"].values()
+        }
+        self.hidden: dict[str, set[str]] = {}
+        self.designs: dict[tuple[str, bytes], LoadedDesign | list[dict[str, Any]]] = {}
+
+    def hidden_of(self, path: str) -> set[str]:
+        found = self.hidden.get(path)
+        if found is None:
+            found = self.hidden[path] = _hidden(self.document, self.loaded, path)
+        return found
+
+    def design(self, path: str, value: object) -> LoadedDesign | list[dict[str, Any]]:
+        """The design with the leaf at ``path`` holding ``value``, or its load failures as
+        plain data; built once per leaf and value."""
+        key = (path, encode(value))
+        found = self.designs.get(key)
+        if found is None:
+            if len(self.designs) >= _DESIGNS_KEPT:
+                self.designs.clear()
+            try:
+                found = self.base.with_parameters({path: value})
+            except InvalidDesign as exc:
+                found = [
+                    {"check": f.check, "names": list(f.names), "message": f.message}
+                    for f in exc.failures
+                ]
+            self.designs[key] = found
+        return found
+
+
+_DESIGNS_KEPT = 1024
+"""The most designs a batch keeps built before it starts over."""
 
 
 def _points(bounds: set[Fraction], t: Type, integer: bool) -> list[_Value]:
@@ -241,16 +351,17 @@ class _Job:
     """One record, design and leaf: ``summary`` replays and reports one varied value's
     results, ``unseen`` names what the probes could not see."""
 
-    def __init__(self, log: _Log, loaded: LoadedDesign, path: str, functions: _Functions) -> None:
-        self.log, self.loaded, self.path, self.functions = log, loaded, path, functions
-        self.document = cast("_Doc", decode(loaded.document))
+    def __init__(self, log: _Log, shared: _Shared, path: str) -> None:
+        self.log, self.shared, self.path = log, shared, path
+        self.loaded = shared.loaded
+        self.document = shared.document
         self.mine = {i["ref"]: i for i in log if i["item"] == "entry"}
         self.late: set[str] = set()  # components comparing values only round 1 found, or unread
 
     def unseen(self, t: Type) -> list[str]:
         if _finite(t) is not None:
             return []
-        return code_point_sorted(_hidden(self.document, self.loaded, self.path) | self.late)
+        return code_point_sorted(self.shared.hidden_of(self.path) | self.late)
 
     async def summary(self, t: Type, own: Any, key: str | None) -> dict[str, Any]:
         """``{"entries"}`` over the values tried for the leaf, or its key ``key``."""
@@ -260,7 +371,7 @@ class _Job:
         if numeric is not None and not integer:
             own = float(own)  # a number leaf's own value as its points are held
         tried: dict[_Value, _Run | _Result] = {
-            own: _Run([], self.carrying(self.log), decision_bytes(self.log))
+            own: _Run(self.log, self.mine, self.carrying(self.log), decision_bytes(self.log))
         }
         bounds: set[Fraction] = set()
         if values is not None:
@@ -303,23 +414,22 @@ class _Job:
 
     async def run(self, v: _Value, key: str | None) -> tuple[_Run | _Result, _Log]:
         """The run at ``v``, or its failure, and the replay's log, empty when none ran."""
-        document = cast("_Doc", decode(self.loaded.document))
-        leaf = document["parameters"][self.path]
-        leaf["value"] = v if key is None else {**leaf["value"], key: v}
-        try:
-            design = load(document, functions=self.functions)
-        except InvalidDesign as exc:
-            failures = [
-                {"check": f.check, "names": list(f.names), "message": f.message}
-                for f in exc.failures
-            ]
+        held = self.loaded._leaf_value(self.path)
+        value = v if key is None else {**cast("dict[str, Any]", held), key: v}
+        design = self.shared.design(self.path, value)
+        if isinstance(design, list):
             components = _components(self.document)
-            self.late |= {n for f in exc.failures for n in f.names if n in components}
-            return {"not-loading": failures}, []
-        rerun, found, _ = await _replay_with(self.log, design, self.log, observer=None)
+            self.late |= {n for f in design for n in f["names"] if n in components}
+            return {"not-loading": design}, []
+        rerun, found, fixture = await _replay_with(
+            self.log, design, self.log, observer=None, findings=False
+        )
         rerun_log = rerun.log
-        outside = any(f["kind"] in OUTSIDE for f in found)
-        run = _Run(found, self.carrying(rerun_log), decision_bytes(rerun_log), outside)
+        # The stale refs are the fixture's; a finding of one, given findings, says the same.
+        outside = bool(fixture.stale) or any(f["kind"] in OUTSIDE for f in found)
+        run = _Run(
+            rerun_log, self.mine, self.carrying(rerun_log), decision_bytes(rerun_log), outside
+        )
         return run, rerun_log
 
     def compared(self, log: _Log) -> _Compared:
@@ -334,9 +444,7 @@ class _Job:
         output, under ``F`` the first matched, outputs ``Param`` of the leaf. The rows are read
         from every run, whatever its value."""
         out: set[str] = set()
-        rules: dict[str, dict[str, Any]] = {
-            r["provides"]: r for r in self.document["rules"].values()
-        }
+        rules = self.shared.rules
         for item in log:
             if item["item"] != "entry" or not item.get("rows"):  # a function's has none
                 continue

@@ -222,6 +222,8 @@ EVALUATION = {
     "scenario",
     "scenario_sync",
     "switching_values",
+    "switching_values_batch",
+    "switching_values_batch_sync",
     "switching_values_sync",
     "use_answers",
     "use_answers_sync",
