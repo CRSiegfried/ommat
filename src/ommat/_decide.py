@@ -84,9 +84,23 @@ class DefectWarning(UserWarning):
         self.defects = list(defects)
 
 
+_DEFECT_NEEDLES = tuple(
+    f'"code":"{code}"'.encode() for code in ("invalid-return", "raised", "undeclared-read")
+)
+
+
+def _may_hold_defect(record: Record) -> bool:
+    """Whether some item's canonical bytes name a defect code, so the log is worth decoding; a
+    string value holding one is escaped, so it never matches."""
+    items = record._items  # pyright: ignore[reportPrivateUsage]
+    return any(needle in item for item in items for needle in _DEFECT_NEEDLES)
+
+
 def _warn_defects(record: Record, stacklevel: int) -> None:
     """One ``DefectWarning`` for a closed record holding a defect, naming each defect's ref,
     marker kind, cause and the exception text recorded at its index; nothing otherwise."""
+    if not _may_hold_defect(record):
+        return
     log = record.log
     if not log or log[0].get("format", 0) < POLICY_FORMAT:
         return

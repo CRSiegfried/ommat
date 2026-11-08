@@ -817,7 +817,7 @@ class _Turn:
         self.left_out: dict[str, Undetermined] = {}
         """Each candidate-valued question left out of its batch, with its own marker."""
         self.spent = Fraction(0)
-        self.document = cast("dict[str, Any]", decode(loaded.document))["sources"]
+        self.document = _sources(loaded)
 
     async def run(self) -> dict[str, object]:
         """Run the rounds and return the live board, which decide reads."""
@@ -1416,8 +1416,14 @@ class _Turn:
         return values
 
     def identity(self, ref: str) -> str:
-        """The question identity of ``ref`` under the turn's design (``question_identity``)."""
-        return question_identity(self.loaded, self.document, ref)
+        """The question identity of ``ref`` under the turn's design (``question_identity``),
+        computed once per design hash."""
+        key = (self.loaded.design_hash, ref)
+        found = _IDENTITIES.get(key)
+        if found is None:
+            found = question_identity(self.loaded, self.document, ref)
+            _remember(_IDENTITIES, key, found, _IDENTITIES_HELD)
+        return found
 
     def slot_key(self, origin: str, candidate: str | None) -> str:
         """A slot ref's needs key: a ref on a grounded declared ref, in a per-candidate
@@ -1589,6 +1595,31 @@ class _Turn:
         index = self.ledger.append(item)
         self.board[ref] = live
         return index
+
+
+# Per-design work a turn reads and never changes, kept by design hash, the hash of the design
+# document both are computed from. Each cache is bounded, the oldest entry dropped first.
+_SOURCES: dict[str, dict[str, Any]] = {}
+_SOURCES_HELD = 64
+_IDENTITIES: dict[tuple[str, str], str] = {}
+_IDENTITIES_HELD = 1 << 16
+
+
+def _remember(cache: dict[Any, Any], key: Any, value: Any, held: int) -> None:
+    """Keep ``value`` under ``key``, dropping the oldest entry past ``held``."""
+    if len(cache) >= held:
+        del cache[next(iter(cache))]
+    cache[key] = value
+
+
+def _sources(loaded: LoadedDesign) -> dict[str, Any]:
+    """The design document's ``sources`` object, decoded once per design hash; a turn only
+    reads it."""
+    found = _SOURCES.get(loaded.design_hash)
+    if found is None:
+        found = cast("dict[str, Any]", decode(loaded.document))["sources"]
+        _remember(_SOURCES, loaded.design_hash, found, _SOURCES_HELD)
+    return found
 
 
 def question_identity(loaded: LoadedDesign, sources: Mapping[str, Any], ref: str) -> str:
