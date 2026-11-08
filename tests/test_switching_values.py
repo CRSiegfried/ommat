@@ -16,7 +16,7 @@ import pytest
 
 import extraction as x
 import test_grounded_rules as grounded
-from designs import minimal, slot
+from designs import minimal, roles, slot
 from ledger_logs import rehashed
 from ommat import (
     CallResult,
@@ -52,6 +52,7 @@ from ommat.evaluation import (
     switching_values,
     switching_values_sync,
 )
+from ommat.helpers import pick_with_thresholds
 from scripted import Scripted, returns
 from test_decide import LOADED
 from test_use_answers import broken, format_7, unfinished
@@ -777,9 +778,128 @@ def test_a_function_computing_from_the_leaf_ends_and_is_unseen(tmp_path: Path) -
         )
     )
     value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/f", tmp_path)["value"]
-    # y has no boundaries; over reads d:y, which holds the leaf, as the policy reads d:over,
-    # whose function declares it.
-    assert value["unseen"] == ["act", "over", "y"]
+    # y has no boundaries, and over reads d:y, a number that holds the leaf. The policy reads
+    # d:over, a boolean, which sees the leaf only where d:over switches.
+    assert value["unseen"] == ["over", "y"]
+
+
+def mood_pick(r: Any) -> object:
+    return pick_with_thresholds(r, "q:mood", r.param("mood/th"), 0)
+
+
+def told_tool(r: Any) -> object:
+    return r.read("d:pick")
+
+
+def test_a_reader_of_a_label_a_named_bar_decides_is_not_unseen(tmp_path: Path) -> None:
+    # The turn route's shape: a label rule naming its thresholds in boundaries, and a rule
+    # declaring no parameter reading it.
+    loaded = load(
+        designed(
+            state=STATE_T,
+            sources={
+                "ask": Source(
+                    {"q:mood": Question("choice", Text("Mood?"), labels=("calm", "wild"))},
+                    needs=["t:state"],
+                )
+            },
+            rules={
+                "pick": Rule(
+                    "d:pick",
+                    t.label("calm", "wild"),
+                    mood_pick,
+                    version="1",
+                    reads=["q:mood"],
+                    params=["mood/th"],
+                    boundaries={"q:mood": roles(thresholds=["mood/th"])},
+                ),
+            },
+            parameters={
+                "mood/th": Parameter(t.mapping(t.number(0, 1)), {"calm": 0.6, "wild": 0.6}),
+            },
+            policy=policy_rule(told_tool, "d:pick", outputs=t.label("calm", "wild")),
+        )
+    )
+    value = run(mood_record(loaded), loaded, "mood/th", tmp_path)["value"]
+    assert value["unseen"] == []
+    calm = value["keys"]["calm"]["entries"]
+    assert calm["d:pick"]["switching"] == [0.7]
+    assert calm["d:act"]["switching"] == [0.7]  # the reader is still listed where it switches
+
+
+def bar_label(r: Any) -> str:
+    return "hi" if r.read("t:state.n") > r.param("lim/f") else "lo"
+
+
+def bar_maybe(r: Any) -> object:
+    return None if r.read("t:state.n") > r.param("lim/f") else "lo"
+
+
+def bar_pair(r: Any) -> dict[str, object]:
+    hot = r.read("t:state.n") > r.param("lim/f")
+    return {"band": "hi" if hot else "lo", "hot": hot}
+
+
+def bar_text(r: Any) -> str:
+    return str(r.param("lim/f"))
+
+
+def bar_flags(r: Any) -> list[bool]:
+    return [True] * int(r.param("lim/f"))
+
+
+def bar_figure(r: Any) -> dict[str, object]:
+    return {"band": "lo", "at": r.param("lim/f")}
+
+
+HI_LO = t.label("hi", "lo")
+
+
+@pytest.mark.parametrize(
+    ("function", "outputs", "unseen"),
+    [
+        (bar_label, HI_LO, []),
+        (bar_maybe, t.nullable(HI_LO), []),
+        (bar_pair, t.record(band=HI_LO, hot=t.boolean), []),
+        (bar_text, t.string, ["act"]),  # a string can spell the leaf
+        (bar_flags, t.list_(t.boolean), ["act"]),  # a list's length can count it
+        (bar_figure, t.record(band=HI_LO, at=t.number()), ["act"]),
+    ],
+)
+def test_a_reader_is_unseen_only_when_the_entry_can_hold_the_leaf(
+    tmp_path: Path, function: Any, outputs: Any, unseen: list[str]
+) -> None:
+    loaded = load(
+        designed(
+            state=STATE_T,
+            rules={
+                "p": Rule(
+                    "d:p",
+                    outputs,
+                    function,
+                    version="1",
+                    reads=["t:state.n"],
+                    params=["lim/f"],
+                    boundaries={"t:state.n": ["lim/f"]},
+                ),
+            },
+            parameters={"lim/f": PARAMETERS["lim/f"]},
+            policy=policy_rule(constant, "d:p"),
+        )
+    )
+    value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/f", tmp_path)["value"]
+    assert value["unseen"] == unseen
+
+
+def test_a_held_key_refusal_carries_the_key_the_store_looks_up(tmp_path: Path) -> None:
+    record = mood_record()
+    results = EvaluationStore(tmp_path)
+    first = switching_values_sync(record, MOOD, "mood/bar", results=results)
+    with pytest.raises(EvaluationRefusal) as caught:
+        switching_values_sync(record, MOOD, "mood/bar", results=results)
+    assert caught.value.reason is R.held_key
+    assert caught.value.key is not None
+    assert results.lookup(KIND, caught.value.key[0]) == first
 
 
 def three_way(own: float) -> LoadedDesign:

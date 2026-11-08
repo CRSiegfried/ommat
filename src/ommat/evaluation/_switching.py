@@ -49,10 +49,10 @@ probed value; it names, in code-point order, each component the leaf reaches oth
 function component declaring it whose ``boundaries`` field does not name it; a ``C+``, ``C<``
 or ``C>`` table with a ``Param`` row of it beside another row; each component reading an entry
 that holds the leaf, one a table's row outputs ``Param`` of or a function component declaring
-it provides, one level deep; each component of a value round 1 found; each table comparing a
-``candidate`` read against the leaf whose set holds no value; and each component a failure
-names when a value tried does not load. It is empty for a ``boolean`` or ``label`` leaf, every
-value of which was tried.
+it provides whose type holds other than booleans and labels, one level deep; each component
+of a value round 1 found; each table comparing a ``candidate`` read against the leaf whose set
+holds no value; and each component a failure names when a value tried does not load. It is
+empty for a ``boolean`` or ``label`` leaf, every value of which was tried.
 
 Refused as ``_diff._refuse_unfit`` orders the record checks, which ``_edit`` runs; the baseline
 replay and the change of an entry are ``_diff``'s, shared with the deciding inputs. The entry
@@ -73,7 +73,7 @@ from ommat._load import load
 from ommat._read_view import _ViewError, is_candidate_read, walk
 from ommat._refs import _RefError, code_point_sorted, parse_ref
 from ommat._replay import FindingKind, _replay_with
-from ommat._types import Label, MappingOf, Scalar, Type, _numeric, render
+from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
 from ommat._values import MAX_INTEGER
 from ommat.evaluation._diff import (
     OUTSIDE,
@@ -112,7 +112,10 @@ async def switching_values(
     results: EvaluationStore,
 ) -> dict[str, Any]:
     """The switching values of the leaf at ``path`` for ``record``, per entry, written to
-    ``results`` under the record hash, the design hash and ``path``; the entry written."""
+    ``results`` under the record hash, the design hash and ``path``; the entry written. A key
+    the store holds is refused ``held-key`` before any replay: a caller rerunning a record
+    reads the held entry with ``results.lookup("switching-value", key)``, the key being the one
+    the refusal carries."""
     read, log = _checked(record, loaded)
     functions = own_functions(loaded, functions)
     t = _leaf_type(path, loaded)
@@ -177,6 +180,21 @@ def _leaf_type(path: object, loaded: LoadedDesign) -> Type:
             path=path,
         )
     return t
+
+
+def _discrete(t: Type) -> bool:
+    """Whether every value of ``t`` is built from booleans and labels alone, so that an entry
+    of it cannot hold a numeric leaf's value: a ``boolean``, a ``label``, or a record or
+    nullable of those. A string, list or mapping can carry a number, so it is not."""
+    if isinstance(t, Label):
+        return True
+    if isinstance(t, Scalar):
+        return t.name == "boolean"
+    if isinstance(t, Nullable):
+        return _discrete(t.inner)
+    if isinstance(t, RecordOf):
+        return all(_discrete(f) for _, f in t.fields)
+    return False
 
 
 def _finite(t: Type) -> list[_Value] | None:
@@ -436,13 +454,17 @@ def _hidden(document: _Doc, loaded: LoadedDesign, path: str) -> set[str]:
     component declaring it whose ``boundaries`` field does not name it; a table aggregating
     it under ``C+``, ``C<`` or ``C>`` beside other values; and each component reading an entry
     that holds the leaf, one a table row outputs ``Param`` of, or a function component
-    declaring the leaf provides."""
+    declaring the leaf provides of a type that holds other than booleans and labels: a
+    reader of a boolean or label entry sees the leaf only where that entry switches, which
+    the declaring component's own probes find or its ``unseen`` names."""
     out: set[str] = set()
     valued: set[str] = set()
     for name, c in _components(document).items():
         if c["form"] == "function":
             if path in c["params"]:
-                valued.add(c.get("provides", ""))
+                provides = c.get("provides", "")
+                if not _discrete(loaded._types[provides]):
+                    valued.add(provides)
                 if not _contains(c["boundaries"], path):
                     out.add(name)
         elif any(_contains(row.get("output"), {"param": path}) for row in c["rows"]):
