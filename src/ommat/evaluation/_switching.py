@@ -465,7 +465,7 @@ class _Job:
     def compared(self, log: _Log, path: str) -> _Compared:
         """``_compared`` over ``log`` for the leaf, or one key's path, a table whose
         ``candidate`` read finds no set noted unseen."""
-        found, blind = _compared(self.document, path, log)
+        found, blind = _compared(self.document, path, _Entries(log))
         self.late |= blind
         return found
 
@@ -488,16 +488,22 @@ class _Job:
 
 class _Light:
     """The ledger surface interpret writes to for a probe's rerun, which no record holds: each
-    item kept as ``_ledger._logged`` gives it, with none of the record's checks or hash."""
+    item kept as ``_ledger._logged`` gives it, with none of the record's checks or hash; given
+    ``keep``, only the entries at refs it keeps, every item still counted in the indexes
+    ``append`` returns."""
 
     observer_error = None
 
-    def __init__(self) -> None:
+    def __init__(self, keep: Callable[[str], bool] | None = None) -> None:
         self.log: _Log = []
+        self.keep = keep
+        self.count = 0
 
     def append(self, item: dict[str, Any]) -> int:
-        self.log.append(_logged(item))
-        return len(self.log) - 1
+        if self.keep is None or (item.get("item") == "entry" and self.keep(item["ref"])):
+            self.log.append(_logged(item))
+        self.count += 1
+        return self.count - 1
 
     def write_unhashed(self, member: str, value: object, index: int | None = None) -> None:
         pass
@@ -519,13 +525,15 @@ async def _rerun(
     *,
     design: LoadedDesign | None = None,
     reuse: Reuse | None = None,
+    keep: Callable[[str], bool] | None = None,
 ) -> tuple[_Rerun, FixtureBinding]:
     """``log``'s turn rerun under ``loaded`` as replay reruns it, the fixture built from
     ``answers``' calls and each source checked against them under ``design``, the design the
     answers were decided under, ``loaded`` itself when ``None``, writing to no record: the
     rerun and the fixture, whose ``stale`` names the stale refs. The record checks found a
     value at the state entry, and the caller typed it under ``loaded``. ``reuse`` is the
-    record's reference run, which the job's first rerun of it keeps."""
+    record's reference run, which the job's first rerun of it keeps. Given ``keep``, the
+    rerun's log holds only the entries at the refs it keeps, the policy's among them."""
     state = next(i for i in log if i["item"] == "entry" and i["ref"] == _STATE)
     settings = cast("dict[str, Any]", log[1]["settings"])
     run = run_settings(
@@ -539,7 +547,7 @@ async def _rerun(
     fixture = FixtureBinding(RecordedCalls(answers), loaded, base)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
     bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))
-    kept = _Light()
+    kept = _Light(keep)
     for item in _opening(loaded, run.item()):
         kept.append(item)
     forms = typed(decoded(state["value"], loaded._types[_STATE]), loaded._types[_STATE])
@@ -725,7 +733,7 @@ def _components(document: _Doc) -> dict[str, dict[str, Any]]:
     return document["rules"]
 
 
-def _compared(document: _Doc, path: str, log: _Log) -> tuple[_Compared, set[str]]:
+def _compared(document: _Doc, path: str, log: "_Log | _Entries") -> tuple[_Compared, set[str]]:
     """The values ``log``'s turn compares the leaf at ``path`` against, exactly, each to the
     components comparing it; and each table comparing a ``candidate`` read whose set ``log``
     holds no value of."""
@@ -748,7 +756,9 @@ _SIDES: dict[str, str] = {">=": _LOW, "<": _LOW, ">": _HIGH, "<=": _HIGH}
 below it, ``input < leaf`` fails there as it does below, and the other two the reverse."""
 
 
-def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison], set[str]]:
+def _comparisons(
+    document: _Doc, path: str, log: "_Log | _Entries"
+) -> tuple[list[_Comparison], set[str]]:
     """Each comparison ``log``'s turn makes against the leaf at ``path``, or for a key path
     ``leaf.key`` against that key: one naming the key path or its whole leaf; and each table
     comparing a ``candidate`` read whose set ``log`` holds no value of. A table's pick helper
@@ -757,7 +767,7 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
     bound is the leaf ``low`` and whose high bound is ``high``. A function rule's ``boundaries``
     roles and its bare reads are compared in its own code, which the document does not hold, so
     they name no predicate: a role declared for a pick helper may be compared with ``>``."""
-    entries = [i for i in log if i["item"] == "entry"]
+    entries = _Entries.of(log)
     keyed = key_path(path)
     leaf = path if keyed is None else keyed[0]
     named = {path, leaf}
@@ -789,6 +799,8 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
                     add(name, side, (x for v in held for x in _input(document, i, v)))
         elif c["boundaries"] is not None:
             for read, entry in cast("dict[str, Any]", c["boundaries"]).items():
+                if not _names(entry, named):
+                    continue  # the leaf does not reach this read
                 values = _read_values(read, entries, None) or []
                 if isinstance(entry, list):
                     if named & set(cast("list[str]", entry)):
@@ -806,6 +818,20 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
                     elif named & set(cast("list[str]", members)):
                         add(name, None, (x for v in values for x in _measure(role, v, ())))
     return out, blind
+
+
+def _names(entry: object, named: set[str]) -> bool:
+    """Whether a ``boundaries`` entry, a list of paths or roles of them, names any of
+    ``named``."""
+    if isinstance(entry, list):
+        return bool(named & set(cast("list[str]", entry)))
+    for role, members in cast("dict[str, Any]", entry).items():
+        if role == "mass":
+            if any(named & set(m["bounds"]) for m in cast("list[dict[str, Any]]", members)):
+                return True
+        elif named & set(cast("list[str]", members)):
+            return True
+    return False
 
 
 def _cell_sides(cell: object, path: str) -> list[str | None]:
@@ -838,13 +864,52 @@ def _input(document: _Doc, i: dict[str, Any], v: object) -> list[object]:
     return []
 
 
-def _read_values(read: str, entries: _Log, grounded: str | None) -> list[object] | None:
+class _Entries:
+    """A log's entries as the compared values read them, indexed once: each entry by its ref,
+    the first of a ref, and the values of those holding one by declared ref, in log order."""
+
+    __slots__ = ("by_ref", "values")
+
+    def __init__(self, log: _Log) -> None:
+        self.by_ref: dict[str, dict[str, Any]] = {}
+        self.values: dict[str, list[object]] = {}
+        for e in log:
+            if e["item"] != "entry":
+                continue
+            self.by_ref.setdefault(e["ref"], e)
+            if "value" in e:
+                self.values.setdefault(_declared_ref(e["ref"]), []).append(e["value"])
+
+    @staticmethod
+    def of(log: "_Log | _Entries") -> "_Entries":
+        return log if isinstance(log, _Entries) else _Entries(log)
+
+
+_DECLARED: dict[str, str] = {}
+_DECLARED_KEPT = 65536
+"""The most refs ``_declared_ref`` keeps parsed before it starts over."""
+
+
+def _declared_ref(ref: str) -> str:
+    """``_edit._declared``, parsed once per ref."""
+    found = _DECLARED.get(ref)
+    if found is None:
+        if len(_DECLARED) >= _DECLARED_KEPT:
+            _DECLARED.clear()
+        found = _DECLARED[ref] = _declared(ref)
+    return found
+
+
+def _read_values(
+    read: str, entries: "_Log | _Entries", grounded: str | None
+) -> list[object] | None:
     """The values of the entries a read names, a grounded declared ref's each, through its
     field path, a marker and a path the entry does not hold giving none. A ``candidate`` read
     of a table grounded over ``grounded`` takes each member of that set's entry through its
     field path, the input as recorded; ``None`` when the entry holds no value."""
+    indexed = _Entries.of(entries)
     if is_candidate_read(read):
-        held = next((e for e in entries if e["ref"] == grounded), None)
+        held = indexed.by_ref.get(grounded) if grounded is not None else None
         if held is None or "value" not in held:
             return None
         members, fields = cast("list[object]", held["value"]), tuple(read.split(".")[1:])
@@ -853,8 +918,7 @@ def _read_values(read: str, entries: _Log, grounded: str | None) -> list[object]
             parsed = parse_ref(read)
         except _RefError:
             return []
-        declared = f"{parsed.level}:{parsed.name}"
-        members = [e["value"] for e in entries if "value" in e and _declared(e["ref"]) == declared]
+        members = indexed.values.get(f"{parsed.level}:{parsed.name}", [])
         fields = parsed.fields
     out: list[object] = []
     for m in members:

@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import extraction as x
+import test_grounded_rules as grounded
 import test_rescore as tr
 import test_switching_values as sv
 from designs import parts, roles, slot
@@ -1029,3 +1030,257 @@ def test_a_key_of_a_wording_slot_leaf_gives_each_value_its_own_run(
     rows = same(records, loaded, loaded, points)
     assert count[0] == 3  # one per distinct value, as for a whole leaf that fills a slot
     assert [row["stale"] for row in rows] == [["q:mood"], [], [], ["q:mood"]]
+
+
+# ---------------------------------------------------------------------------------------------
+# Each rerun's log kept lean, and a point no other uncovered point can join covering itself
+
+
+def unoptimised(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The grid logging every item of each rerun and searching every uncovered point for each
+    rerun's region."""
+    real_rerun = _grid._rerun  # pyright: ignore[reportPrivateUsage]
+
+    async def full(*args: Any, keep: Any = None, **kwargs: Any) -> Any:
+        return await real_rerun(*args, **kwargs)
+
+    monkeypatch.setattr(_grid, "_rerun", full)
+    real_init = _grid._Grid.__init__  # pyright: ignore[reportPrivateUsage]
+
+    def init(self: Any, *args: Any) -> None:
+        real_init(self, *args)
+        self.peers = [frozenset(range(len(self.designs)))] * len(self.designs)
+
+    monkeypatch.setattr(_grid._Grid, "__init__", init)  # pyright: ignore[reportPrivateUsage]
+
+
+def traced(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list[int]]:
+    """The design hash of each rerun, in order, and the count of regions searched."""
+    designs: list[str] = []
+    regions = [0]
+    real_rerun = _grid._rerun  # pyright: ignore[reportPrivateUsage]
+
+    async def rerun(log: Any, loaded: LoadedDesign, *args: Any, **kwargs: Any) -> Any:
+        designs.append(loaded.design_hash)
+        return await real_rerun(log, loaded, *args, **kwargs)
+
+    monkeypatch.setattr(_grid, "_rerun", rerun)
+    real_region = _grid._Grid.region  # pyright: ignore[reportPrivateUsage]
+
+    def region(self: Any, *args: Any) -> list[int]:
+        regions[0] += 1
+        return real_region(self, *args)
+
+    monkeypatch.setattr(_grid._Grid, "region", region)  # pyright: ignore[reportPrivateUsage]
+    return designs, regions
+
+
+Case = tuple[list[Record], LoadedDesign, LoadedDesign, list[Point]]
+
+
+def mixed(mode: str = "strict", on: bool = True) -> LoadedDesign:
+    """A number leaf compared by a table, beside a label and a boolean leaf the policy reads."""
+
+    def act(r: Any) -> str:
+        if not r.param("k/on"):
+            return "stop"
+        return "go" if r.param("k/mode") == "loose" or r.read("d:big") == "yes" else "wait"
+
+    return load(
+        Design(
+            name="mixed",
+            state=TIE_STATE,
+            sources={},
+            rules={
+                "big": Table(
+                    "d:big", YES_NO, "F", ["t:state.n"], [[">= k/bar", "yes"], ["-", "no"]]
+                ),
+                "act": Rule(
+                    "d:act",
+                    t.label("go", "wait", "stop"),
+                    act,
+                    version="1",
+                    reads=["d:big"],
+                    params=["k/on", "k/mode"],
+                ),
+            },
+            parameters={
+                "k/bar": Parameter(t.number(0, 1), 0.5),
+                "k/mode": Parameter(t.label("loose", "strict"), mode),
+                "k/on": Parameter(t.boolean, on),
+            },
+            policy="d:act",
+        )
+    )
+
+
+def candidates() -> LoadedDesign:
+    rules = dict(grounded.design().rules)
+    rules["level"] = Table(
+        grounded.LEVEL,
+        t.label("adult", "minor"),
+        "F",
+        ["candidate.age"],
+        [[">= lim/age", "adult"], ["-", "minor"]],
+        grounded=grounded.SET,
+    )
+    return load(grounded.design(rules=rules, parameters={"lim/age": Parameter(t.integer(), 18)}))
+
+
+def case(name: str) -> Case:
+    if name == "gated":
+        recorded = gated(0.6)
+        records = [tr.turn(recorded, *split) for split in tr.SPLITS]
+        points = [
+            {"g/bar": b, "g/margin": m, "g/stated": s}
+            for b in (*tr.BARS, 0.9)
+            for m in (0.0, 0.24)
+            for s in (0.2, 0.6)
+        ]
+        return records, recorded, gated(0.5, stated=0.7), points
+    if name == "switcher":
+        loaded = switcher()
+        record = answered(loaded, {"r1": 0.3, "r2": 0.8}, {"q:x": {"hi": 0.6, "lo": 0.4}})
+        return (
+            [record],
+            loaded,
+            loaded,
+            [{"a/bar": a, "b/bar": b} for a in (0.4, 0.6, 0.7) for b in (0.2, 0.3, 0.5, 0.8, 0.9)],
+        )
+    if name == "mood":
+        loaded = mood_without_thf()
+        return (
+            [sv.mood_record(loaded)],
+            loaded,
+            loaded,
+            [
+                {"mood/th": {"calm": c, "wild": w}, "mood/m": m}
+                for c in (0.3, 0.7, 0.8)
+                for w in (0.3, 0.5)
+                for m in (0.2, 0.4)
+            ],
+        )
+    if name == "key paths":
+        loaded = parts()
+        return (
+            part_records(loaded),
+            loaded,
+            loaded,
+            [{"part/at.email": e, "part/at.phone": p} for e in BARS for p in BARS],
+        )
+    if name == "whole mapping":
+        loaded = parts()
+        return (
+            part_records(loaded),
+            loaded,
+            loaded,
+            [{"part/at": {"email": e, "phone": p}} for e in BARS for p in BARS],
+        )
+    if name == "ties":
+        loaded = two_row_table("> k/bar", ">= k/bar")
+        records = [decide_sync(loaded, {"n": n}, {}).record for n in (0.4, 0.6)]
+        return records, loaded, loaded, [{"k/bar": v} for v in (0.3, 0.4, 0.5, 0.6, 0.7)]
+    if name == "extraction":
+        loaded = x.loaded()
+        record = answered(loaded, x.STATE, {"q:amount": x.AMOUNT, "q:dates": x.DATES})
+        return [record], loaded, loaded, [{"amount/null": v} for v in (0.05, 0.1, 0.3, 0.6)]
+    if name == "worded":
+        worded = sv.mood_design(Text("Mood over {th}?", [slot("th", param="mood/th")]))
+        document = json.loads(worded.document)
+        del document["rules"]["thf"]
+        loaded = load(document, functions=worded._callables)  # pyright: ignore[reportPrivateUsage]
+        return (
+            [sv.mood_record(loaded)],
+            loaded,
+            loaded,
+            [{"mood/th.calm": c, "mood/m": m} for c in (0.3, 0.6, 0.7) for m in (0.2, 0.4, 0.5)],
+        )
+    if name == "mixed":
+        loaded = mixed()
+        records = [decide_sync(loaded, {"n": n}, {}).record for n in (0.4, 0.6)]
+        return (
+            records,
+            loaded,
+            loaded,
+            [
+                {"k/mode": m, "k/on": o, "k/bar": b}
+                for m in ("loose", "strict")
+                for o in (False, True)
+                for b in (0.3, 0.5, 0.6, 0.8)
+            ],
+        )
+    assert name == "candidates"
+    loaded = candidates()
+    records = [
+        decide_sync(loaded, state, {"default": grounded.answer}).record
+        for state in (
+            {"people": [grounded.BO, grounded.ANA]},
+            {"people": [{"name": "raise", "age": 1}]},  # the set's rule raises: no set to read
+        )
+    ]
+    return records, loaded, loaded, [{"lim/age": a} for a in (10, 18, 31, 32, 42, 50)]
+
+
+CASES = (
+    "gated",
+    "switcher",
+    "mood",
+    "key paths",
+    "whole mapping",
+    "ties",
+    "extraction",
+    "worded",
+    "mixed",
+    "candidates",
+)
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_lean_reruns_and_lone_points_rerun_and_row_as_the_full_search_does(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    records, recorded, loaded, points = case(name)
+    with monkeypatch.context() as full:
+        unoptimised(full)
+        their_designs, _ = traced(full)
+        theirs = rescore_grid_sync(records, recorded, loaded, points)
+    mine_designs, _ = traced(monkeypatch)
+    rows = same(records, recorded, loaded, points)
+    assert [encode(row) for row in rows] == [encode(row) for row in theirs]
+    assert mine_designs == their_designs
+    assert len(their_designs) < len(points) * len(records)
+
+
+def test_a_lone_numeric_point_searches_no_region(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded = gated(0.6)
+    records = [tr.turn(recorded, *split) for split in tr.SPLITS]
+    designs, regions = traced(monkeypatch)
+    same(records, recorded, recorded, [{"g/bar": 0.5, "g/stated": 0.3}])
+    assert len(designs) == len({r.record_hash for r in records})
+    assert regions[0] == 0
+
+
+def test_a_point_no_other_shares_by_value_paths_with_covers_itself_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = mixed()
+    record = decide_sync(loaded, {"n": 0.6}, {}).record
+    designs, regions = traced(monkeypatch)
+    same([record], loaded, loaded, [{"k/mode": m, "k/bar": 0.3} for m in ("loose", "strict")])
+    assert (len(designs), regions[0]) == (2, 0)
+    # A second point of the same label value, in the same bucket, is searched for and joins.
+    points = [{"k/mode": m, "k/bar": b} for m in ("loose", "strict") for b in (0.3, 0.4)]
+    same([record], loaded, loaded, points)
+    assert (len(designs), regions[0]) == (4, 2)
+
+
+def test_a_region_is_searched_while_another_point_could_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = tie_table(">= k/bar")
+    record = decide_sync(loaded, {"n": 0.6}, {}).record
+    designs, regions = traced(monkeypatch)
+    rows = same([record], loaded, loaded, [{"k/bar": v} for v in (0.4, 0.8)])
+    # 0.8 could have joined 0.4's run, so its region is searched; 0.8 is then alone.
+    assert (len(designs), regions[0]) == (2, 1)
+    assert [row["decision"]["value"] for row in rows] == ["yes", "no"]

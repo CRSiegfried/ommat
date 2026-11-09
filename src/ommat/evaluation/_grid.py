@@ -9,9 +9,12 @@ leaf by its key path, ``leaf.key``, that key's value replacing the one ``loaded`
 A run reaches a numeric leaf only by comparing values the turn holds against it, so two points
 on the same side of every value a run compared give that run again: the same questions asked,
 the same values read and compared, the same decision. The job reruns one uncovered point with
-the switching job's light ledger, reads from its log each grid leaf's compared values and the
-side a leaf value equal to one joins, and gives that run's row to every uncovered point whose
-values fall in the same bucket on every grid leaf, until every point is covered. A key path, and
+the switching job's light ledger, keeping only the entries the job reads: the policy's, each
+table input's read and grounded set, and each function rule's ``boundaries`` reads. It reads
+from that log each grid leaf's compared values and the side a leaf value equal to one joins,
+and gives that run's row to every uncovered point whose values fall in the same bucket on every
+grid leaf, until every point is covered; a point no other uncovered point shares its value of
+every by-value leaf with covers itself, its log unread. A key path, and
 each key of a mapping leaf given whole, is bucketed on its own axis: the comparisons naming the
 leaf whole or that key's path. A tie joins the side the predicate puts it on where the document
 fixes the predicate, a table's pick helper and ``extract`` bindings and a table cell's own
@@ -56,7 +59,9 @@ from ommat.evaluation._switching import (
     _comparisons,
     _components,
     _contains,
+    _declared_ref,
     _discrete,
+    _Entries,
     _finite,
     _hidden,
     _leaf_type,
@@ -197,6 +202,19 @@ class _Grid:
             [_material(point[path], types[path], path in self.compared) for path in self.paths]
             for point in points
         ]
+        # The points sharing each one's values on every by-value path: only they can share a run.
+        by_value: dict[tuple[object, ...], set[int]] = {}
+        for i, material in enumerate(self.material):
+            held = tuple(
+                m for p, m in zip(self.paths, material, strict=True) if p not in self.compared
+            )
+            by_value.setdefault(held, set()).add(i)
+        self.peers: list[frozenset[int]] = [frozenset()] * len(points)
+        for group in by_value.values():
+            for i in group:
+                self.peers[i] = frozenset(group)
+        self.needed = _needed(self.document, self.policy)
+        self.kept: dict[str, bool] = {}
 
     async def results(self, log: _Log) -> list[_Result]:
         """One record's decision and stale refs per point."""
@@ -210,14 +228,23 @@ class _Grid:
         while uncovered:
             at = min(uncovered)
             rerun, fixture = await _rerun(
-                log, self.designs[at], log, design=self.recorded, reuse=reuse
+                log, self.designs[at], log, design=self.recorded, reuse=reuse, keep=self.keeps
             )
             stale = code_point_sorted(fixture.stale)
             result: _Result = (NOT_DETERMINED, stale) if stale else (self.decision(rerun.log), [])
-            for q in self.region(at, uncovered, rerun.log):
+            peers = uncovered & self.peers[at]
+            for q in [at] if len(peers) == 1 else self.region(at, peers, rerun.log):
                 out[q] = result
                 uncovered.discard(q)
         return cast("list[_Result]", out)
+
+    def keeps(self, ref: str) -> bool:
+        """Whether a rerun's log keeps the entry at ``ref``: one ``region`` or ``decision``
+        reads."""
+        found = self.kept.get(ref)
+        if found is None:
+            found = self.kept[ref] = _declared_ref(ref) in self.needed
+        return found
 
     def decision(self, log: _Log) -> dict[str, Any]:
         """The policy's entry as decide writes it, from the rerun's log."""
@@ -227,6 +254,7 @@ class _Grid:
     def region(self, at: int, uncovered: set[int], log: _Log) -> list[int]:
         """The uncovered points whose runs cannot differ from the run at ``at``, read from its
         log: ``at`` alone when some table's compared values could not be read."""
+        entries = _Entries(log)
         buckets: dict[str, Callable[[Fraction], int]] = {}
         for path in self.compared:
             # A mapping leaf's each key on its own axis: the comparisons naming the leaf whole
@@ -234,7 +262,7 @@ class _Grid:
             for at_path in (
                 [f"{path}.{k}" for k in self.keys[path]] if path in self.keys else [path]
             ):
-                found, blind = _comparisons(self.document, at_path, log)
+                found, blind = _comparisons(self.document, at_path, entries)
                 if blind:
                     return [at]
                 buckets[at_path] = _axis(found)
@@ -287,6 +315,21 @@ def _axis(found: list[tuple[str, str | None, Fraction]]) -> Callable[[Fraction],
         return 2 * i
 
     return bucket
+
+
+def _needed(document: _Doc, policy: str) -> frozenset[str]:
+    """The declared refs whose entries ``region`` and ``decision`` read from a rerun: the
+    policy's, each table input's read and grounded set, and each function rule's
+    ``boundaries`` reads."""
+    out = {policy}
+    for c in _components(document).values():
+        if c["form"] == "table":
+            out.update(_declared_ref(i["read"]) for i in cast("list[dict[str, Any]]", c["inputs"]))
+            if c.get("grounded") is not None:
+                out.add(_declared_ref(c["grounded"]))
+        elif c["boundaries"] is not None:
+            out.update(_declared_ref(read) for read in cast("dict[str, Any]", c["boundaries"]))
+    return frozenset(out)
 
 
 def _unseen(document: _Doc, loaded: LoadedDesign, path: str, points: Sequence[_Point]) -> list[str]:
