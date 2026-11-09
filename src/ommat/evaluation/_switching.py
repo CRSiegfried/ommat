@@ -66,12 +66,12 @@ from fractions import Fraction
 from typing import Any, cast
 
 from ommat._axis import numeric_axis
-from ommat._canonical import decode, decode_written, encode, encode_checked
+from ommat._canonical import decode, encode
 from ommat._decide import _bound, _opening, run_settings
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._fixture import Base, FixtureBinding, RecordedCalls
 from ommat._interpret import interpret
-from ommat._ledger import _ORDERED, _copy, _in_held_order, _with_held_order, decision_bytes
+from ommat._ledger import _ORDERED, _copy, _with_held_order, decision_bytes
 from ommat._load import load
 from ommat._read_view import _ViewError, is_candidate_read, walk
 from ommat._refs import _RefError, code_point_sorted, parse_ref
@@ -268,7 +268,7 @@ class _Run:
     def __init__(
         self,
         rerun: _Log,
-        mine: Mapping[str, Any],
+        mine: Mapping[str, bytes],
         carrying: set[str],
         decision: bytes | None,
         outside: bool = False,
@@ -278,15 +278,12 @@ class _Run:
         self.carrying = carrying  # each ref whose output passed the leaf
         theirs = {i["ref"]: i for i in rerun if i["item"] == "entry"}
         self.entries = {ref: theirs.get(ref) for ref in {*mine, *theirs}}
+        # Changed in value, or in marker kind and code (``outcome``); a side with none differs.
         self.changed = {
-            ref for ref, entry in self.entries.items() if _changed(mine.get(ref), entry)
+            ref
+            for ref, entry in self.entries.items()
+            if entry is None or ref not in mine or outcome(entry) != mine[ref]
         }
-
-
-def _changed(recorded: dict[str, Any] | None, replayed: dict[str, Any] | None) -> bool:
-    """Whether two entries differ in value, or in marker kind and code; a side with none
-    differs."""
-    return recorded is None or replayed is None or outcome(recorded) != outcome(replayed)
 
 
 class _Shared:
@@ -362,6 +359,7 @@ class _Job:
         self.loaded = shared.loaded
         self.document = shared.document
         self.mine = {i["ref"]: i for i in log if i["item"] == "entry"}
+        self.outcomes = {ref: outcome(e) for ref, e in self.mine.items()}  # compared each run
         self.late: set[str] = set()  # components comparing values only round 1 found, or unread
 
     def unseen(self, t: Type) -> list[str]:
@@ -377,7 +375,7 @@ class _Job:
         if numeric is not None and not integer:
             own = float(own)  # a number leaf's own value as its points are held
         tried: dict[_Value, _Run | _Result] = {
-            own: _Run(self.log, self.mine, self.carrying(self.log), decision_bytes(self.log))
+            own: _Run(self.log, self.outcomes, self.carrying(self.log), decision_bytes(self.log))
         }
         bounds: set[Fraction] = set()
         if values is not None:
@@ -432,7 +430,7 @@ class _Job:
         # The stale refs are the fixture's; a finding of one, were any given, says the same.
         outside = bool(fixture.stale) or any(f["kind"] in OUTSIDE for f in found)
         run = _Run(
-            rerun_log, self.mine, self.carrying(rerun_log), decision_bytes(rerun_log), outside
+            rerun_log, self.outcomes, self.carrying(rerun_log), decision_bytes(rerun_log), outside
         )
         return run, rerun_log
 
@@ -462,8 +460,11 @@ class _Job:
 
 class _Light:
     """The ledger surface interpret writes to for a probe's rerun, which no record holds: each
-    item kept as the record's log would read it, an ordered item through the ledger's held
-    order and canonical bytes, with none of the record's checks or hash."""
+    item kept as the record's log would read it, an ordered item with its members in canonical
+    order and its ``order``, its values' objects as held, with none of the record's checks or
+    hash. The record's bytes and their reading add nothing: a value interpret writes is in the
+    domain, so its canonical bytes read back as the value, and ``order`` puts its objects back
+    as held."""
 
     observer_error = None
 
@@ -473,7 +474,7 @@ class _Light:
     def append(self, item: dict[str, Any]) -> int:
         copy = cast("dict[str, Any]", _copy(item))
         if copy.get("item") in _ORDERED:
-            copy = _in_held_order(decode_written(encode_checked(_with_held_order(copy))))
+            copy = _with_held_order(copy)
         self.log.append(copy)
         return len(self.log) - 1
 

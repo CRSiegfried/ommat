@@ -605,8 +605,11 @@ class LoadedDesign:
     ``_requirement_bytes``, each source requirement's values as canonical bytes, by source id;
     ``_reads`` and ``_params``, each rule's declared reads and leaf paths, a table's from its
     inputs, cells and outputs; ``_table_bytes``, each table's document object by rule id, read
-    by ``_table``. The class trees, payloads and leaf values are decoded afresh at each read, so
-    nothing a caller changes after load reaches a turn.
+    by ``_table``; ``_read_leaves``, each leaf whose value a load check read beyond check 10's
+    domain and check 8's conformance clauses, and ``_keyed_leaves``, each whose keys alone a
+    check read, so a design changing one, or the other's keys, is loaded (``with_parameters``).
+    The class trees, payloads and leaf values are decoded afresh at each read, so nothing a
+    caller changes after load reaches a turn.
     """
 
     __slots__ = (
@@ -621,6 +624,7 @@ class LoadedDesign:
         "_group_reasons",
         "_groups",
         "_hash",
+        "_keyed_leaves",
         "_label_at",
         "_label_sets",
         "_labels",
@@ -630,6 +634,7 @@ class LoadedDesign:
         "_params",
         "_payload_bytes",
         "_providers",
+        "_read_leaves",
         "_reads",
         "_requirement_bytes",
         "_table_bytes",
@@ -660,6 +665,8 @@ class LoadedDesign:
     _reads: Mapping[str, tuple[str, ...]]
     _params: Mapping[str, tuple[str, ...]]
     _table_bytes: Mapping[str, bytes]
+    _read_leaves: frozenset[str]
+    _keyed_leaves: frozenset[str]
 
     def __init__(self, token: object, **parts: object) -> None:
         if token is not _BUILT_BY_LOAD:

@@ -26,6 +26,7 @@ from ommat import (
     Design,
     DesignFailure,
     Group,
+    Helper,
     InvalidDesign,
     LoadedDesign,
     Parameter,
@@ -41,6 +42,7 @@ from ommat import (
 from ommat import types as t
 from ommat._canonical import decode, encode, sha256_ref
 from ommat._design import _BUILT_BY_LOAD, _rebuild_invalid_design
+from ommat._load import _takes_a_load
 from ommat._types import Interval, Label, ListOf, MappingOf, Nullable, RecordOf, Scalar, parse_type
 from ommat._values import MAX_DEPTH
 
@@ -2399,6 +2401,15 @@ BOUNDED_VALUES: dict[str, Any] = {
 }
 
 
+def _as_loaded(fresh: LoadedDesign, like: LoadedDesign, values: Mapping[str, Any]) -> LoadedDesign:
+    """``fresh`` loaded the way ``with_parameters`` builds ``like`` with ``values``: a change
+    that reaches a check is loaded from the document, so its ``_design`` holds document values
+    and its ``_reads`` the document's order; any other is rebuilt from ``like`` as given."""
+    if _takes_a_load(like, values):
+        return load(fresh.document, functions=fresh._callables)
+    return fresh
+
+
 @pytest.mark.parametrize("path", sorted(BOUNDED_VALUES))
 def test_with_parameters_equals_a_fresh_load_slot_for_slot(path: str) -> None:
     design = designs.bounded()
@@ -2408,7 +2419,7 @@ def test_with_parameters_equals_a_fresh_load_slot_for_slot(path: str) -> None:
     fresh = load(_reparameterised(design, values))
     assert variant.document == fresh.document
     assert variant.design_hash == fresh.design_hash
-    assert _parts(variant) == _parts(fresh)
+    assert _parts(variant) == _parts(_as_loaded(fresh, loaded, values))
     assert variant._leaf_value(path) == BOUNDED_VALUES[path]
     assert loaded._leaf_value(path) != BOUNDED_VALUES[path]  # the given design is untouched
 
@@ -2418,12 +2429,174 @@ def test_with_parameters_sets_several_leaves_and_hops_from_a_variant() -> None:
     loaded = load(design)
     variant = loaded.with_parameters(BOUNDED_VALUES)
     fresh = load(_reparameterised(design, BOUNDED_VALUES))
-    assert _parts(variant) == _parts(fresh)
-    hop = variant.with_parameters({"score/cut": 0.9})
-    assert _parts(hop) == _parts(
-        load(_reparameterised(design, {**BOUNDED_VALUES, "score/cut": 0.9}))
-    )
+    assert _parts(variant) == _parts(_as_loaded(fresh, loaded, BOUNDED_VALUES))
+    hop = variant.with_parameters({"score/cut": 0.9})  # fast, from a document-loaded variant
+    fresh = load(_reparameterised(design, {**BOUNDED_VALUES, "score/cut": 0.9}))
+    assert _parts(hop) == _parts(load(fresh.document, functions=fresh._callables))
     assert hop.with_parameters({}).design_hash == hop.design_hash
+
+
+def test_load_records_each_leaf_a_check_reads_beyond_domain_and_conformance() -> None:
+    # bounded: check 9 reads a thresholds leaf's keys; a bar, margin or mass leaf is typed only.
+    loaded = load(designs.bounded())
+    assert loaded._read_leaves == frozenset()
+    assert loaded._keyed_leaves == frozenset({"tone/thresholds"})
+    assert load(designs.full())._read_leaves == load(designs.full())._keyed_leaves == frozenset()
+    # A table: check 9 reads the leaves its cells compare against and its mass helper's labels
+    # leaf, and its thresholds helper's keys; a pick helper's bar or margin binding is typed only.
+    loaded = load(_TABLED)
+    assert loaded._read_leaves == frozenset({"lo", "hi", "five", "labels", "bar"})
+    assert loaded._keyed_leaves == frozenset({"th"})
+    assert not _takes_a_load(loaded, {"th": {"hotel": 0.1}, "margin": 0.3, "free": 2.0})
+    assert _takes_a_load(loaded, {"th": {"hotel": 0.1, "car": 0.2}})
+    assert _takes_a_load(loaded, {"lo": 0.3})
+
+
+def test_a_check_reading_a_leaf_sends_with_parameters_to_load(monkeypatch: Any) -> None:
+    """The gate is the loader's own record: a check added anywhere that reads a leaf's value
+    makes with_parameters load a design changing that leaf, with no gate to update."""
+    from ommat import _load as module
+
+    check_5 = module._Loader.check_5
+
+    def reading_check_5(self: Any, graph: Any) -> None:
+        self.leaf_value("intent/bar")  # a cross-leaf rule would read it so
+        check_5(self, graph)
+
+    monkeypatch.setattr(module._Loader, "check_5", reading_check_5)
+    loaded = load(designs.bounded())
+    assert loaded._read_leaves == frozenset({"intent/bar"})
+    loads: list[object] = []
+    inner = module.load
+
+    def counted_load(*args: Any, **kwargs: Any) -> LoadedDesign:
+        loads.append(args[0])
+        return inner(*args, **kwargs)
+
+    monkeypatch.setattr(module, "load", counted_load)
+    loaded.with_parameters({"score/cut": 0.9})
+    loaded.with_parameters({"tone/thresholds": {"warm": 0.3}})  # the keys check 9 read stand
+    assert loads == []
+    loaded.with_parameters({"intent/bar": 0.9})
+    loaded.with_parameters({"tone/thresholds": {"warm": 0.3, "cold": 0.2}})
+    assert len(loads) == 2
+
+
+def test_with_parameters_refuses_a_value_by_the_two_leaf_clauses_before_any_load() -> None:
+    design = designs.bounded()
+    loaded = load(design)
+    for values in (
+        {"intent/bar": 1.5},
+        {"age/limit": float("nan")},
+        {"blob": ""},  # a base64url string is not bytes: refused, not read as the document form
+        {"blob": "AAEC"},
+        {"weights": {1: 0.5}},
+    ):
+        with pytest.raises(InvalidDesign) as mine:
+            loaded.with_parameters(values)
+        with pytest.raises(InvalidDesign) as fresh:
+            load(_reparameterised(design, values))
+        assert mine.value.failures == fresh.value.failures
+        assert {f.check for f in mine.value.failures} <= {8, 10}
+    # A value check 8 refuses on a leaf whose keys check 9 reads is refused by check 8 alone,
+    # where a load of the design also runs check 9 over it.
+    with pytest.raises(InvalidDesign) as mine:
+        loaded.with_parameters({"tone/thresholds": {"tepid": 1.5}})
+    assert [f.check for f in mine.value.failures] == [8]
+    assert {
+        f.check for f in refused(_reparameterised(design, {"tone/thresholds": {"tepid": 1.5}}))
+    } == {8, 9}
+
+
+_TABLED = Design(
+    state=t.record(n=t.integer(), x=t.number()),
+    policy="d:show",
+    sources={
+        "ask": Source(
+            {
+                "q:desk": Question("choice", Text("Which desk?"), labels=("hotel", "car")),
+                "q:urgent": Question("noul", Text("Urgent?")),
+            },
+            needs=["t:state"],
+        )
+    },
+    rules={
+        "tab": Table(
+            "d:tab",
+            "integer",
+            "F",
+            [
+                "t:state.n",
+                "t:state.x",
+                Helper("pick_with_thresholds", "q:desk", thresholds="th", margin="margin"),
+                Helper("mass", "q:urgent", labels="labels"),
+            ],
+            [
+                [">= five", "> lo", "-", "-", 1],
+                ["-", "[lo, hi]", "-", "> bar", 2],
+                ["-", "-", "-", "-", 0],
+            ],
+        ),
+        "show": Rule("d:show", t.string, lambda r: "done", version="1", reads=["d:tab"]),
+    },
+    parameters={
+        "lo": Parameter(t.number(), 0.25),
+        "hi": Parameter(t.number(), 0.75),
+        "bar": Parameter(t.number(0, 1), 0.6),
+        "margin": Parameter(t.number(0, 1), 0.2),
+        "five": Parameter(t.integer(), 5),
+        "th": Parameter(t.mapping(t.number(0, 1)), {"hotel": 0.5}),
+        "labels": Parameter(t.list_(t.string), ["yes"]),
+        "free": Parameter(t.number(), 0.1),
+    },
+)
+
+_SPREAD: list[Any] = [
+    0, 1, 0.5, -1, 1.5, 21, 5.0, -0.0, 2**53, 2**53 + 1, float("nan"), float("inf"), True, "x",
+    b"\x00", None, [], ["c"], ["c", "c"], [[1]], {}, {"warm": 0.5, "cold": 0.1}, {"tepid": 0.2},
+    {"hotel": 0.4}, {"warm": 1.5}, {1: 0.5}, set(),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "name", ["bounded", "gated", "tabled", "bounded-document", "tabled-document"]
+)
+def test_with_parameters_agrees_with_a_fresh_load_over_every_leaf_and_a_spread(name: str) -> None:
+    """The differential guard: for every leaf and a spread of values, with_parameters gives the
+    fresh load's slots, or refuses as it does, or by the two leaf clauses alone where the
+    fresh load also runs check 9 over a value they refuse."""
+    design = {"bounded": designs.bounded, "gated": designs.gated, "tabled": lambda: _TABLED}[
+        name.removesuffix("-document")
+    ]()
+    loaded = load(design)
+    if name.endswith("-document"):
+        loaded = load(loaded.document, functions=loaded._callables)
+    for path in sorted(loaded._leaf_types):
+        for v in _SPREAD:
+            values = {path: v}
+            fresh: LoadedDesign | None = None
+            refusal: list[DesignFailure] = []
+            try:
+                fresh = load(_reparameterised(design, values))
+            except InvalidDesign as exc:
+                refusal = list(exc.failures)
+            if fresh is None:
+                with pytest.raises(InvalidDesign) as mine:
+                    loaded.with_parameters(values)
+                local = [f for f in refusal if f.check in (8, 10)]
+                reaches = path in loaded._read_leaves or path in loaded._keyed_leaves
+                assert list(mine.value.failures) == (local if local and reaches else refusal), (
+                    path,
+                    v,
+                )
+                continue
+            variant = loaded.with_parameters(values)
+            assert variant.document == fresh.document, (path, v)
+            assert variant.design_hash == fresh.design_hash, (path, v)
+            expected = fresh
+            if name.endswith("-document") or _takes_a_load(loaded, values):
+                expected = load(fresh.document, functions=fresh._callables)
+            assert _parts(variant) == _parts(expected), (path, v)
 
 
 def test_with_parameters_on_a_table_named_leaf_takes_the_load_path_and_agrees() -> None:

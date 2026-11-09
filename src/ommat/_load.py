@@ -271,6 +271,13 @@ class _Loader:
         # Each leaf's value as Python holds it, bytes as ``bytes``; a document writes a bytes
         # value as base64url, read back here once its type passes check 10.
         self.live: dict[str, object] = {}
+        # Each leaf whose value a check read through ``leaf_value``: every clause but the two
+        # ``with_parameters`` runs itself, check 10's domain and check 8's conformance, which
+        # read ``held``. A change to one of these leaves takes a load (``with_parameters``);
+        # a change to one a check read the keys of alone, through ``leaf_keys``, takes one
+        # when it changes the keys.
+        self.read_leaves: set[str] = set()
+        self.keyed_leaves: set[str] = set()
 
     def fail(self, check: int, names: tuple[str, ...], message: str) -> None:
         self.failures.append(new_failure(check, code_point_sorted(names), message))
@@ -1213,7 +1220,7 @@ class _Loader:
                 leaf.value if self.parsed is not None else self.leaf_document_value(leaf.value, t)
             )
             if not in_domain(written):
-                self.fail(10, (path,), f"parameter {_q(path)}'s value is outside the value domain")
+                self.failures.append(_domain_failure(path))
             if t is None:
                 continue
             full = _resolved(t, self.defs)
@@ -1230,10 +1237,26 @@ class _Loader:
             if self.parsed is not None and value_conforms(leaf.value, full, {}, form="document"):
                 self.live[path] = live_value(leaf.value, full)
 
-    def leaf_value(self, path: str) -> object:
+    def held(self, path: str) -> object:
         """A leaf's value with ``bytes`` as Python ``bytes`` where its document form was read
-        back; otherwise as declared."""
+        back; otherwise as declared. Read by check 10's domain clause, check 8's conformance
+        clause and the document alone; a check reads ``leaf_value``."""
         return self.live.get(path, self.d.parameters[path].value)
+
+    def leaf_value(self, path: str) -> object:
+        """``held``, the leaf noted as one a check read, so that ``with_parameters`` loads a
+        design that changes it."""
+        self.read_leaves.add(path)
+        return self.held(path)
+
+    def leaf_keys(self, path: str) -> frozenset[str] | None:
+        """The keys of a mapping leaf's value, ``None`` for a value that is no mapping, the leaf
+        noted as one a check read the keys of alone, so that ``with_parameters`` loads a design
+        that changes them. A check whose clause depends on more than the key set reads
+        ``leaf_value``."""
+        self.keyed_leaves.add(path)
+        held = self.held(path)
+        return frozenset(cast("dict[str, object]", held)) if type(held) is dict else None
 
     def leaf_document_value(self, value: object, t: Type | None) -> object:
         """A leaf value in its document form, ``bytes`` as base64url, when its type passed
@@ -1280,8 +1303,8 @@ class _Loader:
                     self.refused_leaves.add(path)
                     self.fail(8, (owner, path), f"{where} names {_q(path)}, which is not a leaf")
         for path, t in self.leaf_types.items():
-            if not value_conforms(self.leaf_value(path), t, {}, form="live"):
-                self.fail(8, (path,), f"parameter {_q(path)}'s value does not conform to its type")
+            if not value_conforms(self.held(path), t, {}, form="live"):
+                self.failures.append(_conformance_failure(path))
 
     def table_params(self) -> list[tuple[str, str, str]]:
         """Each leaf path a table names: its helpers' bindings, its cells' operands and its
@@ -1591,10 +1614,17 @@ class _Loader:
         path = i["params"][arg]
         if path not in self.leaf_types or f"q:{parsed.name}" not in self.providers:
             return
-        held: object = self.leaf_value(path)
-        wanted_type: type = list if helper == "mass" else dict
-        if type(held) is not wanted_type:
-            return  # check 8's
+        members: Sequence[object]
+        if helper == "mass":
+            held: object = self.leaf_value(path)
+            if type(held) is not list:
+                return  # check 8's
+            members = cast("list[object]", held)
+        else:  # the thresholds' keys alone
+            keys = self.leaf_keys(path)
+            if keys is None:
+                return  # check 8's
+            members = code_point_sorted(keys)
         question = self.question(f"q:{parsed.name}")
         if question.kind is AnswerKind.extraction:
             return  # check 4's
@@ -1609,11 +1639,6 @@ class _Loader:
             _NOUL_LABELS
             if question.kind is AnswerKind.noul
             else label_parts(_fixed(question.labels))[0]
-        )
-        members: list[object] = (
-            list(cast("dict[str, object]", held))
-            if type(held) is dict
-            else cast("list[object]", held)
         )
         for label in members:
             if label not in labels:
@@ -1866,8 +1891,10 @@ class _Loader:
     ) -> None:
         reads = [cast(str, i["read"]) for i in table.inputs]
         axes = [self.axis(t) for t in types]
-        leaves = {p: self.leaf_value(p) for p in self.leaf_types}
         rows = list(table.rows)
+        # The leaves the rows compare against, which are what ``overlap`` reads.
+        compared = {p for row in rows for p in _cell_params(row["cells"])}
+        leaves = {p: self.leaf_value(p) for p in self.leaf_types if p in compared}
         for a in range(len(rows)):
             for b in range(a + 1, len(rows)):
                 if len(rows[a]["cells"]) != len(reads) or len(rows[b]["cells"]) != len(reads):
@@ -1994,10 +2021,9 @@ class _Loader:
             for path in self.typed(entry["thresholds"]):
                 t = self.leaf_types[path]
                 self.bound(owner, where, path, t, _UNITS, "mapping<string, number [0, 1]>")
-                value = self.leaf_value(path)
-                if type(value) is dict:
-                    keys = cast("dict[str, object]", value)
-                    for label in code_point_sorted(set(keys) - set(labels)):
+                keys = self.leaf_keys(path)
+                if keys is not None:
+                    for label in code_point_sorted(keys - set(labels)):
                         self.fail(
                             9,
                             (owner, key, path),
@@ -2164,7 +2190,7 @@ class _Loader:
         parameters: dict[str, Any] = {}
         for path, leaf in d.parameters.items():
             t = self.leaf_types.get(path)
-            value = self.leaf_value(path)
+            value = self.held(path)
             if t is not None and value_conforms(value, t, {}, form="live"):
                 value = document_value(value, t)
             else:
@@ -2375,6 +2401,8 @@ class _Loader:
             table_bytes=MappingProxyType(
                 {rid: encode(decoded["rules"][rid], MAX_DOCUMENT_DEPTH) for rid, _ in self.tables()}
             ),
+            read_leaves=frozenset(self.read_leaves),
+            keyed_leaves=frozenset(self.keyed_leaves),
         )
 
     def component_reads(self) -> dict[str, tuple[str, ...]]:
@@ -3679,15 +3707,16 @@ def _each(value: object, build: Callable[[Any], Any]) -> Any:
 
 
 def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> LoadedDesign:
-    """``loaded`` with each leaf in ``values`` holding the value given: the loaded design a
-    fresh ``load`` of the design with those leaf values gives, its document and design hash
-    that load's. A path naming no leaf of the design is refused ``ValueError``. The load
-    checks that read a leaf's value (check 8's conformance, check 10's domain, check 9's
-    clauses on a table naming the leaf and on a ``thresholds`` leaf's keys) are what a value
-    can fail: where none can, the loaded design is rebuilt from the one given, every
-    value-free part shared; elsewhere ``loaded``'s document with the leaves replaced is
-    loaded with its own callables, as the switching-value job loads a value's design, and
-    that load's ``InvalidDesign`` stands."""
+    """``loaded`` with each leaf in ``values`` holding the value given, in its live form: the
+    loaded design a fresh ``load`` of the design with those leaf values gives, its document and
+    design hash that load's. A path naming no leaf of the design is refused ``ValueError``.
+    Each value passes check 10's domain clause and check 8's conformance clause first, the two
+    a value is held to alone, and any failure is raised as ``InvalidDesign`` before a load. A
+    leaf no other check read when ``loaded`` was loaded cannot fail another, nor can one whose
+    keys alone a check read when the keys stand (``_takes_a_load``), so a change to such leaves
+    alone rebuilds the loaded design from the one given, every value-free part shared; any
+    other change loads ``loaded``'s document with the leaves replaced, with its own callables,
+    and that load's ``InvalidDesign`` stands."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type(loaded).__name__}, not a LoadedDesign")
     if not isinstance(values, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -3696,18 +3725,27 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
     for path in values:
         if type(path) is not str or path not in loaded._leaf_types:
             raise ValueError(f"{path!r} names no parameter leaf of the design")
-    fast = _values_pass(loaded, values)
-    doc = cast("dict[str, Any]", decode(loaded._document))
-    parameters = cast("dict[str, Any]", doc["parameters"])
+    written: dict[str, object] = {}
+    failures: list[DesignFailure] = []
     for path, value in values.items():
         t = loaded._leaf_types[path]
-        written = document_value(value, t) if value_conforms(value, t, {}, form="live") else value
-        try:
-            order = order_of(written)
-        except (TypeError, ValueError, RecursionError):  # a value no document holds
-            order = {}
-        parameters[path] = {"type": design.parameters[path].type, "value": written, "order": order}
-    if not fast:  # a failure, or a check only a load runs: that load's refusal stands
+        conforms = value_conforms(value, t, {}, form="live")
+        written[path] = document_value(value, t) if conforms else value
+        if not in_domain(written[path]):
+            failures.append(_domain_failure(path))
+        if not conforms:
+            failures.append(_conformance_failure(path))
+    if failures:
+        raise InvalidDesign(failures, _BUILT_BY_LOAD)
+    doc = cast("dict[str, Any]", decode(loaded._document))
+    parameters = cast("dict[str, Any]", doc["parameters"])
+    for path, value in written.items():
+        parameters[path] = {
+            "type": design.parameters[path].type,
+            "value": value,
+            "order": order_of(value),
+        }
+    if _takes_a_load(loaded, values):
         return load(doc, functions=loaded._callables)
     document = encode(doc, MAX_DOCUMENT_DEPTH)
     parts = {name[1:]: getattr(loaded, name) for name in LoadedDesign.__slots__}
@@ -3716,12 +3754,15 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
             design,
             parameters={
                 **design.parameters,
-                **{p: Parameter(design.parameters[p].type, v) for p, v in values.items()},
+                **{
+                    p: Parameter(design.parameters[p].type, _as_held(loaded, p, v, written[p]))
+                    for p, v in values.items()
+                },
             },
         ),
         document=document,
         hash=sha256_ref(document),
-        grid=_grid(doc),
+        grid=_grid(doc),  # reads a table's mass labels leaf, which check 9 reads: as given
         leaf_bytes=MappingProxyType(
             {p: _held_bytes(v["value"], v.get("order")) for p, v in parameters.items()}
         ),
@@ -3729,31 +3770,38 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
     return LoadedDesign(_BUILT_BY_LOAD, **parts)
 
 
-def _values_pass(loaded: LoadedDesign, values: Mapping[str, object]) -> bool:
-    """Whether every value in ``values`` passes each load check that reads a leaf's value, so
-    that the loaded design can be rebuilt without a load: in the domain and conforming to its
-    leaf's type; named by no table, whose check 9 clauses read the values it compares; and,
-    under a ``thresholds`` role, keyed by labels of the question alone."""
-    tables = set(loaded._table_bytes)
+def _takes_a_load(loaded: LoadedDesign, values: Mapping[str, object]) -> bool:
+    """Whether a change of ``loaded``'s leaves to ``values``, each conforming, reaches a check
+    beyond the two leaf clauses: a leaf a check read the value of (``_read_leaves``), or one a
+    check read the keys of (``_keyed_leaves``) given other keys."""
     for path, value in values.items():
-        t = loaded._leaf_types[path]
-        if not value_conforms(value, t, {}, form="live"):
-            return False
-        if domain_error(document_value(value, t)) is not None:  # as the document holds it
-            return False
-        if any(path in loaded._params.get(rid, ()) for rid in tables):
-            return False
-        if type(value) is not dict:
-            continue
-        keys = set(cast("dict[str, object]", value))
-        for key, entry in loaded._grid.items():
-            roles = cast("Mapping[str, Any]", entry)
-            if not key.startswith("q:") or "thresholds" not in roles:
-                continue
-            thresholds = cast("tuple[str, ...]", roles["thresholds"])
-            if path in thresholds and keys - set(loaded._labels.get(key, ((), ()))[0]):
-                return False  # a key that is no label of the question
-    return True
+        if path in loaded._read_leaves:
+            return True
+        if path in loaded._keyed_leaves:
+            held = cast("dict[str, object]", loaded._design.parameters[path].value)
+            if set(cast("dict[str, object]", value)) != set(held):
+                return True
+    return False
+
+
+def _as_held(loaded: LoadedDesign, path: str, live: object, written: object) -> object:
+    """A leaf's new value in the form ``loaded``'s Design holds the leaf: a design loaded from a
+    document holds document values, one loaded as a Design the live ones, which differ only
+    where the type holds ``bytes``."""
+    held = loaded._design.parameters[path].value
+    if value_conforms(held, loaded._leaf_types[path], {}, form="live"):
+        return live
+    return written
+
+
+def _domain_failure(path: str) -> DesignFailure:
+    """Check 10's clause on a leaf's value, run by load and by ``with_parameters``."""
+    return new_failure(10, (path,), f"parameter {_q(path)}'s value is outside the value domain")
+
+
+def _conformance_failure(path: str) -> DesignFailure:
+    """Check 8's clause on a leaf's value, run by load and by ``with_parameters``."""
+    return new_failure(8, (path,), f"parameter {_q(path)}'s value does not conform to its type")
 
 
 def _object(value: object) -> dict[str, Any] | None:
