@@ -1,7 +1,10 @@
 """The rescoring job: each recorded turn decided again under each of several designs, building
-no record. Every decision equals the policy's entry a full replay under that design writes; a
-design that asks a question the record does not answer is not-determined; records are checked
-as replay checks them, against the design they were decided under."""
+no record. Every decision equals the policy's entry a full replay under that design writes,
+except that each asked source is checked against the record under the recorded design, so a
+design changing a source's payload, oracle key or a provided t: type is not-determined where
+replay under it decides; a design that asks a question the record does not answer is
+not-determined; records are checked as replay checks them, against the design they were decided
+under."""
 
 from typing import Any
 
@@ -235,3 +238,187 @@ def test_a_rescored_decision_reads_as_the_record_does() -> None:
         {"value": entry["value"]}
     )  # the integral float as the int 1
     assert type(row["decision"]["value"]) is int
+
+
+# ---------------------------------------------------------------------------------------------
+# Where rescore and replay part: the source check runs under the recorded design
+
+
+def wording(bar: float, payload: Any = None, oracle: str | None = None) -> LoadedDesign:
+    """A design whose intent question's wording takes the bar, so a changed bar stales it; its
+    source's payload and oracle key as given."""
+
+    def intent(r: Any) -> object:
+        return pick_with_margin(r, "q:intent", 0.5, 0.0)
+
+    def act(r: Any) -> object:
+        return "a" if r.read("d:intent") == "refund" else "b"
+
+    extra: dict[str, Any] = {} if oracle is None else {"oracle": oracle}
+    return load(
+        Design(
+            name="worded",
+            state=STATE_T,
+            sources={
+                "ask": Source(
+                    {
+                        "q:intent": Question(
+                            "choice",
+                            Text(
+                                "Intent at {bar}?", [{"name": "bar", "origin": {"param": "w/bar"}}]
+                            ),
+                            labels=INTENTS,
+                        )
+                    },
+                    needs=["t:state"],
+                    payload=payload if payload is not None else {"m": 1},
+                    **extra,
+                )
+            },
+            rules={
+                "intent": Rule(
+                    "d:intent", t.label(*INTENTS), intent, version="1", reads=["q:intent"]
+                ),
+                "act": Rule("d:act", t.label("a", "b"), act, version="1", reads=["d:intent"]),
+            },
+            parameters={"w/bar": Parameter(t.number(0, 1), bar)},
+            policy="d:act",
+        )
+    )
+
+
+def worded_turn(loaded: LoadedDesign) -> Record:
+    async def answer(batch: Any, *, seconds: float) -> object:
+        return CallResult({"q:intent": {"refund": 0.8, "other": 0.2}})
+
+    return decide_sync(loaded, STATE, {"default": answer}).record
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [wording(0.3, payload={"m": 2}), wording(0.3, oracle="x")],
+    ids=["payload", "oracle"],
+)
+def test_a_changed_payload_or_oracle_is_not_determined_where_replay_decides(
+    changed: LoadedDesign,
+) -> None:
+    recorded = wording(0.3)
+    record = worded_turn(recorded)
+    (row,) = rescore_sync([record], recorded, [changed])
+    assert (row["decision"], row["stale"]) == ("not-determined", ["q:intent"])
+    assert replayed(record, changed) == ({"value": "a"}, [])  # replay checks under ``changed``
+    (same,) = rescore_sync([record], recorded, [recorded])
+    assert (same["decision"], same["stale"]) == ({"value": "a"}, [])
+
+
+def test_a_wording_slot_leaf_stales_the_question_as_replay_does() -> None:
+    recorded = wording(0.3)
+    record = worded_turn(recorded)
+    (row,) = rescore_sync([record], recorded, [wording(0.4)])
+    assert (row["decision"], row["stale"]) == ("not-determined", ["q:intent"])
+    assert replayed(record, wording(0.4)) == ("not-determined", ["q:intent"])
+
+
+def test_a_state_that_fails_the_designs_type_gives_the_broken_entry() -> None:
+    recorded = gated(0.5)
+    record = turn(recorded, 0.9, 0.9)
+    retyped = load(
+        Design(
+            name="gated",
+            state=t.record(text=t.number()),
+            sources={},
+            rules={"act": Rule("d:act", t.label("a"), whole_a, version="1")},
+            parameters={},
+            policy="d:act",
+        )
+    )
+    (row,) = rescore_sync([record], recorded, [retyped])
+    assert row["decision"] == {
+        "marker": {
+            "kind": "Unavailable",
+            "cause": {"code": "invalid-return", "refs": ["t:state"]},
+        }
+    }
+    assert row["stale"] == []
+    assert (row["decision"], row["stale"]) == replayed(record, retyped)
+
+
+def whole_a(r: Any) -> str:
+    return "a"
+
+
+def test_a_cut_record_rescores_as_it_replays() -> None:
+    from ommat import RunSettings
+
+    recorded = gated(0.5)
+    whole = turn(recorded, 0.9, 0.9)
+    assert decision_entry(whole.log) == whole.entries["d:act"]
+    assert whole.entries["d:act"]["value"] == "refund"
+
+    async def answer(batch: Any, *, seconds: float) -> object:
+        given = {
+            "q:intent": {"refund": 0.9, "other": 0.1},
+            "q:amount": {"yes": 0.9, "no": 0.1},
+        }
+        return CallResult({ref: given[ref] for call in batch for ref in call.questions})
+
+    # The amount question is asked in round 2, past the bound: the turn is cut after round 1.
+    cut = decide_sync(recorded, STATE, {"default": answer}, RunSettings(round_bound=1)).record
+    assert cut.entries["d:act"]["value"] == "ask"
+    assert "q:amount" not in cut.entries or "marker" in cut.entries["q:amount"]
+    designs = [recorded, gated(0.95), gated(0.5, stated=0.95)]
+    rows = rescore_sync([cut, whole], recorded, designs)
+    for row, (design, record) in zip(
+        rows, [(d, r) for d in designs for r in (cut, whole)], strict=True
+    ):
+        assert (row["decision"], row["stale"]) == replayed(record, design)
+    assert rows[0]["decision"] == {"value": "ask"}  # the cut holds under its own design
+    assert rows[1]["decision"] == {"value": "refund"}
+
+
+# ---------------------------------------------------------------------------------------------
+# The refusals, each check over every record before the next
+
+
+def test_the_records_are_refused_in_replays_order() -> None:
+    from test_decide import LOADED
+    from test_use_answers import broken, format_7, unfinished
+
+    def refusal(records: list[Any]) -> EvaluationRefusal:
+        with pytest.raises(EvaluationRefusal) as caught:
+            rescore_sync(records, LOADED, [LOADED])
+        return caught.value
+
+    exc = refusal([{"not": "a record"}])
+    assert exc.reason is RefusalReason.invalid_record
+    old, half, marker = format_7(), unfinished(), broken()
+    exc = refusal([half, old])  # the format check runs over every record first
+    assert exc.reason is RefusalReason.wrong_design
+    assert exc.turn == old.record_hash
+    assert "before format 8" in str(exc)
+    exc = refusal([marker, half])
+    assert exc.reason is RefusalReason.unfinished
+    assert exc.turn == half.record_hash
+    exc = refusal([marker])
+    assert exc.reason is RefusalReason.nothing_to_replay
+    assert exc.turn == marker.record_hash
+    other = turn(gated(0.5), 0.9, 0.9)
+    exc = refusal([other])
+    assert exc.reason is RefusalReason.wrong_design
+    assert exc.turn == other.record_hash
+    # Invalid records are refused as they are read, before the checks on the records read.
+    exc = refusal([old, {"not": "a record"}])
+    assert exc.reason is RefusalReason.invalid_record
+
+
+def test_records_must_be_a_sequence() -> None:
+    recorded = gated(0.5)
+    record = turn(recorded, 0.9, 0.9)
+    with pytest.raises(TypeError):
+        rescore_sync((r for r in [record]), recorded, [recorded])  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        rescore_sync("records", recorded, [recorded])  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        rescore_sync([record], recorded, (d for d in [recorded]))  # type: ignore[arg-type]
+    assert rescore_sync([], recorded, [recorded]) == []
+    assert rescore_sync([record], recorded, []) == []

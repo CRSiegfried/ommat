@@ -2,12 +2,15 @@
 """The rescoring job: each recorded turn decided again under each of several designs, from the
 record's answers alone, with no record built (§evaluation-jobs).
 
-Each rescore is replay's run, the fixture built from the record's calls and each asked source
-checked against the record under ``recorded``, the design it was decided under, but the turn
-writes to a ledger that checks, encodes and keeps nothing but the policy's entry. Its decision is
-therefore the one replay under that design writes, and no record of it exists. A run in which a
-source asks something the record does not answer, a stale question, is ``not-determined``, as in
-the switching-value job: its decision says nothing of the record.
+Each rescore is replay's run, the fixture built from the record's calls, but the turn writes to
+a ledger that checks, encodes and keeps nothing but the policy's entry, so no record of it
+exists. Each asked source is checked against the record under ``recorded``, the design the
+record was decided under, where ``replay(record, design)`` checks it under ``design`` itself: so
+a design whose source carries another payload or ``oracle`` key than ``recorded``'s, or another
+type for a ``t:`` ref it provides, gives ``not-determined`` for that source's refs where replay
+under it decides. Apart from that, the decision is the one replay under the design writes. A run
+in which a source asks something the record does not answer, a stale question, is
+``not-determined``, as in the switching-value job: its decision says nothing of the record.
 
 Every record is read and checked as replay checks it, against ``recorded``, before any run. The
 rows come back in design order, then record order, as plain data.
@@ -42,8 +45,10 @@ async def rescore(
     built: one row per design and record, in that order, ``{"design", "record", "decision",
     "stale"}``. ``decision`` is the policy's entry as decide writes it, ``{"value": v}`` or
     ``{"marker": {"kind", "cause"}}``, or ``"not-determined"`` when the run asked a question the
-    record does not answer; ``stale`` lists those refs in code-point order. Each record is
-    checked as replay checks it, against ``recorded``, its own design, before any run."""
+    record does not answer; ``stale`` lists those refs in code-point order. Each asked source
+    is checked against the record under ``recorded``, so a payload, ``oracle`` or ``t:`` type
+    the design changes stales it. Each record is checked as replay checks it, against
+    ``recorded``, its own design, before any run."""
     if type(recorded) is not LoadedDesign:
         raise EntryRefusal(f"recorded is a {type_name(recorded)}, not exactly a LoadedDesign")
     if isinstance(designs, str | bytes) or not isinstance(designs, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
