@@ -41,7 +41,6 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._canonical import decode, encode
-from ommat._replay import FindingKind
 from ommat.evaluation import (
     EvaluationRefusal,
     EvaluationStore,
@@ -1148,11 +1147,11 @@ def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
     binding = Scripted({"a": returns({"t:a": "x"})})
     record = decide_sync(loaded, STATE, {"o": binding, "default": binding}).record
     real = _switching._rerun
-    stale = {"kind": FindingKind.stale_question, "ref": "t:a", "source": "a", "clause": "needs"}
 
     async def staled(*args: Any, **kwargs: Any) -> Any:
-        rerun, found, fixture = await real(*args, **kwargs)
-        return rerun, [*found, stale], fixture
+        rerun, fixture = await real(*args, **kwargs)
+        fixture.stale["t:a"] = ("a", cast(Any, "needs"))
+        return rerun, fixture
 
     monkeypatch.setattr(_switching, "_rerun", staled)
     big = run(record, loaded, "lim/n", tmp_path)["value"]["entries"]["d:big"]
@@ -1429,24 +1428,33 @@ def test_the_batch_gives_the_single_jobs_entries_in_record_then_path_order(tmp_p
     ):
         singles = [run(record, ld, p, tmp_path / "single" / p.replace("/", "_")) for p in ps]
         batch = _switching.switching_values_batch_sync(
-            [record, record],
+            [record],
             ld,
             ps,
             results=EvaluationStore(tmp_path / "batch" / ps[0].replace("/", "_")),
         )
-        # The second record is the first again: its entries are held, and come back as held.
-        assert [encode(e) for e in batch] == [encode(s) for s in [*singles, *singles]]
+        assert [encode(e) for e in batch] == [encode(s) for s in singles]
 
 
-def test_the_batch_returns_a_held_entry_rather_than_refusing(tmp_path: Path) -> None:
+def test_the_batch_refuses_every_held_key_before_any_replay(tmp_path: Path) -> None:
     record = tables_record()
     store = EvaluationStore(tmp_path)
     first = run(record, TABLES, "lim/n", tmp_path)
     with pytest.raises(EvaluationRefusal) as raised:
-        run(record, TABLES, "lim/n", tmp_path)
+        _switching.switching_values_batch_sync([record], TABLES, ["lim/k", "lim/n"], results=store)
     assert raised.value.reason is R.held_key
-    [again] = _switching.switching_values_batch_sync([record], TABLES, ["lim/n"], results=store)
-    assert again == first
+    assert raised.value.key == [first["key"]]
+    assert store.lookup(_switching.KIND, {**first["key"], "parameter": "lim/k"}) is None
+    assert store.lookup(_switching.KIND, first["key"]) == first
+
+
+def test_the_batch_refuses_a_key_it_names_twice(tmp_path: Path) -> None:
+    record = tables_record()
+    store = EvaluationStore(tmp_path)
+    with pytest.raises(EvaluationRefusal) as raised:
+        _switching.switching_values_batch_sync([record, record], TABLES, ["lim/n"], results=store)
+    assert raised.value.reason is R.held_key
+    assert [k["parameter"] for k in raised.value.key or []] == ["lim/n"]
 
 
 def test_the_batch_checks_every_record_and_path_before_any_replay(
@@ -1501,3 +1509,55 @@ def test_the_batch_is_exported_and_its_sync_twin_refuses_a_running_loop(tmp_path
         assert entry["key"]["parameter"] == "lim/n"
 
     asyncio.run(inside())
+
+
+# ---------------------------------------------------------------------------------------------
+# A probe's rerun keeps each item as the record's log reads it
+
+
+NUMS_T = t.record(z=t.number(), a=t.number(), big=t.number(), tenth=t.number())
+
+
+def nums(r: Any) -> dict[str, float]:
+    return {"z": 1.0, "a": -0.0, "big": 2.0**60, "tenth": 0.1}  # not in canonical order
+
+
+def nums_policy(r: Any) -> str:
+    return "ok" if r.require("d:nums")["tenth"] > r.param("lim/n") else "no"
+
+
+def test_a_probe_rerun_logs_each_item_as_replay_does() -> None:
+    from ommat._replay import _replay_with
+
+    loaded = load(
+        designed(
+            state=STATE_T,
+            rules={"nums": Rule("d:nums", NUMS_T, nums, version="1", reads=["t:state.n"])},
+            parameters={"lim/n": PARAMETERS["lim/n"]},
+            policy=Rule(
+                "d:act",
+                t.label("ok", "no"),
+                nums_policy,
+                version="1",
+                reads=["d:nums"],
+                params=["lim/n"],
+            ),
+        )
+    )
+    log = decide_sync(loaded, STATE, {}).record.log
+
+    async def both() -> tuple[Any, Any]:
+        light, _ = await _switching._rerun(log, loaded, log)
+        full, _, _ = await _replay_with(log, loaded, log, observer=None)
+        return light.log, full.log
+
+    light, full = asyncio.run(both())
+    # repr, not ==: 1.0 == 1, -0.0 == 0 and dict equality ignores member order.
+    assert repr(light) == repr(full)
+    for record, other in ((tables_record(), TABLES), (mood_record(), MOOD)):
+        assert repr(asyncio.run(_switching._rerun(record.log, other, record.log))[0].log) == repr(
+            asyncio.run(_replay_with(record.log, other, record.log, observer=None))[0].log
+        )
+    [entry] = [i for i in light if i["item"] == "entry" and i["ref"] == "d:nums"]
+    assert entry["value"] == {"z": 1, "a": 0, "big": 2**60, "tenth": 0.1}
+    assert [type(entry["value"][k]) for k in ("z", "a")] == [int, int]

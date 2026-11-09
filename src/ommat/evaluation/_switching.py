@@ -71,15 +71,15 @@ from ommat._decide import _bound, _opening, run_settings
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._fixture import Base, FixtureBinding, RecordedCalls
 from ommat._interpret import interpret
-from ommat._ledger import _ORDERED, _copy, _with_held_order, decision_bytes
-from ommat._load import load
+from ommat._ledger import _logged, decision_bytes
+from ommat._load import load, with_parameters
 from ommat._read_view import _ViewError, is_candidate_read, walk
 from ommat._refs import _RefError, code_point_sorted, parse_ref
 from ommat._replay import _cut
 from ommat._typed import decoded, typed
 from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
 from ommat._values import MAX_INTEGER, type_name
-from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, outcome, own_functions
+from ommat.evaluation._diff import _run_sync, baseline, outcome, own_functions
 from ommat.evaluation._edit import _checked, _declared
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
@@ -138,27 +138,39 @@ async def switching_values_batch(
 ) -> list[dict[str, Any]]:
     """``switching_values`` for each record and each path, on one loop, the design's
     value-free work done once: the entries in record order, then path order. Each record is
-    read and checked, and each path's type, before any replay. An entry the store holds
-    already is returned as held, not refused: the job is deterministic for its key."""
+    read and checked, and each path's type, before any replay. Any key the store holds is
+    refused ``held-key`` before any replay, the refusal carrying every such key; a caller
+    rerunning a batch drops them or reads each with ``results.lookup``. A refusal later on
+    leaves the entries already written in the store."""
     if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"records are a {type_name(records)}, not a sequence of records")
     if isinstance(paths, str | bytes) or not isinstance(paths, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"paths are a {type_name(paths)}, not a sequence of leaf paths")
     checked = [_checked(record, loaded) for record in records]
     types = [_leaf_type(path, loaded) for path in paths]
+    keys = [
+        [{"record": read.record_hash, "design": loaded.design_hash, "parameter": p} for p in paths]
+        for read, _ in checked
+    ]
+    seen: set[bytes] = set()
+    twice = [k for row in keys for k in row if encode(k) in seen or seen.add(encode(k))]
+    if twice:
+        raise EvaluationRefusal(
+            f"the batch names {len(twice)} {KIND} keys more than once",
+            reason=_R.held_key,
+            key=twice,
+        )
+    held = [k for row in keys for k in row if results.lookup(KIND, k) is not None]
+    if held:
+        raise EvaluationRefusal(
+            f"the store holds {len(held)} of the {KIND} keys to write", reason=_R.held_key, key=held
+        )
     shared = _Shared(loaded, own_functions(loaded, functions))
     out: list[dict[str, Any]] = []
-    for read, log in checked:
-        based = False
-        for path, t in zip(paths, types, strict=True):
-            key = {"record": read.record_hash, "design": loaded.design_hash, "parameter": path}
-            held = results.lookup(KIND, key)
-            if held is not None:
-                out.append(held)
-                continue
-            if not based:
-                await baseline(log, loaded)
-                based = True
+    for (_, log), row in zip(checked, keys, strict=True):
+        if row:
+            await baseline(log, loaded)
+        for path, t, key in zip(paths, types, row, strict=True):
             entry = await _entry(log, shared, path, t, key)
             results.write(entry)
             out.append(entry)
@@ -324,7 +336,7 @@ class _Shared:
             if len(self.designs) >= _DESIGNS_KEPT:
                 self.designs.clear()
             try:
-                found = self.base.with_parameters({path: value})
+                found = with_parameters(self.base, {path: value})
             except InvalidDesign as exc:
                 found = [
                     {"check": f.check, "names": list(f.names), "message": f.message}
@@ -425,10 +437,9 @@ class _Job:
             components = _components(self.document)
             self.late |= {n for f in design for n in f["names"] if n in components}
             return {"not-loading": design}, []
-        rerun, found, fixture = await _rerun(self.log, design, self.log)
+        rerun, fixture = await _rerun(self.log, design, self.log)
         rerun_log = rerun.log
-        # The stale refs are the fixture's; a finding of one, were any given, says the same.
-        outside = bool(fixture.stale) or any(f["kind"] in OUTSIDE for f in found)
+        outside = bool(fixture.stale)  # a stale ref: the record cannot answer this run
         run = _Run(
             rerun_log, self.outcomes, self.carrying(rerun_log), decision_bytes(rerun_log), outside
         )
@@ -460,11 +471,7 @@ class _Job:
 
 class _Light:
     """The ledger surface interpret writes to for a probe's rerun, which no record holds: each
-    item kept as the record's log would read it, an ordered item with its members in canonical
-    order and its ``order``, its values' objects as held, with none of the record's checks or
-    hash. The record's bytes and their reading add nothing: a value interpret writes is in the
-    domain, so its canonical bytes read back as the value, and ``order`` puts its objects back
-    as held."""
+    item kept as ``_ledger._logged`` gives it, with none of the record's checks or hash."""
 
     observer_error = None
 
@@ -472,10 +479,7 @@ class _Light:
         self.log: _Log = []
 
     def append(self, item: dict[str, Any]) -> int:
-        copy = cast("dict[str, Any]", _copy(item))
-        if copy.get("item") in _ORDERED:
-            copy = _with_held_order(copy)
-        self.log.append(copy)
+        self.log.append(_logged(item))
         return len(self.log) - 1
 
     def write_unhashed(self, member: str, value: object, index: int | None = None) -> None:
@@ -491,13 +495,11 @@ class _Rerun:
         self.log = log
 
 
-async def _rerun(
-    log: _Log, loaded: LoadedDesign, answers: _Log
-) -> tuple[_Rerun, list[dict[str, Any]], FixtureBinding]:
+async def _rerun(log: _Log, loaded: LoadedDesign, answers: _Log) -> tuple[_Rerun, FixtureBinding]:
     """``log``'s turn rerun under ``loaded`` as replay reruns it, the fixture built from
     ``answers``' calls and each source checked against them under ``loaded`` itself, writing
-    to no record: the rerun, no findings, and the fixture, whose ``stale`` names the stale
-    refs. The record checks found a value at the state entry, and the baseline replayed it."""
+    to no record: the rerun and the fixture, whose ``stale`` names the stale refs. The record
+    checks found a value at the state entry, and the baseline replayed it."""
     state = next(i for i in log if i["item"] == "entry" and i["ref"] == _STATE)
     settings = cast("dict[str, Any]", log[1]["settings"])
     run = run_settings(
@@ -515,7 +517,9 @@ async def _rerun(
     for item in _opening(loaded, run.item()):
         kept.append(item)
     forms = typed(decoded(state["value"], loaded._types[_STATE]), loaded._types[_STATE])
-    if forms is None:  # pragma: no cover - the baseline replayed this state under these types
+    if (
+        forms is None
+    ):  # pragma: no cover - a leaf's value changes no type, and the baseline typed it
         raise RuntimeError("the probe's state does not type under the value's design")
     kept.append({"item": "entry", "ref": _STATE, "round": 0, "call": None, "value": forms[0]})
     await interpret(
@@ -531,7 +535,12 @@ async def _rerun(
         cut=_cut(log),
         carried=frozenset(),
     )
-    return _Rerun(kept.log), [], fixture
+    policy = loaded._design.policy
+    if not any(i["item"] == "entry" and i["ref"] == policy for i in kept.log):
+        raise RuntimeError(
+            "the probe's rerun wrote no entry at the policy's ref"
+        )  # pragma: no cover
+    return _Rerun(kept.log), fixture
 
 
 def _result(run: _Run | _Result, ref: str, mine: Mapping[str, Any]) -> _Result:

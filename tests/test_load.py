@@ -42,7 +42,7 @@ from ommat import (
 from ommat import types as t
 from ommat._canonical import decode, encode, sha256_ref
 from ommat._design import _BUILT_BY_LOAD, _rebuild_invalid_design
-from ommat._load import _takes_a_load
+from ommat._load import _takes_a_load, with_parameters
 from ommat._types import Interval, Label, ListOf, MappingOf, Nullable, RecordOf, Scalar, parse_type
 from ommat._values import MAX_DEPTH
 
@@ -2415,7 +2415,7 @@ def test_with_parameters_equals_a_fresh_load_slot_for_slot(path: str) -> None:
     design = designs.bounded()
     loaded = load(design)
     values = {path: BOUNDED_VALUES[path]}
-    variant = loaded.with_parameters(values)
+    variant = with_parameters(loaded, values)
     fresh = load(_reparameterised(design, values))
     assert variant.document == fresh.document
     assert variant.design_hash == fresh.design_hash
@@ -2427,13 +2427,13 @@ def test_with_parameters_equals_a_fresh_load_slot_for_slot(path: str) -> None:
 def test_with_parameters_sets_several_leaves_and_hops_from_a_variant() -> None:
     design = designs.bounded()
     loaded = load(design)
-    variant = loaded.with_parameters(BOUNDED_VALUES)
+    variant = with_parameters(loaded, BOUNDED_VALUES)
     fresh = load(_reparameterised(design, BOUNDED_VALUES))
     assert _parts(variant) == _parts(_as_loaded(fresh, loaded, BOUNDED_VALUES))
-    hop = variant.with_parameters({"score/cut": 0.9})  # fast, from a document-loaded variant
+    hop = with_parameters(variant, {"score/cut": 0.9})  # fast, from a document-loaded variant
     fresh = load(_reparameterised(design, {**BOUNDED_VALUES, "score/cut": 0.9}))
     assert _parts(hop) == _parts(load(fresh.document, functions=fresh._callables))
-    assert hop.with_parameters({}).design_hash == hop.design_hash
+    assert with_parameters(hop, {}).design_hash == hop.design_hash
 
 
 def test_load_records_each_leaf_a_check_reads_beyond_domain_and_conformance() -> None:
@@ -2474,11 +2474,11 @@ def test_a_check_reading_a_leaf_sends_with_parameters_to_load(monkeypatch: Any) 
         return inner(*args, **kwargs)
 
     monkeypatch.setattr(module, "load", counted_load)
-    loaded.with_parameters({"score/cut": 0.9})
-    loaded.with_parameters({"tone/thresholds": {"warm": 0.3}})  # the keys check 9 read stand
+    with_parameters(loaded, {"score/cut": 0.9})
+    with_parameters(loaded, {"tone/thresholds": {"warm": 0.3}})  # the keys check 9 read stand
     assert loads == []
-    loaded.with_parameters({"intent/bar": 0.9})
-    loaded.with_parameters({"tone/thresholds": {"warm": 0.3, "cold": 0.2}})
+    with_parameters(loaded, {"intent/bar": 0.9})
+    with_parameters(loaded, {"tone/thresholds": {"warm": 0.3, "cold": 0.2}})
     assert len(loads) == 2
 
 
@@ -2493,7 +2493,7 @@ def test_with_parameters_refuses_a_value_by_the_two_leaf_clauses_before_any_load
         {"weights": {1: 0.5}},
     ):
         with pytest.raises(InvalidDesign) as mine:
-            loaded.with_parameters(values)
+            with_parameters(loaded, values)
         with pytest.raises(InvalidDesign) as fresh:
             load(_reparameterised(design, values))
         assert mine.value.failures == fresh.value.failures
@@ -2501,7 +2501,7 @@ def test_with_parameters_refuses_a_value_by_the_two_leaf_clauses_before_any_load
     # A value check 8 refuses on a leaf whose keys check 9 reads is refused by check 8 alone,
     # where a load of the design also runs check 9 over it.
     with pytest.raises(InvalidDesign) as mine:
-        loaded.with_parameters({"tone/thresholds": {"tepid": 1.5}})
+        with_parameters(loaded, {"tone/thresholds": {"tepid": 1.5}})
     assert [f.check for f in mine.value.failures] == [8]
     assert {
         f.check for f in refused(_reparameterised(design, {"tone/thresholds": {"tepid": 1.5}}))
@@ -2582,7 +2582,7 @@ def test_with_parameters_agrees_with_a_fresh_load_over_every_leaf_and_a_spread(n
                 refusal = list(exc.failures)
             if fresh is None:
                 with pytest.raises(InvalidDesign) as mine:
-                    loaded.with_parameters(values)
+                    with_parameters(loaded, values)
                 local = [f for f in refusal if f.check in (8, 10)]
                 reaches = path in loaded._read_leaves or path in loaded._keyed_leaves
                 assert list(mine.value.failures) == (local if local and reaches else refusal), (
@@ -2590,7 +2590,7 @@ def test_with_parameters_agrees_with_a_fresh_load_over_every_leaf_and_a_spread(n
                     v,
                 )
                 continue
-            variant = loaded.with_parameters(values)
+            variant = with_parameters(loaded, values)
             assert variant.document == fresh.document, (path, v)
             assert variant.design_hash == fresh.design_hash, (path, v)
             expected = fresh
@@ -2614,7 +2614,7 @@ def test_with_parameters_on_a_table_named_leaf_takes_the_load_path_and_agrees() 
         parameters={"lim/n": Parameter(t.number(), 5.0)},
     )
     loaded = load(design)
-    variant = loaded.with_parameters({"lim/n": 6.0})
+    variant = with_parameters(loaded, {"lim/n": 6.0})
     fresh = load(_reparameterised(design, {"lim/n": 6.0}))
     assert variant.document == fresh.document
     assert variant.design_hash == fresh.design_hash
@@ -2626,14 +2626,14 @@ def test_with_parameters_refuses_as_load_refuses() -> None:
     loaded = load(design)
     for values in ({"intent/bar": 1.5}, {"tone/thresholds": {"warm": 0.5, "tepid": 0.2}}):
         with pytest.raises(InvalidDesign) as mine:
-            loaded.with_parameters(values)
+            with_parameters(loaded, values)
         with pytest.raises(InvalidDesign) as fresh:
             load(_reparameterised(design, values))
         assert mine.value.failures == fresh.value.failures
     with pytest.raises(ValueError, match="names no parameter leaf"):
-        loaded.with_parameters({"nope": 1})
+        with_parameters(loaded, {"nope": 1})
     with pytest.raises(TypeError):
-        loaded.with_parameters(cast(Any, [("intent/bar", 0.5)]))
+        with_parameters(loaded, cast(Any, [("intent/bar", 0.5)]))
 
 
 def test_a_record_decided_under_a_fresh_load_replays_cleanly_under_the_variant() -> None:
@@ -2653,7 +2653,7 @@ def test_a_record_decided_under_a_fresh_load_replays_cleanly_under_the_variant()
         parameters={"lim/n": Parameter(t.number(), 5.0)},
     )
     loaded = load(design)
-    variant = loaded.with_parameters({"lim/n": 6.5})
+    variant = with_parameters(loaded, {"lim/n": 6.5})
     fresh = load(_reparameterised(design, {"lim/n": 6.5}))
     record = decide_sync(fresh, {"n": 7.0}, {}).record
     assert record.design_hash == variant.design_hash
@@ -2663,7 +2663,7 @@ def test_a_record_decided_under_a_fresh_load_replays_cleanly_under_the_variant()
     assert rerun.record_hash == record.record_hash
     assert rerun.entries["d:tb"]["value"] == "big"
     assert (
-        decide_sync(loaded.with_parameters({"lim/n": 8.0}), {"n": 7.0}, {}).record.entries["d:tb"][
+        decide_sync(with_parameters(loaded, {"lim/n": 8.0}), {"n": 7.0}, {}).record.entries["d:tb"][
             "value"
         ]
         == "small"

@@ -98,7 +98,6 @@ async def _replay_with(
     live: Mapping[str, OracleBinding] | None = None,
     note: str = "",
     unpinned: frozenset[str] = frozenset(),
-    findings: bool = True,
 ) -> tuple[Record, list[Finding], FixtureBinding]:
     """Rerun the finished turn ``log`` holds, of format 8 or later with a value at its state
     entry, under ``loaded``, the fixture built from the call items and entries of ``answers``,
@@ -141,8 +140,6 @@ async def _replay_with(
         loaded, value, bindings, run, codec=None, clock=clock, cut=cut, observer=observer
     )
     rerun = decision.record
-    if not findings:  # a caller reading the rerun log itself, the stale refs from the fixture
-        return rerun, [], fixture
     return rerun, _findings(log, rerun.log, loaded, fixture), fixture
 
 

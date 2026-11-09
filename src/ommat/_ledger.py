@@ -130,6 +130,36 @@ def _with_held_order(item: dict[str, Any]) -> dict[str, Any]:
     return canonical
 
 
+def _logged(item: dict[str, Any]) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    """The item as ``Record.log`` reads it back after a format-6 append, without encoding: a
+    copy in exact types, each float its canonical bytes read as an integer (integral, at most
+    ``MAX_INTEGER`` in magnitude, ``-0.0`` included) as that ``int``; an entry, plan or verdict
+    item with its own members in canonical order and its ``order``, its values' objects as
+    held; any other item with every object in canonical order. No check: the item is in the
+    domain."""
+    if item.get("item") in _ORDERED:
+        return _with_held_order(cast("dict[str, Any]", _read_back(item, False)))
+    return cast("dict[str, Any]", _read_back(item, True))
+
+
+def _read_back(value: Any, canonical: bool) -> Any:
+    """``_copy``, with each float the canonical bytes read as an integer as that ``int``, and,
+    when ``canonical``, each object's members in canonical order."""
+    t = type(cast(object, value))
+    if t is dict:
+        held = cast("dict[str, Any]", value)
+        keys = sorted(held, key=_utf16_key) if canonical else held
+        return {string_data(k): _read_back(held[k], canonical) for k in keys}
+    if t is list or t is tuple:
+        return [_read_back(v, canonical) for v in cast("list[Any]", value)]
+    if t is float:
+        f = cast(float, value)
+        return int(f) if f.is_integer() and abs(f) <= MAX_INTEGER else f
+    if isinstance(value, str):
+        return string_data(value)
+    return value
+
+
 def _in_held_order(item: dict[str, Any]) -> dict[str, Any]:
     """A decoded item with each object its ``order`` names in that order; an item with none
     as it is."""

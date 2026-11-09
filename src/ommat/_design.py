@@ -607,9 +607,9 @@ class LoadedDesign:
     inputs, cells and outputs; ``_table_bytes``, each table's document object by rule id, read
     by ``_table``; ``_read_leaves``, each leaf whose value a load check read beyond check 10's
     domain and check 8's conformance clauses, and ``_keyed_leaves``, each whose keys alone a
-    check read, so a design changing one, or the other's keys, is loaded (``with_parameters``).
-    The class trees, payloads and leaf values are decoded afresh at each read, so nothing a
-    caller changes after load reaches a turn.
+    check read, so a design changing one, or the other's keys, is loaded
+    (``_load.with_parameters``). The class trees, payloads and leaf values are decoded afresh
+    at each read, so nothing a caller changes after load reaches a turn.
     """
 
     __slots__ = (
@@ -689,15 +689,6 @@ class LoadedDesign:
     def document(self) -> bytes:
         """The design's canonical bytes."""
         return self._document
-
-    def with_parameters(self, values: Mapping[str, object]) -> "LoadedDesign":
-        """This design with each leaf in ``values`` holding the value given: the loaded design
-        a fresh ``load`` of the design so changed gives, with the same document and design
-        hash; ``InvalidDesign`` as load raises it for a value load refuses, ``ValueError`` for
-        a path naming no leaf."""
-        from ommat._load import with_parameters  # load imports this module
-
-        return with_parameters(self, values)
 
     @property
     def _classes(self) -> dict[str, Any]:
