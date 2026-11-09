@@ -36,6 +36,7 @@ from typing import Any, cast
 from ommat._canonical import decode, encode
 from ommat._decide import EntryRefusal
 from ommat._design import InvalidDesign, LoadedDesign, Question
+from ommat._interpret import Reuse
 from ommat._ledger import _copy
 from ommat._load import with_parameters
 from ommat._refs import code_point_sorted
@@ -184,9 +185,12 @@ class _Grid:
             return [(_broken_state(), [])] * len(self.designs)
         out: list[_Result | None] = [None] * len(self.designs)
         uncovered = set(range(len(self.designs)))
+        reuse = Reuse()  # the first region's rerun, which each later one fires unchanged rules from
         while uncovered:
             at = min(uncovered)
-            rerun, fixture = await _rerun(log, self.designs[at], log, design=self.recorded)
+            rerun, fixture = await _rerun(
+                log, self.designs[at], log, design=self.recorded, reuse=reuse
+            )
             stale = code_point_sorted(fixture.stale)
             result: _Result = (NOT_DETERMINED, stale) if stale else (self.decision(rerun.log), [])
             for q in self.region(at, uncovered, rerun.log):
