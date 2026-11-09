@@ -25,7 +25,9 @@ from ommat.outline._common import (
     parsed,
 )
 from ommat.outline._design import params_of, providers_of, reads_of, wording_of
-from ommat.outline._path import lineage_of, nearest_bounds, summary_of, ties_of
+from ommat.outline._path import lineage_of, nearest_bounds, summary_nearest, summary_of, ties_of
+from ommat.outline._review import review_of
+from ommat.outline._text import why_of
 
 # --- bounds and distances -------------------------------------------------------------------
 
@@ -321,7 +323,8 @@ def turn_outline(record_document: object, design_document: object = None) -> dic
     escalation. With the design document it ran under, each entry gains its declared reads,
     inputs and leaves, each question its wording and targets, and each entry the bounds its
     design declares for it, with the distance to each; ``absent`` lists the refs the design
-    provides that no entry wrote, and ``nearest_bounds`` every bound nearest first. The
+    provides that no entry wrote, ``review`` sorts each source and table row by what the turn
+    did with it, and ``nearest_bounds`` lists every bound nearest first. The
     ``lineage`` from the decision back to what it rests on and the one-line ``summary`` are
     computed from the documents alone. A record ``read_record`` refuses is read raw."""
     doc, _, _ = parsed(record_document, "the record")
@@ -376,10 +379,13 @@ def turn_outline(record_document: object, design_document: object = None) -> dic
 
     legacy: list[dict[str, Any]] = []
     all_entries: list[dict[str, Any]] = []
+    all_calls: list[dict[str, Any]] = []
     for idx, item in enumerate(log):
         kind = item.get("item")
         if kind == "call":
-            col(item.get("round"))["calls"].append(_call(idx, item, unhashed))
+            c = _call(idx, item, unhashed)
+            col(item.get("round"))["calls"].append(c)
+            all_calls.append(c)
         elif kind == "entry":
             e = _entry(idx, item, policy)
             col(item.get("round"))["entries"].append(e)
@@ -451,9 +457,12 @@ def turn_outline(record_document: object, design_document: object = None) -> dic
         "escalation": esc,
         "defects": found_defects,
         "absent": absent,
+        "review": review_of(design, design_providers, all_entries, all_calls),
         "lineage": lineage,
         "nearest_bounds": None if design is None else nearest_bounds(all_entries, lineage),
     }
     outline["ties"] = ties_of(outline["nearest_bounds"])
     outline["summary"] = summary_of(outline)
+    outline["summary_nearest"] = summary_nearest(outline)
+    outline["why"] = why_of(outline)
     return outline

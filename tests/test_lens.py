@@ -777,7 +777,7 @@ def test_an_outline_of_another_version_is_counted_and_not_drawn(
 ) -> None:
     html = page({"decided.json": turns["decided.json"]}, [DESIGN.document])
     data = _data(html)
-    data["sets"][0]["docs"][1]["outline"]["outline_version"] = 2
+    data["sets"][0]["docs"][1]["outline"]["outline_version"] = 3
     shown = _run(
         _with_data(html, data),
         tmp_path,
@@ -801,7 +801,7 @@ def test_the_page_opens_outline_json_in_every_form_it_takes(
           const got = (xs) => xs.map((d) => [d.path, d.text === null, d.outline.kind]);
           const lines = parseOutlines(docs.map(line).join("\\n") + "\\n", "x.jsonl");
           const turn = docs.find((d) => d.outline.kind === "turn");
-          const other = Object.assign({}, turn.outline, {outline_version: 2});
+          const other = Object.assign({}, turn.outline, {outline_version: 3});
           return {
             lines: got(lines),
             paired: prepareSet({name: "dropped", docs: lines}).turns.filter((t) => t.design)
@@ -850,3 +850,191 @@ def test_no_view_draws_nan_or_undefined(tmp_path: Path, turns: dict[str, bytes])
           return n; })()""",
     )
     assert renders > 100
+
+
+# ---------- the design views ----------
+
+
+@needs_node
+def test_every_design_view_draws_without_nan_or_undefined(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    """Turn, Overview, Targets in both modes, Outcomes for every table, and Explore from every node
+    at every depth, in both directions with the details open, for each design alone and under
+    each turn; and a design with no policy node, targets, tables or requirements."""
+    html = page(turns, {**DESIGNS, "full.json": load(full()).document})
+    data = _data(html)
+    bare = json.loads(json.dumps(data["sets"][0]["docs"][0]["outline"]))
+    bare.update(policy_node=None, targets=[], requirements=[], path="bare")
+    for n in bare["nodes"]:
+        n.update(form="function" if n["kind"] == "rule" else n["form"], rows=None)
+        n["steps_to_policy"] = None
+    data["sets"][0]["docs"].append({"path": "bare.json", "outline": bare, "text": None})
+    renders = _run(
+        _with_data(html, data),
+        tmp_path,
+        """(() => {
+          let n = 0;
+          const all = () => {
+            for (const v of ["turn", "overview", "targets", "outcomes"]) {
+              S.view = v; drawView(); n++; }
+            S.tmode = "matrix"; S.view = "targets"; drawView(); S.tmode = null;
+            const X = ixOf(curDesign()); if (!X) return;
+            for (const t of X.tables) { S.table = t.id; S.view = "outcomes"; drawView(); n++; }
+            S.view = "explore";
+            for (const id of Object.keys(X.N)) { S.node = id;
+              for (const d of [0, 1, 99]) for (const dir of ["v", "h"]) {
+                Object.assign(EX, {up: d, down: d, dir, info: true}); drawView(); n++; } }
+            EX.info = false; EX.mini = false; drawView(); EX.mini = true; };
+          cur().designs.forEach((d, di) => { S.design = di; S.turn = null; S.node = null; all(); });
+          cur().turns.forEach((t, ti) => { S.turn = ti; S.node = null; all(); });
+          return {n, designs: cur().designs.map((d) => d.path)}; })()""",
+    )
+    assert "bare.json" in renders["designs"]
+    assert renders["n"] > 300
+
+
+@needs_node
+def test_explore_s_slice_keeps_the_layout_s_rows(tmp_path: Path) -> None:
+    outline = design_outline(DESIGN.document)
+    rows = {k: (v["col"], v["row"]) for k, v in outline["layout"]["nodes"].items()}
+    shown = _run(
+        page([], [DESIGN.document]),
+        tmp_path,
+        """(() => { S.view = "explore"; S.node = "rule:act"; Object.assign(EX, {up: 1, down: 0});
+          drawView(); return LAST_EX; })()""",
+    )
+    assert shown["focus"] == "rule:act"
+    preds = {e["from"] for e in outline["edges"] if e["dependency"] and e["to"] == "rule:act"}
+    assert set(shown["shown"]) == {"rule:act", *preds}
+    for rank in shown["ranks"]:
+        assert len({rows[i][0] for i in rank}) == 1
+        assert [rows[i][1] for i in rank] == sorted(rows[i][1] for i in rank)
+
+
+@needs_node
+def test_the_design_views_draw_the_outline_s_members(tmp_path: Path) -> None:
+    """Altered in the data, the steps to the policy, a requirement's lists, a target's links
+    and path and a row's tests are what the views draw: the page computes none of them."""
+    html = page([], [DESIGN.document])
+    data = _data(html)
+    o = data["sets"][0]["docs"][0]["outline"]
+    by_id = {n["id"]: n for n in o["nodes"]}
+    by_id["source:ask"]["steps_to_policy"] = 7
+    o["requirements"][0]["behind"] = ["rule:urgency", "source:ask"]
+    o["targets"][0].update(
+        questions=[{"ref": "q:planted", "node": "source:ask", "role": "formative"}],
+        estimated_by=[],
+        readers=["rule:act"],
+        path=["source:ask", "rule:urgency", "rule:act"],
+    )
+    table = next(n for n in o["nodes"] if n["form"] == "table")
+    table["rows"][0]["tests"] = [
+        {"input": 0, "read": "d:planted", "node": "rule:urgency", "cell": "seven"}
+    ]
+    shown = _run(
+        _with_data(html, data),
+        tmp_path,
+        f"""(() => {{
+          const html = (v, f) => {{ S.view = v; if (f) f(); drawView();
+            const box = {{overview: "vOverview", targets: "vTargets", outcomes: "vOutcomes"}}[v];
+            const el = (id) => document.getElementById(id).innerHTML;
+            return strip(el(box || "vExplore")
+              + (v === "explore" ? el("vcanvas") + el("sb") : "")); }};
+          return {{
+            card: html("explore", () => {{ S.node = "source:ask"; }}),
+            sb: (S.node = "{o["requirements"][0]["source"]}", html("explore")),
+            targets: html("targets"),
+            outcomes: html("outcomes", () => {{ S.table = "{table["id"]}"; }}) }}; }})()""",
+    )
+    assert "7 steps to the policy" in shown["card"]
+    assert "2 behind" in shown["sb"]
+    assert "formative 1" in shown["targets"]
+    assert "2 steps to the policy" in shown["targets"]
+    assert "ask→urgency→act" in shown["targets"]
+    assert "d:planted is seven" in shown["outcomes"]
+
+
+@needs_node
+def test_a_view_s_hash_opens_it_again(tmp_path: Path, turns: dict[str, bytes]) -> None:
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          const pushed = [];
+          globalThis.location = {hash: ""};
+          globalThis.history = {replaceState: (a, b, h) => { location.hash = h; },
+            pushState: (a, b, h) => { pushed.push(h); location.hash = h; }};
+          S.turn = 0; S.view = "explore"; Object.assign(EX, {up: 3, down: 0, dir: "h", info: true});
+          S.table = "rule:act"; S.tmode = "matrix"; go("source:desk");
+          const hash = location.hash, want = {view: S.view, node: S.node, turn: S.turn,
+            up: EX.up, down: EX.down, dir: EX.dir, info: EX.info, table: S.table, tmode: S.tmode};
+          Object.assign(EX, {up: 1, down: 1, dir: "v", info: false});
+          S.view = null; S.node = null; S.table = null; S.tmode = null; S.turn = null;
+          readHash();
+          return {hash, pushed: pushed.length, want, got: {view: S.view, node: S.node,
+            turn: S.turn, up: EX.up, down: EX.down, dir: EX.dir, info: EX.info,
+            table: S.table, tmode: S.tmode}, plain: (location.hash = "", readHash(), S.view) };
+        })()""",
+    )
+    assert shown["got"] == shown["want"]
+    assert shown["pushed"] == 1
+    assert "view=explore" in shown["hash"]
+    assert shown["plain"] == "turn"  # a set with records opens on the Turn tab
+
+
+@needs_node
+def test_the_turn_view_says_what_took_place(tmp_path: Path, turns: dict[str, bytes]) -> None:
+    """A page given records opens on the Turn tab at its first turn; the tab names the
+    decision, the row that gave it with this turn's values, what was asked and what was not and
+    why; Outcomes marks the row that gave the value."""
+    shown = _run(
+        page(
+            {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
+            [DESIGN.document],
+        ),
+        tmp_path,
+        """(() => {
+          const view = S.view, first = S.turn, out = {view, first};
+          const at = (name) => cur().turns.findIndex((t) => t.path.endsWith(name));
+          for (const name of ["decided.json", "undecided.json"]) {
+            S.turn = at(name); S.view = "turn"; drawView();
+            out[name] = document.getElementById("vTurn").innerHTML;
+            S.view = "outcomes"; S.table = "rule:act"; drawView();
+            out[name + " outcomes"] = document.getElementById("vOutcomes").innerHTML;
+          }
+          return out; })()""",
+    )
+    assert shown["view"] == "turn"
+    assert shown["first"] is not None
+    decided, undecided = shown["decided.json"], shown["undecided.json"]
+    assert "Decided" in decided
+    assert 'The turn was given <span class="mono empty">t:state</span>' in decided
+    assert '<span class="kk">subject</span><blockquote class="said">' in decided
+    assert "Row 1 gave the value." in decided
+    assert '<span class="mono">tg:urgent</span>' not in decided  # act estimates no target
+    assert "no target declared" in decided
+    assert "matched: its output is the value" in decided
+    assert "Round by round" in decided
+    assert '<span class="verb">asked</span>' in decided
+    assert '<span class="verb">called</span>' in decided  # desk is a tool
+    assert "ran because" in decided
+    assert "(it runs when it is yes)" in decided
+    assert "decides whether" in decided  # d:urgency lets desk run
+    assert "Undecided" in undecided
+    assert "unsure: no clear answer (it abstained)" in undecided
+    assert "falls short of the bar" in undecided
+    assert "Its source requirement did not hold" in undecided
+    assert "Row 4 gave the value." in undecided
+    assert 'class="ocard chosen"' in shown["decided.json outcomes"]
+    assert "took row 1's output" in shown["decided.json outcomes"]
+
+
+def test_the_page_is_the_same_bytes_for_the_same_documents(turns: dict[str, bytes]) -> None:
+    """The page is a function of the documents: built twice it is the same bytes, and its
+    script reads no clock and draws no random number."""
+    first = page(turns, DESIGNS)
+    assert page(turns, DESIGNS) == first
+    script = first.split("<script>")[-1]
+    for call in ("Math.random", "Date.now", "new Date", "performance.now", "crypto."):
+        assert call not in script, call

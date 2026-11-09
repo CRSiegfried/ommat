@@ -3,14 +3,13 @@ what it rests on, the bounds nearest to being crossed, and one summary line."""
 
 from typing import Any
 
-from ommat._table import ANY
 from ommat.outline._common import (
     arr,
     as_float,
     base_of,
     exact,
-    is_candidate_read,
     obj,
+    tested_reads,
     text_of,
 )
 
@@ -25,10 +24,8 @@ def _hit_reads(e: dict[str, Any], design: dict[str, Any], provider: object) -> l
         return None
     out: list[str] = []
     for n in hit:
-        for k, cell in enumerate(arr(obj(rows[n - 1]).get("cells"))):
-            read = inputs[k].get("read") if k < len(inputs) else None
-            if cell != ANY and isinstance(read, str) and not is_candidate_read(read):
-                out += [] if read in out else [read]
+        for _, read in tested_reads(obj(rows[n - 1]).get("cells"), inputs):
+            out += [] if read in out else [read]
     return out
 
 
@@ -167,6 +164,18 @@ def _hex(h: object) -> str:
     return h[7:19] if isinstance(h, str) and h.startswith("sha256:") and len(h) >= 19 else "-"
 
 
+def summary_nearest(o: dict[str, Any]) -> dict[str, Any] | None:
+    """The one bound the summary names: of the bounds with a distance, the nearest of the
+    lineage's first branch, else of the lineage, else of all; ``None`` when none has one."""
+    misses: list[dict[str, Any]] = o["nearest_bounds"] or []
+    measured = [m for m in misses if m["distance"] is not None]
+    on_chain = {p["ref"] for p in root_chain(o["lineage"])}
+    return next(
+        (m for m in measured if m["ref"] in on_chain),
+        next((m for m in measured if m["on_lineage"]), measured[0] if measured else None),
+    )
+
+
 def summary_of(o: dict[str, Any]) -> str:
     """One line of fixed columns, two spaces apart: the record hash's first 12 hex digits,
     status, decision, root, defect, rounds, nearest bound (the nearest of the lineage's first
@@ -184,13 +193,7 @@ def summary_of(o: dict[str, Any]) -> str:
     esc = o["escalation"]
     defect = "-" if esc is None else ("yes" if esc.get("defect") else "no")
     rounds = sum(1 for r in o["rounds"] if isinstance(r["round"], int) and r["round"] >= 1)
-    misses: list[dict[str, Any]] = o["nearest_bounds"] or []
-    measured = [m for m in misses if m["distance"] is not None]
-    on_chain = {p["ref"] for p in chain}
-    near = next(
-        (m for m in measured if m["ref"] in on_chain),
-        next((m for m in measured if m["on_lineage"]), measured[0] if measured else None),
-    )
+    near = summary_nearest(o)
     nearest = "nearest -"
     if near is not None:
         nearest = (

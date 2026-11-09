@@ -85,7 +85,7 @@ function tips(el) {
   return out;
 }
 const ctx = {
-  document, console, setTimeout, clearTimeout, problems, byClass, strip, tips,
+  document, console, setTimeout, clearTimeout, URLSearchParams, problems, byClass, strip, tips,
   localStorage: {getItem: () => null, setItem: () => {}}, innerWidth: 1200, innerHeight: 800,
   addEventListener: () => {},
 };

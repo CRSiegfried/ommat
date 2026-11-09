@@ -27,7 +27,7 @@ IDIA = TESTS / "idia_logs"
 
 NODE_KEYS = {
     *("id", "kind", "policy", "name", "refs", "round", "wavefront", "predecessors"),
-    *("fan_in", "fan_out", "type"),
+    *("fan_in", "fan_out", "steps_to_policy", "type"),
     *("oracle", "needs", "requirement", "cost", "timeout", "feedback", "grounded", "payload"),
     *("when", "questions", "tool_results"),
     *("form", "provides", "outputs", "reads", "params", "boundaries", "candidates", "target"),
@@ -156,7 +156,7 @@ def test_every_fixture_prints_as_text_and_json(
         assert text.endswith("\n")
         assert text == render(json.loads(ordered(outline)))  # the text is the outline's
         assert json.loads(ordered(outline)) == outline
-        assert outline["outline_version"] == 3
+        assert outline["outline_version"] == 5
     if record is not None and design is not None:
         assert turn_outline(record, design)["design_hash_matches"] is True
 
@@ -234,9 +234,48 @@ def test_the_showcase_design_holds_its_boundaries_table_requirement_and_targets(
             "statement": "The mail needs an answer today",
             "values": ["yes", "no"],
             "values_text": "yes or no",
+            "questions": [
+                {"ref": "q:tone", "node": "source:ask", "role": "unknown"},
+                {"ref": "q:urgent", "node": "source:ask", "role": "asks"},
+            ],
+            "estimated_by": ["rule:urgency"],
+            "readers": ["rule:act"],
+            "path": ["rule:urgency", "rule:act"],
         }
     ]
+    assert [n["steps_to_policy"] for n in o["nodes"]] == [None, 1, 1, 1, 0]
+    assert o["requirements"] == [
+        {
+            "source": "source:desk",
+            "provider": "rule:urgency",
+            "decided_from": ["source:ask", "rule:urgency"],
+            "behind": ["rule:act"],
+        }
+    ]
+    assert [
+        [(x["input"], x["read"], x["node"], x["cell"]) for x in r["tests"]] for r in act["rows"]
+    ] == [
+        [(0, "d:urgency", "rule:urgency", "yes"), (2, "t:ticket", "source:desk", "Known")],
+        [(0, "d:urgency", "rule:urgency", "no"), (1, "q:tone", "source:ask", "{neutral, warm}")],
+        [(0, "d:urgency", "rule:urgency", "no"), (1, "q:tone", "source:ask", "cold")],
+        [(0, "d:urgency", "rule:urgency", "Undetermined")],
+    ]
     text = render_design(o)
+    assert "predecessors rule:urgency  to policy 1\n" in text
+    assert (
+        "requirements\n"
+        '  source:desk requires d:urgency in ["yes"] from rule:urgency\n'
+        "    decided from source:ask, rule:urgency\n"
+        "    behind rule:act\n"
+    ) in text
+    assert (
+        'target tg:urgent  "The mail needs an answer today"  values yes or no\n'
+        "  unknown q:tone (source:ask)\n"
+        "  asked by q:urgent (source:ask)\n"
+        "  estimated by rule:urgency\n"
+        "  read by rule:act\n"
+        "  path rule:urgency -> rule:act\n"
+    ) in text
     assert "  source:desk -> rule:act  read t:ticket" in text
     assert (
         '[rule]   act  table F  -> d:act  label{"escalate", "file", "reply"}  '
@@ -567,7 +606,7 @@ def test_an_unpaired_turn_holds_no_design_derived_member(shown: dict[str, Any]) 
         assert all(e[k] is None for k in PAIRED)
     # A record alone and paired differ only by the paired members.
     drop = ("paired", "design_name", "design_hash_matches", "absent", "rounds")
-    drop += ("lineage", "nearest_bounds", "ties", "summary")  # a table's rows are followed paired
+    drop += ("lineage", "nearest_bounds", "ties", "summary", "summary_nearest", "why", "review")
     assert {k: v for k, v in alone.items() if k not in drop} == {
         k: v for k, v in paired.items() if k not in drop
     }
@@ -1077,3 +1116,254 @@ def test_the_command_prints_one_summary_line_per_record(
     assert render_turn(o, detail=True) in capsys.readouterr().out
     with pytest.raises(SystemExit):
         main([str(folder), "--oneline", "--json"])
+
+
+def _rule(provides: str, reads: list[str], target: str | None = None) -> dict[str, Any]:
+    return {"form": "function", "provides": provides, "reads": reads, "target": target}
+
+
+def _ask(
+    *refs: str, requirement: str | None = None, links: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """A source asking a noul question per ref, its target and latent targets from ``links``."""
+    links = links or {}
+    return {
+        "oracle": "llm",
+        "requirement": None if requirement is None else {"ref": requirement, "values": ["yes"]},
+        "provides": {
+            r: {
+                "kind": "noul",
+                "target": links.get(r, {}).get("target"),
+                "latent_targets": links.get(r, {}).get("latent", []),
+            }
+            for r in refs
+        },
+    }
+
+
+def _doc(
+    sources: dict[str, Any], rules: dict[str, Any], policy: str | None = "d:p"
+) -> dict[str, Any]:
+    return {"format": 10, "name": "t", "policy": policy, "sources": sources, "rules": rules}
+
+
+def _steps(o: dict[str, Any]) -> dict[str, int | None]:
+    return {n["id"]: n["steps_to_policy"] for n in o["nodes"]}
+
+
+def test_steps_to_policy_are_the_fewest_dependency_edges_and_null_off_the_path() -> None:
+    o = design_outline(
+        _doc(
+            {"s": _ask("q:x")},
+            {
+                "a": _rule("d:a", ["q:x"]),
+                "b": _rule("d:b", ["d:a"]),
+                "p": _rule("d:p", ["d:a", "d:b"]),
+                "z": _rule("d:z", ["d:a"]),
+            },
+        )
+    )
+    assert _steps(o) == {
+        "source:s": 2,
+        "rule:a": 1,
+        "rule:b": 1,
+        "rule:p": 0,
+        "rule:z": None,
+    }
+    assert "  no path to the policy" in render_design(o)
+
+
+def test_the_state_and_a_design_with_no_policy_node_have_no_steps() -> None:
+    doc = _doc({"s": {**_ask("q:x"), "needs": ["t:state.a"]}}, {"a": _rule("d:a", ["q:x"])})
+    doc["state"] = "record{a: string}"
+    o = design_outline(doc)
+    assert o["policy_node"] is None
+    assert set(_steps(o).values()) == {None}
+    assert "to policy" not in render_design(o)
+    assert "no path to the policy" not in render_design(o)
+    with_policy = design_outline({**doc, "policy": "d:a"})
+    assert _steps(with_policy)["state"] is None
+
+
+def test_a_cyclic_document_still_outlines() -> None:
+    o = design_outline(
+        _doc(
+            {}, {"a": _rule("d:a", ["d:b"]), "b": _rule("d:b", ["d:a"]), "p": _rule("d:p", ["d:a"])}
+        )
+    )
+    assert _steps(o) == {"rule:a": 1, "rule:b": 2, "rule:p": 0}
+
+
+def test_requirements_are_by_round_then_id_with_their_provider_and_reach() -> None:
+    o = design_outline(
+        _doc(
+            {
+                "first": _ask("q:f"),
+                "z_late": _ask("q:z", requirement="d:gate"),
+                "a_late": _ask("q:y", requirement="d:gate"),
+                "later": _ask("q:l", requirement="d:z"),
+                "ghost": _ask("q:g", requirement="d:missing"),
+            },
+            {
+                "gate": _rule("d:gate", ["q:f"]),
+                "z": _rule("d:z", ["q:z"]),
+                "p": _rule("d:p", ["d:z", "q:y", "q:l", "q:g"]),
+            },
+        )
+    )
+    reqs = {r["source"]: r for r in o["requirements"]}
+    assert [r["source"] for r in o["requirements"]] == [
+        "source:ghost",
+        "source:a_late",
+        "source:z_late",
+        "source:later",
+    ]
+    assert reqs["source:ghost"] == {
+        "source": "source:ghost",
+        "provider": None,
+        "decided_from": [],
+        "behind": ["rule:p"],
+    }
+    assert reqs["source:a_late"]["provider"] == "rule:gate"
+    assert reqs["source:a_late"]["decided_from"] == ["source:first", "rule:gate"]
+    assert reqs["source:z_late"]["behind"] == ["rule:z", "source:later", "rule:p"]
+    assert "source:later" not in reqs["source:later"]["behind"]
+    assert reqs["source:later"]["decided_from"] == [
+        "source:first",
+        "rule:gate",
+        "source:z_late",
+        "rule:z",
+    ]
+    assert '  source:ghost requires d:missing in ["yes"] from none' in render_design(o)
+
+
+def test_a_target_s_questions_estimators_readers_and_path() -> None:
+    doc = _doc(
+        {
+            "s": _ask(
+                "q:b",
+                "q:a",
+                links={
+                    "q:b": {"latent": [{"target": "tg:t", "role": "formative"}]},
+                    "q:a": {"target": "tg:t", "latent": [{"target": "tg:t", "role": "reflective"}]},
+                },
+            )
+        },
+        {
+            "est": _rule("d:est", ["q:a"], target="tg:t"),
+            "rb": _rule("d:rb", ["q:b"]),
+            "ra": _rule("d:ra", ["q:a"]),
+            "p": _rule("d:p", ["d:est", "d:ra", "d:rb"]),
+        },
+    )
+    doc["targets"] = {"tg:t": {"statement": "s", "values": None}}
+    (t,) = design_outline(doc)["targets"]
+    assert t["questions"] == [
+        {"ref": "q:b", "node": "source:s", "role": "formative"},
+        {"ref": "q:a", "node": "source:s", "role": "asks"},
+        {"ref": "q:a", "node": "source:s", "role": "reflective"},
+    ]
+    assert t["estimated_by"] == ["rule:est"]
+    assert t["readers"] == ["rule:ra", "rule:rb"]  # the estimator is not a reader
+    assert t["path"] == ["rule:est", "rule:p"]
+
+
+def test_a_target_s_path_falls_back_to_its_readers_and_breaks_ties_by_id() -> None:
+    doc = _doc(
+        {"s": _ask("q:a", links={"q:a": {"target": "tg:t"}})},
+        {
+            "est": _rule("d:est", ["q:a"], target="tg:t"),  # no path to the policy
+            "rb": _rule("d:rb", ["q:a"]),
+            "ra": _rule("d:ra", ["q:a"]),
+            "m2": _rule("d:m2", ["d:ra", "d:rb"]),
+            "m1": _rule("d:m1", ["d:ra", "d:rb"]),
+            "p": _rule("d:p", ["d:m1", "d:m2"]),
+        },
+    )
+    doc["targets"] = {"tg:t": {"statement": "s", "values": None}, "tg:none": {"statement": "n"}}
+    none, t = design_outline(doc)["targets"]
+    assert t["path"] == ["rule:ra", "rule:m1", "rule:p"]
+    assert none == {
+        **none,
+        "questions": [],
+        "estimated_by": [],
+        "readers": [],
+        "path": None,
+    }
+
+
+def test_a_row_s_tests_skip_any_cell_and_a_candidate_read() -> None:
+    table = {
+        "form": "table",
+        "provides": "d:p",
+        "hit": "F",
+        "inputs": [{"read": "q:a"}, {"read": "candidate.score"}, {"read": "d:x"}],
+        "rows": [
+            {"cells": [{"is": "yes"}, {"is": 1}, "-"], "output": {"literal": "go"}},
+            {"cells": ["-", "-", {"is": "no"}], "output": {"literal": "stop"}},
+        ],
+    }
+    o = design_outline(_doc({"s": _ask("q:a")}, {"x": _rule("d:x", ["q:a"]), "p": table}))
+    (p,) = [n for n in o["nodes"] if n["id"] == "rule:p"]
+    assert [r["tests"] for r in p["rows"]] == [
+        [{"input": 0, "read": "q:a", "node": "source:s", "cell": "yes"}],
+        [{"input": 2, "read": "d:x", "node": "rule:x", "cell": "no"}],
+    ]
+
+
+def test_review_sorts_each_source_by_what_the_turn_did(shown: dict[str, Any]) -> None:
+    decided = turn_outline(shown["decided"].document, shown["design"])["review"]
+    undecided = turn_outline(shown["undecided"].document, shown["design"])["review"]
+    assert [(s["source"], s["outcome"]) for s in decided["sources"]] == [
+        ("ask", "asked"),
+        ("desk", "asked"),
+    ]
+    desk = undecided["sources"][1]
+    assert (desk["source"], desk["outcome"], desk["why"]) == ("desk", "not asked", "requirement")
+    assert desk["marker"] == "Unasked"
+    assert desk["cause"] == {"code": "need-undetermined", "refs": ["d:urgency"]}
+    assert desk["requirement"] == {"ref": "d:urgency", "values": ["yes"]}
+    assert desk["call"] is None
+    assert turn_outline(shown["decided"].document)["review"] is None
+
+
+def test_review_gives_each_row_of_a_table_entry_its_result(shown: dict[str, Any]) -> None:
+    decided = turn_outline(shown["decided"].document, shown["design"])
+    (act,) = decided["review"]["tables"]
+    assert (act["ref"], act["rule"], act["hit"], act["policy"]) == ("d:act", "act", "F", True)
+    assert [(r["n"], r["result"], r["chosen"]) for r in act["rows"]] == [
+        (1, "matched", True),
+        (2, "not matched", False),
+        (3, "not matched", False),
+        (4, "not matched", False),
+    ]
+    by_index = {e["index"]: e for r in decided["rounds"] for e in r["entries"]}
+    tests = act["rows"][0]["tests"]
+    assert [(t["read"], t["cell"], t["holds"]) for t in tests] == [
+        ("d:urgency", "yes", "value"),
+        ("t:ticket", "Known", "value"),
+    ]
+    assert all(by_index[t["entry"]]["ref"] == t["read"] for t in tests)
+    assert act["rows"][1]["tests"][1]["helper"] == "pick_with_margin"
+    undecided = turn_outline(shown["undecided"].document, shown["design"])
+    (act,) = undecided["review"]["tables"]
+    assert [(r["n"], r["result"], r["chosen"]) for r in act["rows"]][3] == (4, "matched", True)
+
+
+def test_why_and_the_summary_s_bound_are_the_text_form_s(shown: dict[str, Any]) -> None:
+    for turn in ("decided", "undecided"):
+        o = turn_outline(shown[turn].document, shown["design"])
+        assert render_turn(o).splitlines()[1] == "why  " + o["why"]
+    o = turn_outline(shown["undecided"].document, shown["design"])
+    near = o["summary_nearest"]
+    assert near is not None
+    assert o["summary"].split("  ")[6] == (
+        f"nearest {near['distance']} {near['side']} {near['param']}@{near['ref']}"
+    )
+    text = render_turn(o).splitlines()
+    assert text[text.index("sources") :][:3] == [
+        "sources",
+        "  asked  ask  round 1  call 3",
+        "  not asked  desk  round 2  requirement: Unasked need-undetermined (d:urgency)",
+    ]
+    assert "  row 4  matched (its output)  -> Unsure" in text

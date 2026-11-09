@@ -19,8 +19,10 @@ from ommat.outline._common import (
     is_list,
     obj,
     parsed,
+    tested_reads,
 )
 from ommat.outline._layout import fingerprint_of, layout_of, short_of
+from ommat.outline._reach import reach
 from ommat.outline._types import cell_text, input_text, output_text, parse_type, target_values
 
 KNOWN_DESIGN = (
@@ -162,7 +164,11 @@ def _rule_node(rule: dict[str, Any]) -> dict[str, Any]:
                 else {"cell": r.get("output"), "text": output_text(r.get("output"))}
             )
             cells = [{"cell": c, "text": cell_text(c)} for c in arr(r.get("cells"))]
-            rows.append({"n": n, "cells": cells, "output": output})
+            tests = [
+                {"input": k, "read": read, "node": None, "cell": cells[k]["text"]}
+                for k, read in tested_reads(r.get("cells"), rule.get("inputs"))
+            ]
+            rows.append({"n": n, "cells": cells, "output": output, "tests": tests})
         node["rows"] = rows
     else:
         node["body"] = "not in the document"
@@ -427,6 +433,26 @@ def design_outline(document: object) -> dict[str, Any]:
         for r in node["refs"]:
             ref_node.setdefault(r, node["id"])
 
+    targets: list[dict[str, Any]] = [
+        {
+            "id": k,
+            "statement": obj(v).get("statement"),
+            "values": target_values(obj(v).get("values")),
+            "values_text": obj(v).get("values"),
+        }
+        for k, v in sorted(obj(doc.get("targets")).items())
+    ]
+    policy_node = ids[policy_name] if policy_name else None
+    steps, requirements, links = reach(nodes, edges, ref_node, policy_node, targets)
+    for node in nodes:
+        node["steps_to_policy"] = steps[node["id"]]
+    for t in targets:
+        t.update(links[t["id"]])
+    for node in nodes:
+        for row in map(obj, arr(node["rows"])):
+            for test in map(obj, arr(row["tests"])):
+                test["node"] = ref_node.get(base_of(test["read"]) or "")
+
     return {
         "outline_version": OUTLINE_VERSION,
         "kind": "design",
@@ -435,7 +461,7 @@ def design_outline(document: object) -> dict[str, Any]:
         "hash": digest,
         "hash_source": hash_source,
         "policy": policy if isinstance(policy, str) else None,
-        "policy_node": ids[policy_name] if policy_name else None,
+        "policy_node": policy_node,
         "state": parse_type(doc.get("state")),
         "parameters": [
             {
@@ -455,19 +481,12 @@ def design_outline(document: object) -> dict[str, Any]:
             {"name": g, "refs": obj(v).get("refs"), "reason": obj(v).get("reason")}
             for g, v in sorted(obj(doc.get("groups")).items())
         ],
-        "targets": [
-            {
-                "id": k,
-                "statement": obj(v).get("statement"),
-                "values": target_values(obj(v).get("values")),
-                "values_text": obj(v).get("values"),
-            }
-            for k, v in sorted(obj(doc.get("targets")).items())
-        ],
+        "targets": targets,
         "classes": [
             {"ref": k, "class": _class_summary(v)}
             for k, v in sorted(obj(doc.get("classes")).items())
         ],
+        "requirements": requirements,
         "other_members": sorted(k for k in doc if k not in KNOWN_DESIGN),
         "layout": layout_of(nodes, edges),
         "fingerprint": fingerprint_of(nodes, edges),

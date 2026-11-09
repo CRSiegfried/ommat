@@ -10,7 +10,7 @@ from typing import Any, TypeGuard, cast
 from ommat._canonical import encode, ordered, sha256_ref
 from ommat._documents import read_document
 
-OUTLINE_VERSION = 3
+OUTLINE_VERSION = 5
 CUT = 120  # prompts, warnings and long values are cut to this many characters, then "…"
 STATE = "t:state"
 STATE_NODE = "state"
@@ -38,6 +38,7 @@ NODE_KEYS = (
     "predecessors",
     "fan_in",
     "fan_out",
+    "steps_to_policy",
     "type",
     # a source's
     "oracle",
@@ -205,6 +206,20 @@ def fields_of(ref: str) -> list[str]:
 
 def is_candidate_read(ref: object) -> bool:
     return isinstance(ref, str) and (ref == "candidate" or ref.startswith("candidate."))
+
+
+def tested_reads(cells: object, inputs: object) -> list[tuple[int, str]]:
+    """A table row's tests: each input's index and read whose cell is not ``-``, its read a
+    ref and no candidate read, in input order."""
+    from ommat._table import ANY
+
+    ins = [obj(i) for i in arr(inputs)]
+    out: list[tuple[int, str]] = []
+    for k, cell in enumerate(arr(cells)):
+        read = ins[k].get("read") if k < len(ins) else None
+        if cell != ANY and isinstance(read, str) and not is_candidate_read(read):
+            out.append((k, read))
+    return out
 
 
 def text_of(value: object) -> str:

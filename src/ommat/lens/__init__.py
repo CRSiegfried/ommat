@@ -2,17 +2,19 @@
 their outlines, outside the compatibility promise while it is validated.
 
 ``page(records, designs=())`` returns a self-contained page. It takes each document's outline
-(``ommat.outline``) and text form, and the page draws from the outline alone: a design as its
-dependency graph, one band per round, a sub-column per wavefront, the sources, rules and the
-policy with the refs each provides and the edges between them, each declared read, helper,
-need, slot or source requirement by its role; a turn over that graph, each entry washed by what
-it holds and marked by its nearest bound, the lineage from the decision to its root as a tree,
-the round costs, and a headline that says what was decided, or what the undecided turn rests on
-and how far its root fell short; a panel of every bound by entry; a table of the turns, sorted
-and filtered, with a tally; and the text form beside them. A record pairs with the design
-whose bytes' SHA-256 its ``design`` item holds, else with a design of the same name, with a
-notice, else it is drawn alone, its entries by round. ``python -m ommat.lens PATH`` writes the
-page for a record or design file or a folder.
+(``ommat.outline``) and text form, and the page draws from the outline alone: a design's
+overview; a slice of its dependency graph around one node, by round and in the layout's rows,
+with the selected turn's entries marked on it; its targets and its tables' rows; and the design
+as its whole dependency graph, one band per round, a sub-column per wavefront, the sources,
+rules and the policy with the refs each provides and the edges between them, each declared
+read, helper, need, slot or source requirement by its role; a turn over that graph, each entry
+washed by what it holds and marked by its nearest bound, the lineage from the decision to its
+root as a tree, the round costs, and a headline that says what was decided, or what the
+undecided turn rests on and how far its root fell short; a panel of every bound by entry; a
+table of the turns, sorted and filtered, with a tally; and the text form beside them. A record
+pairs with the design whose bytes' SHA-256 its ``design`` item holds, else with a design of the
+same name, with a notice, else it is drawn alone, its entries by round. ``python -m ommat.lens
+PATH`` writes the page for a record or design file or a folder.
 
 The page embeds the outlines and text whole, user text included, so keep it as you keep the
 records, and loads nothing from the network. ``import ommat`` does not import this package, and

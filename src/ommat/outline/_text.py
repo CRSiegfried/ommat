@@ -80,7 +80,7 @@ def render_design(o: dict[str, Any]) -> str:
         for t in o["types"]:
             lines.append(f"  {t['name']} = {_type_text(t['type'])}")
     for n in o["nodes"]:
-        lines.extend(_design_node(n))
+        lines.extend(_design_node(n, o["policy_node"] is not None))
     lines.append("edges (the dependency graph)")
     dependency = [e for e in o["edges"] if e["dependency"]]
     lines.extend(f"  {e['from']} -> {e['to']}  {e['role']} {e['ref']}" for e in dependency)
@@ -90,6 +90,17 @@ def render_design(o: dict[str, Any]) -> str:
     if state:
         lines.append("state edges (not in the dependency graph)")
         lines.extend(f"  {e['from']} -> {e['to']}  {e['role']} {e['ref']}" for e in state)
+    if o["requirements"]:
+        lines.append("requirements")
+        by_id = {n["id"]: n for n in o["nodes"]}
+        for r in o["requirements"]:
+            req = obj(by_id[r["source"]]["requirement"])
+            lines.append(
+                f"  {r['source']} requires {req.get('ref')} in {text_of(req.get('values'))}"
+                f" from {r['provider'] or 'none'}"
+            )
+            lines.append(f"    decided from {', '.join(r['decided_from']) or 'nothing'}")
+            lines.append(f"    behind {', '.join(r['behind']) or 'nothing'}")
     for g in o["groups"]:
         lines.append(
             f"group {g['name']}  refs {', '.join(g['refs'] or [])}  "
@@ -98,6 +109,15 @@ def render_design(o: dict[str, Any]) -> str:
     for t in o["targets"]:
         extra = f"  values {cut(t['values_text'])}" if t["values_text"] is not None else ""
         lines.append(f"target {t['id']}  {_q(cut(str(t['statement'])))}{extra}")
+        for q in t["questions"]:
+            how = "asked by" if q["role"] == "asks" else str(q["role"])
+            lines.append(f"  {how} {q['ref']} ({q['node']})")
+        if t["estimated_by"]:
+            lines.append(f"  estimated by {', '.join(t['estimated_by'])}")
+        if t["readers"]:
+            lines.append(f"  read by {', '.join(t['readers'])}")
+        if t["path"]:
+            lines.append(f"  path {' -> '.join(t['path'])}")
     if o["classes"]:
         lines.append("classes  " + ", ".join(f"{c['ref']} {c['class']}" for c in o["classes"]))
     return "\n".join(lines) + "\n"
@@ -168,10 +188,13 @@ def _source_lines(n: dict[str, Any], preds: str) -> list[str]:
     return out
 
 
-def _design_node(n: dict[str, Any]) -> list[str]:
+def _design_node(n: dict[str, Any], has_policy: bool) -> list[str]:
     if n["kind"] == "state":
         return [f"[state]  {STATE}  {_type_text(n['type'])}"]
     preds = f"  predecessors {', '.join(n['predecessors'])}" if n["predecessors"] else ""
+    if has_policy and not n["policy"]:
+        steps = n["steps_to_policy"]
+        preds += "  no path to the policy" if steps is None else f"  to policy {steps}"
     if n["kind"] == "source":
         return _source_lines(n, preds)
     out: list[str] = []
@@ -360,7 +383,29 @@ def render_turn(o: dict[str, Any], *, detail: bool = False) -> str:
         lines.append(f"defects  {', '.join(o['defects'])}")
     if o["absent"]:
         lines.append(f"absent  {', '.join(o['absent'])}")
+    lines.extend(_review_lines(o["review"]))
     return "\n".join(lines) + "\n"
+
+
+def _review_lines(review: dict[str, Any] | None) -> list[str]:
+    """Each source by what the turn did with it, and each table entry's rows by result."""
+    if review is None:
+        return []
+    out = ["sources"]
+    for s in review["sources"]:
+        line = f"  {s['outcome']}  {s['source']}"
+        if s["outcome"] == "asked":
+            line += f"  round {s['round']}  call {s['call']}"
+        elif s["outcome"] == "not asked":
+            cause = _cause_text(s["cause"]) if s["cause"] else "-"
+            line += f"  round {s['round']}  {s['why'] or '-'}: {s['marker'] or '-'} {cause}"
+        out.append(line)
+    for tb in review["tables"]:
+        out.append(f"table {tb['ref']}  hit {tb['hit']}")
+        for r in tb["rows"]:
+            chosen = " (its output)" if r["chosen"] else ""
+            out.append(f"  row {r['n']}  {r['result']}{chosen}  -> {r['output'] or '-'}")
+    return out
 
 
 _WARNING = re.compile(r"^(\S+): (\S+) (.*)$", re.S)
@@ -395,6 +440,12 @@ def _brief(e: dict[str, Any] | None) -> str:
     if value.get("kind") == "extraction":
         return cut(text_of(value.get("value")), 60)
     return cut(text_of(e["value"]), 60)
+
+
+def why_of(o: dict[str, Any]) -> str:
+    """The text form's why line without its ``why`` label."""
+    by_index = {e["index"]: e for r in o["rounds"] for e in r["entries"]}
+    return _why_line(o, by_index).removeprefix("why  ")
 
 
 def _why_line(o: dict[str, Any], by_index: dict[Any, dict[str, Any]]) -> str:
