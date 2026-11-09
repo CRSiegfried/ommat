@@ -3819,3 +3819,11 @@ def test_filling_a_cache_from_several_threads_raises_nothing() -> None:
         sys.setswitchinterval(interval)
     assert errors == []
     assert len(cache) == 100
+
+
+def test_remembering_a_held_key_at_the_bound_drops_nothing() -> None:
+    from ommat import _interpret as module
+
+    cache: dict[Any, Any] = {i: i for i in range(4)}
+    module._remember(cache, 2, "again", 4)
+    assert cache == {0: 0, 1: 1, 2: "again", 3: 3}

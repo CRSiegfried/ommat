@@ -44,7 +44,7 @@ from ommat._types import MappingOf, Type
 from ommat._values import type_name
 from ommat.evaluation._diff import _read, _refuse_unfit, _run_sync, _state
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
-from ommat.evaluation._rescore import NOT_DETERMINED, _broken_state
+from ommat.evaluation._rescore import NOT_DETERMINED, _broken_state, _run_of
 from ommat.evaluation._switching import (
     _HIGH,
     _LOW,
@@ -94,6 +94,8 @@ async def rescore_grid(
     read = tuple(_read(r, name) for r, name in zip(records, names, strict=True))
     logs = tuple(r.log for r in read)  # read once: every read decodes afresh
     _refuse_unfit(names, read, logs, recorded)
+    for log in logs:
+        _run_of(log)  # a recorded setting decide refuses is refused here, before any run
     if not points:
         return []
     grid = _Grid(recorded, loaded, points)

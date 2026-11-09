@@ -1606,7 +1606,7 @@ _CACHE_LOCK = threading.Lock()
 def _remember(cache: dict[Any, Any], key: Any, value: Any, held: int) -> None:
     """Keep ``value`` under ``key``, dropping the oldest entry past ``held``."""
     with _CACHE_LOCK:
-        if len(cache) >= held:
+        if key not in cache and len(cache) >= held:
             cache.pop(next(iter(cache)), None)
         cache[key] = value
 

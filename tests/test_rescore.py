@@ -422,3 +422,17 @@ def test_records_must_be_a_sequence() -> None:
         rescore_sync([record], recorded, (d for d in [recorded]))  # type: ignore[arg-type]
     assert rescore_sync([], recorded, [recorded]) == []
     assert rescore_sync([record], recorded, []) == []
+
+
+def test_a_record_whose_settings_decide_refuses_is_refused_before_any_run() -> None:
+    import test_replay as tp
+    from ommat import EntryRefusal
+    from ommat.evaluation import rescore_grid_sync
+
+    good = tp.go().record
+    bad = tp.edited(good, lambda d: d["log"][1]["settings"].update({"timeout": 0}))
+    for designs in ([tp.LOADED], []):
+        with pytest.raises(EntryRefusal):
+            rescore_sync([good, bad], tp.LOADED, designs)
+    with pytest.raises(EntryRefusal):
+        rescore_grid_sync([good, bad], tp.LOADED, tp.LOADED, [])

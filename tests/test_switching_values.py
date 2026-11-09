@@ -1667,3 +1667,42 @@ def test_a_refusal_mid_batch_leaves_the_earlier_entries_written(tmp_path: Path) 
     assert store.lookup(KIND, key) == run(fine, loaded, "lim/n", tmp_path / "single")
     key["record"] = overflowing.record_hash
     assert store.lookup(KIND, key) is None
+
+
+def test_an_empty_batch_still_refuses_a_loaded_that_is_no_loaded_design(tmp_path: Path) -> None:
+    from ommat import EntryRefusal
+
+    for paths in (["lim/n"], []):
+        with pytest.raises(EntryRefusal):
+            _switching.switching_values_batch_sync(
+                [], cast(Any, None), paths, results=EvaluationStore(tmp_path)
+            )
+
+
+def test_a_batchs_not_loading_entries_share_no_list(tmp_path: Path) -> None:
+    rules = {
+        "tab": Table(
+            "d:tab", BIG_SMALL, "F", ["t:state.k"], [["[lim/y, lim/x]", "big"], ["-", "small"]]
+        ),
+        "hi": Table("d:hi", BIG_SMALL, "F", ["t:state.j"], [[">= lim/y", "big"], ["-", "small"]]),
+    }
+    leaves = {"lim/x": Parameter(t.integer(), 7), "lim/y": Parameter(t.integer(), 2)}
+    loaded = load(
+        designed(state=t.record(k=t.integer(), j=t.integer()), rules=rules, parameters=leaves)
+    )
+    records = [decide_sync(loaded, {"k": k, "j": 9}, {}).record for k in (4, 5)]
+    entries = _switching.switching_values_batch_sync(
+        records, loaded, ["lim/y"], results=EvaluationStore(tmp_path)
+    )
+    first, second = (
+        next(
+            c["result"]["not-loading"]
+            for entry in e["value"]["entries"].values()
+            for c in entry["classes"]
+            if "not-loading" in c["result"]
+        )
+        for e in entries
+    )
+    assert first == second  # one cached failure, given to each record's entry apart
+    first[0]["names"].append("x")
+    assert second[0]["names"] == ["tab"]

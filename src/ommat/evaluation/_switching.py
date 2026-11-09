@@ -59,6 +59,7 @@ replay and the change of an entry are ``_diff``'s, shared with the deciding inpu
 written is returned, plain data reaching no ``Record``.
 """
 
+import copy
 import itertools
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -80,7 +81,7 @@ from ommat._typed import decoded, typed
 from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
 from ommat._values import MAX_INTEGER, type_name
 from ommat.evaluation._diff import _run_sync, baseline, outcome, own_functions
-from ommat.evaluation._edit import _checked, _declared
+from ommat.evaluation._edit import _checked, _declared, _designs
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._store import EvaluationStore
 from ommat.helpers._choice import _lead
@@ -143,6 +144,7 @@ async def switching_values_batch(
     holds, is refused ``held-key`` before any replay, the refusal carrying every such key; a
     caller rerunning a batch drops them or reads each with ``results.lookup``. A refusal later
     on leaves the entries already written in the store."""
+    _designs(loaded, None, ("loaded", "rerun_design"))  # checked even with no records
     if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"records are a {type_name(records)}, not a sequence of records")
     if isinstance(paths, str | bytes) or not isinstance(paths, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -210,7 +212,8 @@ async def _entry(
     else:
         summary = await job.summary(t, loaded._leaf_value(path), None)
         value = {"unseen": job.unseen(t), **summary}
-    return {"kind": KIND, "format": FORMAT, "key": key, "value": value}
+    # Classes share results and entries between refs and runs; the entry returned shares none.
+    return copy.deepcopy({"kind": KIND, "format": FORMAT, "key": key, "value": value})
 
 
 def switching_values_sync(

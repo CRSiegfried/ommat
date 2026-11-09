@@ -7,12 +7,13 @@ a ledger that checks, encodes and keeps nothing but the policy's entry, so no re
 exists. Each asked source is checked against the record under ``recorded``, the design the
 record was decided under, where ``replay(record, design)`` checks it under ``design`` itself: so
 a design whose source carries another payload or ``oracle`` key than ``recorded``'s, or another
-type for a ``t:`` ref it provides, gives ``not-determined`` for that source's refs where replay
+type for a ``t:`` ref it provides, gives ``not-determined`` for those refs where replay
 under it decides. Apart from that, the decision is the one replay under the design writes. A run
 in which a source asks something the record does not answer, a stale question, is
 ``not-determined``, as in the switching-value job: its decision says nothing of the record.
 
-Every record is read and checked as replay checks it, against ``recorded``, before any run. The
+Every record is read and checked as replay checks it, against ``recorded``, its recorded
+settings included, before any run. The
 rows come back in design order, then record order, as plain data.
 """
 
@@ -46,9 +47,10 @@ async def rescore(
     "stale"}``. ``decision`` is the policy's entry as decide writes it, ``{"value": v}`` or
     ``{"marker": {"kind", "cause"}}``, or ``"not-determined"`` when the run asked a question the
     record does not answer; ``stale`` lists those refs in code-point order. Each asked source
-    is checked against the record under ``recorded``, so a payload, ``oracle`` or ``t:`` type
-    the design changes stales it. Each record is checked as replay checks it, against
-    ``recorded``, its own design, before any run."""
+    is checked against the record under ``recorded``, so a payload or ``oracle`` the design
+    changes stales the source's refs, and a ``t:`` type it changes stales that ref. Each
+    record is checked as replay checks it, against ``recorded``, its own design, before any
+    run."""
     if type(recorded) is not LoadedDesign:
         raise EntryRefusal(f"recorded is a {type_name(recorded)}, not exactly a LoadedDesign")
     if isinstance(designs, str | bytes) or not isinstance(designs, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -62,6 +64,8 @@ async def rescore(
     read = tuple(_read(r, name) for r, name in zip(records, names, strict=True))
     logs = tuple(r.log for r in read)  # read once: every read decodes afresh
     _refuse_unfit(names, read, logs, recorded)
+    for log in logs:
+        _run_of(log)  # a recorded setting decide refuses is refused here, before any run
     rows: list[dict[str, Any]] = []
     for loaded in designs:
         for r, log in zip(read, logs, strict=True):
@@ -107,20 +111,25 @@ class _Kept:
         pass
 
 
-async def _rescored(
-    log: _Log, loaded: LoadedDesign, recorded: LoadedDesign
-) -> tuple[dict[str, Any] | str, list[str]]:
-    """The policy's entry, or ``not-determined``, of ``log``'s turn rerun under ``loaded`` as
-    replay reruns it, and the stale refs."""
-    state = cast("dict[str, Any]", _state(log))  # the record checks found a value there
+def _run_of(log: _Log) -> Any:
+    """The record's run settings, as decide checks them; ``EntryRefusal`` for one it refuses."""
     settings = cast("dict[str, Any]", log[1]["settings"])
-    run = run_settings(
+    return run_settings(
         settings["round_bound"],
         settings["timeout"],
         settings["budget"],
         settings["deadline"],
         settings["certificate_cap"],
     )
+
+
+async def _rescored(
+    log: _Log, loaded: LoadedDesign, recorded: LoadedDesign
+) -> tuple[dict[str, Any] | str, list[str]]:
+    """The policy's entry, or ``not-determined``, of ``log``'s turn rerun under ``loaded`` as
+    replay reruns it, and the stale refs."""
+    state = cast("dict[str, Any]", _state(log))  # the record checks found a value there
+    run = _run_of(log)
     base = Base(log, loaded, design=recorded)
     fixture = FixtureBinding(base.calls, loaded, base)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
