@@ -803,8 +803,7 @@ def _comparisons(
                     continue  # the leaf does not reach this read
                 values = _read_values(read, entries, None) or []
                 if isinstance(entry, list):
-                    if named & set(cast("list[str]", entry)):
-                        add(name, None, values)
+                    add(name, None, values)  # ``_names`` found the leaf among its paths
                     continue
                 for role, members in cast("dict[str, Any]", entry).items():
                     if role == "mass":

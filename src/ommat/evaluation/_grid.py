@@ -13,8 +13,8 @@ the switching job's light ledger, keeping only the entries the job reads: the po
 table input's read and grounded set, and each function rule's ``boundaries`` reads. It reads
 from that log each grid leaf's compared values and the side a leaf value equal to one joins,
 and gives that run's row to every uncovered point whose values fall in the same bucket on every
-grid leaf, until every point is covered; a point no other uncovered point shares its value of
-every by-value leaf with covers itself, its log unread. A key path, and
+grid leaf, until every point is covered; a point whose ``boolean``, ``label`` and wording-slot
+values no other uncovered point shares covers itself without a region search. A key path, and
 each key of a mapping leaf given whole, is bucketed on its own axis: the comparisons naming the
 leaf whole or that key's path. A tie joins the side the predicate puts it on where the document
 fixes the predicate, a table's pick helper and ``extract`` bindings and a table cell's own
