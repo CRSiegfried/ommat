@@ -5,6 +5,7 @@ from fractions import Fraction
 from typing import Any
 
 from ommat import InvalidRecord, Record, defects, escalation, read_record
+from ommat._refs import key_path
 from ommat.outline._common import (
     BOUND_KEYS,
     CALL_KEYS,
@@ -40,6 +41,15 @@ def _project(value: object, fields: list[str]) -> object:
     return value
 
 
+def _bound_value(leaves: dict[str, Any], path: str) -> object:
+    """A bound's value: its leaf's, or for a key path, ``leaf.key``, its leaf's value at the key;
+    ``None`` where the document holds neither."""
+    keyed = key_path(path)
+    if keyed is None:
+        return obj(leaves.get(path)).get("value")
+    return obj(obj(leaves.get(keyed[0])).get("value")).get(keyed[1])
+
+
 def bounds_of(design: dict[str, Any], base: str) -> list[dict[str, Any]]:
     """Every bound the paired design declares for a read: the rules' ``boundaries`` fields, a
     table's helper bindings and its comparisons over a bare input against a leaf. Each holds
@@ -54,7 +64,7 @@ def bounds_of(design: dict[str, Any], base: str) -> list[dict[str, Any]]:
         b = {
             "role": role,
             "param": path,
-            "bound": obj(leaves.get(path)).get("value"),
+            "bound": _bound_value(leaves, path),
             "by": by,
             "key": key if role == "plain" else None,
             "labels": labels,

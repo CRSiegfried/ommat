@@ -42,6 +42,7 @@ class RefusalReason(enum.StrEnum):
     empty_copy = "empty-copy"
     uneven_grid = "uneven-grid"
     hidden_leaf = "hidden-leaf"
+    overlapping_paths = "overlapping-paths"
 
 
 class EvaluationRefusal(Exception):

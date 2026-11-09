@@ -5,15 +5,15 @@ the public generator giving one read's points in record form.
 Both lints call ``fill`` with the reads they fill, and it raises one ``ValueError`` listing
 every slip in ``values`` and every unfilled read before either lint runs a point. A read is
 filled from the first of: its grid points, from load's grid and the parameter block through
-``_leaf_value``; its declared type's values; its list in ``values``. A record's type fill is
-the cross product of its fields' fills, each field filled by the same order under its field
-path. A label question with no grid entry, other than a candidate-valued one, is filled from
-its list in ``values`` when it has one, each label listed at 1 in declared order, and is then
-narrowed. An extraction read's points cross its value points, from its grid's ``value`` axis
-or its list in ``values``, with its ``p_null`` and ``confidence`` points, then add the two
-null points. A ``q:`` read's points end with ``Unavailable`` ``refused``. A per-candidate
-question is filled once, on its declared ref, and each grounded entry takes those points with
-a marker of its own last.
+``_leaf_value``, a key path's from its leaf's value at the key; its declared type's values; its
+list in ``values``. A record's type fill is the cross product of its fields' fills, each field
+filled by the same order under its field path. A label question with no grid entry, other than
+a candidate-valued one, is filled from its list in ``values`` when it has one, each label
+listed at 1 in declared order, and is then narrowed. An extraction read's points cross its
+value points, from its grid's ``value`` axis or its list in ``values``, with its ``p_null`` and
+``confidence`` points, then add the two null points. A ``q:`` read's points end with
+``Unavailable`` ``refused``. A per-candidate question is filled once, on its declared ref, and
+each grounded entry takes those points with a marker of its own last.
 
 Every point is computed exactly over each boundary's ``Fraction(repr(x))`` and rounded once
 to the nearest ``float``. A point is held in two forms: the record form a report shows and
@@ -41,7 +41,7 @@ from ommat._canonical import encode
 from ommat._design import LoadedDesign, Question
 from ommat._interpret import _marker_document
 from ommat._markers import Cause, CauseCode, Unavailable
-from ommat._refs import code_point_sorted, parse_ref
+from ommat._refs import code_point_sorted, key_path, parse_ref
 from ommat._typed import typed
 from ommat._types import (
     Label,
@@ -327,9 +327,14 @@ class _Filler:
     # --- grid points ---------------------------------------------------------------------
 
     def bound(self, boundary: str | int) -> Fraction:
-        """A boundary's value: a leaf's from the block, or an integer literal's own."""
+        """A boundary's value: a leaf's from the block, a key path's at its key of its leaf's,
+        or an integer literal's own."""
         if type(boundary) is int:
             return Fraction(boundary)
+        keyed = key_path(boundary)
+        if keyed is not None:
+            held = cast("dict[str, float]", self.loaded._leaf_value(keyed[0]))
+            return exact(held[keyed[1]])
         return exact(cast(float, self.loaded._leaf_value(cast(str, boundary))))
 
     def numeric(self, path: str, t: Type) -> list[Point]:

@@ -23,7 +23,8 @@ entry, or ``mass``, ``size`` or ``extract`` over its read; for a pick helper's `
 ``thresholds`` binding, each label's probability; for ``extract``'s ``null_bar``, ``p_null``
 when not ``None``; for a ``margin``, the greatest ``float`` whose decimal does not exceed the
 top label's lead; for a function component's ``boundaries`` entry naming the leaf, the read's
-value, or the same role measure of its answer. Only an ``int`` or ``float`` is one. A
+value, or the same role measure of its answer. A mapping leaf's key is compared against what
+names the leaf whole or that key's path, ``leaf.key``. Only an ``int`` or ``float`` is one. A
 ``boolean`` or ``label`` leaf is tried at every value.
 
 ``entries`` lists the policy's entry, and each other ref whose entry some run changed in value,
@@ -46,13 +47,14 @@ bounding the leaf's own class, each minus the leaf's value, null on a side with 
 
 ``unseen`` is empty only when every way the leaf reaches a component is a comparison against a
 probed value; it names, in code-point order, each component the leaf reaches otherwise: a
-function component declaring it whose ``boundaries`` field does not name it; a ``C+``, ``C<``
-or ``C>`` table with a ``Param`` row of it beside another row; each component reading an entry
-that holds the leaf, one a table's row outputs ``Param`` of or a function component declaring
-it provides whose type holds other than booleans and labels, one level deep; each component
-of a value round 1 found; each table comparing a ``candidate`` read against the leaf whose set
-holds no value; and each component a failure names when a value tried does not load. It is
-empty for a ``boolean`` or ``label`` leaf, every value of which was tried.
+function component declaring it whose ``boundaries`` field names neither it nor, for a mapping
+leaf, the path of each key its value holds; a ``C+``, ``C<`` or ``C>`` table with a ``Param``
+row of it beside another row; each component reading an entry that holds the leaf, one a table's
+row outputs ``Param`` of or a function component declaring it provides whose type holds other
+than booleans and labels, one level deep; each component of a value round 1 found; each table
+comparing a ``candidate`` read against the leaf whose set holds no value; and each component a
+failure names when a value tried does not load. It is empty for a ``boolean`` or ``label`` leaf,
+every value of which was tried.
 
 Refused as ``_diff._refuse_unfit`` orders the record checks, which ``_edit`` runs; the baseline
 replay and the change of an entry are ``_diff``'s, shared with the deciding inputs. The entry
@@ -75,7 +77,7 @@ from ommat._interpret import interpret
 from ommat._ledger import _logged, decision_bytes
 from ommat._load import load, with_parameters
 from ommat._read_view import _ViewError, is_candidate_read, walk
-from ommat._refs import _RefError, code_point_sorted, parse_ref
+from ommat._refs import _RefError, code_point_sorted, key_path, parse_ref
 from ommat._replay import _cut
 from ommat._typed import decoded, typed
 from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
@@ -332,7 +334,10 @@ class _Shared:
     def hidden_of(self, path: str) -> set[str]:
         found = self.hidden.get(path)
         if found is None:
-            found = self.hidden[path] = _hidden(self.document, self.loaded, path)
+            keys = None
+            if isinstance(self.loaded._leaf_types[path], MappingOf):
+                keys = set(cast("dict[str, Any]", self.loaded._leaf_value(path)))
+            found = self.hidden[path] = _hidden(self.document, self.loaded, path, keys)
         return found
 
     def design(self, path: str, value: object) -> LoadedDesign | list[dict[str, Any]]:
@@ -404,7 +409,8 @@ class _Job:
                     tried[v] = (await self.run(v, key))[0]
             ordered = values
         else:
-            found: _Compared = self.compared(self.log)
+            at = self.path if key is None else f"{self.path}.{key}"
+            found: _Compared = self.compared(self.log, at)
             for last in (False, True):  # round 0, then round 1
                 bounds |= set(found)
                 found = {}
@@ -413,7 +419,7 @@ class _Job:
                         tried[v], rerun = await self.run(v, key)
                         if not isinstance(tried[v], _Run):
                             continue  # not loading: no log to read
-                        for x, names in self.compared(rerun).items():
+                        for x, names in self.compared(rerun, at).items():
                             found.setdefault(x, set()).update(names)
                 if last:
                     self.late |= {n for x, names in found.items() if x not in bounds for n in names}
@@ -453,10 +459,10 @@ class _Job:
         )
         return run, rerun_log
 
-    def compared(self, log: _Log) -> _Compared:
-        """``_compared`` over ``log``, a table whose ``candidate`` read finds no set noted
-        unseen."""
-        found, blind = _compared(self.document, self.path, log)
+    def compared(self, log: _Log, path: str) -> _Compared:
+        """``_compared`` over ``log`` for the leaf, or one key's path, a table whose
+        ``candidate`` read finds no set noted unseen."""
+        found, blind = _compared(self.document, path, log)
         self.late |= blind
         return found
 
@@ -666,9 +672,12 @@ _ROLES: dict[tuple[str | None, str], str] = {
 }
 
 
-def _hidden(document: _Doc, loaded: LoadedDesign, path: str) -> set[str]:
+def _hidden(
+    document: _Doc, loaded: LoadedDesign, path: str, keys: Iterable[str] | None = None
+) -> set[str]:
     """The components the leaf reaches other than by a comparison the probes see: a function
-    component declaring it whose ``boundaries`` field does not name it; a table aggregating
+    component declaring it whose ``boundaries`` field names neither it nor, for a mapping leaf,
+    the key path of each of ``keys`` (``_sees``); a table aggregating
     it under ``C+``, ``C<`` or ``C>`` beside other values; and each component reading an entry
     that holds the leaf, one a table row outputs ``Param`` of, or a function component
     declaring the leaf provides of a type that holds other than booleans and labels: a
@@ -682,7 +691,7 @@ def _hidden(document: _Doc, loaded: LoadedDesign, path: str) -> set[str]:
                 provides = c.get("provides", "")
                 if not _discrete(loaded._types[provides]):
                     valued.add(provides)
-                if not _contains(c["boundaries"], path):
+                if not _sees(c["boundaries"], path, keys):
                     out.add(name)
         elif any(_contains(row.get("output"), {"param": path}) for row in c["rows"]):
             valued.add(c.get("provides", ""))
@@ -691,6 +700,14 @@ def _hidden(document: _Doc, loaded: LoadedDesign, path: str) -> set[str]:
     readers = loaded._reads
     out |= {n for n, reads in readers.items() if any(_declared(r) in valued for r in reads)}
     return out
+
+
+def _sees(boundaries: object, path: str, keys: Iterable[str] | None) -> bool:
+    """Whether a ``boundaries`` field names the leaf at ``path`` whole, or, given ``keys``, the
+    key path of each: a key it names no path of reaches the function unseen."""
+    if _contains(boundaries, path):
+        return True
+    return keys is not None and all(_contains(boundaries, f"{path}.{k}") for k in keys)
 
 
 def _components(document: _Doc) -> dict[str, dict[str, Any]]:
@@ -722,7 +739,8 @@ below it, ``input < leaf`` fails there as it does below, and the other two the r
 
 
 def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison], set[str]]:
-    """Each comparison ``log``'s turn makes against the leaf at ``path``; and each table
+    """Each comparison ``log``'s turn makes against the leaf at ``path``, or for a key path
+    ``leaf.key`` against that key: one naming the key path or its whole leaf; and each table
     comparing a ``candidate`` read whose set ``log`` holds no value of. A table's pick helper
     ``bar``, ``thresholds`` and ``margin`` and its ``extract`` ``null_bar`` hold at equality, so
     their side is ``low``; a table cell's side is its comparison's, a ``between`` whose low
@@ -730,6 +748,9 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
     roles and its bare reads are compared in its own code, which the document does not hold, so
     they name no predicate: a role declared for a pick helper may be compared with ``>``."""
     entries = [i for i in log if i["item"] == "entry"]
+    keyed = key_path(path)
+    leaf = path if keyed is None else keyed[0]
+    named = {path, leaf}
     out: list[_Comparison] = []
     blind: set[str] = set()
 
@@ -743,8 +764,8 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
     for name, c in _components(document).items():
         if c["form"] == "table":
             for n, i in enumerate(cast("list[dict[str, Any]]", c["inputs"])):
-                roles = [_ROLES.get((i["helper"], r)) for r, b in i["params"].items() if b == path]
-                sides = {s for row in c["rows"] for s in _cell_sides(row["cells"][n], path)}
+                roles = [_ROLES.get((i["helper"], r)) for r, b in i["params"].items() if b == leaf]
+                sides = {s for row in c["rows"] for s in _cell_sides(row["cells"][n], leaf)}
                 if not roles and not sides:
                     continue  # the leaf does not reach this input
                 held = _read_values(i["read"], entries, c.get("grounded"))
@@ -760,19 +781,19 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
             for read, entry in cast("dict[str, Any]", c["boundaries"]).items():
                 values = _read_values(read, entries, None) or []
                 if isinstance(entry, list):
-                    if path in entry:
+                    if named & set(cast("list[str]", entry)):
                         add(name, None, values)
                     continue
                 for role, members in cast("dict[str, Any]", entry).items():
                     if role == "mass":
                         for m in cast("list[dict[str, Any]]", members):
-                            if path in m["bounds"]:
+                            if named & set(m["bounds"]):
                                 add(
                                     name,
                                     None,
                                     (x for v in values for x in _measure(role, v, m["labels"])),
                                 )
-                    elif path in members:
+                    elif named & set(cast("list[str]", members)):
                         add(name, None, (x for v in values for x in _measure(role, v, ())))
     return out, blind
 

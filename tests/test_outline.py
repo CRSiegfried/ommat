@@ -11,10 +11,11 @@ from typing import Any, cast
 
 import pytest
 
+import designs
 import outline_showcase as showcase
 from designs import full
 from ledger_logs import LOGS, fresh, rehashed
-from ommat import Record, defects, escalation, load, read_record
+from ommat import Record, decide_sync, defects, escalation, load, read_record
 from ommat._canonical import ordered
 from ommat.outline import design_outline, render_design, render_turn, turn_outline
 from ommat.outline.__main__ import main
@@ -1367,3 +1368,17 @@ def test_why_and_the_summary_s_bound_are_the_text_form_s(shown: dict[str, Any]) 
         "  not asked  desk  round 2  requirement: Unasked need-undetermined (d:urgency)",
     ]
     assert "  row 4  matched (its output)  -> Unsure" in text
+
+
+def test_a_key_path_bound_is_its_leafs_value_at_the_key() -> None:
+    loaded = designs.parts()
+    record = decide_sync(loaded, {"email": 0.4, "phone": 0.6}, {}).record
+    state = entry(turn_outline(record.document, loaded.document), "t:state")
+    by_param = {b["param"]: b for b in state["bounds"]}
+    assert by_param["part/at.email"]["bound"] == 0.5
+    assert by_param["part/at.email"]["distance"] == -0.1
+    # A document whose leaf lacks the key gives the bound as null.
+    document = json.loads(loaded.document)
+    document["parameters"]["part/at"]["value"] = {"phone": 0.5}
+    state = entry(turn_outline(record.document, document), "t:state")
+    assert {b["param"]: b["bound"] for b in state["bounds"]}["part/at.email"] is None

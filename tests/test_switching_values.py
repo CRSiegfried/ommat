@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import pytest
 
+import designs
 import extraction as x
 import test_grounded_rules as grounded
 from designs import minimal, roles, slot
@@ -1719,3 +1720,27 @@ def test_a_batch_refuses_bad_recorded_settings_before_any_write(tmp_path: Path) 
         _switching.switching_values_batch_sync([good, bad], TABLES, ["lim/n"], results=store)
     key = {"record": good.record_hash, "design": TABLES.design_hash, "parameter": "lim/n"}
     assert store.lookup(_switching.KIND, key) is None
+
+
+def test_a_mapping_leaf_whose_keys_a_function_names_is_probed_per_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded = designs.parts()
+    record = decide_sync(loaded, {"email": 0.4, "phone": 0.6}, {}).record
+    replays = counting_replays(monkeypatch)
+    value = run(record, loaded, "part/at", tmp_path)["value"]
+    assert value["unseen"] == []
+    # Each key's axis is its own compared value and a point past each side, three replays a
+    # key; one axis pooling 0.4 and 0.6 would replay each key at four values besides its own.
+    assert replays[0] == 2 * 3
+    # Each key is probed at its own read's value alone, so it switches there and only there.
+    assert value["keys"]["email"]["entries"]["d:fired"]["switching"] == [0.4]
+    assert value["keys"]["phone"]["entries"]["d:fired"]["switching"] == [0.6]
+
+
+def test_a_function_naming_some_keys_of_a_mapping_leaf_is_unseen(tmp_path: Path) -> None:
+    loaded = designs.parts({"t:state.email": ["part/at.email"], "t:state.phone": []})
+    record = decide_sync(loaded, {"email": 0.4, "phone": 0.6}, {}).record
+    value = run(record, loaded, "part/at", tmp_path)["value"]
+    assert value["unseen"] == ["fired"]
+    assert value["keys"]["email"]["entries"]["d:fired"]["switching"] == [0.4]

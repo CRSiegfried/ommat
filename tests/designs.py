@@ -8,6 +8,7 @@ from typing import Any
 from ommat import (
     Design,
     Group,
+    LoadedDesign,
     Parameter,
     Question,
     Rule,
@@ -15,6 +16,7 @@ from ommat import (
     SourceRequirement,
     Text,
     When,
+    load,
 )
 from ommat import types as t
 
@@ -255,3 +257,63 @@ def bounded(**changes: Any) -> Design:
     }
     fields.update(changes)
     return dataclasses.replace(design, **fields)
+
+
+PART_STATE = t.record(email=t.number(), phone=t.number())
+
+
+def fired_by_map(r: Any) -> str:
+    bars = r.param("part/at")
+    hits = [p for p in ("email", "phone") if r.read(f"t:state.{p}") >= bars[p]]
+    return "+".join(hits) or "none"
+
+
+def fired_by_leaves(r: Any) -> str:
+    hits = [p for p in ("email", "phone") if r.read(f"t:state.{p}") >= r.param(f"part/{p}")]
+    return "+".join(hits) or "none"
+
+
+FIRED = t.label("none", "email", "phone", "email+phone")
+
+
+def parts(boundaries: dict[str, list[str]] | None = None, *, leaves: bool = False) -> LoadedDesign:
+    """One bar per part: a mapping leaf whose keys the rule's boundaries name, or with
+    ``leaves`` the workaround, a number leaf per part."""
+    reads = ["t:state.email", "t:state.phone"]
+    if leaves:
+        rule = Rule(
+            "d:fired",
+            FIRED,
+            fired_by_leaves,
+            version="1",
+            reads=reads,
+            params=["part/email", "part/phone"],
+            boundaries={"t:state.email": ["part/email"], "t:state.phone": ["part/phone"]},
+        )
+        parameters = {
+            "part/email": Parameter(t.number(), 0.5),
+            "part/phone": Parameter(t.number(), 0.5),
+        }
+    else:
+        if boundaries is None:
+            boundaries = {"t:state.email": ["part/at.email"], "t:state.phone": ["part/at.phone"]}
+        rule = Rule(
+            "d:fired",
+            FIRED,
+            fired_by_map,
+            version="1",
+            reads=reads,
+            params=["part/at"],
+            boundaries=boundaries,
+        )
+        parameters = {"part/at": Parameter(t.mapping(t.number()), {"email": 0.5, "phone": 0.5})}
+    return load(
+        Design(
+            name="parts",
+            state=PART_STATE,
+            sources={},
+            rules={"fired": rule},
+            parameters=parameters,
+            policy="d:fired",
+        )
+    )

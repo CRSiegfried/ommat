@@ -11,7 +11,7 @@ import pytest
 import extraction as x
 import test_rescore as tr
 import test_switching_values as sv
-from designs import roles, slot
+from designs import parts, roles, slot
 from ommat import (
     CallResult,
     Design,
@@ -48,6 +48,7 @@ from ommat.helpers import mass
 pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")
 
 YES_NO = 'label{"no", "yes"}'
+_R = RefusalReason
 Point = dict[str, Any]
 
 
@@ -116,8 +117,12 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 def plain(
     records: Sequence[Record], recorded: LoadedDesign, loaded: LoadedDesign, points: list[Point]
 ) -> list[dict[str, Any]]:
-    """``rescore``'s rows over the points' designs."""
-    return rescore_sync(records, recorded, [with_parameters(loaded, p) for p in points])
+    """``rescore``'s rows over the points' designs, a key path's value merged into its leaf's."""
+    return rescore_sync(records, recorded, [designed(loaded, p) for p in points])
+
+
+def designed(loaded: LoadedDesign, point: Point) -> LoadedDesign:
+    return with_parameters(loaded, _grid._leaf_values(loaded, point))  # pyright: ignore[reportPrivateUsage]
 
 
 def same(
@@ -131,7 +136,7 @@ def same(
     assert [encode(row) for row in rows] == [encode(row) for row in theirs]
     assert repr(rows) == repr(theirs)
     assert [row["design"] for row in rows] == [
-        with_parameters(loaded, p).design_hash for p in points for _ in records
+        designed(loaded, p).design_hash for p in points for _ in records
     ]
     return rows
 
@@ -882,3 +887,145 @@ def test_a_source_needing_a_param_valued_entry_of_the_leaf_is_hidden(
     refusal = refused(monkeypatch, [record], loaded, loaded, [{"k/bar": 0.3}])
     assert refusal.reason is RefusalReason.hidden_leaf
     assert "lim" in str(refusal)
+
+
+# ---------------------------------------------------------------------------------------------
+# A key of a numeric mapping leaf: named in boundaries and varied by a point
+
+BARS = (0.1, 0.3, 0.5, 0.7, 0.9)
+
+
+def part_records(loaded: LoadedDesign) -> list[Record]:
+    return [
+        decide_sync(loaded, {"email": e, "phone": p}, {}).record
+        for e, p in ((0.4, 0.6), (0.3, 0.8))
+    ]
+
+
+def test_key_paths_vary_a_mapping_leaf_as_number_leaves_would(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The workaround, a number leaf per part, and the mapping form by key path give the same
+    # decisions with the same reruns.
+    by_leaves, by_keys = parts(leaves=True), parts()
+    leaf_points = [{"part/email": e, "part/phone": p} for e in BARS for p in BARS]
+    key_points = [{"part/at.email": e, "part/at.phone": p} for e in BARS for p in BARS]
+    count = counted(monkeypatch)
+    leaf_rows = same(part_records(by_leaves), by_leaves, by_leaves, leaf_points)
+    leaf_runs = count[0]
+    key_rows = same(part_records(by_keys), by_keys, by_keys, key_points)
+    assert count[0] - leaf_runs == leaf_runs < len(leaf_points) * 2
+    assert [r["decision"] for r in key_rows] == [r["decision"] for r in leaf_rows]
+    point = key_points[7]
+    assert (
+        key_rows[14]["design"]
+        == with_parameters(
+            by_keys, {"part/at": {"email": point["part/at.email"], "phone": point["part/at.phone"]}}
+        ).design_hash
+    )
+
+
+def test_a_whole_mapping_leaf_buckets_each_key_on_its_own_axis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = parts()
+    records = part_records(loaded)
+    points = [{"part/at": {"email": e, "phone": p}} for e in BARS for p in BARS]
+    count = counted(monkeypatch)
+    same(records, loaded, loaded, points)
+    # Each key's axis holds that key's compared value alone. The first record's email 0.4 and
+    # phone 0.6 split the bars in two each, 4 regions; the second's email 0.3, a tie in a bucket
+    # of its own, in three and its phone 0.8 in two, 6. One axis pooling both keys' values
+    # would give 9 and 16.
+    assert count[0] == 4 + 6
+
+
+def test_key_paths_mix_with_whole_leaves_and_take_any_key_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = parts()
+    records = part_records(loaded)
+    points: list[Point] = [{"part/at.phone": p, "part/at.email": e} for e in BARS for p in BARS]
+    same(records, loaded, loaded, points)
+    only_email = [{"part/at.email": e} for e in BARS]
+    same(records, loaded, loaded, only_email)
+
+
+def test_a_function_sees_only_the_keys_its_boundaries_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = parts({"t:state.email": ["part/at.email"], "t:state.phone": []})
+    records = part_records(loaded)
+    refusal = refused(monkeypatch, records, loaded, loaded, [{"part/at.phone": 0.3}])
+    assert refusal.reason is RefusalReason.hidden_leaf
+    assert refusal.path == "part/at.phone"
+    assert "fired" in str(refusal)
+    varied = [{"part/at": {"email": 0.3, "phone": 0.3}}, {"part/at": {"email": 0.3, "phone": 0.7}}]
+    refusal = refused(monkeypatch, records, loaded, loaded, varied)
+    assert refusal.reason is RefusalReason.hidden_leaf
+    assert refusal.path == "part/at"
+    # A key no point varies gives every run its one value, so it needs no boundary.
+    same(records, loaded, loaded, [{"part/at.email": e} for e in BARS])
+    same(records, loaded, loaded, [{"part/at": {"email": e, "phone": 0.3}} for e in BARS])
+
+
+def test_a_key_path_is_refused_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded = parts()
+    records = part_records(loaded)
+    cases: list[tuple[Point, RefusalReason, str]] = [
+        ({"part/at": {"email": 0.1}, "part/at.email": 0.2}, _R.overlapping_paths, "part/at.email"),
+        ({"part/at.fax": 0.2, "part/at.email": 0.1}, _R.unknown_path, "part/at.fax"),
+        ({"part/no.email": 0.2}, _R.unknown_path, "part/no.email"),
+        # Overlap is read from the names alone, before any path is looked up.
+        (
+            {"part/no.x": 0.2, "part/at.email": 0.1, "part/at": {}},
+            _R.overlapping_paths,
+            "part/at.email",
+        ),
+    ]
+    for point, reason, path in cases:
+        refusal = refused(monkeypatch, records, loaded, loaded, [point])
+        assert refusal.reason is reason
+        assert refusal.path == path
+    refusal = refused(monkeypatch, records, loaded, loaded, [{"part/at.email": "high"}])
+    assert refusal.reason is RefusalReason.invalid_design
+
+
+def test_paths_are_checked_in_code_point_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded = parts()
+    records = part_records(loaded)
+    for point in ({"part/zz": 1.0, "part/aa": 1.0}, {"part/aa": 1.0, "part/zz": 1.0}):
+        refusal = refused(monkeypatch, records, loaded, loaded, [point])
+        assert refusal.path == "part/aa"
+
+
+def test_a_key_path_into_a_mapping_the_job_does_not_vary_is_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = parts()
+    document = json.loads(base.document)
+    document["parameters"]["part/names"] = {
+        **document["parameters"]["part/at"],
+        "type": "mapping<string, string>",
+        "value": {"email": "x", "phone": "y"},
+    }
+    loaded = load(document, functions=base._callables)  # pyright: ignore[reportPrivateUsage]
+    records = part_records(loaded)
+    refusal = refused(monkeypatch, records, loaded, loaded, [{"part/names.email": "y"}])
+    assert refusal.reason is RefusalReason.unsupported_leaf
+    assert refusal.path == "part/names.email"
+
+
+def test_a_key_of_a_wording_slot_leaf_gives_each_value_its_own_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worded = sv.mood_design(Text("Mood over {th}?", [slot("th", param="mood/th")]))
+    document = json.loads(worded.document)
+    del document["rules"]["thf"]
+    loaded = load(document, functions=worded._callables)  # pyright: ignore[reportPrivateUsage]
+    records = [sv.mood_record(loaded)]
+    points = [{"mood/th.calm": calm} for calm in (0.3, 0.6, 0.6, 0.7)]
+    count = counted(monkeypatch)
+    rows = same(records, loaded, loaded, points)
+    assert count[0] == 3  # one per distinct value, as for a whole leaf that fills a slot
+    assert [row["stale"] for row in rows] == [["q:mood"], [], [], ["q:mood"]]

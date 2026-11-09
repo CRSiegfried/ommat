@@ -133,6 +133,15 @@ def is_declared_name(value: object) -> bool:
     return isinstance(value, str) and _NAME_RE.fullmatch(value) is not None
 
 
+def key_path(path: object) -> tuple[str, str] | None:
+    """A key path's leaf and key: a name, ``.``, then the key, any text; ``None`` for any other
+    value. A leaf path is a name, which holds no ``.``, so the first ``.`` ends it."""
+    if not isinstance(path, str):
+        return None
+    leaf, dot, key = path.partition(".")
+    return (leaf, key) if dot and is_declared_name(leaf) else None
+
+
 def is_segment(value: object) -> bool:
     """Whether ``value`` is one segment: no ``/``."""
     return isinstance(value, str) and _SEGMENT_RE.fullmatch(value) is not None

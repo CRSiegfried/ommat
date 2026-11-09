@@ -4,26 +4,30 @@ gives, each record rerun once per region of points whose runs cannot differ, not
 (§rescore-grid).
 
 A point's design is ``loaded`` with the point's leaves holding its values, built once per point
-as ``with_parameters`` builds it. A run reaches a numeric leaf only by comparing values the turn
-holds against it, so two points on the same side of every value a run compared give that run
-again: the same questions asked, the same values read and compared, the same decision. The job
-reruns one uncovered point with the switching job's light ledger, reads from its log each grid
-leaf's compared values and the side a leaf value equal to one joins, and gives that run's row to
-every uncovered point whose values fall in the same bucket on every grid leaf, until every point
-is covered. A tie joins the side the predicate puts it on where the document fixes the predicate,
-a table's pick helper and ``extract`` bindings and a table cell's own comparison; a function
-rule's ``boundaries`` roles and its bare reads, compared in code the document does not hold, put
-a tie in a bucket of its own. A ``boolean`` or ``label`` leaf, and a
-leaf that fills some question's wording slot, whose value reaches the wording and not a
-comparison, give each distinct grid value its own bucket. A run in which some table's
+as ``with_parameters`` builds it. A point names a leaf whole, or one key of a numeric mapping
+leaf by its key path, ``leaf.key``, that key's value replacing the one ``loaded``'s leaf holds.
+A run reaches a numeric leaf only by comparing values the turn holds against it, so two points
+on the same side of every value a run compared give that run again: the same questions asked,
+the same values read and compared, the same decision. The job reruns one uncovered point with
+the switching job's light ledger, reads from its log each grid leaf's compared values and the
+side a leaf value equal to one joins, and gives that run's row to every uncovered point whose
+values fall in the same bucket on every grid leaf, until every point is covered. A key path, and
+each key of a mapping leaf given whole, is bucketed on its own axis: the comparisons naming the
+leaf whole or that key's path. A tie joins the side the predicate puts it on where the document
+fixes the predicate, a table's pick helper and ``extract`` bindings and a table cell's own
+comparison; a function rule's ``boundaries`` roles and its bare reads, compared in code the
+document does not hold, put a tie in a bucket of its own. A ``boolean`` or ``label`` leaf, and a
+leaf, or a key of one, that fills some question's wording slot, whose value reaches the wording
+and not a comparison, give each distinct grid value its own bucket. A run in which some table's
 ``candidate`` read finds its set's entry holding no value, so that its compared values cannot be
 read, covers its own point alone.
 
 Before any run the job refuses a grid leaf a run could reach other than by a comparison it can
-see: a function rule declaring it whose ``boundaries`` do not name it, a ``C+``, ``C<`` or ``C>``
-table aggregating it beside other rows, a reader of an entry that holds it, a table row outputting
-``Param`` of it under any hit policy, and a function rule declaring it whose output type can hold
-a number. A function rule's ``boundaries`` are trusted as the switching job trusts them. Records
+see: a function rule declaring it whose ``boundaries`` name neither the leaf whole nor the path
+of each key the grid varies, a ``C+``, ``C<`` or ``C>`` table aggregating it beside other rows,
+a reader of an entry that holds it, a table row outputting ``Param`` of it under any hit policy,
+and a function rule declaring it whose output type can hold a number. A function rule's
+``boundaries`` are trusted as the switching job trusts them, each key path for its key. Records
 of one hash are rerun once. The rows are ``rescore``'s, in its order, with each point's design
 hash, and equal ``rescore`` over the points' designs row for row.
 """
@@ -38,7 +42,7 @@ from ommat._decide import EntryRefusal
 from ommat._design import InvalidDesign, LoadedDesign, Question
 from ommat._ledger import _copy
 from ommat._load import with_parameters
-from ommat._refs import code_point_sorted
+from ommat._refs import code_point_sorted, key_path
 from ommat._typed import decoded, typed
 from ommat._types import MappingOf, Type
 from ommat._values import type_name
@@ -146,14 +150,31 @@ class _Grid:
                 "the points do not all name one non-empty set of leaves",
                 reason=_R.uneven_grid,
             )
-        types: dict[str, Type] = {path: _leaf_type(path, loaded) for path in self.paths}
+        self.paths = code_point_sorted(self.paths)
+        for path in self.paths:
+            keyed = key_path(path)
+            if keyed is not None and keyed[0] in points[0]:
+                raise EvaluationRefusal(
+                    f"the points name the leaf at {keyed[0]} both whole and by its key path {path}",
+                    reason=_R.overlapping_paths,
+                    path=path,
+                )
+        types: dict[str, Type] = {path: _grid_type(path, loaded) for path in self.paths}
         self.document = cast("_Doc", decode(loaded.document))
         worded = _worded(loaded)
         self.compared = [
-            path for path in self.paths if _finite(types[path]) is None and path not in worded
+            path
+            for path in self.paths
+            if _finite(types[path]) is None and _leaf_of(path) not in worded
         ]
+        # Each compared mapping leaf's keys across the points, each bucketed on its own axis.
+        self.keys: dict[str, list[str]] = {
+            path: code_point_sorted({k for p in points for k in _held_keys(p[path])})
+            for path in self.compared
+            if isinstance(types[path], MappingOf)
+        }
         for path in self.compared:
-            unseen = _unseen(self.document, loaded, path)
+            unseen = _unseen(self.document, loaded, path, points)
             if unseen:
                 raise EvaluationRefusal(
                     f"the leaf at {path} reaches {', '.join(unseen)} other than by a comparison "
@@ -164,7 +185,7 @@ class _Grid:
         self.designs: list[LoadedDesign] = []
         for i, point in enumerate(points):
             try:
-                self.designs.append(with_parameters(loaded, point))
+                self.designs.append(with_parameters(loaded, _leaf_values(loaded, point)))
             except InvalidDesign as exc:
                 raise EvaluationRefusal(
                     f"points[{i}]'s design does not load: {exc}",
@@ -204,28 +225,32 @@ class _Grid:
         log: ``at`` alone when some table's compared values could not be read."""
         buckets: dict[str, Callable[[Fraction], int]] = {}
         for path in self.compared:
-            found, blind = _comparisons(self.document, path, log)
-            if blind:
-                return [at]
-            buckets[path] = _axis(found)
+            # A mapping leaf's each key on its own axis: the comparisons naming the leaf whole
+            # or that key's path.
+            for at_path in (
+                [f"{path}.{k}" for k in self.keys[path]] if path in self.keys else [path]
+            ):
+                found, blind = _comparisons(self.document, at_path, log)
+                if blind:
+                    return [at]
+                buckets[at_path] = _axis(found)
         mine = self.signature(at, buckets)
         return [q for q in sorted(uncovered) if self.signature(q, buckets) == mine]
 
     def signature(
         self, point: int, buckets: Mapping[str, Callable[[Fraction], int]]
     ) -> tuple[object, ...]:
-        """Where ``point`` falls on every grid leaf: a compared leaf's bucket, or each key's, a
-        by-value leaf's canonical bytes."""
+        """Where ``point`` falls on every grid path: a compared leaf's or key's bucket, or each
+        key's, a by-value path's canonical bytes."""
         out: list[object] = []
         for path, material in zip(self.paths, self.material[point], strict=True):
-            bucket = buckets.get(path)
-            if bucket is None:
+            if path not in self.compared:
                 out.append(material)
             elif type(material) is Fraction:
-                out.append(bucket(material))
+                out.append(buckets[path](material))
             else:
                 keyed = cast("tuple[tuple[str, Fraction], ...]", material)
-                out.append(tuple((k, bucket(x)) for k, x in keyed))
+                out.append(tuple((k, buckets[f"{path}.{k}"](x)) for k, x in keyed))
         return tuple(out)
 
 
@@ -260,19 +285,83 @@ def _axis(found: list[tuple[str, str | None, Fraction]]) -> Callable[[Fraction],
     return bucket
 
 
-def _unseen(document: _Doc, loaded: LoadedDesign, path: str) -> list[str]:
-    """Each component a run could reach the leaf at ``path`` through other than by a
+def _unseen(document: _Doc, loaded: LoadedDesign, path: str, points: Sequence[_Point]) -> list[str]:
+    """Each component a run could reach the leaf, or key, at ``path`` through other than by a
     comparison the grid can see, in code-point order: the switching job's hidden ones, each
     table with a row outputting ``Param`` of the leaf, and each function rule declaring it whose
-    output type can hold a number."""
-    out = _hidden(document, loaded, path)
+    output type can hold a number. A function rule sees a key path's key, and a mapping leaf's
+    each key whose value differs between two points holding it, only where its ``boundaries``
+    name the leaf whole or that key's path: a key no point varies gives every run the same
+    value."""
+    keyed = key_path(path)
+    leaf = path if keyed is None else keyed[0]
+    keys: set[str] | None = {keyed[1]} if keyed is not None else None
+    if keyed is None and isinstance(loaded._leaf_types[leaf], MappingOf):
+        held: dict[str, set[bytes]] = {}
+        for point in points:
+            value = point[path]
+            for k in _held_keys(value):
+                held.setdefault(k, set()).add(encode(cast("Mapping[str, object]", value)[k]))
+        keys = {k for k, values in held.items() if len(values) > 1}
+    out = _hidden(document, loaded, leaf, keys)
     for name, c in _components(document).items():
         if c["form"] == "table":
-            if any(_contains(row.get("output"), {"param": path}) for row in c["rows"]):
+            if any(_contains(row.get("output"), {"param": leaf}) for row in c["rows"]):
                 out.add(name)
-        elif path in c["params"] and not _discrete(loaded._types[c["provides"]]):
+        elif leaf in c["params"] and not _discrete(loaded._types[c["provides"]]):
             out.add(name)
     return code_point_sorted(out)
+
+
+def _leaf_of(path: str) -> str:
+    """The leaf a grid path names: itself, or a key path's leaf."""
+    keyed = key_path(path)
+    return path if keyed is None else keyed[0]
+
+
+def _held_keys(value: object) -> list[str]:
+    """A mapping value's keys; none for any other value, which the point's design refuses."""
+    if isinstance(value, Mapping):
+        return [k for k in cast("Mapping[object, object]", value) if type(k) is str]
+    return []
+
+
+def _grid_type(path: object, loaded: LoadedDesign) -> Type:
+    """A grid path's type: a leaf's as ``switching_values`` checks it; a key path's, its numeric
+    mapping leaf's value type, the key one ``loaded``'s value of the leaf holds, else
+    ``unknown-path``."""
+    keyed = key_path(path)
+    if keyed is None:
+        return _leaf_type(path, loaded)
+    leaf, key = keyed
+    t = loaded._leaf_types.get(leaf)
+    if not isinstance(t, MappingOf) or key not in cast("dict[str, Any]", loaded._leaf_value(leaf)):
+        raise EvaluationRefusal(
+            f"path {path!r} names no key of a mapping leaf of the parameter tree",
+            reason=_R.unknown_path,
+            path=cast(str, path),
+        )
+    try:
+        _leaf_type(leaf, loaded)
+    except EvaluationRefusal as exc:  # a mapping of a type the job does not vary
+        raise EvaluationRefusal(str(exc), reason=exc.reason, path=cast(str, path)) from None
+    return t.value
+
+
+def _leaf_values(loaded: LoadedDesign, point: _Point) -> dict[str, object]:
+    """A point as ``with_parameters`` takes it: each key path's value merged into its leaf's
+    value as ``loaded`` holds it."""
+    out: dict[str, object] = {}
+    for path, value in point.items():
+        keyed = key_path(path)
+        if keyed is None:
+            out[path] = value
+            continue
+        leaf, key = keyed
+        if leaf not in out:
+            out[leaf] = dict(cast("dict[str, object]", loaded._leaf_value(leaf)))
+        cast("dict[str, object]", out[leaf])[key] = value
+    return out
 
 
 def _worded(loaded: LoadedDesign) -> set[str]:

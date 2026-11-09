@@ -65,6 +65,7 @@ from ommat._refs import (
     code_point_sorted,
     is_declared_name,
     is_segment,
+    key_path,
     parse_ref,
 )
 from ommat._table import (
@@ -268,6 +269,9 @@ class _Loader:
         # Each leaf check 8 refuses under a boundaries field, left out of check 9's boundaries
         # clauses.
         self.refused_leaves: set[str] = set()
+        # Each key path a boundaries field names that check 8 lets through, to the type of its
+        # key's value as written and resolved.
+        self.key_types: dict[str, tuple[Type, Type]] = {}
         # Each leaf's value as Python holds it, bytes as ``bytes``; a document writes a bytes
         # value as base64url, read back here once its type passes check 10.
         self.live: dict[str, object] = {}
@@ -1299,7 +1303,8 @@ class _Loader:
                 self.fail(8, (owner, path), f"{where} names {_q(path)}, which is not a leaf")
         for owner, _, where, entry in self.boundary_entries():
             for path in _entry_paths(entry):
-                if path not in declared:
+                keyed = key_path(path)
+                if path not in declared and (keyed is None or keyed[0] not in declared):
                     self.refused_leaves.add(path)
                     self.fail(8, (owner, path), f"{where} names {_q(path)}, which is not a leaf")
         for path, t in self.leaf_types.items():
@@ -1355,6 +1360,9 @@ class _Loader:
                         )
         for owner, _, where, entry in self.boundary_entries():
             for path in _entry_paths(entry):
+                if path not in self.leaves:
+                    self.check_8_key(owner, where, path)
+                    continue
                 t = self.leaf_types.get(path)
                 if t is None or conforms(t, _NUMBER, {}) or conforms(t, _NUMBERS, {}):
                     continue
@@ -1365,6 +1373,41 @@ class _Loader:
                     f"{where} names {_q(path)}, whose type is {render(self.leaf_written[path])}, "
                     "which does not conform to number or mapping<string, number>",
                 )
+
+    def check_8_key(self, owner: str, where: str, path: str) -> None:
+        """Check 8's test of a key path a ``boundaries`` field names, its leaf declared: the leaf's
+        type conforms to ``mapping<string, number>`` and its value holds the key. The key is
+        read through ``leaf_keys``, so a change of the leaf's keys takes a load. A key path named
+        twice is checked once."""
+        if path in self.refused_leaves or path in self.key_types:
+            return
+        leaf, key = cast("tuple[str, str]", key_path(path))
+        t = self.leaf_types.get(leaf)
+        if t is None:
+            return  # check 10 refused the leaf's type
+        if not conforms(t, _NUMBERS, {}):
+            self.refused_leaves.add(path)
+            self.fail(
+                8,
+                (owner, path),
+                f"{where} names {_q(path)}, a key of {_q(leaf)}, whose type is "
+                f"{render(self.leaf_written[leaf])}, which does not conform to "
+                "mapping<string, number>",
+            )
+            return
+        keys = self.leaf_keys(leaf)
+        if keys is None:  # check 8's conformance clause refuses the leaf's value
+            self.refused_leaves.add(path)
+            return
+        if key not in keys:
+            self.refused_leaves.add(path)
+            self.fail(
+                8, (owner, path), f"{where} names {_q(path)}, but {_q(leaf)} has no key {_q(key)}"
+            )
+            return
+        written = self.leaf_written[leaf]
+        inner = cast(MappingOf, t).value
+        self.key_types[path] = (written.value if isinstance(written, MappingOf) else inner, inner)
 
     # --- check 9 ---------------------------------------------------------------------------
 
@@ -1992,7 +2035,7 @@ class _Loader:
                         f"to number: its type is {render(t)}",
                     )
                 for path in self.typed(cast("list[str]", entry)):
-                    self.bound(owner, where, path, self.leaf_types[path], _NUMBER, "number")
+                    self.bound(owner, where, path, self.boundary_type(path), _NUMBER, "number")
                 continue
             question = self.question(f"q:{parsed.name}")
             extraction = question.kind is AnswerKind.extraction
@@ -2017,11 +2060,11 @@ class _Loader:
                 labels = label_parts(_fixed(question.labels))[0]
             for role in ("bar", "margin"):
                 for path in self.typed(entry[role]):
-                    self.bound(owner, where, path, self.leaf_types[path], _UNIT, "number [0, 1]")
+                    self.bound(owner, where, path, self.boundary_type(path), _UNIT, "number [0, 1]")
             for path in self.typed(entry["thresholds"]):
-                t = self.leaf_types[path]
+                t = self.boundary_type(path)
                 self.bound(owner, where, path, t, _UNITS, "mapping<string, number [0, 1]>")
-                keys = self.leaf_keys(path)
+                keys = self.leaf_keys(path) if path in self.leaf_types else None
                 if keys is not None:
                     for label in code_point_sorted(keys - set(labels)):
                         self.fail(
@@ -2034,7 +2077,7 @@ class _Loader:
                 self.fail(9, names, f"{where}: a noul question's thresholds are not empty")
             for m in cast("list[dict[str, list[str]]]", entry["mass"]):
                 for path in self.typed(m["bounds"]):
-                    self.bound(owner, where, path, self.leaf_types[path], _UNIT, "number [0, 1]")
+                    self.bound(owner, where, path, self.boundary_type(path), _UNIT, "number [0, 1]")
                 for label in code_point_sorted(set(m["labels"]) - set(labels)):
                     self.fail(
                         9,
@@ -2049,7 +2092,7 @@ class _Loader:
         ``value`` leaves of ``number``, only over a scalar ``number`` question."""
         for role in ("null", "confidence"):
             for path in self.typed(entry[role]):
-                self.bound(owner, where, path, self.leaf_types[path], _UNIT, "number [0, 1]")
+                self.bound(owner, where, path, self.boundary_type(path), _UNIT, "number [0, 1]")
         if entry["value"] and (question.value_type is not ValueType.number or question.is_list):
             self.fail(
                 9,
@@ -2059,18 +2102,32 @@ class _Loader:
             )
             return
         for path in self.typed(entry["value"]):
-            self.bound(owner, where, path, self.leaf_types[path], _NUMBER, "number")
+            self.bound(owner, where, path, self.boundary_type(path), _NUMBER, "number")
 
     def typed(self, paths: Sequence[str]) -> list[str]:
         """The leaf paths check 8 let through, each with its type."""
-        return [p for p in paths if p not in self.refused_leaves and p in self.leaf_types]
+        return [
+            p
+            for p in paths
+            if p not in self.refused_leaves and (p in self.leaf_types or p in self.key_types)
+        ]
+
+    def boundary_type(self, path: str) -> Type:
+        """The type of a leaf or key path ``typed`` let through."""
+        found = self.key_types.get(path)
+        return self.leaf_types[path] if found is None else found[1]
+
+    def written_type(self, path: str) -> Type:
+        """A leaf or key path's type as declared, for messages."""
+        found = self.key_types.get(path)
+        return self.leaf_written[path] if found is None else found[0]
 
     def bound(self, owner: str, where: str, path: str, t: Type, to: Type, shown: str) -> None:
         if not conforms(t, to, {}):
             self.fail(
                 9,
                 (owner, path),
-                f"{where}: {_q(path)}'s type is {render(self.leaf_written[path])}, which does not "
+                f"{where}: {_q(path)}'s type is {render(self.written_type(path))}, which does not "
                 f"conform to {shown}",
             )
 
@@ -2657,14 +2714,14 @@ def _entry_paths(entry: Any) -> list[str]:
 
 def _grid(document: Mapping[str, Any]) -> Mapping[str, Any]:
     """The answer grid, from every ``boundaries`` field in the decoded document: keyed by read in
-    code-point order, field paths kept. A ``d:`` or ``t:`` read's entry is a tuple of leaf paths; a
-    ``q:`` read's maps ``bar``, ``thresholds`` and ``margin`` to tuples of leaf paths and ``mass``
-    to a tuple of ``{labels, bounds}``, one per label set, its bounds sharing the set's one axis.
-    Each role is the union over every component that names the read, without repeats and in
+    code-point order, field paths kept. A ``d:`` or ``t:`` read's entry is a tuple of leaf or key
+    paths; a ``q:`` read's maps ``bar``, ``thresholds`` and ``margin`` to tuples of them and
+    ``mass`` to a tuple of ``{labels, bounds}``, one per label set, its bounds sharing the set's one
+    axis. Each role is the union over every component that names the read, without repeats and in
     ascending order of canonical bytes; the mass sets are in ascending order of their sorted labels'
     canonical bytes, and a set's labels are held in that order too, so a lint takes "the set's first
-    label in declared order" from the question. A read whose boundaries name no leaf over
-    every component has no entry. Read-only at every depth. A table gives its fields as
+    label in declared order" from the question. A read whose boundaries name no leaf over every
+    component has no entry. Read-only at every depth. A table gives its fields as
     ``_table_boundaries`` derives them."""
     rules = list(cast("dict[str, Any]", document["rules"]).values())
     fields = [r.get("boundaries") for r in rules]

@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import pytest
 
+import designs
 from designs import roles
 from ommat import (
     Answer,
@@ -667,3 +668,10 @@ def test_points_refuses_a_read_it_cannot_fill(
 def test_points_takes_exactly_a_loaded_design() -> None:
     with pytest.raises(TypeError, match="exactly a LoadedDesign"):
         points(object(), "q:spam")  # type: ignore[arg-type]
+
+
+def test_a_key_path_boundary_is_its_leafs_value_at_the_key() -> None:
+    by_keys, by_leaves = designs.parts(), designs.parts(leaves=True)
+    for ref in ("t:state.email", "t:state.phone"):
+        assert points(by_keys, ref) == points(by_leaves, ref)
+    assert 0.5 in points(by_keys, "t:state.email")

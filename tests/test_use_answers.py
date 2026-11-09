@@ -477,6 +477,7 @@ def test_a_refusal_names_only_what_its_reason_names() -> None:
         "empty-copy",
         "uneven-grid",
         "hidden-leaf",
+        "overlapping-paths",
     }
 
 

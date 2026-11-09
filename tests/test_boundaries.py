@@ -15,6 +15,7 @@ from designs import bounded, full, roles
 from ommat import Design, DesignFailure, InvalidDesign, Parameter, Rule, load
 from ommat import types as t
 from ommat._canonical import decode
+from ommat._load import with_parameters
 
 
 def refused(design: Design) -> list[DesignFailure]:
@@ -428,3 +429,53 @@ def test_the_specs_function_rule_example_loads() -> None:
         },
         "t:order_age": ["bars/window_days"],
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# A key path: one key of a numeric mapping leaf
+
+
+def test_a_key_path_names_one_key_where_a_number_leaf_goes() -> None:
+    design = route_with({"d:score": ["weights.a"], EMAIL: roles(bar=["tone/thresholds.warm"])})
+    loaded = load(design)
+    assert loaded._grid["d:score"] == ("score/cut", "score/low", "weights.a")
+    assert loaded._grid[EMAIL]["bar"] == ("tone/thresholds.warm",)
+    boundaries = decode(loaded.document)["rules"]["route"]["boundaries"]
+    assert boundaries["d:score"] == ["weights.a"]
+
+
+@pytest.mark.parametrize(
+    ("path", "says"),
+    [
+        ("weights.b", 'but "weights" has no key "b"'),
+        ("weights.", 'but "weights" has no key ""'),
+        ("mood.a", 'a key of "mood", whose type is label{"calm", "wild"}, which does not conform'),
+        ("list/cap.a", "which does not conform to mapping<string, number>"),
+        ("no/leaf.a", "which is not a leaf"),
+        ("Weights.a", "which is not a leaf"),
+    ],
+)
+def test_check_8_a_key_path_whose_leaf_or_key_is_missing_or_not_numeric(
+    path: str, says: str
+) -> None:
+    (failure,) = only(route_with({"d:score": [path]}), 8)
+    assert says in failure.message, failure
+
+
+def test_check_9_a_key_path_is_held_to_its_role_as_a_number_leaf() -> None:
+    found = only(route_with({EMAIL: roles(bar=["weights.a"])}), 9)
+    assert any(
+        '"weights.a"\'s type is number, which does not conform to number [0, 1]' in f.message
+        for f in found
+    )
+    found = only(score_with({"q:intent/tone": roles(thresholds=["tone/thresholds.warm"])}), 9)
+    assert any("mapping<string, number [0, 1]>" in f.message for f in found)
+
+
+def test_a_key_path_holds_its_leaf_to_the_key_when_its_value_changes() -> None:
+    loaded = load(route_with({"d:score": ["weights.a"]}))
+    assert with_parameters(loaded, {"weights": {"a": 2}})._leaf_value("weights") == {"a": 2}
+    with pytest.raises(InvalidDesign) as info:
+        with_parameters(loaded, {"weights": {"b": 2}})
+    assert [f.check for f in info.value.failures] == [8]
+    assert 'has no key "a"' in info.value.failures[0].message
