@@ -135,10 +135,14 @@ def _logged(item: dict[str, Any]) -> dict[str, Any]:  # pyright: ignore[reportUn
     copy in exact types, each float its canonical bytes read as an integer (integral, at most
     ``MAX_INTEGER`` in magnitude, ``-0.0`` included) as that ``int``; an entry, plan or verdict
     item with its own members in canonical order and its ``order``, its values' objects as
-    held; any other item with every object in canonical order. No check: the item is in the
-    domain."""
+    held, and its ``order``'s keys in canonical order, as the read decodes them, not in the
+    pre-order ``order_of`` gives; any other item with every object in canonical order. No
+    check: the item is in the domain."""
     if item.get("item") in _ORDERED:
-        return _with_held_order(cast("dict[str, Any]", _read_back(item, False)))
+        logged = _with_held_order(cast("dict[str, Any]", _read_back(item, False)))
+        order = cast("dict[str, Any]", logged[_ORDER])
+        logged[_ORDER] = {k: order[k] for k in sorted(order, key=_utf16_key)}
+        return logged
     return cast("dict[str, Any]", _read_back(item, True))
 
 

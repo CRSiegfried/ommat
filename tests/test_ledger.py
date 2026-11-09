@@ -1977,3 +1977,60 @@ def test_redact_digests_a_set_literal_under_its_sets_tree() -> None:
     assert step["arguments"]["who"]["literal"]["name"] == digest("Bo", record)
     assert step["arguments"]["who"]["literal"]["age"] == 41
     assert step["arguments"]["to"]["ref"] == grounded_ref(ADDR, digest("Bo", record))
+
+
+# ---------------------------------------------------------------------------------------------
+# _logged: an item as the log reads it back, without the encoding
+
+
+def test_logged_gives_an_items_order_in_the_order_the_log_reads_it() -> None:
+    from ommat._canonical import decode_written
+    from ommat._ledger import _copy, _in_held_order, _logged, _with_held_order
+
+    # Twelve objects out of canonical order: their pre-order indexes run to 12, which the
+    # read-back sorts as text, "10" before "2".
+    item: dict[str, Any] = {
+        "item": "entry",
+        "ref": "d:x",
+        "round": 1,
+        "call": None,
+        "value": [{"b": i, "a": 2.0} for i in range(12)],
+    }
+    read = _in_held_order(decode_written(encode(_with_held_order(_copy(item)))))
+    logged = _logged(item)
+    assert repr(logged) == repr(read)
+    assert list(logged["order"]) == ["1", "10", "11", "12", "2", "3", "4", "5", "6", "7", "8", "9"]
+    assert logged["value"][0] == {"b": 0, "a": 2}
+    assert list(logged["value"][0]) == ["b", "a"]
+    assert repr(_logged({"item": "round", "n": 1, "z": {"b": 1.0, "a": 1}})) == repr(
+        decode_written(encode({"item": "round", "n": 1, "z": {"b": 1.0, "a": 1}}))
+    )
+
+
+def test_logged_equals_a_records_own_entry_over_twelve_ordered_objects() -> None:
+    from ommat import Design, Rule, decide_sync, load
+    from ommat import types as t
+    from ommat._ledger import _logged
+
+    def twelve(r: Any) -> list[dict[str, Any]]:
+        return [{"b": i, "a": 2.0} for i in range(12)]
+
+    loaded = load(
+        Design(
+            name="twelve",
+            state=t.record(text=t.string),
+            sources={},
+            rules={
+                "act": Rule(
+                    "d:act", t.list_(t.record(b=t.integer(), a=t.number())), twelve, version="1"
+                )
+            },
+            parameters={},
+            policy="d:act",
+        )
+    )
+    record = decide_sync(loaded, {"text": "x"}, {}).record
+    entry = record.entries["d:act"]
+    assert len(entry["order"]) == 12
+    written = {k: v for k, v in entry.items() if k != "order"}
+    assert repr(_logged(written)) == repr(entry)
