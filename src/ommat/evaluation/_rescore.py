@@ -13,8 +13,10 @@ in which a source asks something the record does not answer, a stale question, i
 ``not-determined``, as in the switching-value job: its decision says nothing of the record.
 
 Every record is read and checked as replay checks it, against ``recorded``, its recorded
-settings included, before any run. The rows come back in design order, then record order,
-as plain data.
+settings included, before any run. A record's runs go one after another, its first under the
+first design in full and kept as the reference each later one fires an unchanged rule from
+(``_interpret.Reuse``), so that a design changing a few leaves reruns only what they reach. The
+rows come back in design order, then record order, as plain data.
 """
 
 from collections.abc import Sequence
@@ -23,7 +25,7 @@ from typing import Any, cast
 from ommat._decide import EntryRefusal, _bound, _opening, run_settings
 from ommat._design import LoadedDesign
 from ommat._fixture import Base, FixtureBinding
-from ommat._interpret import _marker_document, interpret
+from ommat._interpret import Reuse, _marker_document, interpret
 from ommat._ledger import _logged
 from ommat._markers import Cause, CauseCode, Unavailable
 from ommat._refs import code_point_sorted
@@ -66,10 +68,15 @@ async def rescore(
     _refuse_unfit(names, read, logs, recorded)
     for log in logs:
         _run_of(log)  # a recorded setting decide refuses is refused here, before any run
+    # Record by record, so one record's reference run serves each later design (``Reuse``).
+    results: list[list[tuple[dict[str, Any] | str, list[str]]]] = []
+    for log in logs:
+        reuse = Reuse()
+        results.append([await _rescored(log, loaded, recorded, reuse) for loaded in designs])
     rows: list[dict[str, Any]] = []
-    for loaded in designs:
-        for r, log in zip(read, logs, strict=True):
-            decision, stale = await _rescored(log, loaded, recorded)
+    for i, loaded in enumerate(designs):
+        for r, found in zip(read, results, strict=True):
+            decision, stale = found[i]
             rows.append(
                 {
                     "design": loaded.design_hash,
@@ -124,10 +131,10 @@ def _run_of(log: _Log) -> Any:
 
 
 async def _rescored(
-    log: _Log, loaded: LoadedDesign, recorded: LoadedDesign
+    log: _Log, loaded: LoadedDesign, recorded: LoadedDesign, reuse: Reuse
 ) -> tuple[dict[str, Any] | str, list[str]]:
     """The policy's entry, or ``not-determined``, of ``log``'s turn rerun under ``loaded`` as
-    replay reruns it, and the stale refs."""
+    replay reruns it, and the stale refs; ``reuse`` is the record's reference run."""
     state = cast("dict[str, Any]", _state(log))  # the record checks found a value there
     run = _run_of(log)
     base = Base(log, loaded, design=recorded)
@@ -153,6 +160,7 @@ async def _rescored(
         clock=None,
         cut=_cut(log),
         carried=frozenset(),
+        reuse=reuse,
     )
     stale = code_point_sorted(fixture.stale)
     if stale:

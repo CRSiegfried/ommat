@@ -25,10 +25,13 @@ handed plain data.
 """
 
 import asyncio
+import dataclasses
+import enum
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
+from types import MappingProxyType
 from typing import Any, cast
 
 from ommat import _form
@@ -76,6 +79,7 @@ from ommat._read_view import (
     Role,
     UndeclaredRead,
     _Stop,
+    is_candidate_read,
 )
 from ommat._refs import (
     candidate_values,
@@ -152,6 +156,7 @@ async def interpret(
     clock: float | None,
     cut: tuple[int, bool] | None,
     carried: frozenset[str],
+    reuse: "Reuse | None" = None,
 ) -> dict[str, object]:
     """Run the turn's rounds over the ledger decide opened, which holds the ``design`` and
     ``settings`` items and the state entry, and return the live board when interpret stops: every
@@ -166,7 +171,9 @@ async def interpret(
     carried set are decide's to check. A cancellation propagates: one
     delivered at an await with nothing of the round it interrupted appended, and a
     ``CancelledError`` a function ``when``, a rule or a method of a returned value raises with
-    every item appended before it.
+    every item appended before it. ``reuse``, which only the evaluation jobs pass, is one
+    record's reference run: the first run it is given keeps it, and a later one fires a rule
+    from it where ``Reuse`` says the call would give the same.
     """
     if carried:
         raise _InterpretError("carried providers are not supported in this engine")
@@ -176,7 +183,8 @@ async def interpret(
         raise _InterpretError("the cut stands in for the clock, never beside it")
     end = None if deadline is None or clock is None else clock + deadline
     limits = _Limits(None if budget is None else _exact(budget), end, cut)
-    return await _Turn(ledger, loaded, state, bindings, round_bound, timeout, carried, limits).run()
+    turn = _Turn(ledger, loaded, state, bindings, round_bound, timeout, carried, limits, reuse)
+    return await turn.run()
 
 
 @dataclass(frozen=True, slots=True)
@@ -802,6 +810,7 @@ class _Turn:
         timeout: float,
         carried: frozenset[str],
         limits: _Limits,
+        reuse: "Reuse | None" = None,
     ) -> None:
         self.ledger = ledger
         self.loaded = loaded
@@ -819,6 +828,11 @@ class _Turn:
         """Each candidate-valued question left out of its batch, with its own marker."""
         self.spent = Fraction(0)
         self.document = design_sources(loaded)
+        self.reuse = reuse
+        self.keeping = reuse is not None and reuse.reference is None  # the reference run
+        self.changed = None if reuse is None or self.keeping else reuse.changed(loaded)
+        if self.keeping:
+            cast(Reuse, reuse).calls = {}  # a reference run that raised left only part
 
     async def run(self) -> dict[str, object]:
         """Run the rounds and return the live board, which decide reads."""
@@ -842,6 +856,8 @@ class _Turn:
             )
         if self.sorter.is_active():  # every node is done when interpret ends
             raise _InterpretError("interpret ended with a node not done")
+        if self.keeping:
+            cast(Reuse, self.reuse).kept(self.loaded, self.board)
         return self.board
 
     # -- the rule phase ----------------------------------------------------------------------
@@ -891,9 +907,80 @@ class _Turn:
             self.write_outcome(ref, n, outcomes[ref])
 
     def outcome(self, rid: str, r: Rule | Table, current: Current | None) -> "_Outcome":
+        """A rule's outcome: from the reference run's call where ``Reuse`` allows, a table's
+        whole and a function's judged afresh on this board; else from calling it, which a
+        reference run keeps."""
+        key = (rid, None if current is None else current.value)
+        held = self.held(key, r, current)
         if isinstance(r, Table):
-            return self.table_outcome(rid, r, current)
-        return self.rule_outcome(rid, r, current)
+            if held is not None:
+                return _copied_outcome(cast(_Outcome, held))
+            outcome = self.table_outcome(rid, r, current)
+            if self.keeping:
+                cast(Reuse, self.reuse).calls[key] = outcome
+            return outcome
+        if held is not None:
+            kept = cast(Called, held)
+            called = dataclasses.replace(kept, derivation=cast(Any, _fresh(kept.derivation)))
+        else:
+            called = self.rule_call(rid, r, current)
+            if self.keeping:
+                cast(Reuse, self.reuse).calls[key] = called
+        return self.rule_outcome(rid, r, called)
+
+    def held(
+        self, key: tuple[str, str | None], r: Rule | Table, current: Current | None
+    ) -> "Called | _Outcome | None":
+        """The reference run's call of rule ``key[0]`` for this candidate, when calling it
+        again would give the same: it declares no leaf whose value changed, a function rule's
+        callable is the reference's own, and every entry its read view reaches is the
+        reference's."""
+        reuse, changed = self.reuse, self.changed
+        if reuse is None or changed is None:
+            return None
+        found = reuse.calls.get(key)
+        if found is None:
+            return None
+        rid = key[0]
+        if not changed.isdisjoint(self.loaded._params[rid]):
+            return None
+        reference = cast(LoadedDesign, reuse.reference)
+        if not isinstance(r, Table) and (
+            self.loaded._callables[rid] is not reference._callables[rid]
+        ):
+            return None
+        for ref in self.reached(rid, r, current):
+            if not _same(self.board.get(ref, _ABSENT), reuse.board.get(ref, _ABSENT)):
+                return None
+        return found
+
+    def reached(self, rid: str, r: Rule | Table, current: Current | None) -> Iterator[str]:
+        """Each board ref a rule's read view can reach, as ``ReadView.read`` reads it: each
+        declared read's entry or the marker at its declared ref; for a grounded read not on
+        the board, its set and each candidate's entry, or over the rule's own set the current
+        candidate's alone; and the rule's own set, whose member ``candidate`` reads."""
+        grounded = self.loaded._grounded
+        bases: set[str] = set()
+        for read in self.loaded._reads[rid]:
+            if not is_candidate_read(read):
+                p = parse_ref(read)
+                bases.add(f"{p.level}:{p.name}")
+        bases |= {grounded[b] for b in bases if b in grounded}
+        if r.grounded is not None:
+            bases.add(r.grounded)
+        for b in code_point_sorted(bases):
+            yield b
+            if b not in grounded or b in self.board:
+                continue
+            set_ref = grounded[b]
+            if current is not None and set_ref == current.set_ref:
+                yield grounded_ref(b, current.value)
+                continue
+            members = self.board.get(set_ref)
+            if type(members) is list:
+                field_ = self.loaded._candidate_sets.get(set_ref)
+                for candidate in candidate_values(cast("list[object]", members), field_):
+                    yield grounded_ref(b, candidate)
 
     def write_outcome(self, ref: str, n: int, outcome: "_Outcome") -> None:
         index = self.write(ref, n, None, outcome.written, outcome.derivation, rows=outcome.rows)
@@ -902,10 +989,8 @@ class _Turn:
         if outcome.unnamed is not None:
             self.ledger.write_unhashed("reads", outcome.unnamed, index)
 
-    def rule_outcome(self, rid: str, r: Rule, current: Current | None) -> "_Outcome":
-        """Call a function rule on its read view and judge it by the read view's order of
-        outcomes: the first undeclared read, the first ``require`` stop, a raise, an invalid
-        return, the returned value."""
+    def rule_call(self, rid: str, r: Rule, current: Current | None) -> Called:
+        """Call a function rule on its read view."""
         leaves = {path: self.loaded._leaf_value(path) for path in r.params}
         view = ReadView(
             Role(ComponentKind.rule, rid),
@@ -917,7 +1002,12 @@ class _Turn:
             sets=self.loaded._candidate_sets,
             current=current,
         )
-        called = call(self.loaded._callables[rid], view)
+        return call(self.loaded._callables[rid], view)
+
+    def rule_outcome(self, rid: str, r: Rule, called: Called) -> "_Outcome":
+        """Judge a function rule's call by the read view's order of outcomes: the first
+        undeclared read, the first ``require`` stop, a raise, an invalid return, the returned
+        value."""
         stop, error, returned = called.stop, called.error, called.returned
         unnamed: str | None = None
         written: Written
@@ -1590,6 +1680,135 @@ class _Turn:
         index = self.ledger.append(item)
         self.board[ref] = live
         return index
+
+
+# ---------------------------------------------------------------------------------------------
+# A reference run's calls, which an evaluation job's later runs of the same record reuse
+
+
+class Reuse:
+    """One record's reference run, kept by an evaluation job that reruns the record under
+    several designs: each rule's call by rule id and candidate, a function rule's ``Called``
+    and a table's outcome, and the live board the run ended with. The first run handed it
+    keeps it. A later run under a design whose document is the reference's but for its leaves'
+    values fires a rule from the reference's call, not calling it, when the rule declares no
+    leaf whose value differs, a function rule's callable is the reference's own, and every
+    entry its read view reaches is the reference's, by ``_same``: a rule's value being a
+    function of what it reads, its leaves and its candidate (§rule-contract, §read-view), the
+    run writes what calling it would. A function's call is judged afresh on the run's board.
+    Sources are asked, and their function ``when`` called, as ever, so a source now asked or
+    left unasked, a stale question, the budget and the cut each reach a rule through what it
+    reads.
+    A run under any other design keeps and reuses nothing."""
+
+    def __init__(self) -> None:
+        self.reference: LoadedDesign | None = None
+        self.board: dict[str, object] = {}
+        self.calls: dict[tuple[str, str | None], Called | _Outcome] = {}
+        self._shapes: dict[str, bytes] = {}
+
+    def kept(self, loaded: LoadedDesign, board: dict[str, object]) -> None:
+        """Keep a finished reference run under ``loaded``."""
+        self.reference, self.board = loaded, board
+
+    def changed(self, loaded: LoadedDesign) -> frozenset[str] | None:
+        """The leaves whose values differ between ``loaded`` and the reference design, or
+        ``None`` when the documents differ elsewhere, a leaf's type included."""
+        reference = cast(LoadedDesign, self.reference)
+        if not _shares_all_but_leaves(loaded, reference) and self._shape(loaded) != self._shape(
+            reference
+        ):
+            return None
+        mine, theirs = loaded._leaf_bytes, reference._leaf_bytes
+        return frozenset(p for p in mine if mine[p] != theirs[p])
+
+    def _shape(self, loaded: LoadedDesign) -> bytes:
+        """The design document with every leaf's value and order dropped."""
+        found = self._shapes.get(loaded.design_hash)
+        if found is None:
+            if len(self._shapes) >= _SHAPES_HELD:
+                self._shapes.clear()
+            doc = cast("dict[str, Any]", decode(loaded.document))
+            leaves = cast("dict[str, dict[str, Any]]", doc["parameters"])
+            doc["parameters"] = {p: leaf["type"] for p, leaf in leaves.items()}
+            found = self._shapes[loaded.design_hash] = encode(doc, MAX_DOCUMENT_DEPTH)
+        return found
+
+
+_SHAPES_HELD = 1024
+_LEAF_PARTS = frozenset({"_design", "_document", "_hash", "_grid", "_leaf_bytes"})
+"""The parts of a loaded design ``with_parameters`` builds afresh when it loads nothing."""
+
+
+def _held_alike(u: object, v: object) -> bool:
+    """The same object, or a ``Design``'s snapshot of the same mapping: its every key holding
+    the same object."""
+    if u is v:
+        return True
+    if type(u) is not MappingProxyType or type(v) is not MappingProxyType:
+        return False
+    x, y = cast("Mapping[object, object]", u), cast("Mapping[object, object]", v)
+    return x.keys() == y.keys() and all(x[k] is y[k] for k in x)
+
+
+def _shares_all_but_leaves(a: LoadedDesign, b: LoadedDesign) -> bool:
+    """Whether two loaded designs hold every part but their leaves' values as the same
+    objects, as ``with_parameters`` builds one from the other when it loads nothing."""
+    slots = (n for n in LoadedDesign.__slots__ if n not in _LEAF_PARTS)
+    if any(getattr(a, n) is not getattr(b, n) for n in slots):
+        return False
+    x, y = a._design, b._design
+    fields = (f.name for f in dataclasses.fields(x) if f.name != "parameters")
+    if not all(_held_alike(getattr(x, n), getattr(y, n)) for n in fields):
+        return False
+    return x.parameters.keys() == y.parameters.keys() and all(
+        x.parameters[p].type == y.parameters[p].type for p in x.parameters
+    )
+
+
+_ABSENT = object()
+"""A ref not on a board."""
+_SAME_FIELDS = (Answer, ExtractionAnswer, Cause, Unsure, Unavailable, Unasked)
+
+
+def _same(a: object, b: object) -> bool:
+    """Whether two live board values are alike in everything a rule can tell apart: exact
+    types at every depth, a mapping's keys in order, a float's bits (every NaN alike), an
+    answer's and a marker's every field. A value of any other type is the same only as
+    itself."""
+    if a is b:
+        return True
+    kind = type(a)
+    if kind is not type(b):
+        return False
+    if kind is float:
+        return cast(float, a).hex() == cast(float, b).hex()
+    if kind in (str, int, bool, bytes) or isinstance(a, enum.Enum):
+        return a == b
+    if kind is dict:
+        x, y = cast("dict[object, object]", a), cast("dict[object, object]", b)
+        return (
+            len(x) == len(y)
+            and all(_same(i, j) for i, j in zip(x, y, strict=True))
+            and all(_same(x[k], y[k]) for k in x)
+        )
+    if kind is list or kind is tuple:
+        x2, y2 = cast("Sequence[object]", a), cast("Sequence[object]", b)
+        return len(x2) == len(y2) and all(_same(i, j) for i, j in zip(x2, y2, strict=True))
+    if kind in _SAME_FIELDS:
+        return all(
+            _same(getattr(a, f.name), getattr(b, f.name)) for f in dataclasses.fields(cast(Any, a))
+        )
+    return False
+
+
+def _copied_outcome(outcome: "_Outcome") -> "_Outcome":
+    """A kept table outcome with fresh containers, so no run changes the reference's."""
+    written = outcome.written
+    if not isinstance(written, Undetermined):
+        written = (_fresh(written[0]), _fresh(written[1]))
+    rows = None if outcome.rows is None else list(outcome.rows)
+    return _Outcome(written, None, rows, outcome.exception, outcome.unnamed)
 
 
 # Per-design work a turn reads and never changes, kept by design hash, the hash of the design

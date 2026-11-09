@@ -73,7 +73,7 @@ from ommat._canonical import decode, encode
 from ommat._decide import _bound, _opening, run_settings
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._fixture import Base, FixtureBinding, RecordedCalls
-from ommat._interpret import interpret
+from ommat._interpret import Reuse, interpret
 from ommat._ledger import _logged, decision_bytes
 from ommat._load import load, with_parameters
 from ommat._read_view import _ViewError, is_candidate_read, walk
@@ -127,7 +127,7 @@ async def switching_values(
             f"the store holds a {KIND} entry under {key!r}", reason=_R.held_key, key=[key]
         )
     await baseline(log, loaded)
-    entry = await _entry(log, shared, path, t, key)
+    entry = await _entry(log, shared, path, t, key, Reuse())
     results.write(entry)
     return entry
 
@@ -179,8 +179,9 @@ async def switching_values_batch(
     for (_, log), row in zip(checked, keys, strict=True):
         if row:
             await baseline(log, loaded)
+        reuse = Reuse()  # one reference run per record, whichever leaf's probe ran it
         for path, t, key in zip(paths, types, row, strict=True):
-            entry = await _entry(log, shared, path, t, key)
+            entry = await _entry(log, shared, path, t, key, reuse)
             results.write(entry)
             out.append(entry)
     return out
@@ -205,10 +206,11 @@ def switching_values_batch_sync(
 
 
 async def _entry(
-    log: _Log, shared: "_Shared", path: str, t: Type, key: dict[str, str]
+    log: _Log, shared: "_Shared", path: str, t: Type, key: dict[str, str], reuse: Reuse
 ) -> dict[str, Any]:
-    """The entry for one record and leaf, every replay done."""
-    job = _Job(log, shared, path)
+    """The entry for one record and leaf, every replay done, ``reuse`` the record's reference
+    run."""
+    job = _Job(log, shared, path, reuse)
     loaded = shared.loaded
     value: dict[str, Any]
     if isinstance(t, MappingOf):
@@ -379,8 +381,9 @@ class _Job:
     """One record, design and leaf: ``summary`` replays and reports one varied value's
     results, ``unseen`` names what the probes could not see."""
 
-    def __init__(self, log: _Log, shared: _Shared, path: str) -> None:
+    def __init__(self, log: _Log, shared: _Shared, path: str, reuse: Reuse) -> None:
         self.log, self.shared, self.path = log, shared, path
+        self.reuse = reuse  # the record's reference run, shared by its every leaf
         self.loaded = shared.loaded
         self.document = shared.document
         self.mine = {i["ref"]: i for i in log if i["item"] == "entry"}
@@ -451,7 +454,7 @@ class _Job:
             components = _components(self.document)
             self.late |= {n for f in design for n in f["names"] if n in components}
             return {"not-loading": design}, []
-        rerun, fixture = await _rerun(self.log, design, self.log)
+        rerun, fixture = await _rerun(self.log, design, self.log, reuse=self.reuse)
         rerun_log = rerun.log
         outside = bool(fixture.stale)  # a stale ref: the record cannot answer this run
         run = _Run(
@@ -510,13 +513,19 @@ class _Rerun:
 
 
 async def _rerun(
-    log: _Log, loaded: LoadedDesign, answers: _Log, *, design: LoadedDesign | None = None
+    log: _Log,
+    loaded: LoadedDesign,
+    answers: _Log,
+    *,
+    design: LoadedDesign | None = None,
+    reuse: Reuse | None = None,
 ) -> tuple[_Rerun, FixtureBinding]:
     """``log``'s turn rerun under ``loaded`` as replay reruns it, the fixture built from
     ``answers``' calls and each source checked against them under ``design``, the design the
     answers were decided under, ``loaded`` itself when ``None``, writing to no record: the
     rerun and the fixture, whose ``stale`` names the stale refs. The record checks found a
-    value at the state entry, and the caller typed it under ``loaded``."""
+    value at the state entry, and the caller typed it under ``loaded``. ``reuse`` is the
+    record's reference run, which the job's first rerun of it keeps."""
     state = next(i for i in log if i["item"] == "entry" and i["ref"] == _STATE)
     settings = cast("dict[str, Any]", log[1]["settings"])
     run = run_settings(
@@ -551,6 +560,7 @@ async def _rerun(
         clock=None,
         cut=_cut(log),
         carried=frozenset(),
+        reuse=reuse,
     )
     policy = loaded._design.policy
     if not any(i["item"] == "entry" and i["ref"] == policy for i in kept.log):
