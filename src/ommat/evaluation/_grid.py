@@ -11,9 +11,9 @@ reruns one uncovered point with the switching job's light ledger, reads from its
 leaf's compared values and the side a leaf value equal to one joins, and gives that run's row to
 every uncovered point whose values fall in the same bucket on every grid leaf, until every point
 is covered. A tie joins the side the predicate puts it on where the document fixes the predicate,
-a table's pick helper and ``extract`` bindings and a function rule's pick-helper roles holding at
-or above their bar, and a table cell's own comparison; a function rule's other ``boundaries``
-roles and its bare reads put a tie in a bucket of its own. A ``boolean`` or ``label`` leaf, and a
+a table's pick helper and ``extract`` bindings and a table cell's own comparison; a function
+rule's ``boundaries`` roles and its bare reads, compared in code the document does not hold, put
+a tie in a bucket of its own. A ``boolean`` or ``label`` leaf, and a
 leaf that fills some question's wording slot, whose value reaches the wording and not a
 comparison, give each distinct grid value its own bucket. A run in which some table's
 ``candidate`` read finds its set's entry holding no value, so that its compared values cannot be

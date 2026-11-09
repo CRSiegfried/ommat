@@ -718,10 +718,10 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
     """Each comparison ``log``'s turn makes against the leaf at ``path``; and each table
     comparing a ``candidate`` read whose set ``log`` holds no value of. A table's pick helper
     ``bar``, ``thresholds`` and ``margin`` and its ``extract`` ``null_bar`` hold at equality, so
-    their side is ``low``, as is a function rule's ``bar``, ``thresholds`` or ``margin`` role,
-    declared for the pick helpers; a table cell's side is its comparison's, a ``between`` whose
-    low bound is the leaf ``low`` and whose high bound is ``high``; a function rule's other
-    roles, and its bare reads, are compared in its own code, so they name no predicate."""
+    their side is ``low``; a table cell's side is its comparison's, a ``between`` whose low
+    bound is the leaf ``low`` and whose high bound is ``high``. A function rule's ``boundaries``
+    roles and its bare reads are compared in its own code, which the document does not hold, so
+    they name no predicate: a role declared for a pick helper may be compared with ``>``."""
     entries = [i for i in log if i["item"] == "entry"]
     out: list[_Comparison] = []
     blind: set[str] = set()
@@ -757,28 +757,17 @@ def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison
                         add(name, None, values)
                     continue
                 for role, members in cast("dict[str, Any]", entry).items():
-                    side = _LOW if role in _HELD_AT_EQUALITY else None
                     if role == "mass":
                         for m in cast("list[dict[str, Any]]", members):
                             if path in m["bounds"]:
                                 add(
                                     name,
-                                    side,
+                                    None,
                                     (x for v in values for x in _measure(role, v, m["labels"])),
                                 )
                     elif path in members:
-                        add(
-                            name,
-                            side,
-                            (x for v in values for x in _measure(role, v, ())),
-                        )
+                        add(name, None, (x for v in values for x in _measure(role, v, ())))
     return out, blind
-
-
-_HELD_AT_EQUALITY = frozenset({"bar", "thresholds", "margin"})
-"""The function-rule ``boundaries`` roles the spec declares for the pick helpers, which pick at
-or above ``bar`` and each threshold and at or above ``margin``. A ``null``, ``mass``,
-``confidence`` or ``value`` role is compared in the rule's own code."""
 
 
 def _cell_sides(cell: object, path: str) -> list[str | None]:

@@ -629,7 +629,7 @@ def test_a_function_rules_null_tie_is_a_bucket_of_its_own(monkeypatch: pytest.Mo
     assert rows[0]["decision"] != rows[2]["decision"]
 
 
-def test_a_function_rules_pick_helper_role_holds_at_the_tie(
+def test_a_function_rules_pick_helper_role_tie_is_a_bucket_of_its_own(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     recorded = gated(0.6)
@@ -637,8 +637,191 @@ def test_a_function_rules_pick_helper_role_holds_at_the_tie(
     points = [{"g/bar": bar} for bar in (0.5, 0.9, 0.95)]
     count = counted(monkeypatch)
     rows = same([record], recorded, recorded, points)
-    assert count[0] == 2  # the tie at 0.9 shares 0.5's run
+    # The rule's code compares the bar; the document does not say how, so the tie is rerun.
+    assert count[0] == 3
     assert [row["decision"]["value"] for row in rows] == ["refund", "refund", "ask"]
+
+
+def above_bar(r: Any) -> str:
+    return "yes" if r.read("q:x").probabilities["yes"] > r.param("k/bar") else "no"
+
+
+def above_margin(r: Any) -> str:
+    probabilities = r.read("q:x").probabilities
+    return "yes" if probabilities["yes"] - probabilities["no"] > r.param("k/bar") else "no"
+
+
+@pytest.mark.parametrize(
+    ("role", "function", "points", "decisions"),
+    [
+        ("bar", above_bar, (0.5, 0.6, 0.7), ["yes", "no", "no"]),
+        ("margin", above_margin, (0.1, 0.2, 0.3), ["yes", "no", "no"]),
+    ],
+)
+def test_a_declared_pick_helper_role_compared_strictly_in_code_is_rerun_at_the_tie(
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+    function: Any,
+    points: tuple[float, ...],
+    decisions: list[str],
+) -> None:
+    """A rule declaring ``bar`` or ``margin`` for a read and comparing with ``>``: were the tie
+    trusted to the helper's side, the middle point would take the first run's row."""
+    loaded = load(
+        Design(
+            name="strict",
+            state=tr.STATE_T,
+            sources={
+                "ask": Source(
+                    {"q:x": Question("choice", Text("?"), labels=("yes", "no"))},
+                    needs=["t:state"],
+                )
+            },
+            rules={
+                "p": Rule(
+                    "d:p",
+                    t.label("yes", "no"),
+                    function,
+                    version="1",
+                    reads=["q:x"],
+                    params=["k/bar"],
+                    boundaries={"q:x": roles(**{role: ["k/bar"]})},
+                )
+            },
+            parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
+            policy="d:p",
+        )
+    )
+    record = answered(loaded, tr.STATE, {"q:x": {"yes": 0.6, "no": 0.4}})
+    count = counted(monkeypatch)
+    rows = same([record], loaded, loaded, [{"k/bar": v} for v in points])
+    assert count[0] == 3
+    assert [row["decision"]["value"] for row in rows] == decisions
+
+
+# ---------------------------------------------------------------------------------------------
+# Ties a table fixes two ways, an integer leaf, signed zero, repeats and the points' order
+
+
+def two_row_table(first: str, second: str) -> LoadedDesign:
+    """``tie_table`` with two cells over the one input, the first row's taken first."""
+    return load(
+        Design(
+            name="tie",
+            state=TIE_STATE,
+            sources={},
+            rules={
+                "act": Table(
+                    "d:act",
+                    'label{"maybe", "no", "yes"}',
+                    "F",
+                    ["t:state.n"],
+                    [[first, "yes"], [second, "maybe"], ["-", "no"]],
+                )
+            },
+            parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
+            policy="d:act",
+        )
+    )
+
+
+def test_a_tie_two_cells_put_on_different_sides_is_a_bucket_of_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = two_row_table("> k/bar", ">= k/bar")  # the tie fails the first and holds the second
+    record = decide_sync(loaded, {"n": 0.6}, {}).record
+    assert tie_rows(monkeypatch, loaded, record, 3) == ["yes", "maybe", "no"]
+
+
+def test_a_tie_two_cells_put_on_one_side_shares_that_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = two_row_table("> k/bar", "<= k/bar")  # both read the tie as the leaf above
+    record = decide_sync(loaded, {"n": 0.6}, {}).record
+    assert tie_rows(monkeypatch, loaded, record, 2) == ["yes", "maybe", "maybe"]
+
+
+def test_a_between_with_the_leaf_at_both_bounds_holds_at_the_tie_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = tie_table("[k/bar, k/bar]")
+    record = decide_sync(loaded, {"n": 0.6}, {}).record
+    assert tie_rows(monkeypatch, loaded, record, 3) == ["no", "yes", "no"]
+
+
+def test_the_leaf_in_two_inputs_on_different_sides_is_rerun_at_the_tie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = load(
+        Design(
+            name="two",
+            state=t.record(n=t.number(), m=t.number()),
+            sources={},
+            rules={
+                "act": Table(
+                    "d:act",
+                    'label{"maybe", "no", "yes"}',
+                    "F",
+                    ["t:state.n", "t:state.m"],
+                    [[">= k/bar", "-", "yes"], ["-", "<= k/bar", "maybe"], ["-", "-", "no"]],
+                )
+            },
+            parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
+            policy="d:act",
+        )
+    )
+    record = decide_sync(loaded, {"n": 0.6, "m": 0.6}, {}).record
+    assert tie_rows(monkeypatch, loaded, record, 3) == ["yes", "yes", "maybe"]
+    # With the inputs apart, each tie joins its own cell's side: 0.6 low, 0.3 high.
+    record = decide_sync(loaded, {"n": 0.6, "m": 0.3}, {}).record
+    count = counted(monkeypatch)
+    points = [{"k/bar": v} for v in (0.2, 0.3, 0.4, 0.6, 0.8)]
+    rows = same([record], loaded, loaded, points)
+    assert count[0] == 3
+    assert [row["decision"]["value"] for row in rows] == ["yes", "yes", "yes", "yes", "maybe"]
+
+
+def test_an_integer_leaf_is_bucketed_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded = load(
+        Design(
+            name="int",
+            state=t.record(n=t.integer()),
+            sources={},
+            rules={
+                "act": Table("d:act", YES_NO, "F", ["t:state.n"], [[">= k/n", "yes"], ["-", "no"]])
+            },
+            parameters={"k/n": Parameter(t.integer(), 5)},
+            policy="d:act",
+        )
+    )
+    record = decide_sync(loaded, {"n": 5}, {}).record
+    count = counted(monkeypatch)
+    rows = same([record], loaded, loaded, [{"k/n": v} for v in (3, 5, 6, 2**53 - 1, -(2**53 - 1))])
+    assert count[0] == 2
+    assert [row["decision"]["value"] for row in rows] == ["yes", "yes", "no", "no", "yes"]
+
+
+def test_signed_zero_shares_zeros_bucket_and_design(monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded = tie_table(">= k/bar")
+    record = decide_sync(loaded, {"n": 0.0}, {}).record
+    count = counted(monkeypatch)
+    rows = same([record], loaded, loaded, [{"k/bar": v} for v in (-0.0, 0.0, 0.5)])
+    assert count[0] == 2
+    assert rows[0]["design"] == rows[1]["design"]  # the canonical document writes both as 0
+    assert [row["decision"]["value"] for row in rows] == ["yes", "yes", "no"]
+
+
+def test_repeated_points_and_points_out_of_axis_order_keep_their_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = tie_table(">= k/bar")
+    record = decide_sync(loaded, {"n": 0.6}, {}).record
+    count = counted(monkeypatch)
+    values = (0.8, 0.4, 0.6, 0.8, 0.4, 0.7)  # descending first, each repeated once
+    rows = same([record], loaded, loaded, [{"k/bar": v} for v in values])
+    assert count[0] == 2
+    assert [row["decision"]["value"] for row in rows] == ["no", "yes", "yes", "no", "yes", "no"]
+    assert rows[0]["design"] == rows[3]["design"]
 
 
 # ---------------------------------------------------------------------------------------------
