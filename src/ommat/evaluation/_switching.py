@@ -495,11 +495,14 @@ class _Rerun:
         self.log = log
 
 
-async def _rerun(log: _Log, loaded: LoadedDesign, answers: _Log) -> tuple[_Rerun, FixtureBinding]:
+async def _rerun(
+    log: _Log, loaded: LoadedDesign, answers: _Log, *, design: LoadedDesign | None = None
+) -> tuple[_Rerun, FixtureBinding]:
     """``log``'s turn rerun under ``loaded`` as replay reruns it, the fixture built from
-    ``answers``' calls and each source checked against them under ``loaded`` itself, writing
-    to no record: the rerun and the fixture, whose ``stale`` names the stale refs. The record
-    checks found a value at the state entry, and the baseline replayed it."""
+    ``answers``' calls and each source checked against them under ``design``, the design the
+    answers were decided under, ``loaded`` itself when ``None``, writing to no record: the
+    rerun and the fixture, whose ``stale`` names the stale refs. The record checks found a
+    value at the state entry, and the caller typed it under ``loaded``."""
     state = next(i for i in log if i["item"] == "entry" and i["ref"] == _STATE)
     settings = cast("dict[str, Any]", log[1]["settings"])
     run = run_settings(
@@ -509,7 +512,7 @@ async def _rerun(log: _Log, loaded: LoadedDesign, answers: _Log) -> tuple[_Rerun
         settings["deadline"],
         settings["certificate_cap"],
     )
-    base = Base(answers, loaded)
+    base = Base(answers, loaded, design=design)
     fixture = FixtureBinding(RecordedCalls(answers), loaded, base)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
     bindings = _bound(loaded, dict.fromkeys({*keys, _DEFAULT}, fixture))
@@ -635,6 +638,23 @@ def _numeric_summary(
 # The compared values
 
 
+def _margin_lead(probs: Mapping[str, float]) -> Fraction:
+    """The top label's lead over the runner-up, exactly, as the pick helpers measure it: a
+    margin picks when its decimal does not exceed it."""
+    exacts = {label: exact(p) for label, p in probs.items()}
+    return _lead(exacts, max(exacts, key=exacts.__getitem__))
+
+
+def _margin_probe(probs: Mapping[str, float]) -> float:
+    """The greatest ``float`` whose decimal does not exceed the top label's lead over the
+    runner-up, as the pick helpers measure it."""
+    lead = _margin_lead(probs)
+    f = float(lead)
+    while exact(f) > lead:
+        f = math.nextafter(f, -math.inf)
+    return f
+
+
 _ROLES: dict[tuple[str | None, str], str] = {
     ("pick_with_margin", "bar"): "bar",
     ("pick_with_margin", "margin"): "margin",
@@ -680,48 +700,113 @@ def _compared(document: _Doc, path: str, log: _Log) -> tuple[_Compared, set[str]
     """The values ``log``'s turn compares the leaf at ``path`` against, exactly, each to the
     components comparing it; and each table comparing a ``candidate`` read whose set ``log``
     holds no value of."""
-    entries = [i for i in log if i["item"] == "entry"]
+    found, blind = _comparisons(document, path, log)
     out: _Compared = {}
+    for name, _, x in found:
+        out.setdefault(x, set()).add(name)
+    return out, blind
+
+
+_LOW = "low"
+_HIGH = "high"
+_Comparison = tuple[str, str | None, Fraction]
+"""One comparison of the leaf: the component, the side a leaf value equal to the compared
+value joins, ``low`` for ``>=`` and ``<`` over the input, ``high`` for ``>`` and ``<=``, and
+``None`` for a comparison whose predicate the document does not hold, and the value."""
+
+_SIDES: dict[str, str] = {">=": _LOW, "<": _LOW, ">": _HIGH, "<=": _HIGH}
+"""Each table comparison's tie side: ``input >= leaf`` holds at the leaf's equality as it does
+below it, ``input < leaf`` fails there as it does below, and the other two the reverse."""
+
+
+def _comparisons(
+    document: _Doc,
+    path: str,
+    log: _Log,
+    *,
+    margin: Callable[[Mapping[str, float]], float | Fraction] = _margin_probe,
+) -> tuple[list[_Comparison], set[str]]:
+    """Each comparison ``log``'s turn makes against the leaf at ``path``; and each table
+    comparing a ``candidate`` read whose set ``log`` holds no value of. A pick helper's ``bar``,
+    ``thresholds`` and ``margin``, and ``extract``'s ``null_bar``, hold at equality, so their
+    side is ``low``; a table cell's side is its comparison's, a ``between`` whose low bound is
+    the leaf ``low`` and whose high bound is ``high``; a function rule's ``boundaries`` entry
+    of another role, or a bare read's, names no predicate. ``margin`` measures a ``margin``
+    role's answer: the probe ``float`` by default, or the exact lead."""
+    entries = [i for i in log if i["item"] == "entry"]
+    out: list[_Comparison] = []
     blind: set[str] = set()
 
-    def add(name: str, values: Iterable[object]) -> None:
+    def add(name: str, side: str | None, values: Iterable[object]) -> None:
         for x in values:
-            if type(x) in (int, float):
-                out.setdefault(exact(cast(float, x)), set()).add(name)
+            if type(x) is Fraction:
+                out.append((name, side, x))
+            elif type(x) in (int, float):
+                out.append((name, side, exact(cast(float, x))))
 
     for name, c in _components(document).items():
         if c["form"] == "table":
             for n, i in enumerate(cast("list[dict[str, Any]]", c["inputs"])):
                 roles = [_ROLES.get((i["helper"], r)) for r, b in i["params"].items() if b == path]
-                cells = any(_compares(row["cells"][n], path) for row in c["rows"])
-                if not roles and not cells:
+                sides = {s for row in c["rows"] for s in _cell_sides(row["cells"][n], path)}
+                if not roles and not sides:
                     continue  # the leaf does not reach this input
                 held = _read_values(i["read"], entries, c.get("grounded"))
                 if held is None:
                     blind.add(name)
                     continue
                 for role in roles:
-                    add(name, (x for v in held for x in _measure(role, v, ())))
-                if cells:
-                    add(name, (x for v in held for x in _input(document, i, v)))
+                    add(name, _LOW, (x for v in held for x in _measure(role, v, (), margin=margin)))
+                if sides:
+                    side = next(iter(sides)) if len(sides) == 1 else None
+                    add(name, side, (x for v in held for x in _input(document, i, v)))
         elif c["boundaries"] is not None:
             for read, entry in cast("dict[str, Any]", c["boundaries"]).items():
                 values = _read_values(read, entries, None) or []
                 if isinstance(entry, list):
                     if path in entry:
-                        add(name, values)
+                        add(name, None, values)
                     continue
                 for role, members in cast("dict[str, Any]", entry).items():
+                    side = _LOW if role in _HELD_AT_EQUALITY else None
                     if role == "mass":
                         for m in cast("list[dict[str, Any]]", members):
                             if path in m["bounds"]:
                                 add(
                                     name,
+                                    side,
                                     (x for v in values for x in _measure(role, v, m["labels"])),
                                 )
                     elif path in members:
-                        add(name, (x for v in values for x in _measure(role, v, ())))
+                        add(
+                            name,
+                            side,
+                            (x for v in values for x in _measure(role, v, (), margin=margin)),
+                        )
     return out, blind
+
+
+_HELD_AT_EQUALITY = frozenset({"bar", "thresholds", "margin", "null"})
+"""The ``boundaries`` roles whose predicate the helpers fix: ``pick_with_margin`` and
+``pick_with_thresholds`` pick at or above ``bar`` and each threshold and at or above ``margin``,
+and ``extract`` nulls at or above ``null_bar``. A ``mass``, ``confidence`` or ``value`` role is
+compared in the rule's own code."""
+
+
+def _cell_sides(cell: object, path: str) -> list[str | None]:
+    """The tie side of each comparison ``cell`` makes against the leaf at ``path``: a
+    ``between`` with the leaf at both bounds holds at equality alone, so its side is ``None``."""
+    if type(cell) is not dict:
+        return []
+    ((tag, member),) = cast("dict[str, Any]", cell).items()
+    if tag == "between":
+        lo, hi = cast("list[object]", member)
+        if lo == hi == {"param": path}:
+            return [None]
+        return [s for o, s in ((lo, _LOW), (hi, _HIGH)) if o == {"param": path}]
+    if tag in _SIDES and member == {"param": path}:
+        return [_SIDES[tag]]
+    return []
 
 
 def _input(document: _Doc, i: dict[str, Any], v: object) -> list[object]:
@@ -765,10 +850,16 @@ def _read_values(read: str, entries: _Log, grounded: str | None) -> list[object]
     return out
 
 
-def _measure(role: str | None, v: object, labels: Iterable[str]) -> list[object]:
+def _measure(
+    role: str | None,
+    v: object,
+    labels: Iterable[str],
+    *,
+    margin: Callable[[Mapping[str, float]], float | Fraction] = _margin_probe,
+) -> list[object]:
     """What a role compares in an answer ``v``: each label's probability for ``bar`` and
-    ``thresholds``; the margin probe; ``mass`` over ``labels``; ``p_null``, ``confidence`` or
-    ``value`` of an extraction."""
+    ``thresholds``; the margin's measure, the probe by default; ``mass`` over ``labels``;
+    ``p_null``, ``confidence`` or ``value`` of an extraction."""
     if type(v) is not dict:
         return []
     answer = cast("dict[str, Any]", v)
@@ -776,7 +867,7 @@ def _measure(role: str | None, v: object, labels: Iterable[str]) -> list[object]
     if role in ("bar", "thresholds") and probs is not None:
         return list(probs.values())
     if role == "margin" and probs is not None:
-        return [_margin_probe(probs)]
+        return [margin(probs)]
     if role == "mass" and probs is not None:
         total = sum((exact(probs[k]) for k in labels if k in probs), Fraction(0))
         return [float(min(total, Fraction(1)))]
@@ -784,27 +875,6 @@ def _measure(role: str | None, v: object, labels: Iterable[str]) -> list[object]
     if member is not None and "p_null" in answer:
         return [answer[member]]
     return []
-
-
-def _margin_probe(probs: Mapping[str, float]) -> float:
-    """The greatest ``float`` whose decimal does not exceed the top label's lead over the
-    runner-up, as the pick helpers measure it."""
-    exacts = {label: exact(p) for label, p in probs.items()}
-    lead = _lead(exacts, max(exacts, key=exacts.__getitem__))
-    f = float(lead)
-    while exact(f) > lead:
-        f = math.nextafter(f, -math.inf)
-    return f
-
-
-def _compares(cell: object, path: str) -> bool:
-    """Whether a cell compares its input against the leaf at ``path``."""
-    if type(cell) is not dict:
-        return False
-    ((tag, member),) = cast("dict[str, Any]", cell).items()
-    if tag == "between":
-        return any(o == {"param": path} for o in cast("list[object]", member))
-    return tag in (">=", ">", "<=", "<") and member == {"param": path}
 
 
 def _contains(value: object, target: object) -> bool:

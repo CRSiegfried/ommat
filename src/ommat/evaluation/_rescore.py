@@ -124,9 +124,8 @@ async def _rescored(
     for item in _opening(loaded, run.item()):
         kept.append(item)
     forms = typed(decoded(state["value"], loaded._types[_STATE]), loaded._types[_STATE])
-    if forms is None:  # decide writes the policy's entry Unavailable, as for a broken state
-        marker = _marker_document(Unavailable(Cause(CauseCode.invalid_return, [_STATE])))
-        return {"marker": marker}, []
+    if forms is None:
+        return _broken_state(), []
     kept.append({"item": "entry", "ref": _STATE})
     await interpret(
         cast(Any, kept),
@@ -147,3 +146,9 @@ async def _rescored(
     if kept.decision is None:  # pragma: no cover - interpret writes the policy's entry
         raise RuntimeError("the rescored turn wrote no entry at the policy's ref")
     return kept.decision, []
+
+
+def _broken_state() -> dict[str, Any]:
+    """The policy's entry decide writes for a state that does not type under the design:
+    ``Unavailable`` with ``invalid-return`` naming ``t:state``."""
+    return {"marker": _marker_document(Unavailable(Cause(CauseCode.invalid_return, [_STATE])))}
