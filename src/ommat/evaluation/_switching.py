@@ -83,6 +83,7 @@ from ommat._values import MAX_INTEGER, type_name
 from ommat.evaluation._diff import _run_sync, baseline, outcome, own_functions
 from ommat.evaluation._edit import _checked, _declared, _designs
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
+from ommat.evaluation._rescore import _run_of
 from ommat.evaluation._store import EvaluationStore
 from ommat.helpers._choice import _lead
 from ommat.helpers._numbers import exact
@@ -150,6 +151,8 @@ async def switching_values_batch(
     if isinstance(paths, str | bytes) or not isinstance(paths, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"paths are a {type_name(paths)}, not a sequence of leaf paths")
     checked = [_checked(record, loaded) for record in records]
+    for _, log in checked:
+        _run_of(log)  # a recorded setting decide refuses is refused here, before any write
     types = [_leaf_type(path, loaded) for path in paths]
     shared = _Shared(loaded, own_functions(loaded, functions))
     keys = [

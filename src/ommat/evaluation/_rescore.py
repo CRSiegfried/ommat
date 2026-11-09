@@ -13,8 +13,8 @@ in which a source asks something the record does not answer, a stale question, i
 ``not-determined``, as in the switching-value job: its decision says nothing of the record.
 
 Every record is read and checked as replay checks it, against ``recorded``, its recorded
-settings included, before any run. The
-rows come back in design order, then record order, as plain data.
+settings included, before any run. The rows come back in design order, then record order,
+as plain data.
 """
 
 from collections.abc import Sequence

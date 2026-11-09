@@ -1706,3 +1706,16 @@ def test_a_batchs_not_loading_entries_share_no_list(tmp_path: Path) -> None:
     assert first == second  # one cached failure, given to each record's entry apart
     first[0]["names"].append("x")
     assert second[0]["names"] == ["tab"]
+
+
+def test_a_batch_refuses_bad_recorded_settings_before_any_write(tmp_path: Path) -> None:
+    import test_replay as tp
+    from ommat import EntryRefusal
+
+    good = tables_record()
+    bad = tp.edited(good, lambda d: d["log"][1]["settings"].update({"timeout": 0}))
+    store = EvaluationStore(tmp_path)
+    with pytest.raises(EntryRefusal):
+        _switching.switching_values_batch_sync([good, bad], TABLES, ["lim/n"], results=store)
+    key = {"record": good.record_hash, "design": TABLES.design_hash, "parameter": "lim/n"}
+    assert store.lookup(_switching.KIND, key) is None
