@@ -20,7 +20,7 @@ from ommat._decide import EntryRefusal, _bound, _opening, run_settings
 from ommat._design import LoadedDesign
 from ommat._fixture import Base, FixtureBinding
 from ommat._interpret import _marker_document, interpret
-from ommat._ledger import _copy
+from ommat._ledger import _logged
 from ommat._markers import Cause, CauseCode, Unavailable
 from ommat._refs import code_point_sorted
 from ommat._replay import _cut
@@ -82,7 +82,7 @@ def rescore_sync(
 
 class _Kept:
     """The ledger surface interpret writes to, checking and keeping nothing but the entry at
-    ``policy``."""
+    ``policy``, as ``Record.log`` reads it back."""
 
     observer_error = None
 
@@ -93,8 +93,8 @@ class _Kept:
 
     def append(self, item: dict[str, Any]) -> int:
         if item.get("item") == "entry" and item.get("ref") == self.policy:
-            kept = {k: item[k] for k in ("value", "marker") if k in item}
-            self.decision = cast("dict[str, Any]", _copy(kept))
+            logged = _logged(item)
+            self.decision = {k: logged[k] for k in ("value", "marker") if k in logged}
         self.count += 1
         return self.count - 1
 

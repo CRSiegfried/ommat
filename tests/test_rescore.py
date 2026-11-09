@@ -210,3 +210,28 @@ def test_tables_and_helpers_rescore_as_they_replay() -> None:
     for row, design in zip(rows, designs, strict=True):
         assert (row["decision"], row["stale"]) == replayed(records[0], design)
     assert len({json.dumps(r["decision"]) for r in rows}) > 1  # the grid moves the decision
+
+
+def whole(r: Any) -> float:
+    return 1.0
+
+
+def test_a_rescored_decision_reads_as_the_record_does() -> None:
+    loaded = load(
+        Design(
+            name="whole",
+            state=STATE_T,
+            sources={},
+            rules={"act": Rule("d:act", t.number(), whole, version="1")},
+            parameters={},
+            policy="d:act",
+        )
+    )
+    record = decide_sync(loaded, STATE, {}).record
+    (row,) = rescore_sync([record], loaded, [loaded])
+    entry = record.entries["d:act"]
+    assert row["decision"] == {"value": entry["value"]}
+    assert repr(row["decision"]) == repr(
+        {"value": entry["value"]}
+    )  # the integral float as the int 1
+    assert type(row["decision"]["value"]) is int

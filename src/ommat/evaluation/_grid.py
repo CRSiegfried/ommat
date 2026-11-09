@@ -1,7 +1,7 @@
 # pyright: reportPrivateUsage=false
 """The grid form of the rescoring job: ``rescore`` over the designs a list of parameter points
 gives, each record rerun once per region of points whose runs cannot differ, not once per point
-(§evaluation-jobs).
+(§rescore-grid).
 
 A point's design is ``loaded`` with the point's leaves holding its values, built once per point
 as ``with_parameters`` builds it. A run reaches a numeric leaf only by comparing values the turn
@@ -11,12 +11,13 @@ reruns one uncovered point with the switching job's light ledger, reads from its
 leaf's compared values and the side a leaf value equal to one joins, and gives that run's row to
 every uncovered point whose values fall in the same bucket on every grid leaf, until every point
 is covered. A tie joins the side the predicate puts it on where the document fixes the predicate,
-the pick helpers' and ``extract``'s at or above their bar, a ``margin`` measured against the exact
-lead, and a table cell's comparison; a function rule's other ``boundaries`` roles and its bare
-reads put a tie in a bucket of its own. A ``boolean`` or ``label`` leaf, and a leaf that fills
-some question's wording slot, whose value reaches the wording and not a comparison, give each
-distinct grid value its own bucket. A run in which some table's ``candidate`` read finds its set's
-entry holding no value, so that its compared values cannot be read, covers its own point alone.
+a table's pick helper and ``extract`` bindings and a function rule's pick-helper roles holding at
+or above their bar, and a table cell's own comparison; a function rule's other ``boundaries``
+roles and its bare reads put a tie in a bucket of its own. A ``boolean`` or ``label`` leaf, and a
+leaf that fills some question's wording slot, whose value reaches the wording and not a
+comparison, give each distinct grid value its own bucket. A run in which some table's
+``candidate`` read finds its set's entry holding no value, so that its compared values cannot be
+read, covers its own point alone.
 
 Before any run the job refuses a grid leaf a run could reach other than by a comparison it can
 see: a function rule declaring it whose ``boundaries`` do not name it, a ``C+``, ``C<`` or ``C>``
@@ -54,7 +55,6 @@ from ommat.evaluation._switching import (
     _finite,
     _hidden,
     _leaf_type,
-    _margin_lead,
     _rerun,
 )
 from ommat.helpers._numbers import exact
@@ -202,7 +202,7 @@ class _Grid:
         log: ``at`` alone when some table's compared values could not be read."""
         buckets: dict[str, Callable[[Fraction], int]] = {}
         for path in self.compared:
-            found, blind = _comparisons(self.document, path, log, margin=_margin_lead)
+            found, blind = _comparisons(self.document, path, log)
             if blind:
                 return [at]
             buckets[path] = _axis(found)

@@ -638,17 +638,11 @@ def _numeric_summary(
 # The compared values
 
 
-def _margin_lead(probs: Mapping[str, float]) -> Fraction:
-    """The top label's lead over the runner-up, exactly, as the pick helpers measure it: a
-    margin picks when its decimal does not exceed it."""
-    exacts = {label: exact(p) for label, p in probs.items()}
-    return _lead(exacts, max(exacts, key=exacts.__getitem__))
-
-
 def _margin_probe(probs: Mapping[str, float]) -> float:
     """The greatest ``float`` whose decimal does not exceed the top label's lead over the
     runner-up, as the pick helpers measure it."""
-    lead = _margin_lead(probs)
+    exacts = {label: exact(p) for label, p in probs.items()}
+    lead = _lead(exacts, max(exacts, key=exacts.__getitem__))
     f = float(lead)
     while exact(f) > lead:
         f = math.nextafter(f, -math.inf)
@@ -719,20 +713,14 @@ _SIDES: dict[str, str] = {">=": _LOW, "<": _LOW, ">": _HIGH, "<=": _HIGH}
 below it, ``input < leaf`` fails there as it does below, and the other two the reverse."""
 
 
-def _comparisons(
-    document: _Doc,
-    path: str,
-    log: _Log,
-    *,
-    margin: Callable[[Mapping[str, float]], float | Fraction] = _margin_probe,
-) -> tuple[list[_Comparison], set[str]]:
+def _comparisons(document: _Doc, path: str, log: _Log) -> tuple[list[_Comparison], set[str]]:
     """Each comparison ``log``'s turn makes against the leaf at ``path``; and each table
-    comparing a ``candidate`` read whose set ``log`` holds no value of. A pick helper's ``bar``,
-    ``thresholds`` and ``margin``, and ``extract``'s ``null_bar``, hold at equality, so their
-    side is ``low``; a table cell's side is its comparison's, a ``between`` whose low bound is
-    the leaf ``low`` and whose high bound is ``high``; a function rule's ``boundaries`` entry
-    of another role, or a bare read's, names no predicate. ``margin`` measures a ``margin``
-    role's answer: the probe ``float`` by default, or the exact lead."""
+    comparing a ``candidate`` read whose set ``log`` holds no value of. A table's pick helper
+    ``bar``, ``thresholds`` and ``margin`` and its ``extract`` ``null_bar`` hold at equality, so
+    their side is ``low``, as is a function rule's ``bar``, ``thresholds`` or ``margin`` role,
+    declared for the pick helpers; a table cell's side is its comparison's, a ``between`` whose
+    low bound is the leaf ``low`` and whose high bound is ``high``; a function rule's other
+    roles, and its bare reads, are compared in its own code, so they name no predicate."""
     entries = [i for i in log if i["item"] == "entry"]
     out: list[_Comparison] = []
     blind: set[str] = set()
@@ -756,7 +744,7 @@ def _comparisons(
                     blind.add(name)
                     continue
                 for role in roles:
-                    add(name, _LOW, (x for v in held for x in _measure(role, v, (), margin=margin)))
+                    add(name, _LOW, (x for v in held for x in _measure(role, v, ())))
                 if sides:
                     side = next(iter(sides)) if len(sides) == 1 else None
                     add(name, side, (x for v in held for x in _input(document, i, v)))
@@ -781,16 +769,15 @@ def _comparisons(
                         add(
                             name,
                             side,
-                            (x for v in values for x in _measure(role, v, (), margin=margin)),
+                            (x for v in values for x in _measure(role, v, ())),
                         )
     return out, blind
 
 
-_HELD_AT_EQUALITY = frozenset({"bar", "thresholds", "margin", "null"})
-"""The ``boundaries`` roles whose predicate the helpers fix: ``pick_with_margin`` and
-``pick_with_thresholds`` pick at or above ``bar`` and each threshold and at or above ``margin``,
-and ``extract`` nulls at or above ``null_bar``. A ``mass``, ``confidence`` or ``value`` role is
-compared in the rule's own code."""
+_HELD_AT_EQUALITY = frozenset({"bar", "thresholds", "margin"})
+"""The function-rule ``boundaries`` roles the spec declares for the pick helpers, which pick at
+or above ``bar`` and each threshold and at or above ``margin``. A ``null``, ``mass``,
+``confidence`` or ``value`` role is compared in the rule's own code."""
 
 
 def _cell_sides(cell: object, path: str) -> list[str | None]:
@@ -850,16 +837,10 @@ def _read_values(read: str, entries: _Log, grounded: str | None) -> list[object]
     return out
 
 
-def _measure(
-    role: str | None,
-    v: object,
-    labels: Iterable[str],
-    *,
-    margin: Callable[[Mapping[str, float]], float | Fraction] = _margin_probe,
-) -> list[object]:
+def _measure(role: str | None, v: object, labels: Iterable[str]) -> list[object]:
     """What a role compares in an answer ``v``: each label's probability for ``bar`` and
-    ``thresholds``; the margin's measure, the probe by default; ``mass`` over ``labels``;
-    ``p_null``, ``confidence`` or ``value`` of an extraction."""
+    ``thresholds``; the margin probe; ``mass`` over ``labels``; ``p_null``, ``confidence`` or
+    ``value`` of an extraction."""
     if type(v) is not dict:
         return []
     answer = cast("dict[str, Any]", v)
@@ -867,7 +848,7 @@ def _measure(
     if role in ("bar", "thresholds") and probs is not None:
         return list(probs.values())
     if role == "margin" and probs is not None:
-        return [margin(probs)]
+        return [_margin_probe(probs)]
     if role == "mass" and probs is not None:
         total = sum((exact(probs[k]) for k in labels if k in probs), Fraction(0))
         return [float(min(total, Fraction(1)))]
