@@ -27,13 +27,14 @@ decision, else ``not-determined``, ``no-change-found`` or ``never-asked``. ``Des
 loaded design's document under its design hash and fetches it back through ``load``;
 ``EvaluationStore`` keeps write-once entries by kind and key. ``rescore`` decides recorded turns
 again under each of several designs, from their own answers, building no record, for a grid of
-settings scored by decision alone. A job or a store refuses with
-``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
+settings scored by decision alone; ``rescore_grid`` gives its rows over a list of parameter
+points, rerunning each record once per region of points whose runs cannot differ. A job or a
+store refuses with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
 
 ``intervene`` and ``scenario`` are in ``_edit``, the answers table in ``_answers``, the deciding
 inputs, tried through it, in ``_deciding``, the switching-value job in ``_switching``, the
 gold-answers job in ``_gold``, the question-reach job in ``_reach``, the rescoring job in
-``_rescore``, ``use_answers`` and the record
+``_rescore`` and its grid form in ``_grid``, ``use_answers`` and the record
 checks and replay they share in ``_diff``, the stores in ``_store`` and the refusal in
 ``_refusal``.
 """
@@ -43,6 +44,7 @@ from ommat.evaluation._deciding import deciding_inputs, deciding_inputs_sync
 from ommat.evaluation._diff import use_answers, use_answers_sync
 from ommat.evaluation._edit import intervene, intervene_sync, scenario, scenario_sync
 from ommat.evaluation._gold import gold_record, gold_record_sync, write_gold_answers
+from ommat.evaluation._grid import rescore_grid, rescore_grid_sync
 from ommat.evaluation._reach import question_reach, question_reach_sync
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._rescore import rescore, rescore_sync
@@ -69,6 +71,8 @@ __all__ = [
     "question_reach",
     "question_reach_sync",
     "rescore",
+    "rescore_grid",
+    "rescore_grid_sync",
     "rescore_sync",
     "scenario",
     "scenario_sync",

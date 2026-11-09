@@ -40,6 +40,8 @@ class RefusalReason(enum.StrEnum):
     conflicting_labels = "conflicting-labels"
     unknown_entry = "unknown-entry"
     empty_copy = "empty-copy"
+    uneven_grid = "uneven-grid"
+    hidden_leaf = "hidden-leaf"
 
 
 class EvaluationRefusal(Exception):

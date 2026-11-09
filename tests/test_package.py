@@ -218,6 +218,8 @@ EVALUATION = {
     "question_reach",
     "question_reach_sync",
     "rescore",
+    "rescore_grid",
+    "rescore_grid_sync",
     "rescore_sync",
     "scenario",
     "scenario_sync",
