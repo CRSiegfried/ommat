@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import extraction as x
 import test_rescore as tr
 import test_switching_values as sv
 from designs import roles, slot
@@ -28,6 +29,7 @@ from ommat import (
     Table,
     Text,
     Undetermined,
+    When,
     decide_sync,
     load,
 )
@@ -113,18 +115,21 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 def plain(
     records: Sequence[Record], recorded: LoadedDesign, loaded: LoadedDesign, points: list[Point]
-) -> list[bytes]:
-    """``rescore``'s rows over the points' designs, as canonical bytes."""
-    designs = [with_parameters(loaded, p) for p in points]
-    return [encode(row) for row in rescore_sync(records, recorded, designs)]
+) -> list[dict[str, Any]]:
+    """``rescore``'s rows over the points' designs."""
+    return rescore_sync(records, recorded, [with_parameters(loaded, p) for p in points])
 
 
 def same(
     records: Sequence[Record], recorded: LoadedDesign, loaded: LoadedDesign, points: list[Point]
 ) -> list[dict[str, Any]]:
-    """The grid's rows, asserted equal to ``rescore``'s row for row."""
+    """The grid's rows, asserted equal to ``rescore``'s row for row: as plain data, by
+    canonical bytes, and in type."""
     rows = rescore_grid_sync(records, recorded, loaded, points)
-    assert [encode(row) for row in rows] == plain(records, recorded, loaded, points)
+    theirs = plain(records, recorded, loaded, points)
+    assert rows == theirs
+    assert [encode(row) for row in rows] == [encode(row) for row in theirs]
+    assert repr(rows) == repr(theirs)
     assert [row["design"] for row in rows] == [
         with_parameters(loaded, p).design_hash for p in points for _ in records
     ]
@@ -263,7 +268,9 @@ def test_a_label_switching_which_number_meets_the_other_leaf(
     points = [{"a/bar": a, "b/bar": b} for a in (0.4, 0.6, 0.7) for b in (0.2, 0.3, 0.5, 0.8, 0.9)]
     count = counted(monkeypatch)
     rows = same([record], loaded, loaded, points)
-    assert count[0] < len(points)
+    # Leaf A is compared against both labels' probabilities, 0.6 and 0.4, so each of its three
+    # points is a region of its own, 0.4 and 0.6 ties on the low side; leaf B has two within each.
+    assert count[0] == 6
     decisions = [row["decision"]["value"] for row in rows]
     assert decisions[:5] == ["yes", "yes", "no", "no", "no"]  # a 0.4: 0.3 against b
     assert decisions[10:] == ["yes", "yes", "yes", "yes", "no"]  # a 0.7: 0.8 against b
@@ -516,3 +523,179 @@ def test_the_points_are_refused_in_order(monkeypatch: pytest.MonkeyPatch) -> Non
     assert refusal.reason is RefusalReason.invalid_design
     assert isinstance(refusal.error, InvalidDesign)
     assert "points[1]" in str(refusal)
+
+
+# ---------------------------------------------------------------------------------------------
+# Ties: a grid point at a compared value, the first rerun elsewhere
+
+TIE_STATE = t.record(n=t.number())
+TIES = (0.4, 0.6, 0.8)  # the record's number is 0.6; the first rerun is at 0.4
+
+
+def tie_table(cell: str) -> LoadedDesign:
+    """A policy table with one cell comparing the state's number against the leaf; ``k/lo``
+    and ``k/hi`` are the other bound of a ``between``."""
+    return load(
+        Design(
+            name="tie",
+            state=TIE_STATE,
+            sources={},
+            rules={"act": Table("d:act", YES_NO, "F", ["t:state.n"], [[cell, "yes"], ["-", "no"]])},
+            parameters={
+                "k/bar": Parameter(t.number(0, 1), 0.5),
+                "k/lo": Parameter(t.number(0, 1), 0.0),
+                "k/hi": Parameter(t.number(0, 1), 1.0),
+            },
+            policy="d:act",
+        )
+    )
+
+
+def tie_rows(
+    monkeypatch: pytest.MonkeyPatch, loaded: LoadedDesign, record: Record, reruns: int
+) -> list[str]:
+    """The decisions over ``TIES``, the grid asserted equal to ``rescore`` and rerun exactly
+    ``reruns`` times."""
+    count = counted(monkeypatch)
+    rows = same([record], loaded, loaded, [{"k/bar": v} for v in TIES])
+    assert count[0] == reruns
+    return [row["decision"]["value"] for row in rows]
+
+
+@pytest.mark.parametrize(
+    ("cell", "decisions", "reruns"),
+    [
+        (">= k/bar", ["yes", "yes", "no"], 2),  # holds at the tie, as below it
+        ("> k/bar", ["yes", "no", "no"], 2),  # fails at the tie, as above it
+        ("<= k/bar", ["no", "yes", "yes"], 2),
+        ("< k/bar", ["no", "no", "yes"], 2),
+        ("[k/lo, k/bar]", ["no", "yes", "yes"], 2),  # the high bound holds at the tie
+        ("[k/bar, k/hi]", ["yes", "yes", "no"], 2),  # and the low bound
+    ],
+)
+def test_a_table_cells_tie_joins_the_side_its_comparison_holds_on(
+    monkeypatch: pytest.MonkeyPatch, cell: str, decisions: list[str], reruns: int
+) -> None:
+    loaded = tie_table(cell)
+    record = decide_sync(loaded, {"n": 0.6}, {}).record
+    assert tie_rows(monkeypatch, loaded, record, reruns) == decisions
+
+
+def over_mass(r: Any) -> str:
+    found = mass(r, "q:m", ["yes"])
+    if isinstance(found, Undetermined):
+        return "no"
+    return "yes" if found > r.param("k/bar") else "no"
+
+
+M_SOURCE = Source({"q:m": Question("noul", Text("M?"))}, needs=["t:state"])
+
+
+def test_a_function_rules_mass_tie_is_a_bucket_of_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = load(
+        Design(
+            name="over",
+            state=TIE_STATE,
+            sources={"ask": M_SOURCE},
+            rules={
+                "act": Rule(
+                    "d:act",
+                    t.label("yes", "no"),
+                    over_mass,
+                    version="1",
+                    reads=["q:m"],
+                    params=["k/bar"],
+                    boundaries={"q:m": roles(mass=[{"labels": ["yes"], "bounds": ["k/bar"]}])},
+                )
+            },
+            parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
+            policy="d:act",
+        )
+    )
+    record = answered(loaded, {"n": 0.0}, {"q:m": {"yes": 0.6, "no": 0.4}})
+    # The rule compares with >, which the document does not hold, so the tie is rerun alone.
+    assert tie_rows(monkeypatch, loaded, record, 3) == ["yes", "no", "no"]
+
+
+def test_a_function_rules_null_tie_is_a_bucket_of_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded = x.loaded()  # extract nulls at or above amount/null; the document does not say so
+    record = answered(loaded, x.STATE, {"q:amount": x.AMOUNT, "q:dates": x.DATES})
+    points = [{"amount/null": v} for v in (0.05, 0.1, 0.3)]  # p_null is 0.1
+    count = counted(monkeypatch)
+    rows = same([record], loaded, loaded, points)
+    assert count[0] == 3
+    assert rows[0]["decision"] != rows[2]["decision"]
+
+
+def test_a_function_rules_pick_helper_role_holds_at_the_tie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = gated(0.6)
+    record = tr.turn(recorded, 0.9, 0.9)  # refund at 0.9, picked at any bar up to 0.9
+    points = [{"g/bar": bar} for bar in (0.5, 0.9, 0.95)]
+    count = counted(monkeypatch)
+    rows = same([record], recorded, recorded, points)
+    assert count[0] == 2  # the tie at 0.9 shares 0.5's run
+    assert [row["decision"]["value"] for row in rows] == ["refund", "refund", "ask"]
+
+
+# ---------------------------------------------------------------------------------------------
+# What a source can see of the leaf
+
+
+def opens(r: Any) -> bool:
+    return r.param("k/bar") < 0.5
+
+
+def act_m(r: Any) -> str:
+    return "no" if isinstance(mass(r, "q:m", ["yes"]), Undetermined) else "yes"
+
+
+def test_a_when_reading_the_leaf_is_an_undeclared_read_at_every_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = load(
+        Design(
+            name="when",
+            state=TIE_STATE,
+            sources={
+                "ask": Source(
+                    {"q:m": Question("noul", Text("M?"))},
+                    needs=["t:state"],
+                    when=When(opens, version="1"),
+                )
+            },
+            rules={"act": Rule("d:act", t.label("yes", "no"), act_m, version="1", reads=["q:m"])},
+            parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
+            policy="d:act",
+        )
+    )
+    record = answered(loaded, {"n": 0.0}, {"q:m": {"yes": 1.0, "no": 0.0}})
+    count = counted(monkeypatch)
+    rows = same([record], loaded, loaded, [{"k/bar": v} for v in TIES])
+    assert count[0] == 1  # a when declares no leaf, so no point differs from another
+    assert len({encode(row["decision"]) for row in rows}) == 1
+
+
+def test_a_source_needing_a_param_valued_entry_of_the_leaf_is_hidden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = load(
+        Design(
+            name="needs",
+            state=TIE_STATE,
+            sources={"ask": Source({"q:m": Question("noul", Text("M?"))}, needs=["d:lim"])},
+            rules={
+                "lim": Table("d:lim", "number", "F", [], [[Param("k/bar")]]),
+                "act": Rule("d:act", t.label("yes", "no"), act_m, version="1", reads=["q:m"]),
+            },
+            parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
+            policy="d:act",
+        )
+    )
+    record = answered(loaded, {"n": 0.0}, {"q:m": {"yes": 1.0, "no": 0.0}})
+    refusal = refused(monkeypatch, [record], loaded, loaded, [{"k/bar": 0.3}])
+    assert refusal.reason is RefusalReason.hidden_leaf
+    assert "lim" in str(refusal)
