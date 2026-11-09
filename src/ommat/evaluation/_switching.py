@@ -140,10 +140,11 @@ async def switching_values_batch(
 ) -> list[dict[str, Any]]:
     """``switching_values`` for each record and each path, on one loop, the design's
     value-free work done once: the entries in record order, then path order. Each record is
-    read and checked, each path's type, and then the document's load with ``functions``, in
-    the single job's order, before any replay. Then a key named twice, and any key the store
-    holds, is refused ``held-key`` before any replay, the refusal carrying every such key; a
-    caller rerunning a batch drops them or reads each with ``results.lookup``. A refusal later
+    read and checked, its run settings included, each path's type, and then the document's
+    load with ``functions``, in the single job's order, before any replay. Then a key named
+    twice, and any key the store holds, is refused ``held-key`` before any replay, the refusal
+    carrying every such key; a caller rerunning a batch drops them or reads each with
+    ``results.lookup``. A refusal later
     on leaves the entries already written in the store."""
     _designs(loaded, None, ("loaded", "rerun_design"))  # checked even with no records
     if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
