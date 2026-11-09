@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import pytest
 
+import designs
 from counting import SmallBounds, bound, counted
 from designs import DECISION, minimal, slot
 from ommat import (
@@ -3739,3 +3740,82 @@ def test_an_exception_set_as_notes_is_walked_as_an_exception(small_bounds: Small
     assert _record(exc)["message"] == "<unrepresentable>"  # its args were walked: past the bound
     exc.__notes__ = KeyError("k")  # type: ignore[attr-defined]
     assert _record(exc)["message"] == "x"
+
+
+# ---------------------------------------------------------------------------------------------
+# The per-design caches: bounded, shared by design hash, and safe to fill from several threads
+
+
+def test_two_loads_of_one_document_share_one_held_identity(monkeypatch: Any) -> None:
+    from ommat import _interpret as module
+
+    monkeypatch.setattr(module, "_SOURCES", {})
+    monkeypatch.setattr(module, "_IDENTITIES", {})
+    first = load(designs.full())
+    second = load(first.document, functions=first._callables)  # pyright: ignore[reportPrivateUsage]
+    assert first.design_hash == second.design_hash
+    ref = "q:intent/email"
+    held = module.held_identity(first, ref)
+    assert module.held_identity(second, ref) == held
+    assert held == module.question_identity(first, module.design_sources(first), ref)
+    assert module.design_sources(first) is module.design_sources(second)
+    assert len(module._IDENTITIES) == 1
+    assert len(module._SOURCES) == 1
+
+
+def test_the_caches_drop_their_oldest_entry_past_their_bound(monkeypatch: Any) -> None:
+    from ommat import _interpret as module
+
+    monkeypatch.setattr(module, "_SOURCES", {})
+    monkeypatch.setattr(module, "_IDENTITIES", {})
+    monkeypatch.setattr(module, "_SOURCES_HELD", 2)
+    monkeypatch.setattr(module, "_IDENTITIES_HELD", 3)
+    loaded = [
+        load(
+            designs.full(
+                parameters={
+                    **designs.full().parameters,
+                    "intent/bar": Parameter(t.number(0, 1), bar),
+                }
+            )
+        )
+        for bar in (0.1, 0.2, 0.3, 0.4)
+    ]
+    for d in loaded:
+        module.design_sources(d)
+    assert list(module._SOURCES) == [d.design_hash for d in loaded[2:]]
+    for d in loaded:
+        for ref in ("q:intent/email", "q:intent/tone"):
+            module.held_identity(d, ref)
+    assert len(module._IDENTITIES) == 3
+    assert list(module._IDENTITIES)[-1] == (loaded[-1].design_hash, "q:intent/tone")
+
+
+def test_filling_a_cache_from_several_threads_raises_nothing() -> None:
+    import sys
+    import threading
+
+    from ommat import _interpret as module
+
+    cache: dict[Any, Any] = {}
+    errors: list[BaseException] = []
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+
+    def fill(n: int) -> None:
+        try:
+            for i in range(20_000):
+                module._remember(cache, (n, i), i, 100)
+        except BaseException as exc:  # the test records what a thread raised
+            errors.append(exc)
+
+    threads = [threading.Thread(target=fill, args=(n,)) for n in range(8)]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(interval)
+    assert errors == []
+    assert len(cache) == 100

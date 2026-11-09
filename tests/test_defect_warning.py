@@ -13,12 +13,15 @@ from desk_design import DESIGN  # the read-a-record how-to's design
 from ommat import (
     Decision,
     DefectWarning,
+    Design,
+    Rule,
     decide,
     decide_sync,
     defects,
     load,
     replay_sync,
 )
+from ommat import types as t
 from ommat.bindings import fixed
 from ommat.helpers import TurnFailure, decide_many
 
@@ -152,3 +155,76 @@ def test_under_an_error_filter_a_defect_turn_of_decide_many_is_a_turn_failure() 
     assert isinstance(bad, TurnFailure)
     assert isinstance(bad.error, DefectWarning)
     assert bad.record is bad.error.record
+
+
+# ---------------------------------------------------------------------------------------------
+# The byte scan that decides whether a closed record is worth decoding for defects
+
+
+def may_hold_defect(record: Any) -> bool:
+    from ommat._decide import _may_hold_defect  # pyright: ignore[reportPrivateUsage]
+
+    return _may_hold_defect(record)
+
+
+def test_the_scan_finds_a_raised_defect_in_a_rule_and_at_the_codec() -> None:
+    with pytest.warns(DefectWarning):
+        record = decide_sync(LOADED, BAD_DATE, bindings()).record
+    assert may_hold_defect(record)
+    assert [d["marker"]["cause"]["code"] for d in defects(record)] == ["raised"]
+
+    def codec(state: object) -> object:
+        raise LookupError("no such customer")
+
+    with pytest.warns(DefectWarning):
+        record = decide_sync(LOADED, GOOD, bindings(), codec=codec).record
+    assert may_hold_defect(record)
+    assert record.entries["t:state"]["marker"]["cause"]["code"] == "raised"
+
+
+def test_the_scan_finds_an_invalid_return_at_the_state_entry() -> None:
+    with pytest.warns(DefectWarning):
+        record = decide_sync(LOADED, GOOD, bindings(), codec=lambda s: {"message": 1}).record
+    assert may_hold_defect(record)
+    assert record.entries["t:state"]["marker"]["cause"] == {
+        "code": "invalid-return",
+        "refs": ["t:state"],
+    }
+
+
+def reads_nothing(r: Any) -> str:
+    r.read("t:nothing")
+    return "ok"
+
+
+def says_ok(r: Any) -> str:
+    return "ok"
+
+
+def one_rule(function: Any) -> Any:
+    return load(
+        Design(
+            name="scan",
+            state=t.record(text=t.string),
+            sources={},
+            rules={"act": Rule("d:act", t.string, function, version="1")},
+            parameters={},
+            policy="d:act",
+        )
+    )
+
+
+def test_the_scan_finds_an_undeclared_read() -> None:
+    with pytest.warns(DefectWarning):
+        record = decide_sync(one_rule(reads_nothing), {"text": "x"}, {}).record
+    assert may_hold_defect(record)
+    assert record.entries["d:act"]["marker"]["cause"]["code"] == "undeclared-read"
+
+
+def test_a_string_value_spelling_a_defect_code_is_no_defect() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        record = decide_sync(one_rule(says_ok), {"text": '"code":"raised"'}, {}).record
+    assert not may_hold_defect(record)
+    assert defects(record) == []
+    assert record.entries["t:state"]["value"] == {"text": '"code":"raised"'}

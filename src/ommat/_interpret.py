@@ -25,6 +25,7 @@ handed plain data.
 """
 
 import asyncio
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -1592,18 +1593,22 @@ class _Turn:
 
 
 # Per-design work a turn reads and never changes, kept by design hash, the hash of the design
-# document both are computed from. Each cache is bounded, the oldest entry dropped first.
+# document both are computed from. Each cache is bounded, the oldest entry dropped first. A read
+# is a plain ``dict.get``; a write takes the one lock, so two threads evicting at once never
+# race for the same oldest key.
 _SOURCES: dict[str, dict[str, Any]] = {}
 _SOURCES_HELD = 64
 _IDENTITIES: dict[tuple[str, str], str] = {}
 _IDENTITIES_HELD = 1 << 16
+_CACHE_LOCK = threading.Lock()
 
 
 def _remember(cache: dict[Any, Any], key: Any, value: Any, held: int) -> None:
     """Keep ``value`` under ``key``, dropping the oldest entry past ``held``."""
-    if len(cache) >= held:
-        del cache[next(iter(cache))]
-    cache[key] = value
+    with _CACHE_LOCK:
+        if len(cache) >= held:
+            cache.pop(next(iter(cache)), None)
+        cache[key] = value
 
 
 def design_sources(loaded: LoadedDesign) -> dict[str, Any]:
