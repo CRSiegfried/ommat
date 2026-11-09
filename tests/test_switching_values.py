@@ -1561,3 +1561,109 @@ def test_a_probe_rerun_logs_each_item_as_replay_does() -> None:
     [entry] = [i for i in light if i["item"] == "entry" and i["ref"] == "d:nums"]
     assert entry["value"] == {"z": 1, "a": 0, "big": 2**60, "tenth": 0.1}
     assert [type(entry["value"][k]) for k in ("z", "a")] == [int, int]
+
+
+# ---------------------------------------------------------------------------------------------
+# The batch: the single job for many records and leaves, on one loop
+
+
+def batch(
+    records: list[Any], loaded: LoadedDesign, paths: Any, root: Path, functions: Any = None
+) -> list[dict[str, Any]]:
+    return _switching.switching_values_batch_sync(
+        records, loaded, paths, functions=functions, results=EvaluationStore(root)
+    )
+
+
+def test_a_batch_gives_the_single_jobs_entries_in_record_then_path_order(tmp_path: Path) -> None:
+    records = [tables_record(), decide_sync(TABLES, {**STATE, "n": 3.0, "k": 9}, {}).record]
+    paths = ["lim/n", "lim/k", "sw/mode"]
+    entries = batch(records, TABLES, paths, tmp_path / "batch")
+    singles = [
+        run(record, TABLES, path, tmp_path / f"{i}-{path.replace('/', '-')}")
+        for i, record in enumerate(records)
+        for path in paths
+    ]
+    assert entries == singles
+    assert [encode(e) for e in entries] == [encode(e) for e in singles]
+    assert [(e["key"]["record"], e["key"]["parameter"]) for e in entries] == [
+        (r.record_hash, p) for r in records for p in paths
+    ]
+    store = EvaluationStore(tmp_path / "batch")
+    assert all(store.lookup(KIND, e["key"]) == e for e in entries)
+
+
+def test_a_batch_keeping_few_designs_gives_the_same_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = [tables_record(), decide_sync(TABLES, {**STATE, "n": 3.0}, {}).record]
+    full = batch(records, TABLES, ["lim/n", "lim/k"], tmp_path / "full")
+    monkeypatch.setattr(_switching, "_DESIGNS_KEPT", 2)
+    assert batch(records, TABLES, ["lim/n", "lim/k"], tmp_path / "few") == full
+
+
+def test_a_batch_over_no_records_or_no_paths_is_empty(tmp_path: Path) -> None:
+    assert batch([], TABLES, ["lim/n"], tmp_path) == []
+    assert batch([tables_record()], TABLES, [], tmp_path) == []
+    with pytest.raises(TypeError):
+        batch(cast(Any, "records"), TABLES, ["lim/n"], tmp_path)
+    with pytest.raises(TypeError):
+        batch([tables_record()], TABLES, "lim/n", tmp_path)
+
+
+@pytest.mark.usefixtures("no_replay")
+def test_a_batch_naming_a_path_twice_is_refused_before_any_replay(tmp_path: Path) -> None:
+    record = tables_record()
+    with pytest.raises(EvaluationRefusal) as raised:
+        batch([record], TABLES, ["lim/n", "lim/k", "lim/n"], tmp_path)
+    assert raised.value.reason is R.held_key
+    key = {"record": record.record_hash, "design": TABLES.design_hash, "parameter": "lim/n"}
+    assert raised.value.key == [key]
+    assert EvaluationStore(tmp_path).lookup(KIND, key) is None
+
+
+def test_a_batch_is_refused_invalid_design_before_a_held_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = tables_record()
+    store = EvaluationStore(tmp_path)
+    first = switching_values_sync(record, TABLES, "lim/k", results=store)
+    assert first["key"]["parameter"] == "lim/k"  # held now
+
+    async def replayed(*args: object, **kwargs: object) -> object:
+        raise AssertionError("replayed")
+
+    monkeypatch.setattr(_diff, "_replay_with", replayed)
+    monkeypatch.setattr(_switching, "_rerun", replayed)
+    with pytest.raises(EvaluationRefusal) as raised:
+        _switching.switching_values_batch_sync(
+            [record], TABLES, ["lim/k", "lim/k"], functions={"act": 1}, results=store
+        )
+    assert raised.value.reason is R.invalid_design
+    assert isinstance(raised.value.error, InvalidDesign)
+    with pytest.raises(EvaluationRefusal) as raised:
+        _switching.switching_values_batch_sync([record], TABLES, ["lim/k"], results=store)
+    assert raised.value.reason is R.held_key
+    assert raised.value.key == [first["key"]]
+
+
+def test_a_refusal_mid_batch_leaves_the_earlier_entries_written(tmp_path: Path) -> None:
+    big = 1.7976931348623157e308
+    loaded = load(
+        designed(
+            state=STATE_T,
+            rules={"big": RULES["big"]},
+            parameters={"lim/n": Parameter(t.number(), big)},
+            policy=policy_rule(constant, "d:big"),
+        )
+    )
+    fine = decide_sync(loaded, STATE, {}).record
+    overflowing = decide_sync(loaded, {**STATE, "n": -big}, {}).record
+    with pytest.raises(EvaluationRefusal) as raised:
+        batch([fine, overflowing], loaded, ["lim/n"], tmp_path)
+    assert raised.value.reason is R.unrepresentable_slack
+    store = EvaluationStore(tmp_path)
+    key = {"record": fine.record_hash, "design": loaded.design_hash, "parameter": "lim/n"}
+    assert store.lookup(KIND, key) == run(fine, loaded, "lim/n", tmp_path / "single")
+    key["record"] = overflowing.record_hash
+    assert store.lookup(KIND, key) is None

@@ -138,16 +138,18 @@ async def switching_values_batch(
 ) -> list[dict[str, Any]]:
     """``switching_values`` for each record and each path, on one loop, the design's
     value-free work done once: the entries in record order, then path order. Each record is
-    read and checked, and each path's type, before any replay. Any key the store holds is
-    refused ``held-key`` before any replay, the refusal carrying every such key; a caller
-    rerunning a batch drops them or reads each with ``results.lookup``. A refusal later on
-    leaves the entries already written in the store."""
+    read and checked, each path's type, and then the document's load with ``functions``, in
+    the single job's order, before any replay. Then a key named twice, and any key the store
+    holds, is refused ``held-key`` before any replay, the refusal carrying every such key; a
+    caller rerunning a batch drops them or reads each with ``results.lookup``. A refusal later
+    on leaves the entries already written in the store."""
     if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"records are a {type_name(records)}, not a sequence of records")
     if isinstance(paths, str | bytes) or not isinstance(paths, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"paths are a {type_name(paths)}, not a sequence of leaf paths")
     checked = [_checked(record, loaded) for record in records]
     types = [_leaf_type(path, loaded) for path in paths]
+    shared = _Shared(loaded, own_functions(loaded, functions))
     keys = [
         [{"record": read.record_hash, "design": loaded.design_hash, "parameter": p} for p in paths]
         for read, _ in checked
@@ -165,7 +167,6 @@ async def switching_values_batch(
         raise EvaluationRefusal(
             f"the store holds {len(held)} of the {KIND} keys to write", reason=_R.held_key, key=held
         )
-    shared = _Shared(loaded, own_functions(loaded, functions))
     out: list[dict[str, Any]] = []
     for (_, log), row in zip(checked, keys, strict=True):
         if row:
