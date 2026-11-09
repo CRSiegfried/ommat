@@ -1637,7 +1637,7 @@ def test_a_batch_is_refused_invalid_design_before_a_held_key(
     monkeypatch.setattr(_switching, "_rerun", replayed)
     with pytest.raises(EvaluationRefusal) as raised:
         _switching.switching_values_batch_sync(
-            [record], TABLES, ["lim/k", "lim/k"], functions={"act": 1}, results=store
+            [record], TABLES, ["lim/k", "lim/k"], functions=cast(Any, {"act": 1}), results=store
         )
     assert raised.value.reason is R.invalid_design
     assert isinstance(raised.value.error, InvalidDesign)

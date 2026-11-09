@@ -171,7 +171,9 @@ def test_the_scan_finds_a_raised_defect_in_a_rule_and_at_the_codec() -> None:
     with pytest.warns(DefectWarning):
         record = decide_sync(LOADED, BAD_DATE, bindings()).record
     assert may_hold_defect(record)
-    assert [d["marker"]["cause"]["code"] for d in defects(record)] == ["raised"]
+    found = defects(record)
+    assert found is not None
+    assert [d["marker"]["cause"]["code"] for d in found] == ["raised"]
 
     def codec(state: object) -> object:
         raise LookupError("no such customer")

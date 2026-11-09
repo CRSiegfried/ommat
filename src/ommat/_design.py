@@ -609,8 +609,10 @@ class LoadedDesign:
     by ``_table``; ``_read_leaves``, each leaf whose value a load check read beyond check 10's
     domain and check 8's conformance clauses, and ``_keyed_leaves``, each whose keys alone a
     check read, so a design changing one, or the other's keys, is loaded
-    (``_load.with_parameters``). The class trees, payloads and leaf values are decoded afresh
-    at each read, so nothing a caller changes after load reaches a turn.
+    (``_load.with_parameters``); and ``_document_form``, whether ``_design`` was built from a
+    document, so that its leaf values are in document form, ``bytes`` as base64url, rather than
+    the live form a caller's ``Design`` holds. The class trees, payloads and leaf values are
+    decoded afresh at each read, so nothing a caller changes after load reaches a turn.
     """
 
     __slots__ = (
@@ -619,6 +621,7 @@ class LoadedDesign:
         "_classes_bytes",
         "_design",
         "_document",
+        "_document_form",
         "_graph",
         "_grid",
         "_grounded",
@@ -668,6 +671,7 @@ class LoadedDesign:
     _table_bytes: Mapping[str, bytes]
     _read_leaves: frozenset[str]
     _keyed_leaves: frozenset[str]
+    _document_form: bool
 
     def __init__(self, token: object, **parts: object) -> None:
         if token is not _BUILT_BY_LOAD:

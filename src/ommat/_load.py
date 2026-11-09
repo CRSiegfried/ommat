@@ -2403,6 +2403,7 @@ class _Loader:
             ),
             read_leaves=frozenset(self.read_leaves),
             keyed_leaves=frozenset(self.keyed_leaves),
+            document_form=self.parsed is not None,
         )
 
     def component_reads(self) -> dict[str, tuple[str, ...]]:
@@ -3709,18 +3710,24 @@ def _each(value: object, build: Callable[[Any], Any]) -> Any:
 def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> LoadedDesign:
     """``loaded`` with each leaf in ``values`` holding the value given, in its live form: the
     loaded design a fresh ``load`` of the design with those leaf values gives, its document and
-    design hash that load's. A path naming no leaf of the design is refused ``ValueError``.
-    Each value passes check 10's domain clause and check 8's conformance clause first, the two
-    a value is held to alone, and any failure is raised as ``InvalidDesign`` before a load. A
-    leaf no other check read when ``loaded`` was loaded cannot fail another, nor can one whose
-    keys alone a check read when the keys stand (``_takes_a_load``), so a change to such leaves
-    alone rebuilds the loaded design from the one given, every value-free part shared; any
-    other change loads ``loaded``'s document with the leaves replaced, with its own callables,
-    and that load's ``InvalidDesign`` stands."""
+    design hash that load's. ``values`` is read once, so a lazy or changing mapping is held as
+    first read. A path naming no leaf of the design is refused ``ValueError``. Each value passes
+    check 10's domain clause and check 8's conformance clause first, the two a value is held to
+    alone, and any failure is raised as ``InvalidDesign`` before a load, so a value they refuse
+    raises their failures alone, check 8's or 10's, where a fresh load may add check 9's over the
+    same leaf. A leaf no other check read when ``loaded`` was loaded cannot fail another, nor
+    can one whose keys alone a check read when the keys stand (``_takes_a_load``), so a change
+    to such leaves alone rebuilds the loaded design from the one given, every value-free part
+    shared and each new value in the form ``loaded``'s Design holds its leaves; any other change
+    loads ``loaded``'s document with the leaves replaced, with its own callables, and that
+    load's ``InvalidDesign`` stands. That load comes back as a document load, whatever form
+    ``loaded`` was loaded in: its Design holds document values and its ``_reads`` the
+    document's order, its hash and document the fresh load's."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type(loaded).__name__}, not a LoadedDesign")
     if not isinstance(values, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError("values is a mapping from a leaf's path to its value")
+    values = dict(values)  # read once: a lazy or changing mapping gives one value per leaf
     design = loaded._design
     for path in values:
         if type(path) is not str or path not in loaded._leaf_types:
@@ -3755,7 +3762,7 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
             parameters={
                 **design.parameters,
                 **{
-                    p: Parameter(design.parameters[p].type, _as_held(loaded, p, v, written[p]))
+                    p: Parameter(design.parameters[p].type, _as_held(loaded, v, written[p]))
                     for p, v in values.items()
                 },
             },
@@ -3784,14 +3791,12 @@ def _takes_a_load(loaded: LoadedDesign, values: Mapping[str, object]) -> bool:
     return False
 
 
-def _as_held(loaded: LoadedDesign, path: str, live: object, written: object) -> object:
-    """A leaf's new value in the form ``loaded``'s Design holds the leaf: a design loaded from a
-    document holds document values, one loaded as a Design the live ones, which differ only
-    where the type holds ``bytes``."""
-    held = loaded._design.parameters[path].value
-    if value_conforms(held, loaded._leaf_types[path], {}, form="live"):
-        return live
-    return written
+def _as_held(loaded: LoadedDesign, live: object, written: object) -> object:
+    """A leaf's new value in the form ``loaded``'s Design holds its leaves: a design loaded from
+    a document holds document values, one loaded as a Design the live ones, which differ only
+    where the type holds ``bytes``. The form is the load's, not read off the held value: an
+    empty container of ``bytes`` conforms in both forms."""
+    return written if loaded._document_form else live
 
 
 def _domain_failure(path: str) -> DesignFailure:

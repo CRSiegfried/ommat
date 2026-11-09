@@ -2668,3 +2668,69 @@ def test_a_record_decided_under_a_fresh_load_replays_cleanly_under_the_variant()
         ]
         == "small"
     )
+
+
+BYTES_CONTAINERS = minimal(
+    parameters={
+        "lb": Parameter(t.list_(t.bytes_), []),
+        "mb": Parameter(t.mapping(t.bytes_), {}),
+    }
+)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "written"),
+    [("lb", [b"a"], ["YQ"]), ("mb", {"k": b"a"}, {"k": "YQ"})],
+    ids=["list", "mapping"],
+)
+def test_with_parameters_holds_a_bytes_containers_value_in_the_form_the_base_was_loaded_in(
+    path: str, value: Any, written: Any
+) -> None:
+    """An empty container of bytes conforms in both forms, so the form is the load's: a
+    document-loaded base holds the new value as a fresh document load would."""
+    base = load(BYTES_CONTAINERS)
+    document = load(base.document, functions=base._callables)
+    assert base._document_form is False
+    assert document._document_form is True
+    values = {path: value}
+    fresh = load(_reparameterised(BYTES_CONTAINERS, values))
+    from_design = with_parameters(base, values)
+    from_document = with_parameters(document, values)
+    assert from_design.design_hash == fresh.design_hash
+    assert from_document.design_hash == fresh.design_hash
+    assert from_design._design.parameters[path].value == value
+    assert from_document._design.parameters[path].value == written
+    assert _parts(from_design) == _parts(fresh)
+    assert _parts(from_document) == _parts(load(fresh.document, functions=fresh._callables))
+    assert from_design._leaf_value(path) == from_document._leaf_value(path) == value
+
+
+class Shifting(Mapping[str, Any]):
+    """A mapping whose values change at each read, as a lazy view over moving state might."""
+
+    def __init__(self, first: dict[str, Any], then: dict[str, Any]) -> None:
+        self.first, self.then, self.reads = first, then, 0
+
+    def __getitem__(self, key: str) -> Any:
+        self.reads += 1
+        return (self.first if self.reads <= len(self.first) else self.then)[key]
+
+    def __iter__(self) -> Any:
+        return iter(self.first)
+
+    def __len__(self) -> int:
+        return len(self.first)
+
+
+def test_with_parameters_reads_its_values_once() -> None:
+    design = designs.bounded()
+    loaded = load(design)
+    values = Shifting(
+        {"score/cut": 0.25, "intent/bar": 0.75}, {"score/cut": 0.9, "intent/bar": 0.1}
+    )
+    variant = with_parameters(loaded, values)
+    assert values.reads == 2
+    fresh = load(_reparameterised(design, {"score/cut": 0.25, "intent/bar": 0.75}))
+    assert variant.design_hash == fresh.design_hash
+    assert variant._design.parameters["score/cut"].value == variant._leaf_value("score/cut") == 0.25
+    assert _parts(variant) == _parts(fresh)
