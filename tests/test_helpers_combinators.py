@@ -521,12 +521,11 @@ def test_an_answer_equals_a_mapping_with_its_record_bytes() -> None:
     assert got is YES
 
 
-def test_answers_whose_probabilities_differ_as_1_and_1_0_are_equal() -> None:
+def test_answers_given_1_and_1_0_are_equal() -> None:
     sure, suref = BOARD["q:sure"], BOARD["q:suref"]
     assert isinstance(sure, Answer)
     assert isinstance(suref, Answer)
-    assert type(sure.probabilities["yes"]) is int
-    assert type(suref.probabilities["yes"]) is float
+    assert sure.probabilities["yes"] == suref.probabilities["yes"]  # 1 is held as 1.0
     got, log = run("agree", "q:sure", "q:suref")
     assert got is sure
     assert log[0][2] == ("q:sure", "q:suref")

@@ -69,6 +69,13 @@ def answer(**changes: Any) -> ExtractionAnswer:
     return ExtractionAnswer(**fields)
 
 
+def test_an_integer_p_null_or_confidence_is_held_as_a_float() -> None:
+    a = answer(p_null=0, confidence=1)
+    assert (type(a.p_null), type(a.confidence)) == (float, float)
+    assert (a.p_null, a.confidence) == (0.0, 1.0)
+    assert answer(p_null=None).p_null is None
+
+
 def test_an_answer_holds_its_members_a_number_as_a_float_and_pairs_as_tuples() -> None:
     a = answer()
     assert (a.kind, a.value_type, a.is_list) == (AnswerKind.extraction, ValueType.number, False)
@@ -98,12 +105,6 @@ def test_the_document_form_holds_every_member_lists_for_tuples() -> None:
         "confidence": 0.9,
         "span": [[0, 1], [2, 3]],
     }
-
-
-def test_a_read_back_whole_number_probability_is_taken_as_its_int() -> None:
-    a = answer(p_null=0, confidence=1)
-    assert (a.p_null, a.confidence) == (0, 1)
-    assert type(a.p_null) is int
 
 
 def test_none_is_a_value_and_an_empty_list_is_distinct_from_it() -> None:

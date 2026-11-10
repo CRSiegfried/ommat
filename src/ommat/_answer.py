@@ -48,8 +48,8 @@ class Answer:
     the question's order (for ``score``, lowest level first), at least one, and
     ``probabilities`` is exactly a ``dict`` mapping exactly those labels to values whose type
     is exactly ``int`` or ``float``, a ``bool`` not, finite and in [0, 1]. The constructor
-    checks each value alone and raises ``ValueError``; no sum is required, and the values are
-    held as given, but ``-0.0`` as ``0.0``, as the record writes it.
+    checks each value alone and raises ``ValueError``; no sum is required, and each value is
+    held as a ``float``, ``-0.0`` as ``0.0``, so a reader gets the same type live and in replay.
 
     A label, and a key of ``probabilities``, is a ``str`` or an instance of a subclass of
     ``str`` whose data are Unicode scalar values; it is read and compared by its string data,
@@ -143,7 +143,8 @@ def _probabilities(probabilities: object, labels: tuple[str, ...]) -> dict[str, 
         number = cast(float, p)
         if (type(p) is float and not math.isfinite(number)) or not 0 <= number <= 1:
             raise ValueError(f"probability {described(p)} for {label!r} is not in [0, 1]")
-        out[label] = 0.0 if type(p) is float and number == 0 else number  # -0.0 is 0 in bytes
+        # Held as a float, as replay reads it back: -0.0 is 0 in bytes, so it is held as 0.0.
+        out[label] = 0.0 if number == 0 else float(number)
     return out
 
 
@@ -282,7 +283,8 @@ def _probability(value: object, member: str) -> float | None:
     number = cast(float, value)
     if (type(value) is float and not math.isfinite(number)) or not 0 <= number <= 1:
         raise ValueError(f"{member} {described(value)} is not in [0, 1]")
-    return 0.0 if type(value) is float and number == 0 else number  # -0.0 is 0 in the bytes
+    # Held as a float, as replay reads it back: -0.0 is 0 in the bytes, so it is held as 0.0.
+    return 0.0 if number == 0 else float(number)
 
 
 def _pair(value: object, member: str) -> tuple[int, int]:
@@ -326,8 +328,8 @@ class ExtractionAnswer:
     ``number`` exactly an ``int`` of magnitude at most 2^53 - 1 or a finite ``float``, never a
     ``bool``, held as a ``float``; a ``date``, ``time``, ``datetime`` or ``duration`` a string of
     ommat's own grammar, kept as given. ``p_null`` and ``confidence`` are each ``None`` or
-    exactly an ``int`` or ``float``, finite and in [0, 1], kept as given. A ``-0.0`` is held as
-    ``0.0``, as the record writes it.
+    exactly an ``int`` or ``float``, finite and in [0, 1], held as a ``float``. A ``-0.0`` is held
+    as ``0.0``, as the record writes it.
 
     ``span`` is ``None``, or for a scalar exactly a ``list`` ``[start, end]`` of exact ``int``
     values with 0 <= start <= end, ``end`` exclusive, or for a list one such pair per item. It
