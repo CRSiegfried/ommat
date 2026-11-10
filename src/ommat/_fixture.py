@@ -28,7 +28,7 @@ from ommat._binding_kit import bounded_warnings
 from ommat._canonical import _CanonicalError, encode, ordered
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign
-from ommat._interpret import _record_form, held_identity, warnings_conform
+from ommat._interpret import Replaying, _record_form, held_identity, warnings_conform
 from ommat._ledger import Record, read_record
 from ommat._markers import Cause, CauseCode, Failed, Unavailable
 from ommat._read_view import _ViewError, walk
@@ -196,7 +196,7 @@ class Base:
             return True
 
 
-class FixtureBinding:
+class FixtureBinding(Replaying):
     """An oracle binding answering from ``answers``, a record's calls, under a given design,
     each source checked against ``base``. A ref in ``pinned`` is answered from ``answers`` and
     never checked: an edit set it. A source in ``failed``, whose call an edit failed, is never
@@ -244,6 +244,23 @@ class FixtureBinding:
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> object:
         return await self.call(batch, seconds, None)
+
+    def effects(self, sources: frozenset[str], refs: frozenset[str]) -> object:
+        """What a call of ``sources``, providing ``refs``, noted: each stale ref of theirs with
+        its source and why, in the order noted, and the refs given an answer or a recorded
+        failure. Its answer is a function of the batch, the record and the edit sets alone."""
+        stale = [(ref, why) for ref, why in self.stale.items() if why[0] in sources]
+        return (stale, refs & self.pinned, refs & self.reproduced)
+
+    def restore(self, effects: object) -> None:
+        """Note again what ``effects`` says a call noted."""
+        stale, pinned, reproduced = cast(
+            "tuple[list[tuple[str, tuple[str, Stale]]], frozenset[str], frozenset[str]]",
+            effects,
+        )
+        self.stale.update(stale)
+        self.pinned.update(pinned)
+        self.reproduced.update(reproduced)
 
     async def call(
         self, batch: tuple[SourceCall, ...], seconds: float, live: OracleBinding | None

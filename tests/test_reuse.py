@@ -38,6 +38,7 @@ from ommat import (
     Unasked,
     Undetermined,
     Unsure,
+    When,
     decide_sync,
     load,
 )
@@ -821,3 +822,173 @@ def test_every_probe_design_hashes_as_a_fresh_load_of_its_document(
         _checked_build(LOADED, dict(zip(LEAVES, values, strict=True)), seen)
     assert seen["spliced"] > 0
     assert seen["rebuilt"] == 0  # every document here cuts around its parameters
+
+
+# ---------------------------------------------------------------------------------------------
+# A source's call taken from the reference run
+
+
+WHENS = [0]
+"""Each call of the counted ``when``."""
+
+
+def counted_when(r: Any) -> bool:
+    WHENS[0] += 1
+    return r.read("t:state.n") > 0
+
+
+def upstream(r: Any) -> float:
+    return float(r.read("t:state.n") * r.param("g/k"))
+
+
+def downstream_act(r: Any) -> str:
+    said = [repr(r.read("q:first")), repr(r.read("q:down")), str(r.read("d:up"))]
+    return " ".join(said) + f" {r.param('g/other')}"
+
+
+def chained() -> LoadedDesign:
+    return load(
+        Design(
+            name="chained",
+            state=STATE_T,
+            sources={
+                "first": Source(
+                    {"q:first": Question("noul", Text("First?"))},
+                    needs=["t:state"],
+                    when=When(counted_when, version="1"),
+                    oracle="side",  # a batch of its own beside the down source's
+                    cost=1,
+                ),
+                "down": Source({"q:down": Question("noul", Text("Down?"))}, needs=["d:up"], cost=1),
+            },
+            rules={
+                "up": Rule(
+                    "d:up",
+                    t.number(),
+                    upstream,
+                    version="1",
+                    reads=["t:state.n"],
+                    params=["g/k"],
+                ),
+                "act": Rule(
+                    "d:act",
+                    t.string,
+                    downstream_act,
+                    version="1",
+                    reads=["q:first", "q:down", "d:up"],
+                    params=["g/other"],
+                ),
+            },
+            parameters={
+                "g/k": Parameter(t.number(0, 10), 1.0),
+                "g/other": Parameter(t.number(0, 1), 0.5),
+            },
+            policy="d:act",
+        )
+    )
+
+
+CHAINED = chained()
+
+
+def chained_record() -> Record:
+    async def answer(batch: Any, *, seconds: float) -> object:
+        return CallResult({ref: {"yes": 0.7, "no": 0.3} for c in batch for ref in c.questions})
+
+    bindings = {"default": answer, "side": answer}
+    return decide_sync(CHAINED, {"text": "hi", "n": 2.0}, bindings).record
+
+
+def _asked_sources(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Each fixture call's sources, noted as the binding is called."""
+    from ommat._fixture import FixtureBinding
+
+    asked: list[list[str]] = []
+    real = FixtureBinding.call
+
+    async def noting(self: Any, batch: Any, seconds: float, live: Any) -> object:
+        asked.append([s.id for s in batch])
+        return await real(self, batch, seconds, live)
+
+    monkeypatch.setattr(FixtureBinding, "call", noting)
+    return asked
+
+
+def test_a_source_reaching_what_the_reference_reached_takes_its_call_and_its_when_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = chained_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    reference = _rerun(log, CHAINED, log, reuse=reuse)
+    assert asked == [["down"], ["first"]]
+    other = with_parameters(CHAINED, {"g/other": 0.2})  # read by the policy alone
+    asked.clear()
+    WHENS[0] = 0
+    mine, fixture = _rerun(log, other, log, reuse=reuse)
+    assert asked == []  # both calls taken from the reference
+    assert WHENS[0] == 1  # the when is called afresh
+    full, theirs = _rerun(log, other, log)
+    assert [encode(i) for i in mine.log] == [encode(i) for i in full.log]
+    assert fixture.stale == theirs.stale == {}
+    assert reference[1].stale == {}
+
+
+def test_a_leaf_changing_an_upstream_rule_asks_its_downstream_source_again_and_it_goes_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = chained_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _rerun(log, CHAINED, log, reuse=reuse)
+    changed = with_parameters(CHAINED, {"g/k": 2.0})  # d:up, the down source's need, changes
+    asked.clear()
+    mine, fixture = _rerun(log, changed, log, reuse=reuse)
+    assert asked == [["down"]]  # the first source's call is the reference's; down is asked
+    assert set(fixture.stale) == {"q:down"}
+    assert fixture.stale["q:down"][1].clause == "needs"
+    full, theirs = _rerun(log, changed, log)
+    assert [encode(i) for i in mine.log] == [encode(i) for i in full.log]
+    assert fixture.stale == theirs.stale
+
+
+def test_the_jobs_write_the_same_with_and_without_a_source_s_call_from_the_reference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from ommat import _interpret
+
+    asked = _asked_sources(monkeypatch)
+    points = [
+        {"g/bar": bar, "g/word": word, "g/floor": floor}
+        for bar in (0.1, 0.65)
+        for word in LEAVES["g/word"]
+        for floor in LEAVES["g/floor"]
+    ]
+    paths = ["g/bar", "g/stated", "g/count", "g/mode", "g/word", "g/floor"]
+    chained_log = [chained_record()]
+
+    def jobs(where: str) -> list[bytes]:
+        out = [encode(r) for r in rescore_sync(RECORDS, LOADED, DESIGNS)]
+        out += [encode(r) for r in rescore_grid_sync(RECORDS, LOADED, LOADED, points)]
+        store = EvaluationStore(tmp_path / where)
+        out += [
+            encode(e) for e in switching_values_batch_sync(RECORDS, LOADED, paths, results=store)
+        ]
+        store = EvaluationStore(tmp_path / f"{where}-chained")
+        chained_paths = ["g/k", "g/other"]
+        out += [
+            encode(e)
+            for e in switching_values_batch_sync(chained_log, CHAINED, chained_paths, results=store)
+        ]
+        return out
+
+    reusing = jobs("a")
+    calls = len(asked)
+
+    def never(*a: Any, **k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(_interpret._Turn, "reusable", never)  # pyright: ignore[reportPrivateUsage]
+    asked.clear()
+    assert jobs("b") == reusing
+    assert calls < len(asked)
