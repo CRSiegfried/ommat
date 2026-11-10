@@ -3784,7 +3784,7 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
     ``loaded`` was loaded in: its Design holds document values and its ``_reads`` the
     document's order, its hash and document the fresh load's. The rebuild encodes only each
     changed leaf's parameter object, between the bytes of ``loaded``'s document around it
-    (``_spliced``), unless a changed leaf is one the answer grid reads. Either way the built
+    (``_spliced``). Either way the built
     design holds ``loaded``'s ``UnvaluedParts``, which no leaf's value or order reaches."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type(loaded).__name__}, not a LoadedDesign")
@@ -3848,10 +3848,10 @@ def _spliced(
     """``_rebuilt``'s design with no whole document decoded or encoded: each changed leaf's
     parameter object encoded alone, between the bytes of ``loaded``'s document around it
     (``_Template``), the grid ``loaded``'s, and every other leaf's bytes ``loaded``'s. ``None``
-    when ``loaded``'s document cannot be cut so, a changed leaf is one the grid reads, or a
-    changed leaf's object does not encode, for ``_rebuilt`` to build or refuse."""
+    when ``loaded``'s document cannot be cut so or a changed leaf's object does not encode, for
+    ``_rebuilt`` to build or refuse."""
     template = _cut_document(loaded)
-    if template is None or not template.grid_leaves.isdisjoint(written):
+    if template is None:
         return None
     members = dict(template.members)
     held: dict[str, bytes] = {}
@@ -3859,7 +3859,9 @@ def _spliced(
         leaf = _leaf_object(loaded, path, value)
         try:
             # It stands at depth 2 in the document, under ``parameters``.
-            members[path] = encode(path) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2)
+            members[path] = (
+                encode(path, MAX_DOCUMENT_DEPTH) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2)
+            )
         except ValueError:
             return None
         held[path] = _held_bytes(leaf["value"], leaf["order"])
@@ -3902,13 +3904,12 @@ def _built(
 @dataclass(frozen=True, slots=True)
 class _Template:
     """A loaded design's document cut around its ``parameters`` object: the bytes before and
-    after it, each leaf's member bytes, ``"path":{...}``, in the canonical order the object
-    holds them, and the leaves ``_grid`` reads, a table's mass ``labels`` leaves."""
+    after it, and each leaf's member bytes, ``"path":{...}``, in the canonical order the object
+    holds them."""
 
     prefix: bytes
     members: Mapping[str, bytes]
     suffix: bytes
-    grid_leaves: frozenset[str]
 
 
 # Kept by design hash, the oldest entry dropped first. A read is a plain ``dict.get``; a write
@@ -3930,7 +3931,8 @@ def _cut_document(loaded: LoadedDesign) -> _Template | None:
     doc = cast("dict[str, Any]", decode(loaded._document))
     parameters = cast("dict[str, Any]", doc["parameters"])
     members = {
-        p: encode(p) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2) for p, leaf in parameters.items()
+        p: encode(p, MAX_DOCUMENT_DEPTH) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2)
+        for p, leaf in parameters.items()
     }
     body = b"{" + b",".join(members.values()) + b"}"
     whole = encode(parameters, MAX_DOCUMENT_DEPTH - 1)
@@ -3938,18 +3940,10 @@ def _cut_document(loaded: LoadedDesign) -> _Template | None:
     found: _Template | None = None
     if body == whole and loaded._document.count(needle) == 1:
         at = loaded._document.index(needle) + len(_PARAMETERS_KEY)
-        grid_leaves = frozenset(
-            cast(str, i["params"]["labels"])
-            for rule in cast("dict[str, Any]", doc["rules"]).values()
-            if rule["form"] == "table"
-            for i in cast("list[dict[str, Any]]", rule["inputs"])
-            if i["helper"] == "mass"
-        )
         found = _Template(
             loaded._document[:at],
             MappingProxyType(members),
             loaded._document[at + len(body) :],
-            grid_leaves,
         )
     with _TEMPLATES_LOCK:
         if loaded.design_hash not in _TEMPLATES and len(_TEMPLATES) >= _TEMPLATES_HELD:
