@@ -3743,13 +3743,12 @@ def test_an_exception_set_as_notes_is_walked_as_an_exception(small_bounds: Small
 
 
 # ---------------------------------------------------------------------------------------------
-# The per-design caches: bounded, shared by design hash, and safe to fill from several threads
+# The held identities: bounded, shared by design hash, and safe to fill from several threads
 
 
 def test_two_loads_of_one_document_share_one_held_identity(monkeypatch: Any) -> None:
     from ommat import _interpret as module
 
-    monkeypatch.setattr(module, "_SOURCES", {})
     monkeypatch.setattr(module, "_IDENTITIES", {})
     first = load(designs.full())
     second = load(first.document, functions=first._callables)  # pyright: ignore[reportPrivateUsage]
@@ -3757,18 +3756,18 @@ def test_two_loads_of_one_document_share_one_held_identity(monkeypatch: Any) -> 
     ref = "q:intent/email"
     held = module.held_identity(first, ref)
     assert module.held_identity(second, ref) == held
-    assert held == module.question_identity(first, module.design_sources(first), ref)
-    assert module.design_sources(first) is module.design_sources(second)
+    sources = first._unvalued.sources  # pyright: ignore[reportPrivateUsage]
+    assert held == module.question_identity(first, sources, ref)
+    # Decoded once per design.
+    assert first._unvalued.sources is sources  # pyright: ignore[reportPrivateUsage]
+    assert second._unvalued.sources == sources  # pyright: ignore[reportPrivateUsage]
     assert len(module._IDENTITIES) == 1
-    assert len(module._SOURCES) == 1
 
 
-def test_the_caches_drop_their_oldest_entry_past_their_bound(monkeypatch: Any) -> None:
+def test_the_held_identities_drop_their_oldest_entry_past_their_bound(monkeypatch: Any) -> None:
     from ommat import _interpret as module
 
-    monkeypatch.setattr(module, "_SOURCES", {})
     monkeypatch.setattr(module, "_IDENTITIES", {})
-    monkeypatch.setattr(module, "_SOURCES_HELD", 2)
     monkeypatch.setattr(module, "_IDENTITIES_HELD", 3)
     loaded = [
         load(
@@ -3781,9 +3780,6 @@ def test_the_caches_drop_their_oldest_entry_past_their_bound(monkeypatch: Any) -
         )
         for bar in (0.1, 0.2, 0.3, 0.4)
     ]
-    for d in loaded:
-        module.design_sources(d)
-    assert list(module._SOURCES) == [d.design_hash for d in loaded[2:]]
     for d in loaded:
         for ref in ("q:intent/email", "q:intent/tone"):
             module.held_identity(d, ref)

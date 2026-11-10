@@ -234,3 +234,32 @@ class OracleBinding(Protocol):
     def __call__(
         self, batch: tuple[SourceCall, ...], /, *, seconds: float
     ) -> Awaitable[object]: ...
+
+
+class Replaying:
+    """A binding a later run of a record may take a kept call's outcome from rather than call
+    it, as the fixture is. A subclass's answer to a batch is a function of the batch and of
+    ``construction()`` alone: never of ``seconds``, a clock or the order of its calls. The
+    design it was built under counts only through its shape and the leaves its batch's
+    questions declare, which interpret compares itself (``Reuse.changed``,
+    ``Reuse.source_params``), so an equal key alone does not make a call reusable.
+    ``effects(sources, refs)`` is what it noted of the call of ``sources``, providing ``refs``,
+    split by batch so that it holds nothing of another call; ``restore`` notes it again,
+    putting back everything a reader of the binding reads, as calling it would have. It is a
+    nominal base class, not a Protocol, so a binding opts in by naming it; it is private and
+    not exported."""
+
+    def construction(self) -> object:
+        """An opaque key for how the binding was built: equal between two bindings built alike
+        over designs that differ in leaf values alone, and between no two that could answer a
+        batch differently under the same design."""
+        raise NotImplementedError
+
+    def effects(self, sources: frozenset[str], refs: frozenset[str]) -> object:
+        """What the binding noted of its call of ``sources``, providing ``refs``, and of no
+        other call."""
+        raise NotImplementedError
+
+    def restore(self, effects: object) -> None:
+        """Note ``effects`` again, as the call that noted them did."""
+        raise NotImplementedError

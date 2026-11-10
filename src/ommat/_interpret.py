@@ -46,7 +46,7 @@ from ommat._answer import (
     off_sum,
     span_bound,
 )
-from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
+from ommat._binding import CallResult, OracleBinding, RenderedQuestion, Replaying, SourceCall
 from ommat._canonical import decode, encode, hash_value, ordered, with_order
 from ommat._component import (
     Called,
@@ -157,6 +157,7 @@ async def interpret(
     cut: tuple[int, bool] | None,
     carried: frozenset[str],
     reuse: "Reuse | None" = None,
+    replaying: bool = False,
 ) -> dict[str, object]:
     """Run the turn's rounds over the ledger decide opened, which holds the ``design`` and
     ``settings`` items and the state entry, and return the live board when interpret stops: every
@@ -173,7 +174,11 @@ async def interpret(
     ``CancelledError`` a function ``when``, a rule or a method of a returned value raises with
     every item appended before it. ``reuse``, which only the evaluation jobs pass, is one
     record's reference run: the first run it is given keeps it, and a later one fires a rule
-    from it where ``Reuse`` says the call would give the same.
+    from it where ``Reuse`` says the call would give the same. ``replaying``, which only the
+    evaluation jobs pass, has a source's call kept and taken from ``reuse`` too; a call so
+    taken writes the kept call's ``unhashed`` entry, its answers' off sums worked out only
+    when the kept call's run kept ``unhashed`` writes, so one is taken only into a run that
+    keeps them alike.
     """
     if carried:
         raise _InterpretError("carried providers are not supported in this engine")
@@ -182,8 +187,23 @@ async def interpret(
     if cut is not None and clock is not None:
         raise _InterpretError("the cut stands in for the clock, never beside it")
     end = None if deadline is None or clock is None else clock + deadline
-    limits = _Limits(None if budget is None else _exact(budget), end, cut)
-    turn = _Turn(ledger, loaded, state, bindings, round_bound, timeout, carried, limits, reuse)
+    limits = _Limits(None if budget is None else _exact(budget), end, cut, clock)
+    # An answer's off sum is written to the call's ``unhashed`` entry alone, so a ledger that
+    # keeps no ``unhashed`` write is spared it.
+    sums = not getattr(ledger, "drops_unhashed", False)
+    turn = _Turn(
+        ledger,
+        loaded,
+        state,
+        bindings,
+        round_bound,
+        timeout,
+        carried,
+        limits,
+        reuse,
+        replaying,
+        sums=sums,
+    )
     return await turn.run()
 
 
@@ -195,6 +215,8 @@ class _Limits:
     budget: Fraction | None
     end: float | None
     cut: tuple[int, bool] | None
+    clock: float | None = None
+    """Decide's clock reading, or ``None`` under replay's internal entry."""
 
 
 # ---------------------------------------------------------------------------------------------
@@ -342,7 +364,11 @@ class _Judged:
     clients: dict[str, str] | None = None
 
 
-def _judge(batch: _Batch, returned: _Returned, types: Mapping[str, Type]) -> _Judged:
+def _judge(
+    batch: _Batch, returned: _Returned, types: Mapping[str, Type], *, sums: bool = True
+) -> _Judged:
+    """A call's outcome, as the fault scope sorts it; each answer's off sum in ``sums`` only
+    when ``sums``, as nothing but the call's ``unhashed`` entry reads it."""
     judged = _Judged(None, {}, no_provenance())
     codes: list[CauseCode] = []  # in fault-scope order; the first decides
     given: dict[str, object] = {}
@@ -407,7 +433,7 @@ def _judge(batch: _Batch, returned: _Returned, types: Mapping[str, Type]) -> _Ju
         else:
             written = _returned_value(ref, given[ref], batch, types)
             judged.written[ref] = written
-            if type(written) is tuple and type(written[1]) is Answer:
+            if sums and type(written) is tuple and type(written[1]) is Answer:
                 # The flag changes no outcome: the answer is written as returned.
                 total = off_sum(written[1])
                 if total is not None:
@@ -712,8 +738,18 @@ def _fresh(value: object) -> object:
     if type(value) is tuple:
         return tuple(_fresh(v) for v in cast("tuple[object, ...]", value))
     if type(value) is Answer:
-        return Answer(value.kind, value.labels, dict(value.probabilities))
+        return _answer_copy(value)
     return value
+
+
+def _answer_copy(answer: Answer) -> Answer:
+    """``Answer(answer.kind, answer.labels, dict(answer.probabilities))``, the fields already
+    checked and in their held forms, so none is checked again."""
+    copy = object.__new__(Answer)
+    object.__setattr__(copy, "kind", answer.kind)
+    object.__setattr__(copy, "labels", answer.labels)
+    object.__setattr__(copy, "probabilities", dict(answer.probabilities))
+    return copy
 
 
 def slot_value(loaded: LoadedDesign, ref: str, value: object) -> object:
@@ -811,6 +847,9 @@ class _Turn:
         carried: frozenset[str],
         limits: _Limits,
         reuse: "Reuse | None" = None,
+        replaying: bool = False,
+        *,
+        sums: bool = True,
     ) -> None:
         self.ledger = ledger
         self.loaded = loaded
@@ -827,12 +866,21 @@ class _Turn:
         self.left_out: dict[str, Undetermined] = {}
         """Each candidate-valued question left out of its batch, with its own marker."""
         self.spent = Fraction(0)
-        self.document = design_sources(loaded)
+        self.sums = sums
+        """Whether an answer's off sum is worked out, for the call's ``unhashed`` entry;
+        interpret passes it false for a ledger that keeps no ``unhashed`` write."""
+        self.document = loaded._unvalued.sources
         self.reuse = reuse
         self.keeping = reuse is not None and reuse.reference is None  # the reference run
         self.changed = None if reuse is None or self.keeping else reuse.changed(loaded)
+        # A source's call is kept and taken from ``reuse`` only where the caller says so, and
+        # never on a clock: a kept return carries its call's latency and expiry.
+        self.replaying = (
+            replaying and reuse is not None and limits.end is None and limits.clock is None
+        )
         if self.keeping:
             cast(Reuse, reuse).calls = {}  # a reference run that raised left only part
+            cast(Reuse, reuse).asked = {}
 
     async def run(self) -> dict[str, object]:
         """Run the rounds and return the live board, which decide reads."""
@@ -1133,18 +1181,29 @@ class _Turn:
             # A source with no ref left to ask is not called, and is outside the frontier.
             if len(out) < len(expanded[sid].refs):
                 ready.append(sid)
-        batches = self.batches(ready, left, labels, expanded)
+        batches, reused = self.frontier(ready, left, labels, expanded, n)
         cut = self.cut_before(batches, n)
         if cut is not None:
-            batches = []  # the frontier is not asked, whole
-        returned = await self.ask(batches)
+            batches, reused = [], {}  # the frontier is not asked, whole
+        returned = await self.ask(batches, reused)
         if cut is None and self.cut_after(batches, returned, n):
             cut = _C.deadline
         calls: dict[str, tuple[int, _Judged]] = {}
         cost = Fraction(0)
-        for batch, outcome in zip(batches, returned, strict=True):
-            judged = _judge(batch, outcome, self.loaded._types)
-            index = self.ledger.append(self.call_item(batch, judged, n))
+        for i, (batch, outcome) in enumerate(zip(batches, returned, strict=True)):
+            asked = reused.get(i)
+            if asked is None:
+                judged = _judge(batch, outcome, self.loaded._types, sums=self.sums)
+                item = self.call_item(batch, judged, n)
+            else:  # the reference run's call, its live values fresh
+                judged = dataclasses.replace(
+                    asked.judged,
+                    written={r: _copied_written(w) for r, w in asked.judged.written.items()},
+                )
+                item = asked.item
+            index = self.ledger.append(item)
+            if self.keeps_calls():
+                self.keep_call(batch, outcome, judged, item, n)
             unhashed: dict[str, object] = {
                 "start": outcome.start,
                 "latency": outcome.latency,
@@ -1299,16 +1358,18 @@ class _Turn:
         if text.unnamed is not None:
             self.ledger.write_unhashed("reads", text.unnamed, index)
 
-    def batches(
+    def frontier(
         self,
         ready: list[str],
         left: Mapping[str, Mapping[str, Undetermined]],
         labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]],
         expanded: Mapping[str, "_Expanded"],
-    ) -> list[_Batch]:
+        n: int,
+    ) -> tuple[list[_Batch], dict[int, "_Asked"]]:
         """The live frontier's batches: the ready sources naming one oracle form one, and those
         naming none one more under ``default``, in order of their first source id. ``ready`` is
-        in source id order."""
+        in source id order. A batch the reference run asked alike (``reusable``) is its batch,
+        kept by index in the second member, and is not built."""
         groups: list[list[str]] = []
         keyed: dict[str, list[str]] = {}
         for sid in ready:
@@ -1319,7 +1380,85 @@ class _Turn:
             else:
                 keyed[key] = [sid]
                 groups.append(keyed[key])
-        return [self.batch(tuple(group), left, labels, expanded) for group in groups]
+        batches: list[_Batch] = []
+        reused: dict[int, _Asked] = {}
+        for i, group in enumerate(groups):
+            asked = self.reusable(tuple(group), n, left, labels, expanded)
+            if asked is not None:
+                reused[i] = asked
+                batches.append(asked.batch)
+            else:
+                batches.append(self.batch(tuple(group), left, labels, expanded))
+        return batches, reused
+
+    # -- a source's call from the reference run ---------------------------------------------
+
+    def keeps_calls(self) -> bool:
+        """Whether this run is the reference run and keeps its sources' calls."""
+        return self.keeping and self.replaying
+
+    def reusable(
+        self,
+        sids: tuple[str, ...],
+        n: int,
+        left: Mapping[str, Mapping[str, Undetermined]],
+        labels: Mapping[str, tuple[tuple[str, ...], tuple[str | None, ...]]],
+        expanded: Mapping[str, "_Expanded"],
+    ) -> "_Asked | None":
+        """The reference run's call of exactly these sources in round ``n``, when asking them
+        again would give the same: the run is ``replaying``, so has no clock, their binding
+        answers by the batch and its construction (``Replaying``) and was built as the
+        reference's was, the kept call's answers' off sums were worked out as this run works
+        them out, no question of theirs declares a leaf whose value changed, and the batch
+        ``batch`` would build passes what the kept one passed: each source's refs asked,
+        each need's value as ``at`` reads it, by ``_same``, and each question's labels and their
+        descriptions. A question's wording is rendered from these, its leaves and its
+        candidate, which its ref names. The sources' readiness and their left-out refs' markers
+        are judged afresh before this."""
+        reuse, changed = self.reuse, self.changed
+        if reuse is None or changed is None or not self.replaying:
+            return None
+        asked = reuse.asked.get(sids)
+        # A taken call writes the kept judged outcome, its off sums those worked out then.
+        if asked is None or asked.round != n or asked.sums != self.sums:
+            return None
+        binding = self.bindings.get(asked.batch.key)
+        if not isinstance(binding, Replaying) or binding.construction() != asked.construction:
+            return None
+        for sid, kept in zip(sids, asked.batch.call, strict=True):
+            if not changed.isdisjoint(reuse.source_params(sid, self.sources[sid])):
+                return None
+            grounding = expanded[sid]
+            out = left.get(sid, {})
+            provided = [r for r in grounding.refs if r not in out]
+            # A source provides t: refs or q: refs, never both, each in code-point order.
+            if provided != [*kept.refs, *kept.questions]:
+                return None
+            # The same refs name the same needs under a design of the same shape, a grounded
+            # ref naming its candidate, so only the needs' values are compared.
+            for need in self.named_needs(sid, provided, grounding):
+                if not _same(at(self.board, need), kept.needs[need]):
+                    return None
+            for ref, q in kept.questions.items():
+                if q.kind is not AnswerKind.extraction:
+                    name = declared_ref(ref)
+                    found = labels.get(name) or self.loaded._labels[name]
+                    if found != (q.labels, q.descriptions):
+                        return None
+        # The kept batch's ``timeout`` is never read: a replaying run has no clock.
+        return asked
+
+    def keep_call(
+        self, batch: _Batch, returned: _Returned, judged: _Judged, item: dict[str, object], n: int
+    ) -> None:
+        """Keep the reference run's call of ``batch``, with what its binding noted of it and how
+        the binding was built, when it answers by the batch and its construction."""
+        binding = self.bindings[batch.key]
+        if isinstance(binding, Replaying):
+            effects = binding.effects(frozenset(batch.sources), frozenset(batch.refs))
+            construction = binding.construction()
+            asked = _Asked(n, batch, returned, judged, item, construction, effects, self.sums)
+            cast(Reuse, self.reuse).asked[batch.sources] = asked
 
     def expanded(self, sid: str) -> "_Expanded":
         """A source's refs this round, in code-point order: each per-candidate question
@@ -1414,11 +1553,8 @@ class _Turn:
                 for r in provided
                 if r in self.loaded._candidate_sets
             )
-            # A fresh copy per source, so no source's change reaches another's; a slot on a
-            # grounded declared ref is each asked candidate's need, under its grounded ref.
-            named = set(self.loaded._needs[sid])
-            for ref in provided:
-                named.update(self.grounded_slots(sid, ref, grounding.candidates.get(ref)))
+            # A fresh copy per source, so no source's change reaches another's.
+            named = self.named_needs(sid, provided, grounding)
             needs = {need: _fresh(at(self.board, need)) for need in code_point_sorted(named)}
             rendered: dict[str, RenderedQuestion] = {}
             for ref in provided:
@@ -1519,6 +1655,15 @@ class _Turn:
             return origin
         return grounded_ref(declared, candidate) + "".join(f".{f}" for f in p.fields)
 
+    def named_needs(self, sid: str, provided: list[str], grounding: "_Expanded") -> set[str]:
+        """The needs keys a source's call passes when it provides ``provided``: its declared
+        needs, and each slot on a grounded declared ref, as each asked candidate's need under
+        its grounded ref."""
+        named = set(self.loaded._needs[sid])
+        for ref in provided:
+            named.update(self.grounded_slots(sid, ref, grounding.candidates.get(ref)))
+        return named
+
     def grounded_slots(self, sid: str, ref: str, candidate: str | None) -> list[str]:
         """The needs keys of a per-candidate entry's slots on grounded declared refs."""
         if candidate is None:
@@ -1549,17 +1694,31 @@ class _Turn:
                 out[ref] = Unasked(Cause(_C.need_undetermined, keyed))
         return out
 
-    async def ask(self, batches: list[_Batch]) -> list[_Returned]:
+    async def ask(
+        self, batches: list[_Batch], reused: Mapping[int, "_Asked"] | None = None
+    ) -> list[_Returned]:
         """Run the live frontier's calls concurrently, one task per batch; a task that ended
-        cancelled on its own is re-raised here, before the round's first append."""
+        cancelled on its own is re-raised here, before the round's first append. A batch in
+        ``reused`` is not called: its task gives the binding back what it noted of the
+        reference's call, in the batch's place among the calls, and returns that call's
+        return."""
         if not batches:
             return []
+        reused = reused or {}
+        if len(reused) == len(batches):  # nothing to call
+            for i, b in enumerate(batches):
+                cast(Replaying, self.bindings[b.key]).restore(reused[i].effects)
+            return [reused[i].returned for i in range(len(batches))]
         end = self.limits.end
         # No timeout on the group: each task holds its own, cut to the deadline.
         async with asyncio.TaskGroup() as group:
             tasks = [
-                group.create_task(_call(self.bindings[b.key], b.call, b.timeout, end))
-                for b in batches
+                group.create_task(
+                    _restored(cast(Replaying, self.bindings[b.key]), reused[i])
+                    if i in reused
+                    else _call(self.bindings[b.key], b.call, b.timeout, end)
+                )
+                for i, b in enumerate(batches)
             ]
         for task in tasks:  # in batch order, before the round's first append
             if task.cancelled():
@@ -1689,22 +1848,49 @@ class _Turn:
 class Reuse:
     """One record's reference run, kept by an evaluation job that reruns the record under
     several designs: each rule's call by rule id and candidate, a function rule's ``Called``
-    and a table's outcome, and the live board the run ended with. The first run handed it
-    keeps it. A later run under a design whose document is the reference's but for its leaves'
-    values fires a rule from the reference's call, not calling it, when the rule declares no
-    leaf whose value differs, a function rule's callable is the reference's own, and every
-    entry its read view reaches is the reference's, by ``_same``: a rule's value being a
-    function of what it reads, its leaves and its candidate (§rule-contract, §read-view), the
-    run writes what calling it would. A function's call is judged afresh on the run's board.
-    Sources are asked, and their function ``when`` called, as ever, so a source now asked or
-    left unasked, a stale question, the budget and the cut each reach a rule through what it
-    reads.
-    A run under any other design keeps and reuses nothing."""
+    and a table's outcome; each source call by its batch's sources, with its round, batch,
+    return, judged outcome, call item, its binding's construction key and what the binding
+    noted of it; and the live board the run ended with. The first run handed it keeps it. A
+    later run under a design whose document is the reference's but for its leaves' values fires
+    a rule from the reference's call, not calling it, when the rule declares no leaf whose value
+    differs, a function rule's callable is the reference's own, and every entry its read view
+    reaches is the reference's, by ``_same``: a rule's value being a function of what it reads,
+    its leaves and its candidate (§rule-contract, §read-view), the run writes what calling it
+    would. A function's call is judged afresh on the run's board.
+
+    A source's readiness is judged afresh, its function ``when`` called as ever, and so are the
+    markers of the refs left out of its batch. Where interpret is told it is ``replaying``, the
+    run has no clock and the binding answers by the batch and its construction (``Replaying``,
+    the fixture), a later run's batch of the very sources the reference called together in the
+    same round, under a binding built alike, takes that call's outcome, not calling the
+    binding: its entries, live values fresh, its call item, its cost charged again to the
+    budget, and the stale refs and pinned answers the binding noted, when no question of the
+    batch declares a leaf whose value differs and the batch passes what the kept one passed
+    (``_Turn.reusable``). The round is the graph's, so the budget and the cut reach a source
+    through it alone; a source now asked or left unasked, asked with other batchmates, or passed
+    another need's value, label or ref is asked as now. A run under any other design keeps and
+    reuses nothing."""
 
     def __init__(self) -> None:
         self.reference: LoadedDesign | None = None
         self.board: dict[str, object] = {}
         self.calls: dict[tuple[str, str | None], Called | _Outcome] = {}
+        self.asked: dict[tuple[str, ...], _Asked] = {}
+        self.params: dict[str, frozenset[str]] = {}
+
+    def source_params(self, sid: str, source: Source) -> frozenset[str]:
+        """The leaves a source declares, its questions' wording slots', kept per source id:
+        a design differing from the reference's in leaf values alone declares the same."""
+        found = self.params.get(sid)
+        if found is None:
+            found = self.params[sid] = frozenset(
+                origin
+                for q in source.provides.values()
+                if isinstance(q, Question)
+                for tag, origin in _slot_origins(q)
+                if tag == "param"
+            )
+        return found
 
     def kept(self, loaded: LoadedDesign, board: dict[str, object]) -> None:
         """Keep a finished reference run under ``loaded``."""
@@ -1714,12 +1900,44 @@ class Reuse:
         """The leaves whose values differ between ``loaded`` and the reference design, or
         ``None`` when the documents differ elsewhere, a leaf's type included."""
         reference = cast(LoadedDesign, self.reference)
-        if not _shares_all_but_leaves(loaded, reference) and design_shape(loaded) != design_shape(
-            reference
+        if (
+            not _shares_all_but_leaves(loaded, reference)
+            and loaded._unvalued.shape != reference._unvalued.shape
         ):
             return None
         mine, theirs = loaded._leaf_bytes, reference._leaf_bytes
         return frozenset(p for p in mine if mine[p] != theirs[p])
+
+
+@dataclass(frozen=True, slots=True)
+class _Asked:
+    """A reference run's source call: its round, batch, return, judged outcome and call item,
+    its binding's construction key, what the binding noted of it, and whether its answers'
+    off sums were worked out."""
+
+    round: int
+    batch: _Batch
+    returned: _Returned
+    judged: _Judged
+    item: dict[str, object]
+    construction: object
+    effects: object
+    sums: bool
+
+
+async def _restored(binding: Replaying, asked: _Asked) -> _Returned:
+    """A kept call in its batch's place among the round's calls: the binding notes what it
+    noted of it again, and its return is given."""
+    binding.restore(asked.effects)
+    return asked.returned
+
+
+def _copied_written(written: Written) -> Written:
+    """A kept source entry's write with its live value fresh, so no run changes the
+    reference's board; the record form is copied by the ledger."""
+    if isinstance(written, Undetermined):
+        return written
+    return written[0], _fresh(written[1])
 
 
 _LEAF_PARTS = frozenset({"_design", "_document", "_hash", "_grid", "_leaf_bytes"})
@@ -1797,16 +2015,11 @@ def _copied_outcome(outcome: "_Outcome") -> "_Outcome":
     return _Outcome(written, None, rows, outcome.exception, outcome.unnamed)
 
 
-# Per-design work a turn or an evaluation job reads and never changes, kept by design hash, the
-# hash of the design document each is computed from. Each cache is bounded, the oldest entry
-# dropped first. A read is a plain ``dict.get``; a write takes the one lock, so two threads
-# evicting at once never race for the same oldest key.
-_SOURCES: dict[str, dict[str, Any]] = {}
-_SOURCES_HELD = 64
+# The question identities a turn or an evaluation job reads and never changes, kept by design
+# hash and ref, bounded, the oldest entry dropped first. A read is a plain ``dict.get``; a write
+# takes the lock, so two threads evicting at once never race for the same oldest key.
 _IDENTITIES: dict[tuple[str, str], str] = {}
 _IDENTITIES_HELD = 1 << 16
-_SHAPES: dict[str, bytes] = {}
-_SHAPES_HELD = 1024
 _CACHE_LOCK = threading.Lock()
 
 
@@ -1818,36 +2031,12 @@ def _remember(cache: dict[Any, Any], key: Any, value: Any, held: int) -> None:
         cache[key] = value
 
 
-def design_sources(loaded: LoadedDesign) -> dict[str, Any]:
-    """The design document's ``sources`` object, decoded once per design hash. Every caller
-    only reads it."""
-    found = _SOURCES.get(loaded.design_hash)
-    if found is None:
-        found = cast("dict[str, Any]", decode(loaded.document))["sources"]
-        _remember(_SOURCES, loaded.design_hash, found, _SOURCES_HELD)
-    return found
-
-
-def design_shape(loaded: LoadedDesign) -> bytes:
-    """The design document with every leaf's value and order dropped, encoded once per design
-    hash, so every record of a job, and every job, shares it. It reads the document alone,
-    which the hash is taken over."""
-    found = _SHAPES.get(loaded.design_hash)
-    if found is None:
-        doc = cast("dict[str, Any]", decode(loaded.document))
-        leaves = cast("dict[str, dict[str, Any]]", doc["parameters"])
-        doc["parameters"] = {p: leaf["type"] for p, leaf in leaves.items()}
-        found = encode(doc, MAX_DOCUMENT_DEPTH)
-        _remember(_SHAPES, loaded.design_hash, found, _SHAPES_HELD)
-    return found
-
-
 def held_identity(loaded: LoadedDesign, ref: str) -> str:
     """``question_identity`` of declared ``q:`` ref ``ref``, computed once per design hash."""
     key = (loaded.design_hash, ref)
     found = _IDENTITIES.get(key)
     if found is None:
-        found = question_identity(loaded, design_sources(loaded), ref)
+        found = question_identity(loaded, loaded._unvalued.sources, ref)
         _remember(_IDENTITIES, key, found, _IDENTITIES_HELD)
     return found
 

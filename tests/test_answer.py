@@ -289,6 +289,13 @@ def test_the_flag_rounds_the_exact_sum_not_a_float_sum() -> None:
     assert off_sum(Answer("choice", ("a", "b"), {"a": 0.1, "b": 0.2})) == 0.3
 
 
+def test_answer_slots_are_pinned() -> None:
+    assert Answer.__slots__ == ("kind", "labels", "probabilities"), (  # pyright: ignore[reportAttributeAccessIssue]
+        "_interpret._answer_copy sets these slots without running Answer.__init__, "
+        "so a new field must be added there too"
+    )
+
+
 def test_answer_is_frozen_with_three_fields() -> None:
     a = Answer("noul", ("yes", "no"), {"yes": 1, "no": 0})
     assert [f.name for f in dataclasses.fields(a)] == ["kind", "labels", "probabilities"]

@@ -23,7 +23,7 @@ from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from ommat._answer import AnswerKind, ValueType
-from ommat._binding import CallResult, OracleBinding, RenderedQuestion, SourceCall
+from ommat._binding import CallResult, OracleBinding, RenderedQuestion, Replaying, SourceCall
 from ommat._binding_kit import bounded_warnings
 from ommat._canonical import _CanonicalError, encode, ordered
 from ommat._decide import EntryRefusal
@@ -64,6 +64,7 @@ class RecordedCalls:
     ``(call index, ref)``."""
 
     def __init__(self, log: list[dict[str, Any]]) -> None:
+        self.log = log
         self.calls: dict[str, tuple[int, dict[str, Any]]] = {}
         self.entries: dict[tuple[int, str], dict[str, Any]] = {}
         for index, item in enumerate(log):
@@ -76,6 +77,23 @@ class RecordedCalls:
 
     def call_of(self, sid: str) -> tuple[int, dict[str, Any]] | None:
         return self.calls.get(sid)
+
+
+class _Same:
+    """An object compared by identity, held so its ``id`` is not reused. A log so held is
+    taken as immutable once a binding is built from it, so an evaluation job passes one log
+    object, read once, to every run of a record."""
+
+    __slots__ = ("held",)
+
+    def __init__(self, held: object) -> None:
+        self.held = held
+
+    def __eq__(self, other: object) -> bool:
+        return type(other) is _Same and other.held is self.held
+
+    def __hash__(self) -> int:
+        return id(self.held)
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +129,10 @@ class Base:
         self._loaded = loaded
         self._design = loaded if design is None else design
         self._asked = asked
+        self.key = (_Same(log), None if design is None else design.design_hash, asked)
+        """How the base was built: its log, by identity, its design's hash, ``None`` for the
+        design a source is asked under, and the sources asked afresh. The log is taken as
+        immutable from here on: a job passes one log object to every run of a record."""
 
     def check(self, source: SourceCall) -> tuple[Stale | None, dict[str, Stale]]:
         """Whether ``source`` is stale whole, and why, else each stale ref of it, by the first
@@ -196,7 +218,7 @@ class Base:
             return True
 
 
-class FixtureBinding:
+class FixtureBinding(Replaying):
     """An oracle binding answering from ``answers``, a record's calls, under a given design,
     each source checked against ``base``. A ref in ``pinned`` is answered from ``answers`` and
     never checked: an edit set it. A source in ``failed``, whose call an edit failed, is never
@@ -241,9 +263,33 @@ class FixtureBinding:
         whether the call then stood is read from the record the turn wrote."""
         self.reproduced: set[str] = set()
         """Each ref of a recorded failure given back."""
+        self._construction = (_Same(answers.log), base.key, pinned, failed, unpinned)
+
+    def construction(self) -> object:
+        """How the binding was built: its answers' log, by identity, its base's key and the
+        edit sets; equal between bindings built alike over designs that differ in leaf values
+        alone, the design a source is asked under being no part of it."""
+        return self._construction
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> object:
         return await self.call(batch, seconds, None)
+
+    def effects(self, sources: frozenset[str], refs: frozenset[str]) -> object:
+        """What a call of ``sources``, providing ``refs``, noted: each stale ref of theirs with
+        its source and why, in the order noted, and the refs given an answer or a recorded
+        failure."""
+        stale = [(ref, why) for ref, why in self.stale.items() if why[0] in sources]
+        return (stale, refs & self.pinned, refs & self.reproduced)
+
+    def restore(self, effects: object) -> None:
+        """Note again what ``effects`` says a call noted."""
+        stale, pinned, reproduced = cast(
+            "tuple[list[tuple[str, tuple[str, Stale]]], frozenset[str], frozenset[str]]",
+            effects,
+        )
+        self.stale.update(stale)
+        self.pinned.update(pinned)
+        self.reproduced.update(reproduced)
 
     async def call(
         self, batch: tuple[SourceCall, ...], seconds: float, live: OracleBinding | None

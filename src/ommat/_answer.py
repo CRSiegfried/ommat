@@ -159,7 +159,8 @@ def off_sum(answer: Answer) -> float | None:
     """An answer's exact sum rounded once to a ``float`` when it lies outside [0.95, 1.05],
     each end inside; else ``None``. The band is tested on the exact sum, so a sum just outside
     it may round to 0.95 or 1.05 exactly, as 1 + 0.05 + 1e-17 does. The flag changes nothing
-    about the answer."""
+    about the answer.
+    """
     total = exact_sum(answer)
     return None if _SUM_LOW <= total <= _SUM_HIGH else float(total)
 
