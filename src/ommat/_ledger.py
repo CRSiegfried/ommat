@@ -1354,6 +1354,10 @@ class Ledger:
     """The open ledger: no public name. Decide opens it and closes it; ``read_record`` builds one
     to check a stored record."""
 
+    drops_unhashed = False
+    """Whether ``write_unhashed`` keeps nothing, so interpret need not work out what only it
+    reads; the evaluation jobs' stand-ins for a ledger set it."""
+
     def __init__(self, observer: Observer | None = None) -> None:
         self._observer = observer
         self._items: list[dict[str, Any]] = []  # the stored copies, handed to the observer

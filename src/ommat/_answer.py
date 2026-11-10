@@ -24,6 +24,12 @@ _NOUL_LABELS = ("yes", "no")
 # The band an answer's exact sum is flagged outside of, both ends inside it.
 _SUM_LOW = Fraction(95, 100)
 _SUM_HIGH = Fraction(105, 100)
+# ``off_sum``'s fast path: an ``fsum`` this far inside the band, over at most this many labels,
+# is inside it exactly.
+_FAST_MARGIN = 1e-7
+_FAST_LOW = 0.95 + _FAST_MARGIN
+_FAST_HIGH = 1.05 - _FAST_MARGIN
+_FAST_COUNT = 2**18
 
 
 class AnswerKind(enum.StrEnum):
@@ -159,7 +165,16 @@ def off_sum(answer: Answer) -> float | None:
     """An answer's exact sum rounded once to a ``float`` when it lies outside [0.95, 1.05],
     each end inside; else ``None``. The band is tested on the exact sum, so a sum just outside
     it may round to 0.95 or 1.05 exactly, as 1 + 0.05 + 1e-17 does. The flag changes nothing
-    about the answer."""
+    about the answer.
+
+    A sum ``math.fsum`` puts well inside the band is inside it exactly, and gives ``None``
+    with no exact sum: each probability is in [0, 1], so its decimal lies within 2^-53 of its
+    binary value, and ``fsum`` rounds the binary values' exact sum once, within 2^-52 below 2;
+    at most ``MAX_LABELS`` = 2^18 labels put the exact sum within 2^-34 of ``fsum``'s, far inside
+    ``_FAST_MARGIN``. Any other sum, near an end or outside, is summed exactly."""
+    values = answer.probabilities.values()
+    if len(values) <= _FAST_COUNT and _FAST_LOW <= math.fsum(values) <= _FAST_HIGH:
+        return None
     total = exact_sum(answer)
     return None if _SUM_LOW <= total <= _SUM_HIGH else float(total)
 

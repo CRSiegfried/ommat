@@ -498,6 +498,7 @@ class _Light:
     ``append`` returns."""
 
     observer_error = None
+    drops_unhashed = True  # its write_unhashed keeps nothing
 
     def __init__(self, keep: Callable[[str], bool] | None = None) -> None:
         self.log: _Log = []

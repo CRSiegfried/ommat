@@ -342,7 +342,11 @@ class _Judged:
     clients: dict[str, str] | None = None
 
 
-def _judge(batch: _Batch, returned: _Returned, types: Mapping[str, Type]) -> _Judged:
+def _judge(
+    batch: _Batch, returned: _Returned, types: Mapping[str, Type], *, sums: bool = True
+) -> _Judged:
+    """A call's outcome, as the fault scope sorts it; each answer's off sum in ``sums`` only
+    when ``sums``, as nothing but the call's ``unhashed`` entry reads it."""
     judged = _Judged(None, {}, no_provenance())
     codes: list[CauseCode] = []  # in fault-scope order; the first decides
     given: dict[str, object] = {}
@@ -407,7 +411,7 @@ def _judge(batch: _Batch, returned: _Returned, types: Mapping[str, Type]) -> _Ju
         else:
             written = _returned_value(ref, given[ref], batch, types)
             judged.written[ref] = written
-            if type(written) is tuple and type(written[1]) is Answer:
+            if sums and type(written) is tuple and type(written[1]) is Answer:
                 # The flag changes no outcome: the answer is written as returned.
                 total = off_sum(written[1])
                 if total is not None:
@@ -827,6 +831,9 @@ class _Turn:
         self.left_out: dict[str, Undetermined] = {}
         """Each candidate-valued question left out of its batch, with its own marker."""
         self.spent = Fraction(0)
+        # An answer's off sum is written to the call's ``unhashed`` entry alone, so a ledger that
+        # keeps no ``unhashed`` write is spared it.
+        self.sums = not getattr(ledger, "drops_unhashed", False)
         self.document = design_sources(loaded)
         self.reuse = reuse
         self.keeping = reuse is not None and reuse.reference is None  # the reference run
@@ -1143,7 +1150,7 @@ class _Turn:
         calls: dict[str, tuple[int, _Judged]] = {}
         cost = Fraction(0)
         for batch, outcome in zip(batches, returned, strict=True):
-            judged = _judge(batch, outcome, self.loaded._types)
+            judged = _judge(batch, outcome, self.loaded._types, sums=self.sums)
             index = self.ledger.append(self.call_item(batch, judged, n))
             unhashed: dict[str, object] = {
                 "start": outcome.start,

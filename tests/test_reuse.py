@@ -639,3 +639,37 @@ def test_a_probe_keeping_its_entries_alone_writes_what_a_whole_log_does(
     assert [[encode(e) for e in job] for job in kept] == [
         [encode(e) for e in job] for job in theirs
     ]
+
+
+def test_a_rerun_writing_no_unhashed_entry_skips_the_sum_check_and_writes_the_same(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from ommat import _interpret
+
+    checked = [0]
+    real = _interpret.off_sum
+
+    def counting(answer: Any) -> Any:
+        checked[0] += 1
+        return real(answer)
+
+    monkeypatch.setattr(_interpret, "off_sum", counting)
+    points = [{"g/bar": bar, "g/word": word} for bar in (0.1, 0.65) for word in LEAVES["g/word"]]
+    paths = ["g/bar", "g/stated", "g/mode"]
+
+    def jobs(where: str) -> list[bytes]:
+        out = [encode(r) for r in rescore_sync(RECORDS, LOADED, DESIGNS[:9])]
+        out += [encode(r) for r in rescore_grid_sync(RECORDS, LOADED, LOADED, points)]
+        store = EvaluationStore(tmp_path / where)
+        out += [
+            encode(e) for e in switching_values_batch_sync(RECORDS, LOADED, paths, results=store)
+        ]
+        return out
+
+    skipping = jobs("a")
+    skipped = checked[0]
+    monkeypatch.setattr(_switching._Light, "drops_unhashed", False)  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(_rescore._Kept, "drops_unhashed", False)  # pyright: ignore[reportPrivateUsage]
+    checked[0] = 0
+    assert jobs("b") == skipping
+    assert checked[0] > skipped  # the baseline replays' real ledger checks alone when skipping

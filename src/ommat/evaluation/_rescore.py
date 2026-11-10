@@ -101,6 +101,7 @@ class _Kept:
     ``policy``, as ``Record.log`` reads it back."""
 
     observer_error = None
+    drops_unhashed = True  # its write_unhashed keeps nothing
 
     def __init__(self, policy: str) -> None:
         self.policy = policy
