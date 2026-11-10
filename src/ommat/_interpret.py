@@ -868,7 +868,7 @@ class _Turn:
         self.spent = Fraction(0)
         self.sums = sums
         """Whether an answer's off sum is worked out, for the call's ``unhashed`` entry;
-        interpret clears it for a ledger that keeps no ``unhashed`` write."""
+        interpret passes it false for a ledger that keeps no ``unhashed`` write."""
         self.document = loaded._unvalued.sources
         self.reuse = reuse
         self.keeping = reuse is not None and reuse.reference is None  # the reference run

@@ -252,7 +252,7 @@ class Replaying:
     def construction(self) -> object:
         """An opaque key for how the binding was built: equal between two bindings built alike
         over designs that differ in leaf values alone, and between no two that could answer a
-        batch differently."""
+        batch differently under the same design."""
         raise NotImplementedError
 
     def effects(self, sources: frozenset[str], refs: frozenset[str]) -> object:
