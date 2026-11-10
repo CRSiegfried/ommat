@@ -992,3 +992,100 @@ def test_the_jobs_write_the_same_with_and_without_a_source_s_call_from_the_refer
     asked.clear()
     assert jobs("b") == reusing
     assert calls < len(asked)
+
+
+# ---------------------------------------------------------------------------------------------
+# A rebuilt design is a fresh load of its document
+
+
+def _leafy() -> LoadedDesign:
+    """A design holding leaves no check reads: mappings, lists and a scalar."""
+    from designs import minimal
+
+    return load(
+        minimal(
+            parameters={
+                "z/map": Parameter(t.mapping(t.number(0, 1)), {"a": 0.1, "b": 0.2}),
+                "a/map": Parameter(t.mapping(t.integer(0, 9)), {"": 1, "\U0001f600": 2}),
+                "m/list": Parameter(t.list_(t.string), ["x"]),
+                "k/n": Parameter(t.number(0, 1), 0.5),
+            }
+        )
+    )
+
+
+def _is_a_fresh_load(built: LoadedDesign, loaded: LoadedDesign) -> None:
+    fresh = load(built.document, functions=loaded._callables)  # pyright: ignore[reportPrivateUsage]
+    assert built.design_hash == fresh.design_hash
+    assert built.document == fresh.document
+    assert built._leaf_bytes == fresh._leaf_bytes  # pyright: ignore[reportPrivateUsage]
+    assert built._grid == fresh._grid  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_mass_labels_leaf_takes_a_load_and_is_a_fresh_load() -> None:
+    import test_switching_values as sv
+
+    path = "mood/labels"
+    assert path in sv.MOOD._read_leaves  # pyright: ignore[reportPrivateUsage]
+    built = with_parameters(sv.MOOD, {path: ["wild"]})
+    _is_a_fresh_load(built, sv.MOOD)
+    fresh = load(
+        sv.MOOD.document.replace(b'"value":["calm"]', b'"value":["wild"]'),
+        functions=sv.MOOD._callables,  # pyright: ignore[reportPrivateUsage]
+    )
+    assert built._grid == fresh._grid  # pyright: ignore[reportPrivateUsage]
+    assert built.design_hash == fresh.design_hash
+    assert built.document == fresh.document
+
+
+def test_a_leaf_of_each_shape_splices_as_a_fresh_load_does() -> None:
+    from ommat import _load as load_module
+
+    base = _leafy()
+    changes: list[dict[str, Any]] = [
+        {"z/map": {"b": 0.9, "a": 0.3}},  # keys not in canonical order
+        {"a/map": {"\U0001f600": 5, "": 4}},  # keys sorting differently in UTF-16
+        {"m/list": ["y", "x", "y"]},
+        {"k/n": 0.7, "m/list": []},
+    ]
+    for values in changes:
+        assert not load_module._takes_a_load(base, values)  # pyright: ignore[reportPrivateUsage]
+        written = {p: load_module.document_value(v, base._leaf_types[p]) for p, v in values.items()}  # pyright: ignore[reportPrivateUsage]
+        assert load_module._spliced(base, values, written) is not None  # pyright: ignore[reportPrivateUsage]
+        _is_a_fresh_load(with_parameters(base, values), base)
+
+
+def test_chained_builds_are_a_fresh_load() -> None:
+    base = _leafy()
+    once = with_parameters(base, {"z/map": {"b": 0.9, "a": 0.3}, "m/list": ["q"]})
+    twice = with_parameters(once, {"m/list": ["r", "s"], "k/n": 0.1})
+    _is_a_fresh_load(twice, base)
+    again = with_parameters(twice, {"z/map": {"a": 0.0, "b": 0.0}})
+    _is_a_fresh_load(again, base)
+
+
+@pytest.mark.parametrize("how", ["cut", "template", "spliced"])
+def test_a_build_with_no_splice_is_the_whole_document_build(
+    monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    from ommat import _load as load_module
+
+    base = _leafy()
+    if how == "cut":
+        monkeypatch.setattr(load_module, "_cut_document", lambda loaded: None)
+    elif how == "template":
+        monkeypatch.setitem(load_module._TEMPLATES, base.design_hash, None)  # pyright: ignore[reportPrivateUsage]
+    else:
+        monkeypatch.setattr(load_module, "_spliced", lambda *a: None)
+    values = {"z/map": {"b": 0.9, "a": 0.3}, "m/list": ["y"], "k/n": 0.2}
+    rebuilt = []
+    real = load_module._rebuilt  # pyright: ignore[reportPrivateUsage]
+
+    def watching(*a: Any) -> LoadedDesign:
+        rebuilt.append(True)
+        return real(*a)
+
+    monkeypatch.setattr(load_module, "_rebuilt", watching)
+    built = with_parameters(base, values)
+    assert rebuilt
+    _is_a_fresh_load(built, base)
