@@ -581,3 +581,61 @@ def test_the_shape_cache_drops_its_oldest_entry_past_its_bound(
         _interpret.design_shape(d)
     held = list(_interpret._SHAPES)  # pyright: ignore[reportPrivateUsage]
     assert held == [d.design_hash for d in DESIGNS[2:4]]
+
+
+# ---------------------------------------------------------------------------------------------
+# A probe's rerun keeps its entries alone
+
+
+def _varied(loaded: LoadedDesign) -> list[str]:
+    """Each leaf of ``loaded`` the switching-value job varies."""
+    out: list[str] = []
+    for path in loaded._leaf_types:  # pyright: ignore[reportPrivateUsage]
+        try:
+            _switching._leaf_type(path, loaded)  # pyright: ignore[reportPrivateUsage]
+        except _switching.EvaluationRefusal:
+            continue
+        out.append(path)
+    return out
+
+
+def test_a_probe_keeping_its_entries_alone_writes_what_a_whole_log_does(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import test_switching_values as sv
+    from ommat._ledger import decision_bytes
+
+    jobs: list[tuple[list[Record], LoadedDesign, list[str]]] = [
+        (RECORDS, LOADED, ["g/bar", "g/stated", "g/count", "g/mode", "g/word"]),
+        ([sv.mood_record()], sv.MOOD, _varied(sv.MOOD)),
+        ([sv.tables_record()], sv.TABLES, _varied(sv.TABLES)),
+    ]
+    kept = [
+        switching_values_batch_sync(
+            records, loaded, paths, results=EvaluationStore(tmp_path / str(i))
+        )
+        for i, (records, loaded, paths) in enumerate(jobs)
+    ]
+    real = _switching._rerun  # pyright: ignore[reportPrivateUsage]
+    probes = [0]
+
+    async def whole(*a: Any, **k: Any) -> Any:
+        k["keep"] = None
+        out = await real(*a, **k)
+        policy = a[1]._design.policy  # pyright: ignore[reportPrivateUsage]
+        mine = _switching._decision_bytes(out[0].log, policy)  # pyright: ignore[reportPrivateUsage]
+        assert mine == decision_bytes(out[0].log)
+        probes[0] += 1
+        return out
+
+    monkeypatch.setattr(_switching, "_rerun", whole)
+    theirs = [
+        switching_values_batch_sync(
+            records, loaded, paths, results=EvaluationStore(tmp_path / f"w{i}")
+        )
+        for i, (records, loaded, paths) in enumerate(jobs)
+    ]
+    assert probes[0] > 0
+    assert [[encode(e) for e in job] for job in kept] == [
+        [encode(e) for e in job] for job in theirs
+    ]

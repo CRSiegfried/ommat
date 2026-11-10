@@ -81,7 +81,7 @@ from ommat._refs import _RefError, code_point_sorted, key_path, parse_ref
 from ommat._replay import _cut
 from ommat._typed import decoded, typed
 from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
-from ommat._values import MAX_INTEGER, type_name
+from ommat._values import MAX_DOCUMENT_DEPTH, MAX_INTEGER, type_name
 from ommat.evaluation._diff import _run_sync, baseline, outcome, own_functions
 from ommat.evaluation._edit import _checked, _declared, _designs
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
@@ -454,11 +454,16 @@ class _Job:
             components = _components(self.document)
             self.late |= {n for f in design for n in f["names"] if n in components}
             return {"not-loading": design}, []
-        rerun, fixture = await _rerun(self.log, design, self.log, reuse=self.reuse)
+        rerun, fixture = await _rerun(self.log, design, self.log, reuse=self.reuse, keep=_entries)
         rerun_log = rerun.log
         outside = bool(fixture.stale)  # a stale ref: the record cannot answer this run
+        policy = self.loaded._design.policy
         run = _Run(
-            rerun_log, self.outcomes, self.carrying(rerun_log), decision_bytes(rerun_log), outside
+            rerun_log,
+            self.outcomes,
+            self.carrying(rerun_log),
+            _decision_bytes(rerun_log, policy),
+            outside,
         )
         return run, rerun_log
 
@@ -507,6 +512,22 @@ class _Light:
 
     def write_unhashed(self, member: str, value: object, index: int | None = None) -> None:
         pass
+
+
+def _entries(ref: str) -> bool:
+    """A probe's rerun keeps every entry: ``_Run`` compares each ref the record or the rerun
+    holds, and ``carrying`` and ``compared`` read entries alone. The ``design``, ``settings``,
+    ``call`` and ``round`` items, which none of them reads, are dropped."""
+    return True
+
+
+def _decision_bytes(log: _Log, policy: str) -> bytes:
+    """``decision_bytes`` of a rerun's log kept by ``_entries``, which holds no ``design`` or
+    ``settings`` item to read the format and the policy from: the rerun is in this engine's
+    format, and its ``settings`` item names ``policy``, the design's."""
+    entry = next(i for i in log if i["item"] == "entry" and i["ref"] == policy)
+    member = "value" if "value" in entry else "marker"
+    return encode({member: entry[member]}, MAX_DOCUMENT_DEPTH)
 
 
 class _Rerun:
