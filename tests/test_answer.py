@@ -219,12 +219,6 @@ def test_an_answer_is_not_hashable() -> None:
         hash(Answer("noul", ("yes", "no"), {"yes": 1, "no": 0}))
 
 
-def test_values_are_stored_as_given() -> None:
-    a = Answer("choice", ("a", "b"), {"a": 1, "b": 0.0})
-    assert type(a.probabilities["a"]) is int
-    assert type(a.probabilities["b"]) is float
-
-
 def test_the_mapping_is_copied() -> None:
     p = {"yes": 0.25, "no": 0.75}
     a = Answer("noul", ("yes", "no"), p)
@@ -385,3 +379,19 @@ def test_an_answer_kind_that_is_no_string_is_refused_before_any_hash() -> None:
 def test_a_negative_zero_probability_is_held_as_zero() -> None:
     a = Answer("noul", ("yes", "no"), {"yes": -0.0, "no": 1.0})
     assert math.copysign(1.0, a.probabilities["yes"]) == 1.0
+
+
+def test_an_integer_probability_is_held_as_a_float_with_the_same_bytes() -> None:
+    # A component reads the same type live and in replay, and the record's bytes do not change.
+    a = Answer("noul", ("yes", "no"), {"yes": 1, "no": 0})
+    assert [type(p) for p in a.probabilities.values()] == [float, float]
+    assert a.probabilities == {"yes": 1.0, "no": 0.0}
+    mixed = Answer("choice", ("a", "b"), {"a": 1, "b": 0.0})
+    assert [type(p) for p in mixed.probabilities.values()] == [float, float]
+    assert encode(a.probabilities) == encode({"yes": 1, "no": 0}) == b'{"no":0,"yes":1}'
+    back = Answer("noul", ("yes", "no"), decode(encode(a.probabilities)))
+    assert [type(p) for p in back.probabilities.values()] == [float, float]
+    assert (
+        math.copysign(1, Answer("noul", ("yes", "no"), {"yes": 1, "no": -0.0}).probabilities["no"])
+        == 1
+    )
