@@ -650,6 +650,7 @@ async def _rerun(
         cut=_cut(log),
         carried=frozenset(),
         reuse=reuse,
+        replaying=True,  # the fixture's calls, over a log that keeps no unhashed write
     )
     policy = loaded._design.policy
     if not any(i["item"] == "entry" and i["ref"] == policy for i in kept.log):

@@ -7,6 +7,7 @@ whose members change under the same candidate values, a returned marker naming a
 the budget and the policy's own leaf, beneath a costly rule no leaf reaches."""
 
 import asyncio
+import dataclasses
 import itertools
 import types
 from collections.abc import Iterator, Mapping
@@ -23,6 +24,7 @@ from ommat import (
     CauseCode,
     DefectWarning,
     Design,
+    Failed,
     Helper,
     LoadedDesign,
     Param,
@@ -44,8 +46,13 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._canonical import encode
-from ommat._interpret import Reuse, _same  # pyright: ignore[reportPrivateUsage]
+from ommat._component import base as ref_base
+from ommat._decide import _bound, _opening  # pyright: ignore[reportPrivateUsage]
+from ommat._fixture import Base, FixtureBinding, RecordedCalls
+from ommat._interpret import Reuse, _same, interpret  # pyright: ignore[reportPrivateUsage]
 from ommat._load import with_parameters
+from ommat._refs import entry_ref
+from ommat._typed import decoded, typed
 from ommat.evaluation import (
     EvaluationStore,
     _grid,  # pyright: ignore[reportPrivateUsage]
@@ -259,7 +266,7 @@ def test_each_run_writes_what_a_full_rerun_writes_and_calls_no_unreached_rule() 
             CALLS[0] = 0
             mine, mine_stale = _rerun(log, loaded, log, design=LOADED, reuse=reuse)
             assert [encode(item) for item in mine.log] == [encode(item) for item in full.log]
-            assert mine_stale.stale == stale.stale
+            assert list(mine_stale.stale.items()) == list(stale.stale.items())
             assert CALLS[0] == (1 if i == 0 else 0)  # the costly rule runs in the reference alone
 
 
@@ -930,7 +937,7 @@ def test_a_source_reaching_what_the_reference_reached_takes_its_call_and_its_whe
     assert WHENS[0] == 1  # the when is called afresh
     full, theirs = _rerun(log, other, log)
     assert [encode(i) for i in mine.log] == [encode(i) for i in full.log]
-    assert fixture.stale == theirs.stale == {}
+    assert list(fixture.stale.items()) == list(theirs.stale.items()) == []
     assert reference[1].stale == {}
 
 
@@ -949,7 +956,7 @@ def test_a_leaf_changing_an_upstream_rule_asks_its_downstream_source_again_and_i
     assert fixture.stale["q:down"][1].clause == "needs"
     full, theirs = _rerun(log, changed, log)
     assert [encode(i) for i in mine.log] == [encode(i) for i in full.log]
-    assert fixture.stale == theirs.stale
+    assert list(fixture.stale.items()) == list(theirs.stale.items())
 
 
 def test_the_jobs_write_the_same_with_and_without_a_source_s_call_from_the_reference(
@@ -992,3 +999,461 @@ def test_the_jobs_write_the_same_with_and_without_a_source_s_call_from_the_refer
     asked.clear()
     assert jobs("b") == reusing
     assert calls < len(asked)
+
+
+# ---------------------------------------------------------------------------------------------
+# A source's call taken only where its batch passes what the kept call passed
+
+
+def level(r: Any) -> float:
+    return float(r.param("g/lvl"))
+
+
+def opened(r: Any) -> str:
+    return "yes" if r.param("g/open") > 0.5 else "no"
+
+
+def level_when(r: Any) -> bool:
+    return r.read("d:lvl") > 0.5
+
+
+def mixed_act(r: Any) -> str:
+    return f"{r.read('d:lvl')} {r.param('g/other')}"
+
+
+def _noul(text: str) -> Question:
+    return Question("noul", Text(text))
+
+
+def mixed() -> LoadedDesign:
+    return load(
+        Design(
+            name="mixed",
+            state=STATE_T,
+            sources={
+                "w": Source(
+                    {"q:w": _noul("W?")},
+                    needs=["d:lvl"],
+                    when=When(level_when, version="1"),
+                    oracle="w",
+                    cost=1,
+                ),
+                # Two batchmates, the second gated by a leaf.
+                "a": Source({"q:a": _noul("A?")}, needs=["t:state"], oracle="o", cost=1),
+                "b": Source(
+                    {"q:b": _noul("B?")},
+                    needs=["t:state"],
+                    requirement=SourceRequirement("d:open", ["yes"]),
+                    oracle="o",
+                    cost=1,
+                ),
+                "f": Source({"q:f": _noul("F?")}, needs=["t:state"], oracle="f", cost=1),
+            },
+            rules={
+                "lvl": Rule("d:lvl", t.number(), level, version="1", params=["g/lvl"]),
+                "open": Rule(
+                    "d:open", t.label("yes", "no"), opened, version="1", params=["g/open"]
+                ),
+                "act": Rule(
+                    "d:act", t.string, mixed_act, version="1", reads=["d:lvl"], params=["g/other"]
+                ),
+            },
+            parameters={
+                "g/lvl": Parameter(t.number(0, 1), 0.9),
+                "g/open": Parameter(t.number(0, 1), 0.9),
+                "g/other": Parameter(t.number(0, 1), 0.5),
+            },
+            policy="d:act",
+        )
+    )
+
+
+MIXED = mixed()
+
+
+def mixed_record() -> Record:
+    async def answer(batch: Any, *, seconds: float) -> object:
+        return CallResult({ref: {"yes": 0.7, "no": 0.3} for c in batch for ref in c.questions})
+
+    async def failing(batch: Any, *, seconds: float) -> object:
+        return Failed(Cause("raised", ["q:f"]))
+
+    bindings = {"default": answer, "w": answer, "o": answer, "f": failing}
+    return decide_sync(MIXED, {"text": "hi", "n": 2.0}, bindings).record
+
+
+STREETS = ("a", "b", "c", "d")
+
+
+def streets(r: Any) -> object:
+    return list(STREETS[: int(r.param("g/n"))])
+
+
+def lamps_act(r: Any) -> str:
+    return f"{r.read('d:streets')!r} {r.param('g/other')}"
+
+
+def lamps() -> LoadedDesign:
+    wording = Text("Out on {s}?", [slot("s", candidate="d:streets")])
+    return load(
+        Design(
+            name="lamps",
+            state=STATE_T,
+            sources={
+                "lamps": Source(
+                    {"q:out": Question("noul", wording)},
+                    needs=["t:state.text"],
+                    grounded="d:streets",
+                    cost=1,
+                )
+            },
+            rules={
+                "streets": Rule(
+                    "d:streets",
+                    t.list_(t.string),
+                    streets,
+                    version="1",
+                    params=["g/n"],
+                    candidates=True,
+                ),
+                "act": Rule(
+                    "d:act",
+                    t.string,
+                    lamps_act,
+                    version="1",
+                    reads=["d:streets"],
+                    params=["g/other"],
+                ),
+            },
+            parameters={
+                "g/n": Parameter(t.integer(0, 4), 2),
+                "g/other": Parameter(t.number(0, 1), 0.5),
+            },
+            policy="d:act",
+        )
+    )
+
+
+LAMPS = lamps()
+
+
+def lamps_record() -> Record:
+    async def answer(batch: Any, *, seconds: float) -> object:
+        return CallResult({ref: {"yes": 0.7, "no": 0.3} for c in batch for ref in c.questions})
+
+    return decide_sync(LAMPS, {"text": "hi", "n": 2.0}, {"default": answer}).record
+
+
+def _against_full(
+    asked: list[list[str]], log: Any, loaded: LoadedDesign, reuse: Reuse, **given: Any
+) -> tuple[list[list[str]], list[dict[str, Any]], Any]:
+    """``log`` rerun under ``loaded`` with ``reuse`` and in full, the two alike in their logs,
+    byte for byte, their stale refs in the order noted and their pinned and reproduced refs:
+    the fixture calls of the run with ``reuse``, its log and its fixture."""
+    asked.clear()
+    mine, fixture = _rerun(log, loaded, log, reuse=reuse, **given)
+    called = list(asked)
+    full, theirs = _rerun(log, loaded, log, **given)
+    assert [encode(i) for i in mine.log] == [encode(i) for i in full.log]
+    assert list(fixture.stale.items()) == list(theirs.stale.items())
+    assert fixture.pinned == theirs.pinned
+    assert fixture.reproduced == theirs.reproduced
+    return called, mine.log, fixture
+
+
+def _entry(log: list[dict[str, Any]], ref: str) -> dict[str, Any]:
+    return next(i for i in log if i["item"] == "entry" and i["ref"] == ref)
+
+
+def test_a_when_a_changed_leaf_flips_is_judged_afresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    log = mixed_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _rerun(log, MIXED, log, reuse=reuse)
+    low = with_parameters(MIXED, {"g/lvl": 0.1})
+    called, mine, _ = _against_full(asked, log, low, reuse)
+    assert called == []  # w is not ready; the other calls are the reference's
+    assert _entry(mine, "q:w")["marker"]["cause"] == {"code": "when-false", "refs": ["w"]}
+    # A reference whose when is false keeps no call of w: a run whose when is true asks it.
+    reuse = Reuse()
+    _rerun(log, low, log, reuse=reuse)
+    called, mine, _ = _against_full(asked, log, MIXED, reuse)
+    assert called == [["w"]]
+    assert "value" in _entry(mine, "q:w")
+
+
+def test_a_batchmate_left_unready_by_a_changed_rule_has_the_other_asked_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = mixed_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _rerun(log, MIXED, log, reuse=reuse)
+    assert ["a", "b"] in asked
+    shut = with_parameters(MIXED, {"g/open": 0.1})
+    called, mine, _ = _against_full(asked, log, shut, reuse)
+    assert called == [["a"]]
+    assert _entry(mine, "q:b")["marker"]["cause"]["code"] == "when-false"
+
+
+def test_a_reproduced_failed_call_is_taken_with_its_pinned_and_reproduced_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = mixed_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    reference = _rerun(log, MIXED, log, reuse=reuse)[1]
+    assert reference.reproduced == {"q:f"}
+    other = with_parameters(MIXED, {"g/other": 0.2})
+    called, mine, fixture = _against_full(asked, log, other, reuse)
+    assert called == []
+    assert fixture.reproduced == {"q:f"}
+    assert "q:f" in fixture.pinned
+    assert _entry(mine, "q:f")["marker"]["cause"]["code"] == "raised"
+
+
+def test_a_call_stale_in_the_reference_is_taken_with_its_stale_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = chained_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    changed = with_parameters(CHAINED, {"g/k": 2.0})  # down's need differs from the record's
+    assert set(_rerun(log, changed, log, reuse=reuse)[1].stale) == {"q:down"}
+    other = with_parameters(CHAINED, {"g/k": 2.0, "g/other": 0.2})
+    called, _, fixture = _against_full(asked, log, other, reuse)
+    assert called == []
+    assert list(fixture.stale) == ["q:down"]
+
+
+def test_the_budget_cuts_a_round_of_taken_calls_and_not_a_frontier_that_shrank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = RECORDS[1].log  # the gate open: round 2 asks more and late together, over budget
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _rerun(log, LOADED, log, design=LOADED, reuse=reuse)
+    stated = with_parameters(LOADED, {"g/stated": 0.2})
+    called, mine, _ = _against_full(asked, log, stated, reuse, design=LOADED)
+    assert called == []  # round 1's call is the reference's, round 2 cut as there
+    assert _entry(mine, "q:late")["marker"]["cause"]["code"] == "over-budget"
+    shut = with_parameters(LOADED, {"g/bar": 0.7})  # more is not ready: late alone fits
+    called, mine, _ = _against_full(asked, log, shut, reuse, design=LOADED)
+    assert called == [["late"]]
+    assert _entry(mine, "q:late")["marker"]["cause"]["code"] != "over-budget"
+
+
+def test_per_candidate_questions_are_taken_only_over_the_same_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = lamps_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _rerun(log, LAMPS, log, reuse=reuse)
+    called, _, _ = _against_full(asked, log, with_parameters(LAMPS, {"g/other": 0.2}), reuse)
+    assert called == []
+    for n, calls in ((3, [["lamps"]]), (1, [["lamps"]]), (0, [])):
+        changed = with_parameters(LAMPS, {"g/n": n})
+        called, _, fixture = _against_full(asked, log, changed, reuse)
+        assert called == calls, n
+        assert list(fixture.stale) == (['q:out["c"]'] if n == 3 else []), n
+
+
+def test_a_source_asked_in_another_round_is_asked_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A leaf leaves the graph, and so each source's round, as it is: the kept rounds are moved.
+    log = chained_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _rerun(log, CHAINED, log, reuse=reuse)
+    assert reuse.asked
+    for key, kept in list(reuse.asked.items()):
+        reuse.asked[key] = dataclasses.replace(kept, round=kept.round + 1)
+    other = with_parameters(CHAINED, {"g/other": 0.2})
+    called, _, _ = _against_full(asked, log, other, reuse)
+    assert sorted(called) == [["down"], ["first"]]
+
+
+def _interpreted(
+    log: list[dict[str, Any]],
+    loaded: LoadedDesign,
+    binding: Any,
+    reuse: Reuse,
+    *,
+    deadline: float | None = None,
+) -> list[bytes]:
+    """``log``'s turn run under ``loaded`` as the switching job's probe runs it, every oracle
+    name bound to ``binding``, with a deadline on the running loop's clock when given: its log."""
+
+    async def run() -> list[bytes]:
+        settings = _rescore._run_of(log)  # pyright: ignore[reportPrivateUsage]
+        kept = _switching._Light()  # pyright: ignore[reportPrivateUsage]
+        for item in _opening(loaded, settings.item()):
+            kept.append(item)
+        state = _entry(log, "t:state")
+        typed_as = loaded._types["t:state"]  # pyright: ignore[reportPrivateUsage]
+        forms = cast("tuple[Any, Any]", typed(decoded(state["value"], typed_as), typed_as))
+        kept.append(
+            {"item": "entry", "ref": "t:state", "round": 0, "call": None, "value": forms[0]}
+        )
+        sources = loaded._design.sources.values()  # pyright: ignore[reportPrivateUsage]
+        keys: set[str] = {s.oracle for s in sources if s.oracle is not None}
+        names: set[object] = {*keys, "default"}
+        bound = dict.fromkeys(names, cast(object, binding))
+        clock = None if deadline is None else asyncio.get_running_loop().time()
+        await interpret(
+            cast(Any, kept),
+            loaded,
+            forms[1],
+            _bound(loaded, bound),
+            round_bound=settings.round_bound,
+            timeout=settings.timeout,
+            budget=settings.budget,
+            deadline=deadline,
+            clock=clock,
+            cut=None,
+            carried=frozenset(),
+            reuse=reuse,
+            replaying=True,
+        )
+        return [encode(i) for i in kept.log]
+
+    return asyncio.run(run())
+
+
+def _fixture(log: list[dict[str, Any]], loaded: LoadedDesign, **edits: Any) -> FixtureBinding:
+    return FixtureBinding(RecordedCalls(log), loaded, Base(log, loaded), **edits)
+
+
+def test_a_binding_that_is_not_replaying_is_called_every_run() -> None:
+    log = chained_record().log
+    calls: list[list[str]] = []
+
+    async def answer(batch: Any, *, seconds: float) -> object:
+        calls.append([c.id for c in batch])
+        return CallResult({ref: {"yes": 0.7, "no": 0.3} for c in batch for ref in c.questions})
+
+    reuse = Reuse()
+    _interpreted(log, CHAINED, answer, reuse)
+    assert reuse.asked == {}  # nothing kept
+    calls.clear()
+    _interpreted(log, with_parameters(CHAINED, {"g/other": 0.2}), answer, reuse)
+    assert calls == [["down"], ["first"]]
+
+
+def test_a_run_with_a_deadline_takes_no_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    log = chained_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _interpreted(log, CHAINED, _fixture(log, CHAINED), reuse)
+    assert reuse.asked
+    other = with_parameters(CHAINED, {"g/other": 0.2})
+    asked.clear()
+    timed = _interpreted(log, other, _fixture(log, other), reuse, deadline=1000.0)
+    assert asked == [["down"], ["first"]]
+    asked.clear()
+    assert _interpreted(log, other, _fixture(log, other), reuse) == timed
+    assert asked == []  # without one, both are taken
+
+
+def test_a_fixture_built_otherwise_is_not_taken_from(monkeypatch: pytest.MonkeyPatch) -> None:
+    log = chained_record().log
+    asked = _asked_sources(monkeypatch)
+    reuse = Reuse()
+    _interpreted(log, CHAINED, _fixture(log, CHAINED), reuse)
+    other = with_parameters(CHAINED, {"g/other": 0.2})
+    unpinned = frozenset({"q:first"})
+    asked.clear()
+    mine = _fixture(log, other, unpinned=unpinned)
+    logged = _interpreted(log, other, mine, reuse)
+    assert asked == [["down"], ["first"]]
+    theirs = _fixture(log, other, unpinned=unpinned)
+    assert logged == _interpreted(log, other, theirs, Reuse())
+    assert list(mine.stale.items()) == list(theirs.stale.items())
+    assert list(mine.stale) == ["q:first"]
+
+
+def test_every_entry_a_source_s_asking_reads_is_one_the_call_check_compares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Readiness, the refs left out of a batch and the frontier read the board through a noting
+    # wrapper; each source's reads must lie within what its batch's check compares: each need
+    # as ``at`` reads it, its entry and declared ref; the grounding and label sets of its
+    # questions, which reach the batch through its refs and labels; and the requirement's ref,
+    # which decides readiness alone, as the ``when`` does, the batch naming the ready sources.
+    from ommat import _interpret
+
+    read: dict[str, set[str]] = {}
+    reading = [""]
+    checked = [0, 0]  # the batches checked, and those taken from the reference
+
+    class Noting(dict[str, object]):
+        def __getitem__(self, key: str) -> object:
+            read.setdefault(reading[0], set()).add(key)
+            return super().__getitem__(key)
+
+        def get(self, key: str, default: object = None) -> object:  # type: ignore[override]
+            read.setdefault(reading[0], set()).add(key)
+            return super().get(key, default)
+
+        def __contains__(self, key: object) -> bool:
+            read.setdefault(reading[0], set()).add(cast(str, key))
+            return super().__contains__(key)
+
+    def noting(name: str) -> None:
+        real = getattr(_interpret._Turn, name)  # pyright: ignore[reportPrivateUsage]
+
+        def method(self: Any, first: Any, *a: Any, **k: Any) -> Any:
+            board, self.board = self.board, Noting(self.board)
+            reading[0] = first if name != "frontier" else "frontier"
+            try:
+                return real(self, first, *a, **k)
+            finally:
+                self.board = board
+
+        monkeypatch.setattr(_interpret._Turn, name, method)  # pyright: ignore[reportPrivateUsage]
+
+    for name in ("need_marker", "requirement_marker", "expanded", "label_markers", "slot_markers"):
+        noting(name)
+    noting("frontier")
+    framed = _interpret._Turn.frontier  # pyright: ignore[reportPrivateUsage]
+
+    def covered(turn: Any, call: Any) -> set[str]:
+        source = turn.sources[call.id]
+        refs: set[str] = set()
+        for need in call.needs:
+            refs |= {need, ref_base(need), entry_ref(need)}
+        if source.requirement is not None:
+            refs.add(source.requirement.ref)
+        for ref in source.provides:
+            for found in (turn.loaded._grounded.get(ref), turn.loaded._label_sets.get(ref)):
+                if found is not None:
+                    refs.add(found)
+        return refs
+
+    def frontier(self: Any, *a: Any, **k: Any) -> Any:
+        batches, reused = framed(self, *a, **k)
+        every: set[str] = set()
+        for batch in batches:
+            for call in batch.call:
+                mine = covered(self, call)
+                every |= mine
+                assert read.pop(call.id, set()) <= mine, (call.id, read.get(call.id))
+                checked[0] += 1
+        assert read.pop("frontier", set()) <= every
+        checked[1] += len(reused)
+        return batches, reused
+
+    monkeypatch.setattr(_interpret._Turn, "frontier", frontier)  # pyright: ignore[reportPrivateUsage]
+    cases: list[tuple[Record, LoadedDesign, list[LoadedDesign]]] = [
+        *((record, LOADED, DESIGNS[::7]) for record in RECORDS),
+        (chained_record(), CHAINED, [with_parameters(CHAINED, {"g/k": 2.0, "g/other": 0.2})]),
+        (mixed_record(), MIXED, [with_parameters(MIXED, {"g/open": 0.1, "g/lvl": 0.1})]),
+        (lamps_record(), LAMPS, [with_parameters(LAMPS, {"g/n": n}) for n in (3, 2, 1)]),
+    ]
+    for record, recorded, designs in cases:
+        reuse = Reuse()
+        log = record.log  # read once: a fixture is taken from only over the same log
+        for loaded in [recorded, *designs]:
+            read.clear()
+            _rerun(log, loaded, log, design=recorded, reuse=reuse)
+    assert checked[0] > checked[1] > 0

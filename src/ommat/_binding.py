@@ -234,3 +234,21 @@ class OracleBinding(Protocol):
     def __call__(
         self, batch: tuple[SourceCall, ...], /, *, seconds: float
     ) -> Awaitable[object]: ...
+
+
+class Replaying:
+    """A binding whose answer to a batch is a function of the batch and of how the binding was
+    built, as the fixture's from one record under its edit sets is, so a later run of the record
+    under a binding built alike may take a kept call's outcome rather than call it.
+    ``construction`` is an opaque key for how it was built, equal between two bindings that
+    answer every batch alike; ``effects`` is what it noted of the call of ``sources``,
+    providing ``refs``, and ``restore`` notes it again."""
+
+    def construction(self) -> object:
+        raise NotImplementedError
+
+    def effects(self, sources: frozenset[str], refs: frozenset[str]) -> object:
+        raise NotImplementedError
+
+    def restore(self, effects: object) -> None:
+        raise NotImplementedError

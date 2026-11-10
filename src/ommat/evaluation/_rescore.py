@@ -162,6 +162,7 @@ async def _rescored(
         cut=_cut(log),
         carried=frozenset(),
         reuse=reuse,
+        replaying=True,  # the fixture's calls, over a log that keeps no unhashed write
     )
     stale = code_point_sorted(fixture.stale)
     if stale:
