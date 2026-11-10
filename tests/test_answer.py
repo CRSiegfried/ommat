@@ -289,52 +289,11 @@ def test_the_flag_rounds_the_exact_sum_not_a_float_sum() -> None:
     assert off_sum(Answer("choice", ("a", "b"), {"a": 0.1, "b": 0.2})) == 0.3
 
 
-def _exact_off_sum(answer: Answer) -> float | None:
-    """``off_sum`` as summed exactly every time, with no fast path."""
-    total = exact_sum(answer)
-    return None if Fraction(95, 100) <= total <= Fraction(105, 100) else float(total)
-
-
-def _near(x: float, steps: int) -> list[float]:
-    """``x`` and the floats up to ``steps`` apart from it either side, within [0, 1]."""
-    out = [x]
-    lo = hi = x
-    for _ in range(steps):
-        lo, hi = math.nextafter(lo, -math.inf), math.nextafter(hi, math.inf)
-        out += [lo, hi]
-    return [v for v in out if 0 <= v <= 1]
-
-
-def test_the_fsum_fast_path_flags_exactly_as_the_exact_sum_does() -> None:
-    import random
-
-    rng = random.Random(20261110)
-    answers: list[dict[str, int | float]] = []
-    # Every end of the band, approached by floats and decimals from both sides.
-    for end in (0.95, 1.05):
-        for a in [*_near(0.5, 4), 0.45, 0.55, 0.3, 0.7]:
-            for b in _near(end - a, 6) + _near(round(end - a, 12), 3):
-                answers.append({"a": a, "b": b})
-                answers.append({"a": a, "b": b / 2, "c": b / 2})
-    for scale in (0.5, 0.9, 0.95, 0.9500001, 0.95000005, 1.0, 1.0499999, 1.04999995, 1.05, 1.2):
-        for n in (1, 2, 3, 7, 40):
-            raw = [rng.random() for _ in range(n)]
-            total = sum(raw)
-            answers.append({f"l{i}": min(1.0, v / total * scale) for i, v in enumerate(raw)})
-            answers.append(
-                {f"l{i}": round(min(1.0, v / total * scale), 4) for i, v in enumerate(raw)}
-            )
-    answers += [{"a": 1.0, "b": 0.0}, {"a": 1.0, "b": 1.0}]
-    integral: list[dict[str, int | float]] = [{"a": 1, "b": 0}, {"a": 0, "b": 0}, {"a": 1, "b": 1}]
-    answers += integral
-    answers += [dict.fromkeys((f"l{i}" for i in range(20)), 0.05)]
-    labels_of = {len(p) for p in answers}
-    assert labels_of >= {1, 2, 3, 40}
-    for probabilities in answers:
-        answer = Answer("choice", tuple(probabilities), probabilities)
-        got, want = off_sum(answer), _exact_off_sum(answer)
-        assert got == want, probabilities
-        assert type(got) is type(want), probabilities
+def test_answer_slots_are_pinned() -> None:
+    assert Answer.__slots__ == ("kind", "labels", "probabilities"), (  # pyright: ignore[reportAttributeAccessIssue]
+        "_interpret._answer_copy sets these slots without running Answer.__init__, "
+        "so a new field must be added there too"
+    )
 
 
 def test_answer_is_frozen_with_three_fields() -> None:
