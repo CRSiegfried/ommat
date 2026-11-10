@@ -673,3 +673,82 @@ def test_a_rerun_writing_no_unhashed_entry_skips_the_sum_check_and_writes_the_sa
     checked[0] = 0
     assert jobs("b") == skipping
     assert checked[0] > skipped  # the baseline replays' real ledger checks alone when skipping
+
+
+# ---------------------------------------------------------------------------------------------
+# A record's entries encoded once per record, and a probe's entry encoded only when it differs
+
+
+def test_the_record_side_is_encoded_once_per_record_and_alike_entries_not_at_all(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    paths = ["g/bar", "g/stated", "g/count", "g/mode", "g/word"]
+    logs = [record.log for record in RECORDS]  # read once: each read decodes afresh
+    held = {id(i) for log in logs for i in log}  # each record's own items
+    encoded = {"record": 0, "probe": 0}
+    real = _switching.outcome
+
+    def counting(entry: Any) -> bytes:
+        encoded["record" if id(entry) in held else "probe"] += 1
+        return real(entry)
+
+    monkeypatch.setattr(_switching, "outcome", counting)
+
+    def checked(record: Record, loaded: LoadedDesign) -> tuple[Record, Any]:
+        return record, logs[RECORDS.index(record)]
+
+    def never(a: object, b: object) -> bool:
+        return False
+
+    monkeypatch.setattr(_switching, "_checked", checked)
+    entries = switching_values_batch_sync(
+        RECORDS, LOADED, paths, results=EvaluationStore(tmp_path / "a")
+    )
+    count = sum(1 for log in logs for i in log if i["item"] == "entry")
+    assert encoded["record"] == count  # once per record, not once per path or probe
+    alike = encoded["probe"]
+    monkeypatch.setattr(_switching, "_alike_outcome", never)
+    encoded["probe"] = 0
+    theirs = switching_values_batch_sync(
+        RECORDS, LOADED, paths, results=EvaluationStore(tmp_path / "b")
+    )
+    assert [encode(e) for e in entries] == [encode(e) for e in theirs]
+    assert alike < encoded["probe"]
+
+
+def test_alike_values_share_their_canonical_bytes() -> None:
+    from ommat._canonical import decode
+
+    values: list[object] = [
+        None,
+        True,
+        False,
+        0,
+        1,
+        -1,
+        1.5,
+        0.1,
+        "",
+        "x",
+        "é\n",
+        [],
+        [1, 1.5],
+        [1.5, 1],
+        {},
+        {"a": 1, "b": [True, None]},
+        {"b": [True, None], "a": 1},
+        {"a": 1.0},
+        {"a": 1},
+        {"a": True},
+        [[{"x": "y"}]],
+    ]
+    for x in values:
+        for y in values:
+            a, b = decode(encode(x)), decode(encode(y))  # read back, as a log holds them
+            if _switching._alike(a, b):  # pyright: ignore[reportPrivateUsage]
+                assert encode(a) == encode(b), (x, y)
+            if encode(a) == encode(b):
+                assert _switching._alike(a, b), (x, y)  # pyright: ignore[reportPrivateUsage]
+    # Alike decides nothing it cannot see as alike: a type read-back data never holds.
+    one = [1]
+    assert not _switching._alike(tuple(one), tuple(one))  # pyright: ignore[reportPrivateUsage]

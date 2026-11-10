@@ -127,7 +127,7 @@ async def switching_values(
             f"the store holds a {KIND} entry under {key!r}", reason=_R.held_key, key=[key]
         )
     await baseline(log, loaded)
-    entry = await _entry(log, shared, path, t, key, Reuse())
+    entry = await _entry(_Recorded(log), shared, path, t, key, Reuse())
     results.write(entry)
     return entry
 
@@ -180,8 +180,9 @@ async def switching_values_batch(
         if row:
             await baseline(log, loaded)
         reuse = Reuse()  # one reference run per record, whichever leaf's probe ran it
+        recorded = _Recorded(log)  # its entries encoded once, whichever leaf's job reads them
         for path, t, key in zip(paths, types, row, strict=True):
-            entry = await _entry(log, shared, path, t, key, reuse)
+            entry = await _entry(recorded, shared, path, t, key, reuse)
             results.write(entry)
             out.append(entry)
     return out
@@ -206,11 +207,11 @@ def switching_values_batch_sync(
 
 
 async def _entry(
-    log: _Log, shared: "_Shared", path: str, t: Type, key: dict[str, str], reuse: Reuse
+    recorded: "_Recorded", shared: "_Shared", path: str, t: Type, key: dict[str, str], reuse: Reuse
 ) -> dict[str, Any]:
-    """The entry for one record and leaf, every replay done, ``reuse`` the record's reference
-    run."""
-    job = _Job(log, shared, path, reuse)
+    """The entry for one record and leaf, every replay done, ``recorded`` the record's entries
+    and ``reuse`` its reference run."""
+    job = _Job(recorded, shared, path, reuse)
     loaded = shared.loaded
     value: dict[str, Any]
     if isinstance(t, MappingOf):
@@ -292,7 +293,7 @@ class _Run:
     def __init__(
         self,
         rerun: _Log,
-        mine: Mapping[str, bytes],
+        recorded: "_Recorded",
         carrying: set[str],
         decision: bytes | None,
         outside: bool = False,
@@ -300,14 +301,69 @@ class _Run:
         self.outside = outside
         self.decision = decision
         self.carrying = carrying  # each ref whose output passed the leaf
+        mine, held = recorded.outcomes, recorded.entries
         theirs = {i["ref"]: i for i in rerun if i["item"] == "entry"}
         self.entries = {ref: theirs.get(ref) for ref in {*mine, *theirs}}
         # Changed in value, or in marker kind and code (``outcome``); a side with none differs.
+        # An entry alike to the record's in every exact type and value has its bytes, so only
+        # one that is not is encoded.
         self.changed = {
             ref
             for ref, entry in self.entries.items()
-            if entry is None or ref not in mine or outcome(entry) != mine[ref]
+            if entry is None
+            or ref not in mine
+            or (not _alike_outcome(entry, held[ref]) and outcome(entry) != mine[ref])
         }
+
+
+class _Recorded:
+    """One record's entries by ref and their ``outcome`` bytes, encoded once for the record,
+    on the first read, and shared by each leaf's job and every probe of it."""
+
+    def __init__(self, log: _Log) -> None:
+        self.log = log
+        self.entries = {i["ref"]: i for i in log if i["item"] == "entry"}
+        self._outcomes: dict[str, bytes] | None = None
+
+    @property
+    def outcomes(self) -> dict[str, bytes]:
+        if self._outcomes is None:
+            self._outcomes = {ref: outcome(e) for ref, e in self.entries.items()}
+        return self._outcomes
+
+
+def _alike_outcome(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether two read-back entries surely have one ``outcome``: the same item, both markers
+    of one kind and cause code, or values alike by ``_alike``. ``False`` says nothing: the
+    caller compares their bytes."""
+    if a is b:
+        return True
+    if "marker" in a or "marker" in b:
+        if "marker" not in a or "marker" not in b:
+            return False
+        x, y = a["marker"], b["marker"]
+        return _alike(x["kind"], y["kind"]) and _alike(x["cause"]["code"], y["cause"]["code"])
+    return _alike(a["value"], b["value"])
+
+
+def _alike(x: object, y: object) -> bool:
+    """Whether two read-back values are alike in exact type and value at every depth, an
+    object's keys as a set, so that the canonical encoding writes the same bytes for both;
+    ``False`` for any other pair, those of types read-back data does not hold among them."""
+    if x is y:
+        return True
+    kind = type(x)
+    if kind is not type(y):
+        return False
+    if kind is str or kind is int or kind is float or kind is bool:
+        return x == y
+    if kind is dict:
+        u, v = cast("dict[str, object]", x), cast("dict[str, object]", y)
+        return len(u) == len(v) and all(k in v and _alike(m, v[k]) for k, m in u.items())
+    if kind is list:
+        u2, v2 = cast("list[object]", x), cast("list[object]", y)
+        return len(u2) == len(v2) and all(_alike(m, n) for m, n in zip(u2, v2, strict=True))
+    return False
 
 
 class _Shared:
@@ -381,13 +437,13 @@ class _Job:
     """One record, design and leaf: ``summary`` replays and reports one varied value's
     results, ``unseen`` names what the probes could not see."""
 
-    def __init__(self, log: _Log, shared: _Shared, path: str, reuse: Reuse) -> None:
-        self.log, self.shared, self.path = log, shared, path
+    def __init__(self, recorded: _Recorded, shared: _Shared, path: str, reuse: Reuse) -> None:
+        self.log, self.shared, self.path = recorded.log, shared, path
+        self.recorded = recorded  # the record's entries and their bytes, compared each run
         self.reuse = reuse  # the record's reference run, shared by its every leaf
         self.loaded = shared.loaded
         self.document = shared.document
-        self.mine = {i["ref"]: i for i in log if i["item"] == "entry"}
-        self.outcomes = {ref: outcome(e) for ref, e in self.mine.items()}  # compared each run
+        self.mine = recorded.entries
         self.late: set[str] = set()  # components comparing values only round 1 found, or unread
 
     def unseen(self, t: Type) -> list[str]:
@@ -403,7 +459,7 @@ class _Job:
         if numeric is not None and not integer:
             own = float(own)  # a number leaf's own value as its points are held
         tried: dict[_Value, _Run | _Result] = {
-            own: _Run(self.log, self.outcomes, self.carrying(self.log), decision_bytes(self.log))
+            own: _Run(self.log, self.recorded, self.carrying(self.log), decision_bytes(self.log))
         }
         bounds: set[Fraction] = set()
         if values is not None:
@@ -434,7 +490,10 @@ class _Job:
         listed = {r for run in runs for r in run.changed} | carried | {policy}
         for ref in code_point_sorted(listed):
             results = [_result(tried[v], ref, self.mine) for v in ordered]
-            keys = [_key(tried[v], r, ref == policy) for v, r in zip(ordered, results, strict=True)]
+            keys = [
+                _key(tried[v], r, ref, ref == policy, self.recorded)
+                for v, r in zip(ordered, results, strict=True)
+            ]
             if ref in carried:
                 entries[ref] = "carries"
             elif values is not None:
@@ -460,7 +519,7 @@ class _Job:
         policy = self.loaded._design.policy
         run = _Run(
             rerun_log,
-            self.outcomes,
+            self.recorded,
             self.carrying(rerun_log),
             _decision_bytes(rerun_log, policy),
             outside,
@@ -612,14 +671,21 @@ def _result(run: _Run | _Result, ref: str, mine: Mapping[str, Any]) -> _Result:
 _Key = tuple[str, bytes | None]
 
 
-def _key(run: _Run | _Result, result: _Result, decision: bool) -> _Key:
+def _key(
+    run: _Run | _Result, result: _Result, ref: str, decision: bool, recorded: _Recorded
+) -> _Key:
     """What a result is compared by: the decision by its ``decision_bytes``, any other entry
-    by value, or marker kind and code, alone; any other result by canonical bytes."""
+    at ``ref`` by value, or marker kind and code, alone, the record's own entry by the bytes
+    ``recorded`` holds for it; any other result by canonical bytes."""
     if isinstance(run, _Run) and not run.outside and decision:
         return "decision", run.decision
     if isinstance(result, dict) and "entry" in result:
         entry = result["entry"]
-        return "entry", None if entry is None else outcome(entry)
+        if entry is None:
+            return "entry", None
+        if entry is recorded.entries.get(ref):
+            return "entry", recorded.outcomes[ref]
+        return "entry", outcome(entry)
     return "result", encode(result)
 
 
