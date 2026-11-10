@@ -1705,7 +1705,6 @@ class Reuse:
         self.reference: LoadedDesign | None = None
         self.board: dict[str, object] = {}
         self.calls: dict[tuple[str, str | None], Called | _Outcome] = {}
-        self._shapes: dict[str, bytes] = {}
 
     def kept(self, loaded: LoadedDesign, board: dict[str, object]) -> None:
         """Keep a finished reference run under ``loaded``."""
@@ -1715,27 +1714,14 @@ class Reuse:
         """The leaves whose values differ between ``loaded`` and the reference design, or
         ``None`` when the documents differ elsewhere, a leaf's type included."""
         reference = cast(LoadedDesign, self.reference)
-        if not _shares_all_but_leaves(loaded, reference) and self._shape(loaded) != self._shape(
+        if not _shares_all_but_leaves(loaded, reference) and design_shape(loaded) != design_shape(
             reference
         ):
             return None
         mine, theirs = loaded._leaf_bytes, reference._leaf_bytes
         return frozenset(p for p in mine if mine[p] != theirs[p])
 
-    def _shape(self, loaded: LoadedDesign) -> bytes:
-        """The design document with every leaf's value and order dropped."""
-        found = self._shapes.get(loaded.design_hash)
-        if found is None:
-            if len(self._shapes) >= _SHAPES_HELD:
-                self._shapes.clear()
-            doc = cast("dict[str, Any]", decode(loaded.document))
-            leaves = cast("dict[str, dict[str, Any]]", doc["parameters"])
-            doc["parameters"] = {p: leaf["type"] for p, leaf in leaves.items()}
-            found = self._shapes[loaded.design_hash] = encode(doc, MAX_DOCUMENT_DEPTH)
-        return found
 
-
-_SHAPES_HELD = 1024
 _LEAF_PARTS = frozenset({"_design", "_document", "_hash", "_grid", "_leaf_bytes"})
 """The parts of a loaded design ``with_parameters`` builds afresh when it loads nothing."""
 
@@ -1811,14 +1797,16 @@ def _copied_outcome(outcome: "_Outcome") -> "_Outcome":
     return _Outcome(written, None, rows, outcome.exception, outcome.unnamed)
 
 
-# Per-design work a turn reads and never changes, kept by design hash, the hash of the design
-# document both are computed from. Each cache is bounded, the oldest entry dropped first. A read
-# is a plain ``dict.get``; a write takes the one lock, so two threads evicting at once never
-# race for the same oldest key.
+# Per-design work a turn or an evaluation job reads and never changes, kept by design hash, the
+# hash of the design document each is computed from. Each cache is bounded, the oldest entry
+# dropped first. A read is a plain ``dict.get``; a write takes the one lock, so two threads
+# evicting at once never race for the same oldest key.
 _SOURCES: dict[str, dict[str, Any]] = {}
 _SOURCES_HELD = 64
 _IDENTITIES: dict[tuple[str, str], str] = {}
 _IDENTITIES_HELD = 1 << 16
+_SHAPES: dict[str, bytes] = {}
+_SHAPES_HELD = 1024
 _CACHE_LOCK = threading.Lock()
 
 
@@ -1837,6 +1825,20 @@ def design_sources(loaded: LoadedDesign) -> dict[str, Any]:
     if found is None:
         found = cast("dict[str, Any]", decode(loaded.document))["sources"]
         _remember(_SOURCES, loaded.design_hash, found, _SOURCES_HELD)
+    return found
+
+
+def design_shape(loaded: LoadedDesign) -> bytes:
+    """The design document with every leaf's value and order dropped, encoded once per design
+    hash, so every record of a job, and every job, shares it. It reads the document alone,
+    which the hash is taken over."""
+    found = _SHAPES.get(loaded.design_hash)
+    if found is None:
+        doc = cast("dict[str, Any]", decode(loaded.document))
+        leaves = cast("dict[str, dict[str, Any]]", doc["parameters"])
+        doc["parameters"] = {p: leaf["type"] for p, leaf in leaves.items()}
+        found = encode(doc, MAX_DOCUMENT_DEPTH)
+        _remember(_SHAPES, loaded.design_hash, found, _SHAPES_HELD)
     return found
 
 

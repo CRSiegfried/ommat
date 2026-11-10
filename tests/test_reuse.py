@@ -522,3 +522,62 @@ def test_every_entry_a_view_reads_is_one_the_reuse_test_compares(
         for loaded in DESIGNS[::7]:
             _rerun(record.log, loaded, record.log, design=LOADED)
     assert firings[0] > 0
+
+
+# ---------------------------------------------------------------------------------------------
+# A design's shape, the document but for its leaves' values, kept once per design hash
+
+
+def test_a_job_computes_each_design_s_shape_once_across_its_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ommat import _interpret
+
+    class Counting(dict[str, bytes]):
+        stored = 0
+
+        def __setitem__(self, key: str, value: bytes) -> None:
+            Counting.stored += 1
+            super().__setitem__(key, value)
+
+    monkeypatch.setattr(_interpret, "_SHAPES", Counting())
+    # Each design loaded afresh from its document, so no two share their parts and the shape
+    # alone tells that they differ only in their leaves' values.
+    fresh = [
+        load(d.document, functions=LOADED._callables)  # pyright: ignore[reportPrivateUsage]
+        for d in DESIGNS[:6]
+    ]
+    rows = rescore_sync(RECORDS, LOADED, fresh)
+    assert Counting.stored == len({d.design_hash for d in fresh})  # not once per record
+    monkeypatch.setattr(_rescore, "Reuse", _Never)
+    theirs = rescore_sync(RECORDS, LOADED, fresh)
+    assert [encode(row) for row in rows] == [encode(row) for row in theirs]
+
+
+def test_two_loads_of_one_document_share_one_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ommat import _interpret
+
+    monkeypatch.setattr(_interpret, "_SHAPES", {})
+    again = load(LOADED.document, functions=LOADED._callables)  # pyright: ignore[reportPrivateUsage]
+    assert again is not LOADED
+    assert again.design_hash == LOADED.design_hash
+    assert _interpret.design_shape(again) is _interpret.design_shape(LOADED)
+    # A leaf's value is dropped from the shape; its type and every other part are kept.
+    valued = load(with_parameters(LOADED, {"g/word": "bye"}).document, functions=again._callables)  # pyright: ignore[reportPrivateUsage]
+    assert valued.design_hash != LOADED.design_hash
+    assert _interpret.design_shape(valued) == _interpret.design_shape(LOADED)
+    assert _interpret.design_shape(swept(version="2")) != _interpret.design_shape(LOADED)
+    assert len(_interpret._SHAPES) == 3  # pyright: ignore[reportPrivateUsage]
+
+
+def test_the_shape_cache_drops_its_oldest_entry_past_its_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ommat import _interpret
+
+    monkeypatch.setattr(_interpret, "_SHAPES", {})
+    monkeypatch.setattr(_interpret, "_SHAPES_HELD", 2)
+    for d in DESIGNS[:4]:
+        _interpret.design_shape(d)
+    held = list(_interpret._SHAPES)  # pyright: ignore[reportPrivateUsage]
+    assert held == [d.design_hash for d in DESIGNS[2:4]]
