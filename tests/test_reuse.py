@@ -1072,13 +1072,13 @@ def test_a_build_with_no_splice_is_the_whole_document_build(
 
     base = _leafy()
     if how == "cut":
-        monkeypatch.setattr(load_module, "_cut_document", lambda loaded: None)
+        monkeypatch.setattr(load_module, "_cut_document", lambda loaded: None)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     elif how == "template":
         monkeypatch.setitem(load_module._TEMPLATES, base.design_hash, None)  # pyright: ignore[reportPrivateUsage]
     else:
-        monkeypatch.setattr(load_module, "_spliced", lambda *a: None)
+        monkeypatch.setattr(load_module, "_spliced", lambda *a: None)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     values = {"z/map": {"b": 0.9, "a": 0.3}, "m/list": ["y"], "k/n": 0.2}
-    rebuilt = []
+    rebuilt: list[bool] = []
     real = load_module._rebuilt  # pyright: ignore[reportPrivateUsage]
 
     def watching(*a: Any) -> LoadedDesign:
