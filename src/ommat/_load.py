@@ -59,6 +59,7 @@ from ommat._design import (
     new_failure,
 )
 from ommat._form import X_ROLES, check_form
+from ommat._interpret import _remember, inherit
 from ommat._read_view import is_candidate_read
 from ommat._refs import (
     _ParsedRef,
@@ -3779,13 +3780,15 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
     loads ``loaded``'s document with the leaves replaced, with its own callables, and that
     load's ``InvalidDesign`` stands. That load comes back as a document load, whatever form
     ``loaded`` was loaded in: its Design holds document values and its ``_reads`` the
-    document's order, its hash and document the fresh load's."""
+    document's order, its hash and document the fresh load's. The rebuild encodes only each
+    changed leaf's parameter object, between the bytes of ``loaded``'s document around it
+    (``_spliced``), unless a changed leaf is one the answer grid reads; either way the built
+    design's decoded sources and shape are kept as ``loaded``'s (``_interpret.inherit``)."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type(loaded).__name__}, not a LoadedDesign")
     if not isinstance(values, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError("values is a mapping from a leaf's path to its value")
     values = dict(values)  # read once: a lazy or changing mapping gives one value per leaf
-    design = loaded._design
     for path in values:
         if type(path) is not str or path not in loaded._leaf_types:
             raise ValueError(f"{path!r} names no parameter leaf of the design")
@@ -3801,17 +3804,78 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
             failures.append(_conformance_failure(path))
     if failures:
         raise InvalidDesign(failures, _BUILT_BY_LOAD)
+    if _takes_a_load(loaded, values):
+        built = load(_leaves_replaced(loaded, written), functions=loaded._callables)
+    else:
+        built = _spliced(loaded, values, written) or _rebuilt(loaded, values, written)
+    inherit(loaded, built)
+    return built
+
+
+def _leaves_replaced(loaded: LoadedDesign, written: Mapping[str, object]) -> dict[str, Any]:
+    """``loaded``'s document decoded, each leaf in ``written`` holding its document value and
+    that value's order."""
     doc = cast("dict[str, Any]", decode(loaded._document))
     parameters = cast("dict[str, Any]", doc["parameters"])
     for path, value in written.items():
-        parameters[path] = {
-            "type": design.parameters[path].type,
-            "value": value,
-            "order": order_of(value),
-        }
-    if _takes_a_load(loaded, values):
-        return load(doc, functions=loaded._callables)
+        parameters[path] = _leaf_object(loaded, path, value)
+    return doc
+
+
+def _leaf_object(loaded: LoadedDesign, path: str, value: object) -> dict[str, Any]:
+    """The parameter object of the leaf at ``path`` holding the document value ``value``."""
+    return {"type": loaded._design.parameters[path].type, "value": value, "order": order_of(value)}
+
+
+def _rebuilt(
+    loaded: LoadedDesign, values: Mapping[str, object], written: Mapping[str, object]
+) -> LoadedDesign:
+    """``with_parameters``' build with no load, from the whole document decoded and encoded."""
+    doc = _leaves_replaced(loaded, written)
+    parameters = cast("dict[str, Any]", doc["parameters"])
     document = encode(doc, MAX_DOCUMENT_DEPTH)
+    leaf_bytes = {p: _held_bytes(v["value"], v.get("order")) for p, v in parameters.items()}
+    # The grid reads a table's mass labels leaf, which check 9 reads: as given.
+    return _built(loaded, values, written, document, _grid(doc), leaf_bytes)
+
+
+def _spliced(
+    loaded: LoadedDesign, values: Mapping[str, object], written: Mapping[str, object]
+) -> LoadedDesign | None:
+    """``_rebuilt``'s design with no whole document decoded or encoded: each changed leaf's
+    parameter object encoded alone, between the bytes of ``loaded``'s document around it
+    (``_Template``), the grid ``loaded``'s, and every other leaf's bytes ``loaded``'s. ``None``
+    when ``loaded``'s document cannot be cut so, a changed leaf is one the grid reads, or a
+    changed leaf's object does not encode, for ``_rebuilt`` to build or refuse."""
+    template = _cut_document(loaded)
+    if template is None or not template.grid_leaves.isdisjoint(written):
+        return None
+    members = dict(template.members)
+    held: dict[str, bytes] = {}
+    for path, value in written.items():
+        leaf = _leaf_object(loaded, path, value)
+        try:
+            # It stands at depth 2 in the document, under ``parameters``.
+            members[path] = encode(path) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2)
+        except ValueError:
+            return None
+        held[path] = _held_bytes(leaf["value"], leaf["order"])
+    document = template.prefix + b"{" + b",".join(members.values()) + b"}" + template.suffix
+    leaf_bytes = {p: held.get(p, b) for p, b in loaded._leaf_bytes.items()}
+    return _built(loaded, values, written, document, loaded._grid, leaf_bytes)
+
+
+def _built(
+    loaded: LoadedDesign,
+    values: Mapping[str, object],
+    written: Mapping[str, object],
+    document: bytes,
+    grid: Mapping[str, Any],
+    leaf_bytes: Mapping[str, bytes],
+) -> LoadedDesign:
+    """``loaded`` with its leaves in ``values`` holding their new values: its document, hash,
+    grid and leaf bytes those given, every value-free part shared."""
+    design = loaded._design
     parts = {name[1:]: getattr(loaded, name) for name in LoadedDesign.__slots__}
     parts.update(
         design=replace(
@@ -3826,12 +3890,60 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
         ),
         document=document,
         hash=sha256_ref(document),
-        grid=_grid(doc),  # reads a table's mass labels leaf, which check 9 reads: as given
-        leaf_bytes=MappingProxyType(
-            {p: _held_bytes(v["value"], v.get("order")) for p, v in parameters.items()}
-        ),
+        grid=grid,
+        leaf_bytes=MappingProxyType(dict(leaf_bytes)),
     )
     return LoadedDesign(_BUILT_BY_LOAD, **parts)
+
+
+@dataclass(frozen=True, slots=True)
+class _Template:
+    """A loaded design's document cut around its ``parameters`` object: the bytes before and
+    after it, each leaf's member bytes, ``"path":{...}``, in the canonical order the object
+    holds them, and the leaves ``_grid`` reads, a table's mass ``labels`` leaves."""
+
+    prefix: bytes
+    members: Mapping[str, bytes]
+    suffix: bytes
+    grid_leaves: frozenset[str]
+
+
+_TEMPLATES: dict[str, "_Template | None"] = {}
+_TEMPLATES_HELD = 64
+_PARAMETERS_KEY = b'"parameters":'
+
+
+def _cut_document(loaded: LoadedDesign) -> _Template | None:
+    """``loaded``'s ``_Template``, built once per design hash; ``None`` when its parameter
+    members joined are not the bytes its document holds once after ``"parameters":``."""
+    if loaded.design_hash in _TEMPLATES:
+        return _TEMPLATES[loaded.design_hash]
+    doc = cast("dict[str, Any]", decode(loaded._document))
+    parameters = cast("dict[str, Any]", doc["parameters"])
+    members = {
+        p: encode(p) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2) for p, leaf in parameters.items()
+    }
+    body = b"{" + b",".join(members.values()) + b"}"
+    whole = encode(parameters, MAX_DOCUMENT_DEPTH - 1)
+    needle = _PARAMETERS_KEY + body
+    found: _Template | None = None
+    if body == whole and loaded._document.count(needle) == 1:
+        at = loaded._document.index(needle) + len(_PARAMETERS_KEY)
+        grid_leaves = frozenset(
+            cast(str, i["params"]["labels"])
+            for rule in cast("dict[str, Any]", doc["rules"]).values()
+            if rule["form"] == "table"
+            for i in cast("list[dict[str, Any]]", rule["inputs"])
+            if i["helper"] == "mass"
+        )
+        found = _Template(
+            loaded._document[:at],
+            MappingProxyType(members),
+            loaded._document[at + len(body) :],
+            grid_leaves,
+        )
+    _remember(_TEMPLATES, loaded.design_hash, found, _TEMPLATES_HELD)
+    return found
 
 
 def _takes_a_load(loaded: LoadedDesign, values: Mapping[str, object]) -> bool:

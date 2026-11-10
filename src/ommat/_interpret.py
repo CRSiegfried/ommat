@@ -1849,6 +1849,20 @@ def design_shape(loaded: LoadedDesign) -> bytes:
     return found
 
 
+def inherit(source: LoadedDesign, built: LoadedDesign) -> None:
+    """Keep ``built``'s sources and shape as ``source``'s, ``built``'s document being
+    ``source``'s with some leaves' values and orders changed, as ``with_parameters`` builds it:
+    the ``sources`` object holds no leaf's value, and the shape drops every leaf's value and
+    order, so both are a design shape's, decoded and encoded once per shape rather than once
+    per design hash."""
+    if built.design_hash == source.design_hash:
+        return
+    if built.design_hash not in _SOURCES:
+        _remember(_SOURCES, built.design_hash, design_sources(source), _SOURCES_HELD)
+    if built.design_hash not in _SHAPES:
+        _remember(_SHAPES, built.design_hash, design_shape(source), _SHAPES_HELD)
+
+
 def held_identity(loaded: LoadedDesign, ref: str) -> str:
     """``question_identity`` of declared ``q:`` ref ``ref``, computed once per design hash."""
     key = (loaded.design_hash, ref)

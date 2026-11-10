@@ -9,9 +9,9 @@ the budget and the policy's own leaf, beneath a costly rule no leaf reaches."""
 import asyncio
 import itertools
 import types
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -752,3 +752,72 @@ def test_alike_values_share_their_canonical_bytes() -> None:
     # Alike decides nothing it cannot see as alike: a type read-back data never holds.
     one = [1]
     assert not _switching._alike(tuple(one), tuple(one))  # pyright: ignore[reportPrivateUsage]
+
+
+# ---------------------------------------------------------------------------------------------
+# A probe's design built from its parameter object alone, its sources and shape the base's
+
+
+def _checked_build(loaded: LoadedDesign, values: Any, seen: dict[str, int]) -> LoadedDesign:
+    """``with_parameters``, each design it builds checked against the whole-document build and
+    a fresh load of its document, its kept sources and shape against its document's."""
+    from ommat import _interpret
+    from ommat import _load as load_module
+    from ommat._canonical import decode
+
+    built = with_parameters(loaded, values)
+    fresh = load(built.document, functions=loaded._callables)  # pyright: ignore[reportPrivateUsage]
+    assert built.design_hash == fresh.design_hash
+    written = {
+        p: load_module.document_value(v, loaded._leaf_types[p])  # pyright: ignore[reportPrivateUsage]
+        for p, v in values.items()
+    }
+    if not load_module._takes_a_load(loaded, values):  # pyright: ignore[reportPrivateUsage]
+        spliced = load_module._spliced(loaded, values, written)  # pyright: ignore[reportPrivateUsage]
+        whole = load_module._rebuilt(loaded, values, written)  # pyright: ignore[reportPrivateUsage]
+        seen["spliced" if spliced is not None else "rebuilt"] += 1
+        for name in LoadedDesign.__slots__:
+            mine, theirs = getattr(built, name), getattr(whole, name)
+            if name == "_design":
+                assert mine.parameters == theirs.parameters
+            elif isinstance(mine, Mapping):
+                assert dict(cast("Mapping[str, Any]", mine)) == dict(theirs), name
+            else:
+                assert mine == theirs, name
+    else:
+        seen["loaded"] += 1
+    doc = decode(built.document)
+    assert _interpret.design_sources(built) == doc["sources"]
+    doc["parameters"] = {p: leaf["type"] for p, leaf in doc["parameters"].items()}
+    assert _interpret.design_shape(built) == encode(doc, 128)
+    return built
+
+
+def test_every_probe_design_hashes_as_a_fresh_load_of_its_document(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import test_switching_values as sv
+
+    seen = {"spliced": 0, "rebuilt": 0, "loaded": 0}
+
+    def checking(loaded: LoadedDesign, values: Any) -> LoadedDesign:
+        return _checked_build(loaded, values, seen)
+
+    monkeypatch.setattr(_switching, "with_parameters", checking)
+    monkeypatch.setattr(_grid, "with_parameters", checking)
+    jobs: list[tuple[list[Record], LoadedDesign, list[str]]] = [
+        (RECORDS, LOADED, ["g/bar", "g/stated", "g/count", "g/mode", "g/word", "g/floor"]),
+        ([sv.mood_record()], sv.MOOD, _varied(sv.MOOD)),
+        ([sv.tables_record()], sv.TABLES, _varied(sv.TABLES)),
+    ]
+    for i, (records, loaded, paths) in enumerate(jobs):
+        store = EvaluationStore(tmp_path / str(i))
+        switching_values_batch_sync(records, loaded, paths, results=store)
+    points = [
+        {"g/bar": bar, "g/floor": floor} for bar in (0.1, 0.65) for floor in LEAVES["g/floor"]
+    ]
+    rescore_grid_sync(RECORDS, LOADED, LOADED, points)
+    for values in itertools.product(*LEAVES.values()):
+        _checked_build(LOADED, dict(zip(LEAVES, values, strict=True)), seen)
+    assert seen["spliced"] > 0
+    assert seen["rebuilt"] == 0  # every document here cuts around its parameters
