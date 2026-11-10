@@ -651,7 +651,8 @@ class LoadedDesign:
     the live form a caller's ``Design`` holds; and ``_unvalued``, the document's
     ``UnvaluedParts``, shared with each design ``with_parameters`` builds from this one. The
     class trees, payloads and leaf values are decoded afresh at each read, so nothing a caller
-    changes after load reaches a turn.
+    changes after load reaches a turn; ``_unvalued``'s decoded sources, decoded once, are
+    shared by every design built from this one and are read-only by convention.
     """
 
     __slots__ = (

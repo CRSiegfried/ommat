@@ -438,6 +438,8 @@ class _Job:
     results, ``unseen`` names what the probes could not see."""
 
     def __init__(self, recorded: _Recorded, shared: _Shared, path: str, reuse: Reuse) -> None:
+        # One log object per record, shared by every leaf's job: the fixture's construction
+        # key holds it by identity, so a probe reuses the reference run's calls only over it.
         self.log, self.shared, self.path = recorded.log, shared, path
         self.recorded = recorded  # the record's entries and their bytes, compared each run
         self.reuse = reuse  # the record's reference run, shared by its every leaf

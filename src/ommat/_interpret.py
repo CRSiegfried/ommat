@@ -176,8 +176,9 @@ async def interpret(
     record's reference run: the first run it is given keeps it, and a later one fires a rule
     from it where ``Reuse`` says the call would give the same. ``replaying``, which only the
     evaluation jobs pass, has a source's call kept and taken from ``reuse`` too; a call so
-    taken writes the kept call's ``unhashed`` entry, so they pass it over a ledger that keeps
-    none.
+    taken writes the kept call's ``unhashed`` entry, its answers' off sums worked out only
+    when the kept call's run kept ``unhashed`` writes, so one is taken only into a run that
+    keeps them alike.
     """
     if carried:
         raise _InterpretError("carried providers are not supported in this engine")
@@ -187,12 +188,22 @@ async def interpret(
         raise _InterpretError("the cut stands in for the clock, never beside it")
     end = None if deadline is None or clock is None else clock + deadline
     limits = _Limits(None if budget is None else _exact(budget), end, cut, clock)
-    turn = _Turn(
-        ledger, loaded, state, bindings, round_bound, timeout, carried, limits, reuse, replaying
-    )
     # An answer's off sum is written to the call's ``unhashed`` entry alone, so a ledger that
     # keeps no ``unhashed`` write is spared it.
-    turn.sums = not getattr(ledger, "drops_unhashed", False)
+    sums = not getattr(ledger, "drops_unhashed", False)
+    turn = _Turn(
+        ledger,
+        loaded,
+        state,
+        bindings,
+        round_bound,
+        timeout,
+        carried,
+        limits,
+        reuse,
+        replaying,
+        sums=sums,
+    )
     return await turn.run()
 
 
@@ -837,6 +848,8 @@ class _Turn:
         limits: _Limits,
         reuse: "Reuse | None" = None,
         replaying: bool = False,
+        *,
+        sums: bool = True,
     ) -> None:
         self.ledger = ledger
         self.loaded = loaded
@@ -853,7 +866,7 @@ class _Turn:
         self.left_out: dict[str, Undetermined] = {}
         """Each candidate-valued question left out of its batch, with its own marker."""
         self.spent = Fraction(0)
-        self.sums = True
+        self.sums = sums
         """Whether an answer's off sum is worked out, for the call's ``unhashed`` entry;
         interpret clears it for a ledger that keeps no ``unhashed`` write."""
         self.document = loaded._unvalued.sources
@@ -1395,8 +1408,9 @@ class _Turn:
         """The reference run's call of exactly these sources in round ``n``, when asking them
         again would give the same: the run is ``replaying``, so has no clock, their binding
         answers by the batch and its construction (``Replaying``) and was built as the
-        reference's was, no question of theirs declares a leaf whose value changed, and the
-        batch ``batch`` would build passes what the kept one passed: each source's refs asked,
+        reference's was, the kept call's answers' off sums were worked out as this run works
+        them out, no question of theirs declares a leaf whose value changed, and the batch
+        ``batch`` would build passes what the kept one passed: each source's refs asked,
         each need's value as ``at`` reads it, by ``_same``, and each question's labels and their
         descriptions. A question's wording is rendered from these, its leaves and its
         candidate, which its ref names. The sources' readiness and their left-out refs' markers
@@ -1405,7 +1419,8 @@ class _Turn:
         if reuse is None or changed is None or not self.replaying:
             return None
         asked = reuse.asked.get(sids)
-        if asked is None or asked.round != n:
+        # A taken call writes the kept judged outcome, its off sums those worked out then.
+        if asked is None or asked.round != n or asked.sums != self.sums:
             return None
         binding = self.bindings.get(asked.batch.key)
         if not isinstance(binding, Replaying) or binding.construction() != asked.construction:
@@ -1419,13 +1434,10 @@ class _Turn:
             # A source provides t: refs or q: refs, never both, each in code-point order.
             if provided != [*kept.refs, *kept.questions]:
                 return None
-            named = set(self.loaded._needs[sid])
-            for ref in provided:
-                named.update(self.grounded_slots(sid, ref, grounding.candidates.get(ref)))
-            if len(named) != len(kept.needs):
-                return None
-            for need in named:
-                if need not in kept.needs or not _same(at(self.board, need), kept.needs[need]):
+            # The same refs name the same needs under a design of the same shape, a grounded
+            # ref naming its candidate, so only the needs' values are compared.
+            for need in self.named_needs(sid, provided, grounding):
+                if not _same(at(self.board, need), kept.needs[need]):
                     return None
             for ref, q in kept.questions.items():
                 if q.kind is not AnswerKind.extraction:
@@ -1433,6 +1445,7 @@ class _Turn:
                     found = labels.get(name) or self.loaded._labels[name]
                     if found != (q.labels, q.descriptions):
                         return None
+        # The kept batch's ``timeout`` is never read: a replaying run has no clock.
         return asked
 
     def keep_call(
@@ -1443,7 +1456,8 @@ class _Turn:
         binding = self.bindings[batch.key]
         if isinstance(binding, Replaying):
             effects = binding.effects(frozenset(batch.sources), frozenset(batch.refs))
-            asked = _Asked(n, batch, returned, judged, item, binding.construction(), effects)
+            construction = binding.construction()
+            asked = _Asked(n, batch, returned, judged, item, construction, effects, self.sums)
             cast(Reuse, self.reuse).asked[batch.sources] = asked
 
     def expanded(self, sid: str) -> "_Expanded":
@@ -1539,11 +1553,8 @@ class _Turn:
                 for r in provided
                 if r in self.loaded._candidate_sets
             )
-            # A fresh copy per source, so no source's change reaches another's; a slot on a
-            # grounded declared ref is each asked candidate's need, under its grounded ref.
-            named = set(self.loaded._needs[sid])
-            for ref in provided:
-                named.update(self.grounded_slots(sid, ref, grounding.candidates.get(ref)))
+            # A fresh copy per source, so no source's change reaches another's.
+            named = self.named_needs(sid, provided, grounding)
             needs = {need: _fresh(at(self.board, need)) for need in code_point_sorted(named)}
             rendered: dict[str, RenderedQuestion] = {}
             for ref in provided:
@@ -1643,6 +1654,15 @@ class _Turn:
         if candidate is None or declared not in self.loaded._grounded:
             return origin
         return grounded_ref(declared, candidate) + "".join(f".{f}" for f in p.fields)
+
+    def named_needs(self, sid: str, provided: list[str], grounding: "_Expanded") -> set[str]:
+        """The needs keys a source's call passes when it provides ``provided``: its declared
+        needs, and each slot on a grounded declared ref, as each asked candidate's need under
+        its grounded ref."""
+        named = set(self.loaded._needs[sid])
+        for ref in provided:
+            named.update(self.grounded_slots(sid, ref, grounding.candidates.get(ref)))
+        return named
 
     def grounded_slots(self, sid: str, ref: str, candidate: str | None) -> list[str]:
         """The needs keys of a per-candidate entry's slots on grounded declared refs."""
@@ -1892,7 +1912,8 @@ class Reuse:
 @dataclass(frozen=True, slots=True)
 class _Asked:
     """A reference run's source call: its round, batch, return, judged outcome and call item,
-    its binding's construction key, and what the binding noted of it."""
+    its binding's construction key, what the binding noted of it, and whether its answers'
+    off sums were worked out."""
 
     round: int
     batch: _Batch
@@ -1901,6 +1922,7 @@ class _Asked:
     item: dict[str, object]
     construction: object
     effects: object
+    sums: bool
 
 
 async def _restored(binding: Replaying, asked: _Asked) -> _Returned:

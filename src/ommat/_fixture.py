@@ -80,7 +80,9 @@ class RecordedCalls:
 
 
 class _Same:
-    """An object compared by identity, held so its ``id`` is not reused."""
+    """An object compared by identity, held so its ``id`` is not reused. A log so held is
+    taken as immutable once a binding is built from it, so an evaluation job passes one log
+    object, read once, to every run of a record."""
 
     __slots__ = ("held",)
 
@@ -129,7 +131,8 @@ class Base:
         self._asked = asked
         self.key = (_Same(log), None if design is None else design.design_hash, asked)
         """How the base was built: its log, by identity, its design's hash, ``None`` for the
-        design a source is asked under, and the sources asked afresh."""
+        design a source is asked under, and the sources asked afresh. The log is taken as
+        immutable from here on: a job passes one log object to every run of a record."""
 
     def check(self, source: SourceCall) -> tuple[Stale | None, dict[str, Stale]]:
         """Whether ``source`` is stale whole, and why, else each stale ref of it, by the first
@@ -264,7 +267,8 @@ class FixtureBinding(Replaying):
 
     def construction(self) -> object:
         """How the binding was built: its answers' log, by identity, its base's key and the
-        edit sets."""
+        edit sets; equal between bindings built alike over designs that differ in leaf values
+        alone, the design a source is asked under being no part of it."""
         return self._construction
 
     async def __call__(self, batch: tuple[SourceCall, ...], *, seconds: float) -> object:

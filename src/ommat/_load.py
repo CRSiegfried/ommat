@@ -3784,8 +3784,8 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
     ``loaded`` was loaded in: its Design holds document values and its ``_reads`` the
     document's order, its hash and document the fresh load's. The rebuild encodes only each
     changed leaf's parameter object, between the bytes of ``loaded``'s document around it
-    (``_spliced``). Either way the built
-    design holds ``loaded``'s ``UnvaluedParts``, which no leaf's value or order reaches."""
+    (``_spliced``). Either way the built design holds ``loaded``'s ``UnvaluedParts``, which no
+    leaf's value or order reaches."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type(loaded).__name__}, not a LoadedDesign")
     if not isinstance(values, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -3808,8 +3808,6 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
         raise InvalidDesign(failures, _BUILT_BY_LOAD)
     if _takes_a_load(loaded, values):
         built = load(_leaves_replaced(loaded, written), functions=loaded._callables)
-        if built._unvalued is loaded._unvalued:
-            return built
         parts = {name[1:]: getattr(built, name) for name in LoadedDesign.__slots__}
         return LoadedDesign(_BUILT_BY_LOAD, **{**parts, "unvalued": loaded._unvalued})
     return _spliced(loaded, values, written) or _rebuilt(loaded, values, written)
@@ -3848,8 +3846,9 @@ def _spliced(
     """``_rebuilt``'s design with no whole document decoded or encoded: each changed leaf's
     parameter object encoded alone, between the bytes of ``loaded``'s document around it
     (``_Template``), the grid ``loaded``'s, and every other leaf's bytes ``loaded``'s. ``None``
-    when ``loaded``'s document cannot be cut so or a changed leaf's object does not encode, for
-    ``_rebuilt`` to build or refuse."""
+    when ``loaded``'s document cannot be cut so, for ``_rebuilt`` to build. Each changed leaf's
+    value is in the domain (``with_parameters``), so its object, nesting at most ``MAX_DEPTH``
+    + 1 deep, encodes."""
     template = _cut_document(loaded)
     if template is None:
         return None
@@ -3857,13 +3856,10 @@ def _spliced(
     held: dict[str, bytes] = {}
     for path, value in written.items():
         leaf = _leaf_object(loaded, path, value)
-        try:
-            # It stands at depth 2 in the document, under ``parameters``.
-            members[path] = (
-                encode(path, MAX_DOCUMENT_DEPTH) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2)
-            )
-        except ValueError:
-            return None
+        # It stands at depth 2 in the document, under ``parameters``.
+        members[path] = (
+            encode(path, MAX_DOCUMENT_DEPTH) + b":" + encode(leaf, MAX_DOCUMENT_DEPTH - 2)
+        )
         held[path] = _held_bytes(leaf["value"], leaf["order"])
     document = template.prefix + b"{" + b",".join(members.values()) + b"}" + template.suffix
     leaf_bytes = {p: held.get(p, b) for p, b in loaded._leaf_bytes.items()}

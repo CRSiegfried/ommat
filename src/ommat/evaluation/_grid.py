@@ -102,7 +102,9 @@ async def rescore_grid(
         raise TypeError(f"records are a {type_name(records)}, not a sequence of records")
     names = tuple(f"records[{i}]" for i in range(len(records)))
     read = tuple(_read(r, name) for r, name in zip(records, names, strict=True))
-    logs = tuple(r.log for r in read)  # read once: every read decodes afresh
+    # Read once, as every read decodes afresh: one log object per record, which the fixture's
+    # construction key holds by identity, so a later run reuses the first run's calls.
+    logs = tuple(r.log for r in read)
     _refuse_unfit(names, read, logs, recorded)
     for log in logs:
         _run_of(log)  # a recorded setting decide refuses is refused here, before any run
