@@ -526,22 +526,22 @@ def test_every_entry_a_view_reads_is_one_the_reuse_test_compares(
 
 
 # ---------------------------------------------------------------------------------------------
-# A design's shape, the document but for its leaves' values, kept once per design hash
+# A design's shape, the document but for its leaves' values, computed once per design
 
 
 def test_a_job_computes_each_design_s_shape_once_across_its_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ommat import _interpret
+    from ommat import _design
 
-    class Counting(dict[str, bytes]):
-        stored = 0
+    shaped: list[bytes] = []
+    real = _design._shape_of  # pyright: ignore[reportPrivateUsage]
 
-        def __setitem__(self, key: str, value: bytes) -> None:
-            Counting.stored += 1
-            super().__setitem__(key, value)
+    def counting(document: bytes) -> bytes:
+        shaped.append(document)
+        return real(document)
 
-    monkeypatch.setattr(_interpret, "_SHAPES", Counting())
+    monkeypatch.setattr(_design, "_shape_of", counting)
     # Each design loaded afresh from its document, so no two share their parts and the shape
     # alone tells that they differ only in their leaves' values.
     fresh = [
@@ -549,39 +549,45 @@ def test_a_job_computes_each_design_s_shape_once_across_its_records(
         for d in DESIGNS[:6]
     ]
     rows = rescore_sync(RECORDS, LOADED, fresh)
-    assert Counting.stored == len({d.design_hash for d in fresh})  # not once per record
+    # Each design's, and the reference's unless an earlier run read it: not once per record.
+    assert len(fresh) <= len(shaped) <= len(fresh) + 1
     monkeypatch.setattr(_rescore, "Reuse", _Never)
     theirs = rescore_sync(RECORDS, LOADED, fresh)
     assert [encode(row) for row in rows] == [encode(row) for row in theirs]
 
 
-def test_two_loads_of_one_document_share_one_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    from ommat import _interpret
-
-    monkeypatch.setattr(_interpret, "_SHAPES", {})
+def test_a_shape_drops_each_leaf_s_value_and_keeps_every_other_part() -> None:
     again = load(LOADED.document, functions=LOADED._callables)  # pyright: ignore[reportPrivateUsage]
-    assert again is not LOADED
-    assert again.design_hash == LOADED.design_hash
-    assert _interpret.design_shape(again) is _interpret.design_shape(LOADED)
-    # A leaf's value is dropped from the shape; its type and every other part are kept.
+    assert again._unvalued is not LOADED._unvalued  # pyright: ignore[reportPrivateUsage]
+    assert again._unvalued.shape == LOADED._unvalued.shape  # pyright: ignore[reportPrivateUsage]
+    shape = LOADED._unvalued.shape  # pyright: ignore[reportPrivateUsage]
+    assert LOADED._unvalued.shape is shape  # pyright: ignore[reportPrivateUsage]
     valued = load(with_parameters(LOADED, {"g/word": "bye"}).document, functions=again._callables)  # pyright: ignore[reportPrivateUsage]
     assert valued.design_hash != LOADED.design_hash
-    assert _interpret.design_shape(valued) == _interpret.design_shape(LOADED)
-    assert _interpret.design_shape(swept(version="2")) != _interpret.design_shape(LOADED)
-    assert len(_interpret._SHAPES) == 3  # pyright: ignore[reportPrivateUsage]
+    assert valued._unvalued.shape == shape  # pyright: ignore[reportPrivateUsage]
+    assert swept(version="2")._unvalued.shape != shape  # pyright: ignore[reportPrivateUsage]
 
 
-def test_the_shape_cache_drops_its_oldest_entry_past_its_bound(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ommat import _interpret
+def test_a_built_design_shares_its_base_s_unvalued_parts_and_reruns_as_a_fresh_load() -> None:
+    for built in DESIGNS[1:]:
+        assert built._unvalued is LOADED._unvalued  # pyright: ignore[reportPrivateUsage]
+        fresh = load(built.document, functions=LOADED._callables)  # pyright: ignore[reportPrivateUsage]
+        assert fresh._unvalued is not LOADED._unvalued  # pyright: ignore[reportPrivateUsage]
+        assert built._unvalued.sources is LOADED._unvalued.sources  # pyright: ignore[reportPrivateUsage]
+        for record in RECORDS:
+            mine, theirs = (
+                _rerun(record.log, d, record.log, design=LOADED)[0].log for d in (built, fresh)
+            )
+            assert [encode(i) for i in mine] == [encode(i) for i in theirs]
 
-    monkeypatch.setattr(_interpret, "_SHAPES", {})
-    monkeypatch.setattr(_interpret, "_SHAPES_HELD", 2)
-    for d in DESIGNS[:4]:
-        _interpret.design_shape(d)
-    held = list(_interpret._SHAPES)  # pyright: ignore[reportPrivateUsage]
-    assert held == [d.design_hash for d in DESIGNS[2:4]]
+
+def test_a_document_that_cuts_no_template_is_held_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ommat import _load as load_module
+
+    monkeypatch.setattr(load_module, "_TEMPLATES", {LOADED.design_hash: None})
+    assert load_module._cut_document(LOADED) is None  # pyright: ignore[reportPrivateUsage]
+    built = with_parameters(LOADED, {"g/word": "bye"})  # the whole document rebuilt
+    assert built.design_hash == load(built.document, functions=LOADED._callables).design_hash  # pyright: ignore[reportPrivateUsage]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -762,7 +768,6 @@ def test_alike_values_share_their_canonical_bytes() -> None:
 def _checked_build(loaded: LoadedDesign, values: Any, seen: dict[str, int]) -> LoadedDesign:
     """``with_parameters``, each design it builds checked against the whole-document build and
     a fresh load of its document, its kept sources and shape against its document's."""
-    from ommat import _interpret
     from ommat import _load as load_module
     from ommat._canonical import decode
 
@@ -787,10 +792,11 @@ def _checked_build(loaded: LoadedDesign, values: Any, seen: dict[str, int]) -> L
                 assert mine == theirs, name
     else:
         seen["loaded"] += 1
+    assert built._unvalued is loaded._unvalued  # pyright: ignore[reportPrivateUsage]
     doc = decode(built.document)
-    assert _interpret.design_sources(built) == doc["sources"]
+    assert built._unvalued.sources == doc["sources"]  # pyright: ignore[reportPrivateUsage]
     doc["parameters"] = {p: leaf["type"] for p, leaf in doc["parameters"].items()}
-    assert _interpret.design_shape(built) == encode(doc, 128)
+    assert built._unvalued.shape == encode(doc, 128)  # pyright: ignore[reportPrivateUsage]
     return built
 
 

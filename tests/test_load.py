@@ -41,7 +41,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._canonical import decode, encode, sha256_ref
-from ommat._design import _BUILT_BY_LOAD, _rebuild_invalid_design
+from ommat._design import _BUILT_BY_LOAD, UnvaluedParts, _rebuild_invalid_design
 from ommat._load import _takes_a_load, with_parameters
 from ommat._types import Interval, Label, ListOf, MappingOf, Nullable, RecordOf, Scalar, parse_type
 from ommat._values import MAX_DEPTH
@@ -2379,6 +2379,8 @@ def _parts(loaded: LoadedDesign) -> dict[str, Any]:
     """Every slot of a loaded design as plain, comparable data."""
 
     def plain(v: Any) -> Any:
+        if isinstance(v, UnvaluedParts):
+            return v.shape
         if isinstance(v, MappingProxyType | dict):
             return {k: plain(x) for k, x in cast("Mapping[Any, Any]", v).items()}
         if isinstance(v, tuple | list):

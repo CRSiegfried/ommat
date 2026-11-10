@@ -18,10 +18,10 @@ from types import MappingProxyType
 from typing import Any, Literal, cast
 
 from ommat._answer import AnswerKind, ValueType
-from ommat._canonical import decode
+from ommat._canonical import decode, encode
 from ommat._read_view import ReadView
 from ommat._types import ListOf, MappingOf, Scalar, Type, b64url_decode, b64url_encode
-from ommat._values import string_data
+from ommat._values import MAX_DOCUMENT_DEPTH, string_data
 
 # ---------------------------------------------------------------------------------------------
 # Snapshots, which never raise
@@ -585,6 +585,43 @@ def _rebuild_invalid_design(failures: Sequence[DesignFailure]) -> InvalidDesign:
 # The loaded design
 
 
+class UnvaluedParts:
+    """The parts of a design document no leaf's value or order reaches, each computed from
+    the document at its first read and kept: ``sources``, the decoded ``sources`` object, and
+    ``shape``, the document with each leaf's value and order dropped, encoded. Every reader only
+    reads them. ``with_parameters`` hands a design it builds the given design's, the two
+    documents differing in leaves' values and orders alone."""
+
+    __slots__ = ("_document", "_shape", "_sources")
+
+    def __init__(self, document: bytes) -> None:
+        self._document = document
+        self._sources: dict[str, Any] | None = None
+        self._shape: bytes | None = None
+
+    @property
+    def sources(self) -> dict[str, Any]:
+        found = self._sources
+        if found is None:  # two threads may both decode; each keeps an equal object
+            found = self._sources = cast("dict[str, Any]", decode(self._document))["sources"]
+        return found
+
+    @property
+    def shape(self) -> bytes:
+        found = self._shape
+        if found is None:
+            found = self._shape = _shape_of(self._document)
+        return found
+
+
+def _shape_of(document: bytes) -> bytes:
+    """``document`` with each leaf's value and order dropped, encoded."""
+    doc = cast("dict[str, Any]", decode(document))
+    leaves = cast("dict[str, dict[str, Any]]", doc["parameters"])
+    doc["parameters"] = {p: leaf["type"] for p, leaf in leaves.items()}
+    return encode(doc, MAX_DOCUMENT_DEPTH)
+
+
 class LoadedDesign:
     """A design that passed every load check, with what load computed once. Built
     only by ``load``. ``design_hash`` and ``document`` are public; the
@@ -609,10 +646,12 @@ class LoadedDesign:
     by ``_table``; ``_read_leaves``, each leaf whose value a load check read beyond check 10's
     domain and check 8's conformance clauses, and ``_keyed_leaves``, each whose keys alone a
     check read, so a design changing one, or the other's keys, is loaded
-    (``_load.with_parameters``); and ``_document_form``, whether ``_design`` was built from a
+    (``_load.with_parameters``); ``_document_form``, whether ``_design`` was built from a
     document, so that its leaf values are in document form, ``bytes`` as base64url, rather than
-    the live form a caller's ``Design`` holds. The class trees, payloads and leaf values are
-    decoded afresh at each read, so nothing a caller changes after load reaches a turn.
+    the live form a caller's ``Design`` holds; and ``_unvalued``, the document's
+    ``UnvaluedParts``, shared with each design ``with_parameters`` builds from this one. The
+    class trees, payloads and leaf values are decoded afresh at each read, so nothing a caller
+    changes after load reaches a turn.
     """
 
     __slots__ = (
@@ -643,6 +682,7 @@ class LoadedDesign:
         "_requirement_bytes",
         "_table_bytes",
         "_types",
+        "_unvalued",
     )
 
     _design: Design
@@ -672,6 +712,7 @@ class LoadedDesign:
     _read_leaves: frozenset[str]
     _keyed_leaves: frozenset[str]
     _document_form: bool
+    _unvalued: UnvaluedParts
 
     def __init__(self, token: object, **parts: object) -> None:
         if token is not _BUILT_BY_LOAD:

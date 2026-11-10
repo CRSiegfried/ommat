@@ -845,7 +845,7 @@ class _Turn:
         # An answer's off sum is written to the call's ``unhashed`` entry alone, so a ledger that
         # keeps no ``unhashed`` write is spared it.
         self.sums = not getattr(ledger, "drops_unhashed", False)
-        self.document = design_sources(loaded)
+        self.document = loaded._unvalued.sources
         self.reuse = reuse
         self.keeping = reuse is not None and reuse.reference is None  # the reference run
         self.changed = None if reuse is None or self.keeping else reuse.changed(loaded)
@@ -1891,8 +1891,9 @@ class Reuse:
         """The leaves whose values differ between ``loaded`` and the reference design, or
         ``None`` when the documents differ elsewhere, a leaf's type included."""
         reference = cast(LoadedDesign, self.reference)
-        if not _shares_all_but_leaves(loaded, reference) and design_shape(loaded) != design_shape(
-            reference
+        if (
+            not _shares_all_but_leaves(loaded, reference)
+            and loaded._unvalued.shape != reference._unvalued.shape
         ):
             return None
         mine, theirs = loaded._leaf_bytes, reference._leaf_bytes
@@ -2016,16 +2017,11 @@ def _copied_outcome(outcome: "_Outcome") -> "_Outcome":
     return _Outcome(written, None, rows, outcome.exception, outcome.unnamed)
 
 
-# Per-design work a turn or an evaluation job reads and never changes, kept by design hash, the
-# hash of the design document each is computed from. Each cache is bounded, the oldest entry
-# dropped first. A read is a plain ``dict.get``; a write takes the one lock, so two threads
-# evicting at once never race for the same oldest key.
-_SOURCES: dict[str, dict[str, Any]] = {}
-_SOURCES_HELD = 64
+# The question identities a turn or an evaluation job reads and never changes, kept by design
+# hash and ref, bounded, the oldest entry dropped first. A read is a plain ``dict.get``; a write
+# takes the lock, so two threads evicting at once never race for the same oldest key.
 _IDENTITIES: dict[tuple[str, str], str] = {}
 _IDENTITIES_HELD = 1 << 16
-_SHAPES: dict[str, bytes] = {}
-_SHAPES_HELD = 1024
 _CACHE_LOCK = threading.Lock()
 
 
@@ -2037,50 +2033,12 @@ def _remember(cache: dict[Any, Any], key: Any, value: Any, held: int) -> None:
         cache[key] = value
 
 
-def design_sources(loaded: LoadedDesign) -> dict[str, Any]:
-    """The design document's ``sources`` object, decoded once per design hash. Every caller
-    only reads it."""
-    found = _SOURCES.get(loaded.design_hash)
-    if found is None:
-        found = cast("dict[str, Any]", decode(loaded.document))["sources"]
-        _remember(_SOURCES, loaded.design_hash, found, _SOURCES_HELD)
-    return found
-
-
-def design_shape(loaded: LoadedDesign) -> bytes:
-    """The design document with every leaf's value and order dropped, encoded once per design
-    hash, so every record of a job, and every job, shares it. It reads the document alone,
-    which the hash is taken over."""
-    found = _SHAPES.get(loaded.design_hash)
-    if found is None:
-        doc = cast("dict[str, Any]", decode(loaded.document))
-        leaves = cast("dict[str, dict[str, Any]]", doc["parameters"])
-        doc["parameters"] = {p: leaf["type"] for p, leaf in leaves.items()}
-        found = encode(doc, MAX_DOCUMENT_DEPTH)
-        _remember(_SHAPES, loaded.design_hash, found, _SHAPES_HELD)
-    return found
-
-
-def inherit(source: LoadedDesign, built: LoadedDesign) -> None:
-    """Keep ``built``'s sources and shape as ``source``'s, ``built``'s document being
-    ``source``'s with some leaves' values and orders changed, as ``with_parameters`` builds it:
-    the ``sources`` object holds no leaf's value, and the shape drops every leaf's value and
-    order, so both are a design shape's, decoded and encoded once per shape rather than once
-    per design hash."""
-    if built.design_hash == source.design_hash:
-        return
-    if built.design_hash not in _SOURCES:
-        _remember(_SOURCES, built.design_hash, design_sources(source), _SOURCES_HELD)
-    if built.design_hash not in _SHAPES:
-        _remember(_SHAPES, built.design_hash, design_shape(source), _SHAPES_HELD)
-
-
 def held_identity(loaded: LoadedDesign, ref: str) -> str:
     """``question_identity`` of declared ``q:`` ref ``ref``, computed once per design hash."""
     key = (loaded.design_hash, ref)
     found = _IDENTITIES.get(key)
     if found is None:
-        found = question_identity(loaded, design_sources(loaded), ref)
+        found = question_identity(loaded, loaded._unvalued.sources, ref)
         _remember(_IDENTITIES, key, found, _IDENTITIES_HELD)
     return found
 

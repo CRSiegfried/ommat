@@ -16,6 +16,7 @@ one given.
 
 import importlib
 import inspect
+import threading
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -52,6 +53,7 @@ from ommat._design import (
     Table,
     Target,
     Text,
+    UnvaluedParts,
     When,
     document_value,
     label_parts,
@@ -59,7 +61,6 @@ from ommat._design import (
     new_failure,
 )
 from ommat._form import X_ROLES, check_form
-from ommat._interpret import _remember, inherit
 from ommat._read_view import is_candidate_read
 from ommat._refs import (
     _ParsedRef,
@@ -2462,6 +2463,7 @@ class _Loader:
             read_leaves=frozenset(self.read_leaves),
             keyed_leaves=frozenset(self.keyed_leaves),
             document_form=self.parsed is not None,
+            unvalued=UnvaluedParts(document),
         )
 
     def component_reads(self) -> dict[str, tuple[str, ...]]:
@@ -3782,8 +3784,8 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
     ``loaded`` was loaded in: its Design holds document values and its ``_reads`` the
     document's order, its hash and document the fresh load's. The rebuild encodes only each
     changed leaf's parameter object, between the bytes of ``loaded``'s document around it
-    (``_spliced``), unless a changed leaf is one the answer grid reads; either way the built
-    design's decoded sources and shape are kept as ``loaded``'s (``_interpret.inherit``)."""
+    (``_spliced``), unless a changed leaf is one the answer grid reads. Either way the built
+    design holds ``loaded``'s ``UnvaluedParts``, which no leaf's value or order reaches."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type(loaded).__name__}, not a LoadedDesign")
     if not isinstance(values, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -3806,10 +3808,11 @@ def with_parameters(loaded: LoadedDesign, values: Mapping[str, object]) -> Loade
         raise InvalidDesign(failures, _BUILT_BY_LOAD)
     if _takes_a_load(loaded, values):
         built = load(_leaves_replaced(loaded, written), functions=loaded._callables)
-    else:
-        built = _spliced(loaded, values, written) or _rebuilt(loaded, values, written)
-    inherit(loaded, built)
-    return built
+        if built._unvalued is loaded._unvalued:
+            return built
+        parts = {name[1:]: getattr(built, name) for name in LoadedDesign.__slots__}
+        return LoadedDesign(_BUILT_BY_LOAD, **{**parts, "unvalued": loaded._unvalued})
+    return _spliced(loaded, values, written) or _rebuilt(loaded, values, written)
 
 
 def _leaves_replaced(loaded: LoadedDesign, written: Mapping[str, object]) -> dict[str, Any]:
@@ -3908,16 +3911,22 @@ class _Template:
     grid_leaves: frozenset[str]
 
 
+# Kept by design hash, the oldest entry dropped first. A read is a plain ``dict.get``; a write
+# takes the lock, so two threads evicting at once never race for the same oldest key.
 _TEMPLATES: dict[str, "_Template | None"] = {}
 _TEMPLATES_HELD = 64
+_TEMPLATES_LOCK = threading.Lock()
+_UNCUT = object()
+"""A design hash ``_TEMPLATES`` holds nothing for."""
 _PARAMETERS_KEY = b'"parameters":'
 
 
 def _cut_document(loaded: LoadedDesign) -> _Template | None:
     """``loaded``'s ``_Template``, built once per design hash; ``None`` when its parameter
     members joined are not the bytes its document holds once after ``"parameters":``."""
-    if loaded.design_hash in _TEMPLATES:
-        return _TEMPLATES[loaded.design_hash]
+    held = _TEMPLATES.get(loaded.design_hash, _UNCUT)
+    if held is not _UNCUT:
+        return cast("_Template | None", held)
     doc = cast("dict[str, Any]", decode(loaded._document))
     parameters = cast("dict[str, Any]", doc["parameters"])
     members = {
@@ -3942,7 +3951,10 @@ def _cut_document(loaded: LoadedDesign) -> _Template | None:
             loaded._document[at + len(body) :],
             grid_leaves,
         )
-    _remember(_TEMPLATES, loaded.design_hash, found, _TEMPLATES_HELD)
+    with _TEMPLATES_LOCK:
+        if loaded.design_hash not in _TEMPLATES and len(_TEMPLATES) >= _TEMPLATES_HELD:
+            _TEMPLATES.pop(next(iter(_TEMPLATES)), None)
+        _TEMPLATES[loaded.design_hash] = found
     return found
 
 
