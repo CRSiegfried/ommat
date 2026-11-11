@@ -20,6 +20,7 @@ from ommat import (
     LoadedDesign,
     Parameter,
     Record,
+    Rule,
     Table,
     Text,
     decide_sync,
@@ -191,6 +192,35 @@ def test_the_window_is_clipped_to_the_leafs_interval() -> None:
     assert row(record, loaded, "lim/u", 2.0)["clear"]  # 7 is past the interval's 6.5
 
 
+def test_the_window_is_clipped_to_the_leafs_interval_below() -> None:
+    table = Table("d:tab", BIG_SMALL, "F", ["t:state.n"], [[">= lim/c", "big"], ["-", "small"]])
+    loaded, record = deciding(table, **{"lim/c": Parameter(t.number(8.5, 100), 9.0)})
+    assert row(record, loaded, "lim/c", 3.0)["clear"]  # [8.5, 12]: 7 lies below 8.5
+
+
+def both(r: Any) -> object:
+    r.read("d:b")
+    return r.read("d:a")
+
+
+@pytest.mark.parametrize("own", [5.0, 9.0])
+def test_one_value_two_components_compare_on_two_sides_is_near_at_either_end(own: float) -> None:
+    # 7 at an end: d:a's >= joins one side, d:b's > the other, so 7 parts the window.
+    a = Table("d:a", BIG_SMALL, "F", ["t:state.n"], [[">= lim/n", "big"], ["-", "small"]])
+    b = Table("d:b", BIG_SMALL, "F", ["t:state.n"], [["> lim/n", "big"], ["-", "small"]])
+    loaded = load(
+        designed(
+            state=STATE_T,
+            rules={"b": b, "a": a},
+            parameters={"lim/n": Parameter(t.number(), own)},
+            policy=Rule("d:act", BIG_SMALL, both, version="1", reads=["d:a", "d:b"]),
+        )
+    )
+    record = decide_sync(loaded, STATE, {}).record
+    got = row(record, loaded, "lim/n", 2.0)
+    assert got["near"] == [{"key": None, "value": 7.0, "components": ["a", "b"]}]
+
+
 def test_an_unbounded_integer_window_stops_at_the_largest_integer_a_leaf_holds() -> None:
     biggest = 2**53 - 1
     table = Table("d:tab", BIG_SMALL, "F", ["t:state.k"], [["> lim/i", "big"], ["-", "small"]])
@@ -347,6 +377,11 @@ def test_each_gap_between_cuts_is_tried_at_an_integer_and_a_value_that_is_none()
     assert Fraction(1) in floats  # the integer in (1/2, 3)
     assert any(0 < x < Fraction(1, 2) for x in floats)
     assert any(Fraction(1, 2) < x < 3 and x.denominator != 1 for x in floats)
+    for a, b in ((0, 5), (0, 2), (4, 2000)):  # (0, 2) and (4, 2000) have integral midpoints
+        tried = screen_module._tried([Fraction(a), Fraction(b)], integer=False)
+        assert any(a < x < b and x.denominator == 1 for x in tried)
+        assert any(a < x < b and x.denominator != 1 for x in tried)
+    assert Fraction(1, 3) not in screen_module._tried([Fraction(1, 3), Fraction(2)], integer=False)
     ints = screen_module._tried([Fraction(1, 2), Fraction(5, 2), Fraction(3)], integer=True)
     assert ints == [Fraction(1), Fraction(3)]  # the 1/2 and 5/2 cuts hold no integer
 
@@ -406,6 +441,71 @@ def test_a_type_bound_is_a_cut() -> None:
     values = [n["value"] for n in row(record, loaded, "lim/a", 8.0)["not_loading"]]  # [2, 18]
     assert any(4 < v < 4.25 for v in values)
     assert all(v < 4.25 for v in values)
+
+
+def u_over(state_type: Any, state: Any, **values: float) -> tuple[LoadedDesign, Record]:
+    """A ``U`` table of ``> lim/a`` and ``< lim/b`` over ``t:state.n`` of ``state_type``."""
+    table = Table(
+        "d:tab", BIG_SMALL, "U", ["t:state.n"], [["> lim/a", "big"], ["< lim/b", "small"]]
+    )
+    loaded = load(
+        designed(
+            state=state_type,
+            rules={"tab": table},
+            parameters={k: Parameter(t.number(), v) for k, v in values.items()},
+            policy=policy_rule(passed, "d:tab", outputs=BIG_SMALL),
+        )
+    )
+    return loaded, decide_sync(loaded, state, {}).record
+
+
+def test_a_nullable_inputs_bound_is_a_cut() -> None:
+    loaded, record = u_over(
+        t.record(n=t.nullable(t.number(0, 4.25))), {"n": 4.0}, **{"lim/a": 10.0, "lim/b": 100.0}
+    )
+    values = [n["value"] for n in row(record, loaded, "lim/a", 8.0)["not_loading"]]  # [2, 18]
+    assert any(4 < v < 4.25 for v in values)
+
+
+def test_a_types_low_bound_is_a_cut() -> None:
+    # n is in [2.5, 9]: "> 1" and "< lim/b" share a value while lim/b is above 2.5.
+    loaded, record = u_over(
+        t.record(n=t.number(2.5, 9)), {"n": 4.0}, **{"lim/a": 1.0, "lim/b": 2.0}
+    )
+    values = [n["value"] for n in row(record, loaded, "lim/b", 3.0)["not_loading"]]  # [-1, 5]
+    assert any(2.5 < v < 3 for v in values)
+
+
+def test_a_huge_window_on_a_number_axis_stays_within_the_floats() -> None:
+    loaded, record = u_over(STATE_T, STATE, **{"lim/a": 10.0, "lim/b": 1.0})
+    for width in (1e308, 10**400):
+        values = [n["value"] for n in row(record, loaded, "lim/a", width)["not_loading"]]
+        assert values
+        assert all(math.isfinite(v) for v in values)
+
+
+def test_a_u_table_not_naming_the_leaf_loads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    u = Table("d:tab", BIG_SMALL, "U", ["t:state.n"], [["> lim/a", "big"], ["< lim/b", "small"]])
+    other = Table("d:o", BIG_SMALL, "F", ["t:state.n"], [[">= lim/z", "big"], ["-", "small"]])
+    loaded = load(
+        designed(
+            state=STATE_T,
+            rules={"tab": u, "o": other},
+            parameters={
+                "lim/a": Parameter(t.number(), 10.0),
+                "lim/b": Parameter(t.number(), 1.0),
+                "lim/z": Parameter(t.number(), 50.0),
+            },
+            policy=policy_rule(passed, "d:tab", outputs=BIG_SMALL),
+        )
+    )
+    record = decide_sync(loaded, STATE, {}).record
+
+    def loads(*args: object, **kwargs: object) -> object:
+        raise AssertionError("loaded")
+
+    monkeypatch.setattr(screen_module, "with_parameters", loads)
+    assert row(record, loaded, "lim/z", 1000.0)["not_loading"] == []
 
 
 def test_an_integer_input_overlap_changes_two_from_the_other_bound() -> None:

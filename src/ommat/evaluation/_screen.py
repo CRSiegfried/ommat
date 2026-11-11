@@ -24,8 +24,8 @@ name by another leaf, or for an overlap a bound of an input's type, or crosses a
 from two below such a number's floor to two above its ceiling; between two such cuts it
 changes only with whether the leaf is an integer, which a comparison over an integer input
 sees. So the screen loads no value when no check reads the leaf, and otherwise the window's
-ends, each cut, and between each two an integer and a value that is none, and names each
-value that fails.
+ends and each cut the leaf can hold, and between each two an integer and, on a number axis, a
+value that is no integer, and names each value that fails.
 
 The screen trusts the record as the run of ``loaded``: it reads it after the record checks and
 replays nothing, so a record the switching job would refuse ``baseline-differs`` is screened as
@@ -49,9 +49,7 @@ from ommat._types import (
     MappingOf,
     Nullable,
     RecordOf,
-    TypeFailure,
     _numeric,
-    parse_type,
 )
 from ommat._values import MAX_INTEGER, type_name
 from ommat.evaluation._diff import _read, _refuse_unfit
@@ -156,6 +154,7 @@ class _Leaf:
             ]
 
     def row(self, document: _Doc, entries: _Entries) -> dict[str, Any]:
+        """The path's row for one record's entries, all but its ``record``."""
         near: list[dict[str, Any]] = []
         unseen = set(self.unseen)
         for (key, at, _), (lo, hi) in zip(self.axes, self.windows, strict=True):
@@ -194,6 +193,9 @@ class _Leaf:
         return int(x) if self.integer and x.denominator == 1 else float(x)
 
 
+_MAX_FLOAT = exact(sys.float_info.max)
+
+
 def _window(
     own: Fraction, width: int | float, integer: bool, interval: tuple[Any, Any] | None
 ) -> tuple[Fraction, Fraction]:
@@ -210,9 +212,6 @@ def _window(
     if interval is not None:
         ends = (exact(interval[0]), exact(interval[1]))
     return max(lo, ends[0]), min(hi, ends[1])
-
-
-_MAX_FLOAT = Fraction(sys.float_info.max)
 
 
 def _separates(x: Fraction, sides: set[str | None], lo: Fraction, hi: Fraction) -> bool:
@@ -238,8 +237,9 @@ def _not_loading(
     integer: bool,
 ) -> list[Fraction]:
     """Each value in the window whose design fails load: none when no check reads the leaf's
-    value; else the design is loaded at the window's ends, at each cut, and between each two at
-    an integer and at a value that is none, the result being the same for each between two.
+    value; else the design is loaded at the window's ends and each cut the leaf can hold, and
+    between each two at an integer and, on a number axis, at a value that is no integer, the
+    result being the same for each between two.
     A cut is a number a check compares the leaf with, and the integers from two below its
     floor to two above its ceiling, where a comparison over an integer input can change."""
     numbers = _cut_numbers(loaded, document, leaf)
@@ -307,13 +307,9 @@ def _numbers(loaded: LoadedDesign, value: object, leaf: str) -> set[Fraction]:
 
 
 def _type_bounds(loaded: LoadedDesign) -> set[Fraction]:
-    """Every interval bound of a type the design declares, a definition's, an entry's or a
-    leaf's, and of the types the helpers return: a table input's axis is bounded by one."""
-    types: list[object] = [*loaded._types.values(), *loaded._leaf_types.values()]
-    for text in loaded._design.types.values():
-        parsed = parse_type(text, nullable=True)
-        if not isinstance(parsed, TypeFailure):
-            types.append(parsed)
+    """Every interval bound of an entry's type, through its fields, items and values, and of
+    the types the helpers return: a table input's axis is bounded by one."""
+    types: list[object] = list(loaded._types.values())
     out = {Fraction(0), Fraction(1), Fraction(MAX_INTEGER)}  # mass's [0, 1], size's [0, 2^53-1]
     while types:
         t = types.pop()
@@ -339,7 +335,8 @@ def _tried(cuts: list[Fraction], integer: bool) -> list[Fraction]:
         if whole < b:
             out.append(whole)
         if not integer:
-            for m in (exact(float((a + b) / 2)), exact(float((3 * a + b) / 4))):
+            mid = (a + b) / 2
+            for m in (exact(float(x)) for x in (mid, mid + Fraction(1, 2), (3 * a + b) / 4)):
                 if a < m < b and m.denominator != 1:
                     out.append(m)
                     break
