@@ -16,6 +16,7 @@ import pytest
 import test_grounded_rules as grounded
 from ommat import (
     EntryRefusal,
+    Helper,
     InvalidDesign,
     LoadedDesign,
     Parameter,
@@ -190,6 +191,27 @@ def test_the_window_is_clipped_to_the_leafs_interval() -> None:
     table = Table("d:tab", BIG_SMALL, "F", ["t:state.n"], [["> lim/u", "big"], ["-", "small"]])
     loaded, record = deciding(table, **{"lim/u": Parameter(t.number(0, 6.5), 6.0)})
     assert row(record, loaded, "lim/u", 2.0)["clear"]  # 7 is past the interval's 6.5
+
+
+def test_an_integer_window_rounds_its_ends_inward() -> None:
+    assert screen_module._window(Fraction(5), 1.5, True, None) == (4, 6)
+    assert screen_module._window(Fraction(5, 2), 0.25, True, None) == (3, 2)  # no integer
+
+
+def test_an_unbounded_integer_window_with_a_cut_near_the_top_tries_no_value_past_it() -> None:
+    top = 2**53 - 1
+    loaded, record = table_of(
+        "U",
+        [["> lim/a", "big"], ["< lim/b", "small"]],
+        "t:state.k",
+        **{"lim/a": Parameter(t.integer(), top - 1), "lim/b": Parameter(t.integer(), top)},
+    )
+    values = [n["value"] for n in row(record, loaded, "lim/a", 5)["not_loading"]]
+    assert values
+    assert max(values) <= top  # a value past the top is none of the leaf's
+    for v in values:
+        with pytest.raises(InvalidDesign):
+            with_parameters(loaded, {"lim/a": v})
 
 
 def test_the_window_is_clipped_to_the_leafs_interval_below() -> None:
@@ -382,6 +404,8 @@ def test_each_gap_between_cuts_is_tried_at_an_integer_and_a_value_that_is_none()
         assert any(a < x < b and x.denominator == 1 for x in tried)
         assert any(a < x < b and x.denominator != 1 for x in tried)
     assert Fraction(1, 3) not in screen_module._tried([Fraction(1, 3), Fraction(2)], integer=False)
+    narrow = screen_module._tried([Fraction(3, 4), Fraction(5, 4)], integer=False)
+    assert any(Fraction(3, 4) < x < Fraction(5, 4) and x.denominator != 1 for x in narrow)
     ints = screen_module._tried([Fraction(1, 2), Fraction(5, 2), Fraction(3)], integer=True)
     assert ints == [Fraction(1), Fraction(3)]  # the 1/2 and 5/2 cuts hold no integer
 
@@ -482,6 +506,40 @@ def test_a_huge_window_on_a_number_axis_stays_within_the_floats() -> None:
         values = [n["value"] for n in row(record, loaded, "lim/a", width)["not_loading"]]
         assert values
         assert all(math.isfinite(v) for v in values)
+        assert len(values) == len(set(values))
+
+
+@pytest.mark.parametrize(
+    "field", [t.list_(t.number(0, 4.25)), t.mapping(t.number(0, 4.25))], ids=["list", "mapping"]
+)
+def test_a_bound_within_an_entrys_list_or_mapping_type_is_a_type_bound(field: Any) -> None:
+    table = Table("d:tab", BIG_SMALL, "F", ["t:state.n"], [[">= lim/a", "big"], ["-", "small"]])
+    loaded = load(
+        designed(
+            state=t.record(n=t.number(), xs=field),
+            rules={"tab": table},
+            parameters={"lim/a": Parameter(t.number(), 1.0)},
+            policy=policy_rule(passed, "d:tab", outputs=BIG_SMALL),
+        )
+    )
+    assert Fraction(17, 4) in screen_module._type_bounds(loaded)
+
+
+def test_a_helpers_implicit_bound_is_a_cut() -> None:
+    # size over items is in [0, 2^53 - 1]: "< lim/i" overlaps "-" while lim/i is above 0.
+    table = Table(
+        "d:tab",
+        BIG_SMALL,
+        "U",
+        [Helper("size", "t:state.items")],
+        [["< lim/i", "big"], [">= lim/j", "small"]],
+    )
+    loaded, record = deciding(
+        table, **{"lim/i": Parameter(t.integer(), -3), "lim/j": Parameter(t.integer(), -1)}
+    )
+    values = {n["value"] for n in row(record, loaded, "lim/i", 5)["not_loading"]}  # [-8, 2]
+    assert 1 in values  # from 1 both rows hold a size of 0
+    assert 0 not in values
 
 
 def test_a_u_table_not_naming_the_leaf_loads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -332,7 +332,7 @@ def _tried(cuts: list[Fraction], integer: bool) -> list[Fraction]:
     out: list[Fraction] = [c for c in cuts if _holds(c, integer)]
     for a, b in itertools.pairwise(cuts):
         whole = Fraction(math.floor(a) + 1)
-        if whole < b:
+        if whole < b and _holds(whole, integer):
             out.append(whole)
         if not integer:
             mid = (a + b) / 2
