@@ -223,6 +223,7 @@ EVALUATION = {
     "rescore_sync",
     "scenario",
     "scenario_sync",
+    "screen_switches",
     "switching_values",
     "switching_values_batch",
     "switching_values_batch_sync",
