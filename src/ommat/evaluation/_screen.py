@@ -14,17 +14,18 @@ round 0 reads them, and the grid's reach test: a leaf a run could reach other th
 comparison, a table whose ``candidate`` read finds its set holding no value, and a leaf filling
 a question's wording slot, are not cleared.
 
-A value whose design does not load decides nothing. Past its type's interval, and on an
-integer axis past +-(2^53 - 1), the leaf holds no value, so the window stops there. Within it,
-load reads a numeric leaf's value only in check 9's tests of a table's cells: a ``between``
-whose bound is the leaf, its low bound above its high one, and two overlapping rows of a ``U``
-or ``A`` table comparing the leaf. Their result changes only where the leaf crosses one of the
-numbers they compare it with, a literal, another leaf's value or a bound of a type the
-document writes, or an integer within two of one, where a comparison over an integer input
-changes. These are the cuts:
-when none lies in the window, every value there loads as the leaf's own does; else the screen
-loads the window's ends, each cut and one value between each two, and names each value that
-fails.
+A value whose design does not load decides nothing. Past its type's interval, or with none past
++-(2^53 - 1) on an integer axis and the finite ``float``s on a number axis, the leaf holds no
+value, so the window stops there. Within it, load reads a numeric leaf's value only in check
+9's tests of a table's cells: a ``between`` holding the leaf, its low bound above its high
+one, and two rows of a ``U`` or ``A`` table naming the leaf that come to overlap. Their result
+changes only where the leaf crosses a number they compare it with, a number the cells hold or
+name by another leaf, or for an overlap a bound of an input's type, or crosses an integer
+from two below such a number's floor to two above its ceiling; between two such cuts it
+changes only with whether the leaf is an integer, which a comparison over an integer input
+sees. So the screen loads no value when no check reads the leaf, and otherwise the window's
+ends, each cut, and between each two an integer and a value that is none, and names each
+value that fails.
 
 The screen trusts the record as the run of ``loaded``: it reads it after the record checks and
 replays nothing, so a record the switching job would refuse ``baseline-differs`` is screened as
@@ -33,9 +34,8 @@ written. A function rule's ``boundaries`` are trusted as the switching job trust
 
 import itertools
 import math
-import re
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from fractions import Fraction
 from typing import Any, cast
 
@@ -43,7 +43,16 @@ from ommat._canonical import decode
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._load import with_parameters
 from ommat._refs import code_point_sorted, key_path
-from ommat._types import MappingOf, _numeric
+from ommat._types import (
+    Interval,
+    ListOf,
+    MappingOf,
+    Nullable,
+    RecordOf,
+    TypeFailure,
+    _numeric,
+    parse_type,
+)
 from ommat._values import MAX_INTEGER, type_name
 from ommat.evaluation._diff import _read, _refuse_unfit
 from ommat.evaluation._edit import _designs
@@ -52,9 +61,9 @@ from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
 from ommat.evaluation._switching import (
     _HIGH,
     _LOW,
-    _SIDES,
     _comparisons,
     _components,
+    _contains,
     _Entries,
     _finite,
 )
@@ -100,8 +109,8 @@ def screen_switches(
 
 class _Leaf:
     """One path's screen, its value-free work done once: its type and width checked, each axis
-    it varies with its window, the components it reaches unseen, the sources whose wording it
-    fills, and the values in its window whose design does not load."""
+    it varies with its window, the components the design lets it reach unseen, the sources
+    whose wording it fills, and the values in its window whose design does not load."""
 
     def __init__(self, loaded: LoadedDesign, document: _Doc, path: str, width: object) -> None:
         self.path = path
@@ -180,7 +189,8 @@ class _Leaf:
         }
 
     def form(self, x: Fraction) -> int | float:
-        """A value as the leaf's type holds it: an ``int`` on an integer axis, else a ``float``."""
+        """A value as a row gives it: an integer as an ``int`` on an integer axis, else a
+        ``float``."""
         return int(x) if self.integer and x.denominator == 1 else float(x)
 
 
@@ -206,9 +216,9 @@ _MAX_FLOAT = Fraction(sys.float_info.max)
 
 
 def _separates(x: Fraction, sides: set[str | None], lo: Fraction, hi: Fraction) -> bool:
-    """Whether a compared value can part two values of the window: one inside it, or at an end
-    whose tie does not join the window's inside, ``high`` at its low end and ``low`` at its
-    high end."""
+    """Whether a compared value can part two values of the window: one inside it, or one at an
+    end unless its tie joins the inside, every side ``high`` at the low end or ``low`` at the
+    high end; none parts a window of one value."""
     if x < lo or x > hi or lo == hi:
         return False
     return not ((x == lo and sides == {_HIGH}) or (x == hi and sides == {_LOW}))
@@ -227,19 +237,21 @@ def _not_loading(
     window: tuple[Fraction, Fraction],
     integer: bool,
 ) -> list[Fraction]:
-    """Each value in the window whose design fails load: none when no cut lies in it; else the
-    design is loaded at the window's ends, each cut and once between each two, the result
-    being the same between two cuts. A cut is a number a check compares the leaf with, and the
-    integers within two of it, where a comparison over an integer input can change."""
+    """Each value in the window whose design fails load: none when no check reads the leaf's
+    value; else the design is loaded at the window's ends, at each cut, and between each two at
+    an integer and at a value that is none, the result being the same for each between two.
+    A cut is a number a check compares the leaf with, and the integers from two below its
+    floor to two above its ceiling, where a comparison over an integer input can change."""
+    numbers = _cut_numbers(loaded, document, leaf)
+    if numbers is None:
+        return []
     lo, hi = window
-    cuts: set[Fraction] = set()
-    for c in _cut_numbers(loaded, document, leaf):
+    cuts: set[Fraction] = {lo, hi}
+    for c in numbers:
         near = {c} | {Fraction(b + k) for b in (math.floor(c), math.ceil(c)) for k in range(-2, 3)}
         cuts |= {x for x in near if lo <= x <= hi}
-    if not cuts:
-        return []  # one piece, holding the leaf's own value, which loads
     out: list[Fraction] = []
-    for x in _tried(sorted(cuts | {lo, hi}), integer):
+    for x in _tried(sorted(cuts), integer):
         try:
             with_parameters(loaded, {leaf: int(x) if integer else float(x)})
         except InvalidDesign:
@@ -247,101 +259,93 @@ def _not_loading(
     return out
 
 
-def _cut_numbers(loaded: LoadedDesign, document: _Doc, leaf: str) -> set[Fraction]:
-    """The numbers a load check compares the leaf with: the other bound of each ``between``
-    whose bound is the leaf, and, for each ``U`` or ``A`` table one of whose cells compares
-    it, every literal and other leaf's value its cells hold and every number the document's
-    strings write, a superset of its inputs' type bounds."""
-    out: set[Fraction | None] = set()
-    texts = False
+def _cut_numbers(loaded: LoadedDesign, document: _Doc, leaf: str) -> set[Fraction] | None:
+    """The numbers a load check compares the leaf with, ``None`` when none reads its value: the
+    bounds of each ``between`` holding the leaf, and, for each ``U`` or ``A`` table one of
+    whose cells names it, every number its cells hold or name by another leaf, and every bound
+    of a type the design declares or a helper returns."""
+    out: set[Fraction] = set()
+    reads = False
     for c in _components(document).values():
         if c["form"] != "table":
             continue
         rows = cast("list[dict[str, Any]]", c["rows"])
-        named = [o for row in rows for o in _operands(row["cells"]) if o.get("param") == leaf]
-        if not named:
+        cells: list[object] = [cell for row in rows for cell in row["cells"]]
+        if not _contains(cells, {"param": leaf}):
             continue
-        for row in rows:
-            for cell in row["cells"]:
-                if type(cell) is dict and "between" in cell:
-                    pair = cast("list[dict[str, Any]]", cell["between"])
-                    if {"param": leaf} in pair:
-                        out.update(_number(loaded, o, leaf) for o in pair)
+        for cell in cells:
+            pair = cast("dict[str, Any]", cell).get("between") if type(cell) is dict else None
+            if pair is not None and {"param": leaf} in pair:
+                reads = True
+                out |= _numbers(loaded, pair, leaf)
         if c["hit"] in ("U", "A"):
-            texts = True
-            out.update(_number(loaded, o, leaf) for row in rows for o in _operands(row["cells"]))
-    found = {x for x in out if x is not None}
-    if texts:
-        found |= _text_numbers(document)
-    return found
+            reads = True
+            out |= _numbers(loaded, cells, leaf) | _type_bounds(loaded)
+    return out if reads else None
 
 
-def _operands(cells: list[Any]) -> Iterator[dict[str, Any]]:
-    """Each operand of a row's comparison and ``between`` cells."""
-    for cell in cells:
-        if type(cell) is not dict:
-            continue
-        ((tag, member),) = cast("dict[str, Any]", cell).items()
-        if tag == "between":
-            yield from cast("list[dict[str, Any]]", member)
-        elif tag in _SIDES and type(member) is dict:
-            yield cast("dict[str, Any]", member)
+def _numbers(loaded: LoadedDesign, value: object, leaf: str) -> set[Fraction]:
+    """Every number within ``value``, through dicts and lists, a leaf named as ``{"param"}``
+    by its value; the leaf itself by none."""
+    out: set[Fraction] = set()
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if type(item) is int or type(item) is float:
+            out.add(exact(item))
+        elif type(item) is dict:
+            held = cast("dict[str, object]", item)
+            path = held.get("param")
+            if type(path) is str and len(held) == 1:
+                if path != leaf:
+                    stack.append(loaded._leaf_value(path))
+            else:
+                stack += held.values()
+        elif type(item) is list:
+            stack += cast("list[object]", item)
+    return out
 
 
-def _number(loaded: LoadedDesign, operand: dict[str, Any], leaf: str) -> Fraction | None:
-    """An operand's number: a literal's, or another leaf's value; ``None`` for the leaf itself,
-    which meets itself nowhere, and for a read."""
-    if "literal" in operand:
-        return exact(operand["literal"])
-    path = operand.get("param")
-    if path is None or path == leaf:
-        return None
-    value = loaded._leaf_value(path)
-    return exact(value) if type(value) in (int, float) else None
+def _type_bounds(loaded: LoadedDesign) -> set[Fraction]:
+    """Every interval bound of a type the design declares, a definition's, an entry's or a
+    leaf's, and of the types the helpers return: a table input's axis is bounded by one."""
+    types: list[object] = [*loaded._types.values(), *loaded._leaf_types.values()]
+    for text in loaded._design.types.values():
+        parsed = parse_type(text, nullable=True)
+        if not isinstance(parsed, TypeFailure):
+            types.append(parsed)
+    out = {Fraction(0), Fraction(1), Fraction(MAX_INTEGER)}  # mass's [0, 1], size's [0, 2^53-1]
+    while types:
+        t = types.pop()
+        if isinstance(t, Interval):
+            out |= {exact(t.lo), exact(t.hi)}
+        elif isinstance(t, ListOf):
+            types.append(t.item)
+        elif isinstance(t, MappingOf):
+            types.append(t.value)
+        elif isinstance(t, Nullable):
+            types.append(t.inner)
+        elif isinstance(t, RecordOf):
+            types += [f for _, f in t.fields]
+    return out
 
 
 def _tried(cuts: list[Fraction], integer: bool) -> list[Fraction]:
-    """A value the leaf can hold at each cut it can take and one in each gap between two."""
+    """A value the leaf can hold at each cut it can take and, in each gap between two, an
+    integer and, on a number axis, a value that is no integer."""
     out: list[Fraction] = [c for c in cuts if _holds(c, integer)]
     for a, b in itertools.pairwise(cuts):
-        mid = (a + b) / 2
-        between = (Fraction(math.floor(mid)), Fraction(math.ceil(mid)))
-        for m in between if integer else (exact(float(mid)),):
-            if a < m < b:
-                out.append(m)
-                break
+        whole = Fraction(math.floor(a) + 1)
+        if whole < b:
+            out.append(whole)
+        if not integer:
+            for m in (exact(float((a + b) / 2)), exact(float((3 * a + b) / 4))):
+                if a < m < b and m.denominator != 1:
+                    out.append(m)
+                    break
     return sorted(set(out))
 
 
 def _holds(x: Fraction, integer: bool) -> bool:
     """Whether the leaf can hold ``x`` exactly: an integer, or a ``float``."""
     return x.denominator == 1 if integer else exact(float(x)) == x
-
-
-_NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
-
-
-def _text_numbers(document: _Doc) -> set[Fraction]:
-    """Every finite number the document's strings write, such as a type's interval bound, both
-    as written and as the ``float`` it reads as; one past the finite ``float``s is no cut."""
-    out: set[Fraction] = set()
-    for x in _walk(document):
-        if type(x) is str:
-            for text in _NUMBER.findall(x):
-                f = float(text)
-                if math.isfinite(f):
-                    out |= {Fraction(text), exact(f)}
-    return out
-
-
-def _walk(value: object) -> Iterator[object]:
-    """Every value within ``value``, through dicts and lists, keys included."""
-    stack = [value]
-    while stack:
-        item = stack.pop()
-        yield item
-        if type(item) is dict:
-            for k, v in cast("dict[str, object]", item).items():
-                stack += (k, v)
-        elif type(item) is list:
-            stack += cast("list[object]", item)

@@ -340,23 +340,119 @@ def test_the_load_scan_is_bounded_whatever_the_width() -> None:
     assert got["not_loading"]
 
 
-def test_a_huge_number_in_a_wording_is_no_cut() -> None:
-    wording = Text("Mood? ref 5e20000000")
-    loaded = mood_design(wording)
-    began = time.perf_counter()
-    row(mood_record(loaded), loaded, "mood/bar", 0.1)
-    assert time.perf_counter() - began < 5
-
-
-def test_one_value_is_tried_in_each_gap_between_cuts() -> None:
-    cuts = [Fraction(0), Fraction(1, 2), Fraction(3)]
-    floats = screen_module._tried(cuts, integer=False)
+def test_each_gap_between_cuts_is_tried_at_an_integer_and_a_value_that_is_none() -> None:
+    floats = screen_module._tried([Fraction(0), Fraction(1, 2), Fraction(3)], integer=False)
     assert floats[0] == 0
     assert floats[-1] == 3
+    assert Fraction(1) in floats  # the integer in (1/2, 3)
     assert any(0 < x < Fraction(1, 2) for x in floats)
-    assert any(Fraction(1, 2) < x < 3 for x in floats)
+    assert any(Fraction(1, 2) < x < 3 and x.denominator != 1 for x in floats)
     ints = screen_module._tried([Fraction(1, 2), Fraction(5, 2), Fraction(3)], integer=True)
-    assert ints == [Fraction(1), Fraction(3)]  # 1 or 2 in the first gap; the 0.5 cut holds no int
+    assert ints == [Fraction(1), Fraction(3)]  # the 1/2 and 5/2 cuts hold no integer
+
+
+def table_of(
+    hit: str, rows: list[Any], read: str, **parameters: Parameter
+) -> tuple[LoadedDesign, Record]:
+    return deciding(Table("d:tab", BIG_SMALL, hit, [read], rows), **parameters)
+
+
+@pytest.mark.parametrize("hit", ["U", "A"])
+def test_rows_of_a_u_or_a_table_that_come_to_overlap_do_not_load(hit: str) -> None:
+    # "< lim/a" and ">= lim/b" overlap once lim/a passes lim/b, 6.
+    loaded, record = table_of(
+        hit,
+        [["< lim/a", "big"], [">= lim/b", "small"]],
+        "t:state.n",
+        **{"lim/a": Parameter(t.number(), 5.0), "lim/b": Parameter(t.number(), 6.0)},
+    )
+    got = row(record, loaded, "lim/a", 4.0)  # [1, 9]
+    values = [n["value"] for n in got["not_loading"]]
+    assert 9.0 in values
+    assert all(v > 6 for v in values)
+    assert not got["clear"]
+
+
+@pytest.mark.parametrize("cell", [">= 60", 60, {"one_of": [59, 60]}], ids=["ge", "is", "one-of"])
+def test_a_literal_a_u_table_compares_the_leaf_with_is_a_cut(cell: Any) -> None:
+    loaded, record = table_of(
+        "U",
+        [["< lim/i", "big"], [cell, "small"]],
+        "t:state.k",
+        **{"lim/i": Parameter(t.integer(), 5)},
+    )
+    values = {n["value"] for n in row(record, loaded, "lim/i", 100)["not_loading"]}  # [-95, 105]
+    assert 61 in values  # from 61 the rows share 60
+    assert 55 not in values
+
+
+def test_a_type_bound_is_a_cut() -> None:
+    # n is in [0, 4.25]: "> lim/a" and "< lim/b" share a value while lim/a is below 4.25.
+    table = Table(
+        "d:tab", BIG_SMALL, "U", ["t:state.n"], [["> lim/a", "big"], ["< lim/b", "small"]]
+    )
+    loaded = load(
+        designed(
+            state=t.record(n=t.number(0, 4.25)),
+            rules={"tab": table},
+            parameters={
+                "lim/a": Parameter(t.number(), 10.0),
+                "lim/b": Parameter(t.number(), 100.0),
+            },
+            policy=policy_rule(passed, "d:tab", outputs=BIG_SMALL),
+        )
+    )
+    record = decide_sync(loaded, {"n": 4.0}, {}).record
+    values = [n["value"] for n in row(record, loaded, "lim/a", 8.0)["not_loading"]]  # [2, 18]
+    assert any(4 < v < 4.25 for v in values)
+    assert all(v < 4.25 for v in values)
+
+
+def test_an_integer_input_overlap_changes_two_from_the_other_bound() -> None:
+    # "> lim/a" and "< lim/b" share an integer while lim/a is at most 48, two below lim/b.
+    loaded, record = table_of(
+        "U",
+        [["> lim/a", "big"], ["< lim/b", "small"]],
+        "t:state.k",
+        **{"lim/a": Parameter(t.integer(), 100), "lim/b": Parameter(t.integer(), 50)},
+    )
+    values = {n["value"] for n in row(record, loaded, "lim/a", 100)["not_loading"]}  # [0, 200]
+    assert 48 in values
+    assert 49 not in values
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [[["[lim/c, lim/c]", "big"], ["-", "small"]], [[">= lim/c", "big"], ["<= lim/c", "small"]]],
+)
+@pytest.mark.parametrize("hit", ["U", "A"])
+def test_a_number_leaf_meeting_itself_over_an_integer_input_fails_at_an_integer(
+    hit: str, rows: list[Any]
+) -> None:
+    # The leaf meets itself only at an integer over k, so 1000 fails though no number is near.
+    loaded, record = table_of(hit, rows, "t:state.k", **{"lim/c": Parameter(t.number(), 1000.5)})
+    got = row(record, loaded, "lim/c", 0.7)
+    assert not got["clear"]
+    assert {"key": None, "value": 1000.0} in got["not_loading"]
+    with pytest.raises(InvalidDesign):
+        with_parameters(loaded, {"lim/c": 1000.0})
+
+
+def test_values_between_a_cut_and_the_window_ends_are_tried() -> None:
+    table = Table(
+        "d:tab", BIG_SMALL, "F", ["t:state.n"], [["[lim/lo, lim/hi]", "big"], ["-", "small"]]
+    )
+    loaded, record = deciding(
+        table, **{"lim/lo": Parameter(t.number(), 6.0), "lim/hi": Parameter(t.number(), 7.5)}
+    )
+    values = [n["value"] for n in row(record, loaded, "lim/lo", 10.0)["not_loading"]]  # [-4, 16]
+    assert 16.0 in values
+    assert any(10 < v < 16 for v in values)
+    values = [
+        n["value"] for n in row(record, loaded, "lim/hi", 10.0)["not_loading"]
+    ]  # [-2.5, 17.5]
+    assert -2.5 in values
+    assert any(-2.5 < v < 4 for v in values)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -410,37 +506,51 @@ def differing(record: Record, loaded: LoadedDesign, path: str, width: float) -> 
     return out
 
 
-CASES: list[tuple[str, Any, str, float]] = [
-    ("ge", lambda: cell(">=", 5.0), "lim/c", 2.0),
-    ("ge-near", lambda: cell(">=", 5.0), "lim/c", 2.5),
-    ("gt", lambda: cell(">", 5.0), "lim/c", 2.0),
-    ("le", lambda: cell("<=", 9.0), "lim/c", 2.0),
-    ("lt", lambda: cell("<", 9.0), "lim/c", 2.0),
+def u_cell() -> tuple[LoadedDesign, Record]:
+    return table_of(
+        "U",
+        [["< lim/a", "big"], [">= lim/b", "small"]],
+        "t:state.n",
+        **{"lim/a": Parameter(t.number(), 5.0), "lim/b": Parameter(t.number(), 7.5)},
+    )
+
+
+CASES: list[tuple[str, Any, str, float, bool]] = [
+    ("ge", lambda: cell(">=", 5.0), "lim/c", 2.0, True),
+    ("ge-near", lambda: cell(">=", 5.0), "lim/c", 2.5, False),
+    ("gt", lambda: cell(">", 5.0), "lim/c", 2.0, False),
+    ("le", lambda: cell("<=", 9.0), "lim/c", 2.0, True),
+    ("lt", lambda: cell("<", 9.0), "lim/c", 2.0, False),
     (
         "three-way",
         lambda: (three_way(5.0), decide_sync(three_way(5.0), STATE, {}).record),
         "lim/n",
         1.9,
+        True,
     ),
-    ("band", band, "lim/y", 1),
-    ("band-wide", band, "lim/y", 6),
-    ("bar", lambda: (MOOD, mood_record()), "mood/bar", 0.15),
-    ("bar-at", lambda: (MOOD, mood_record()), "mood/bar", 0.2),
-    ("margin", lambda: (MOOD, mood_record()), "mood/m", 0.15),
-    ("margin-at", lambda: (MOOD, mood_record()), "mood/m", 0.2),
-    ("mass", lambda: (MOOD, mood_record()), "mood/mbar", 0.15),
-    ("mass-at", lambda: (MOOD, mood_record()), "mood/mbar", 0.2),
-    ("threshold", lambda: (MOOD, mood_record()), "mood/th.calm", 0.1),
-    ("threshold-near", lambda: (MOOD, mood_record()), "mood/th.calm", 0.11),
+    ("band", band, "lim/y", 1, True),
+    ("band-wide", band, "lim/y", 6, False),
+    ("u-table", u_cell, "lim/a", 1.5, True),
+    ("u-table-wide", u_cell, "lim/a", 3.0, False),
+    ("size", lambda: (TABLES, tables_record()), "lim/s", 1, True),
+    ("bar", lambda: (MOOD, mood_record()), "mood/bar", 0.15, True),
+    ("bar-at", lambda: (MOOD, mood_record()), "mood/bar", 0.2, False),
+    ("margin", lambda: (MOOD, mood_record()), "mood/m", 0.15, True),
+    ("margin-at", lambda: (MOOD, mood_record()), "mood/m", 0.2, True),
+    ("mass", lambda: (MOOD, mood_record()), "mood/mbar", 0.15, True),
+    ("mass-at", lambda: (MOOD, mood_record()), "mood/mbar", 0.2, True),
 ]
 
 
-@pytest.mark.parametrize(("name", "make", "path", "width"), CASES, ids=[c[0] for c in CASES])
+@pytest.mark.parametrize(
+    ("name", "make", "path", "width", "clear"), CASES, ids=[c[0] for c in CASES]
+)
 def test_a_clear_record_writes_its_own_entries_at_every_value_tried_in_the_window(
-    name: str, make: Any, path: str, width: float
+    name: str, make: Any, path: str, width: float, clear: bool
 ) -> None:
     loaded, record = make()
-    if row(record, loaded, path, width)["clear"]:
+    assert row(record, loaded, path, width)["clear"] is clear, name
+    if clear:
         assert differing(record, loaded, path, width) == [], name
 
 
