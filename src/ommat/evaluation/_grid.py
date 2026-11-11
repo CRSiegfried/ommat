@@ -352,6 +352,14 @@ def _unseen(document: _Doc, loaded: LoadedDesign, path: str, points: Sequence[_P
             for k in _held_keys(value):
                 held.setdefault(k, set()).add(encode(cast("Mapping[str, object]", value)[k]))
         keys = {k for k, values in held.items() if len(values) > 1}
+    return _unseen_keys(document, loaded, leaf, keys)
+
+
+def _unseen_keys(
+    document: _Doc, loaded: LoadedDesign, leaf: str, keys: set[str] | None
+) -> list[str]:
+    """``_unseen`` for the leaf at ``leaf``, ``keys`` the keys of a mapping leaf that vary, or
+    ``None`` for any other leaf, in code-point order."""
     out = _hidden(document, loaded, leaf, keys)
     for name, c in _components(document).items():
         if c["form"] == "table":
