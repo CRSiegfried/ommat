@@ -423,12 +423,18 @@ def _leaf_values(loaded: LoadedDesign, point: _Point) -> dict[str, object]:
 
 def _worded(loaded: LoadedDesign) -> set[str]:
     """Each leaf some question's wording slot takes its value from."""
-    out: set[str] = set()
-    for source in loaded._design.sources.values():
+    return set(_wording(loaded))
+
+
+def _wording(loaded: LoadedDesign) -> dict[str, set[str]]:
+    """Each leaf some question's wording slot takes its value from, to the sources asking such
+    a question."""
+    out: dict[str, set[str]] = {}
+    for sid, source in loaded._design.sources.items():
         for provided in source.provides.values():
             if isinstance(provided, Question):
                 for slot in provided.wording.slots:
                     origin = cast("Mapping[str, str]", slot["origin"])
                     if "param" in origin:
-                        out.add(origin["param"])
+                        out.setdefault(origin["param"], set()).add(sid)
     return out
