@@ -230,7 +230,7 @@ class ReadView:
         declared = {string_data(r) for r in reads}
         if role.kind is ComponentKind.when:
             declared.add(_STATE)
-        # A per-candidate question's set is read with it (§candidate-sets).
+        # A per-candidate question's set is read with it (§grounded-declarations).
         declared |= {self._grounded[r] for r in declared if r in self._grounded}
         self._reads: dict[str, _Path] = {}
         for ref in sorted(declared):

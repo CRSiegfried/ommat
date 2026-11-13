@@ -12,7 +12,9 @@ def test_version_matches_metadata() -> None:
     assert ommat.__version__ == version("ommat")
 
 
-@pytest.mark.parametrize("module", ["ommat", "ommat.conversation", "ommat.lens", "ommat.outline"])
+@pytest.mark.parametrize(
+    "module", ["ommat", "ommat.conversation", "ommat.evaluation", "ommat.lens", "ommat.outline"]
+)
 def test_core_imports_only_the_standard_library(module: str) -> None:
     # A fresh interpreter, so modules loaded by pytest or plugins don't count.
     probe = (
