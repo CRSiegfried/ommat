@@ -147,7 +147,7 @@ def _block(
         else:
             done = _run(loaded, given, keys)
             # A d: set the probe fixed holds for the whole assignment, or the lint cannot fill
-            # the entries a run asks (§candidate-sets).
+            # the entries a run asks (§grounded-declarations).
             for set_ref, value in done[2].items():
                 if set_ref in sets and encode(value) != encode(sets[set_ref]):
                     raise ValueError(

@@ -2589,7 +2589,7 @@ _GROUNDED_NEED = "need or slot ref on a grounded declared ref"
 
 def _per_candidate_refs(design: Design) -> dict[str, str]:
     """Each grounded declared ref and its grounding set: a question of a grounded source that
-    holds a candidate slot, and a grounded rule's or table's own ref (§candidate-sets)."""
+    holds a candidate slot, and a grounded rule's or table's own ref (§grounded-declarations)."""
     out: dict[str, str] = {}
     for rule in design.rules.values():
         grounded = getattr(rule, "grounded", None)
@@ -2813,7 +2813,7 @@ def _table_boundaries(table: Mapping[str, Any], leaves: Mapping[str, Any]) -> di
             i = inputs[n]
             helper, read = i["helper"], cast(str, i["read"])
             if is_candidate_read(read):
-                continue  # a cell over the candidate adds nothing (§candidate-sets)
+                continue  # a cell over the candidate adds nothing (§grounded-declarations)
             if tag in ("is", "one_of"):
                 # An integer value cell is a literal boundary of a bare numeric read.
                 values = [member] if tag == "is" else cast("list[object]", member)

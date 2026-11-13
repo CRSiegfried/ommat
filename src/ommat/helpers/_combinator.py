@@ -82,7 +82,7 @@ def _withheld(call: Call, ref: str) -> Unavailable:
 def _conflict(r: ReadView, call: Call, determined: list[tuple[str, object]]) -> Unsure:
     refs = [ref for ref, _ in determined]
     call.rested_on(refs)
-    # A candidate read names its set's ref, each once (§candidate-sets).
+    # A candidate read names its set's ref, each once (§grounded-declarations).
     return Unsure(Cause(CauseCode.conflict, r.cause_refs(refs)))
 
 
