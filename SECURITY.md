@@ -17,6 +17,6 @@ ommat runs code you supply (oracle bindings, function `when`s, rules, the policy
 - decide returning anything but the policy's entry as the decision, or a marker entry not read as undecided
 - the model being consulted after decide returns
 - a rule reading something it did not declare
-- a redacted view showing a non-null `identifier` or `content` value instead of its keyed digest
+- a redacted view showing in clear a value digested under the applied policy, or a digest that discloses the value
 
 The record holds every value of a turn and is as sensitive as the turn's inputs; redaction is a separate view of it. The core makes no network calls and has no runtime dependencies. Issues in optional extras' third-party SDKs belong with those projects.

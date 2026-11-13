@@ -108,7 +108,7 @@ def failures(design: Design | dict[str, Any]) -> list[tuple[int, tuple[str, ...]
 def test_a_design_declaring_targets_writes_them_and_round_trips_byte_for_byte() -> None:
     loaded = load(targeted())
     doc = json.loads(loaded.document)
-    assert doc["format"] == 10
+    assert doc["format"] == 11
     assert doc["targets"] == {
         "tg:distress": {"statement": "How upset the traveller is", "values": None},
         "tg:urgency": {

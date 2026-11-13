@@ -17,4 +17,4 @@ def test_check_11_refuses_a_stored_format_8_design_naming_its_format() -> None:
     with pytest.raises(InvalidDesign) as raised:
         load(data)
     assert [f.check for f in raised.value.failures] == [11]
-    assert "the document's format 8 is not 10" in str(raised.value)
+    assert "the document's format 8 is not 11" in str(raised.value)

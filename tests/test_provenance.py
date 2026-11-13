@@ -15,7 +15,7 @@ import pytest
 import rfc8785
 
 from counting import SmallBounds
-from ledger_logs import before_key_order, before_profile, rehashed
+from ledger_logs import before_key_order, before_profile, before_shapes, rehashed
 from ommat import (
     CallResult,
     Cause,
@@ -63,9 +63,9 @@ YES = {"yes": 0.8, "no": 0.2}
 ROOT = b"k" * 32
 
 
-def digest(value: Any, record: Record) -> str:
-    """A keyed digest computed apart from the code under test."""
-    mac = hmac.new(key_of(record.record_hash, ROOT), rfc8785.dumps(value), hashlib.sha256)
+def digest(value: Any, view: dict[str, Any]) -> str:
+    """A keyed digest computed apart from the code under test, under the view's key."""
+    mac = hmac.new(key_of(view, ROOT), rfc8785.dumps(value), hashlib.sha256)
     return "hmac-sha256:" + mac.hexdigest()
 
 
@@ -273,7 +273,7 @@ def old_doc_of(record: Record) -> dict[str, Any]:
     ``policy`` and the ``context`` item dropped."""
     doc = doc_of(record)
     doc["log"] = [i for i in doc["log"] if i["item"] != "context"]
-    doc["log"][0]["format"] = 7
+    before_shapes(doc, 7)
     doc["log"][1].pop("policy")
     return doc
 
@@ -411,7 +411,7 @@ def test_no_result_or_request_takes_calibrated() -> None:
 
 def as_format_6(doc: dict[str, Any]) -> dict[str, Any]:
     """A current record document made format 6: the settings item's ``sets`` dropped."""
-    doc["log"][0]["format"] = 6
+    before_shapes(doc, 6)
     for item in doc["log"]:
         if item["item"] == "settings":
             item.pop("sets", None)
@@ -441,7 +441,7 @@ def test_a_format_6_record_may_hold_calibrated_and_a_format_7_one_may_not(place:
     format_7 = with_calibrated(old_doc_of(turn(**PROFILE)), place)
     refused(format_7, f"{verb} calibrated, which a format-7 record does not")
     current = with_calibrated(doc_of(turn(**PROFILE)), place)
-    refused(current, f"{verb} calibrated, which a format-8 record does not")
+    refused(current, f"{verb} calibrated, which a format-9 record does not")
 
 
 def test_a_detail_is_missing_only_when_every_sent_request_lacks_it() -> None:
@@ -530,12 +530,12 @@ def test_a_binding_that_gives_a_new_request_id_each_call_is_still_deterministic(
 def test_a_request_id_is_digested_and_the_other_new_members_are_open() -> None:
     missing = {k: v for k, v in PROFILE["missing"].items() if k != "request_id"}
     record = turn(**{**PROFILE, "request_id": "caller-case-42", "missing": missing})
-    view = json.loads(redact(record, ROOT))
+    view = json.loads(redact(record, ROOT, {}))
     entry = next(iter(view["unhashed"]["calls"].values()))
-    assert entry["request_id"] == digest("caller-case-42", record)
+    assert entry["request_id"] == digest("caller-case-42", view)
     assert (entry["missing"], entry["clients"]) == (missing, PROFILE["clients"])
     call = next(i for i in view["log"] if i["item"] == "call")
-    assert call["prompt"] == digest("the prompt", record)
+    assert call["prompt"] == digest("the prompt", view)
     for name in ("provider", "model_requested", "model_reported", "revision", "elicitation"):
         assert call[name] == PROFILE[name]
     assert (call["runtime"], call["precision"], call["claimed"]) == (
@@ -548,9 +548,9 @@ def test_a_request_id_is_digested_and_the_other_new_members_are_open() -> None:
 @pytest.mark.parametrize(("member", "value"), [("request_id", b"x"), ("missing", 5)])
 def test_an_invalid_new_member_is_digested_under_invalid(member: str, value: object) -> None:
     record = turn(**{member: value})
-    view = json.loads(redact(record, ROOT))
+    view = json.loads(redact(record, ROOT, {}))
     entry = next(iter(view["unhashed"]["calls"].values()))
-    assert entry["invalid"][member] == digest(repr(value), record)
+    assert entry["invalid"][member] == digest(repr(value), view)
 
 
 def test_the_fold_refuses_a_clients_package_at_two_versions_and_ignores_unsent_ones() -> None:
@@ -576,7 +576,7 @@ def test_the_fold_reads_no_request_whose_attempts_is_not_above_0() -> None:
 
 def test_a_format_4_record_redacts_with_its_snapshot_open_and_replays_as_wrong_design() -> None:
     old = read_record(rehashed(before_profile(old_doc_of(turn(**PROFILE)), 4)))
-    view = json.loads(redact(old, ROOT))
+    view = json.loads(redact(old, ROOT, {}))
     call = next(i for i in view["log"] if i["item"] == "call")
     assert call["snapshot"] == "7132dc4"
     assert replay_sync(old, LOADED) == (None, [{"kind": FindingKind.wrong_design}])
@@ -615,12 +615,12 @@ def test_a_stored_format_4_record_reads_to_its_own_hash_and_keeps_its_snapshot()
     call = call_item(record)
     assert (call["snapshot"], call["precision"]) == ("m-1", 2)
     assert "revision" not in call
-    view = json.loads(redact(record, ROOT))
+    view = json.loads(redact(record, ROOT, {}))
     assert call_item_of(view)["snapshot"] == "m-1"
 
 
 def test_a_stored_format_4_design_is_refused_and_its_record_replays_as_wrong_design() -> None:
-    with pytest.raises(InvalidDesign, match="the document's format 4 is not 10"):
+    with pytest.raises(InvalidDesign, match="the document's format 4 is not 11"):
         load((FORMAT_4 / "design.json").read_bytes())
     record = read_record((FORMAT_4 / "record.json").read_bytes())
     assert record.log[0]["hash"] == FORMAT_4_DESIGN

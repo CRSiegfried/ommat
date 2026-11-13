@@ -133,7 +133,6 @@ def design(**changes: Any) -> Design:
             "act": Rule("d:act", t.string, act, version="1", reads=[FIT, "d:summary"]),
         },
         "policy": "d:act",
-        "classes": {SET: {"name": "identifier"}},
     }
     fields.update(changes)
     return Design(**fields)
@@ -444,10 +443,13 @@ def test_replay_finds_a_changed_grounded_entry() -> None:
 
 def test_redact_digests_a_grounded_rules_candidate() -> None:
     record = decided()
-    view = json.loads(redact(record, ROOT))
-    written = [i["ref"] for i in view["log"] if i["item"] == "entry"]
-    assert grounded_ref(FIT, digest("Ana", record)) in written
-    assert grounded_ref(FIT, "Ana") not in written
+    for policy in ({}, {SET: {"name": "identifier"}}, {SET: "identifier"}):
+        view = json.loads(redact(record, ROOT, policy))
+        written = [i["ref"] for i in view["log"] if i["item"] == "entry"]
+        assert grounded_ref(FIT, digest("Ana", view)) in written
+        assert grounded_ref(FIT, "Ana") not in written
+    opened = json.loads(redact(record, ROOT, {SET: {"name": "open"}}))
+    assert grounded_ref(FIT, "Ana") in [i["ref"] for i in opened["log"] if i["item"] == "entry"]
 
 
 def test_check_4_refuses_a_source_requirement_naming_a_grounded_declared_ref() -> None:

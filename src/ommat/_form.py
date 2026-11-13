@@ -38,10 +38,7 @@ from ommat._design import (
 from ommat._refs import code_point_sorted, is_segment, parse_ref
 from ommat._table import NotationError, input_form, row_form
 from ommat._values import (
-    MAX_DEPTH,
     MAX_INTEGER,
-    Count,
-    SizeExceeded,
     domain_error,
     in_domain,
     is_scalar_string,
@@ -51,7 +48,6 @@ from ommat._values import (
 )
 
 _ORIGINS = frozenset({"ref", "param", "candidate"})
-_CLASSES = frozenset({"open", "identifier", "content"})
 MAX_LABELS = 2**18
 """The most labels a question declares; read at each check, so a test may set it smaller."""
 MAX_LABEL_CODE_POINTS = 2**24
@@ -198,7 +194,6 @@ class _Form:
             parameters=parameters,
             types=self.mapping(d.types, "types", ()),
             groups=groups,
-            classes=self.classes(d.classes),
             name=self.string(d.name, "the design's name", ()),
             targets=targets,
         )
@@ -287,25 +282,6 @@ class _Form:
         if ref is None:
             return None
         return SourceRequirement(ref, values)
-
-    def classes(self, value: object) -> dict[str, Any]:
-        """The classes block, each tree as plain data; a tree of the wrong form is dropped.
-        Whether a tree conforms to its type is load's."""
-        out: dict[str, Any] = {}
-        for ref, tree in self.mapping(value, "classes", ()).items():
-            try:
-                plain = _tree(tree, 0, Count())
-            except SizeExceeded:
-                self.fail((ref,), f"the class tree of {quote(ref)} is outside the value domain")
-                continue
-            if plain is None:
-                self.fail(
-                    (ref,),
-                    f"the class tree of {quote(ref)} is not a class name or an object of trees",
-                )
-            else:
-                out[ref] = plain
-        return out
 
     def provided(self, ref: str, value: object, where: str, names: tuple[str, ...]) -> Any:
         if ref.startswith("q:"):
@@ -777,28 +753,6 @@ def _slot_form(slot: object) -> bool:
         return False
     ((tag, value),) = cast("Mapping[object, Any]", origin).items()
     return tag in _ORIGINS and isinstance(value, str) and is_scalar_string(value)
-
-
-def _tree(tree: object, depth: int, count: Count) -> Any:
-    """A class tree as plain data: a class name, or a ``dict`` of trees keyed by strings;
-    ``None`` when it is neither, at any depth, or nests past the value bound. The tree, each
-    key and each member counts as a value, with its code points, at every place it stands;
-    past the size bounds the walk stops with ``SizeExceeded``, before the copy grows further."""
-    count.add(tree)
-    if isinstance(tree, str):
-        return string_data(tree) if string_data(tree) in _CLASSES else None
-    if not isinstance(tree, Mapping) or depth >= MAX_DEPTH:
-        return None
-    out: dict[str, Any] = {}
-    for key, member in cast("Mapping[object, object]", tree).items():
-        count.add(key)
-        if not isinstance(key, str) or not is_scalar_string(key) or string_data(key) in out:
-            return None
-        plain = _tree(member, depth + 1, count)
-        if plain is None:
-            return None
-        out[string_data(key)] = plain
-    return out
 
 
 def _number(value: object) -> bool:

@@ -13,10 +13,11 @@ guide shows them at work.
 
 The turn history is not an audit trail, and a renderer says nothing of its own beyond fixed
 labels. It is minimal: what the next model needs to carry on, not every value the turn wrote.
-Each `t:` value is carried whole, the customer's words and any `identifier` field among them,
+Each `t:` value is carried whole, the customer's words and any identifying field among them,
 so a binding's values set most of the history's size ([Shape a tool's
 value](add-a-source.md#shape-a-tools-value)). For the whole turn, read the record, its outline
-or the record lens; to share a turn, share its redacted view.
+or the record lens; to share a turn, share its [redacted
+view](../spec/README.md#the-redacted-view) under a policy of your own.
 
 The example's files are in `docs/how-to/hand_off_a_turn/`: `support_design.py` is the design,
 `turn_run.py` the driver, which answers through `ommat.bindings.fixed`, so it runs with no
@@ -81,10 +82,10 @@ leaves to ask the customer and of a third turn whose source could not answer:
 
 ```text
 The turn decided refund_order.
-call om_99095d193e254d10ac37189b_c1 ask {}
-result om_99095d193e254d10ac37189b_c1 24 bytes
-call om_99095d193e254d10ac37189b_d decide {"d:refund":"yes"}
-result om_99095d193e254d10ac37189b_d 27 bytes
+call om_9bb4033a6afb0cc25b4d87ed_c1 ask {}
+result om_9bb4033a6afb0cc25b4d87ed_c1 24 bytes
+call om_9bb4033a6afb0cc25b4d87ed_d decide {"d:refund":"yes"}
+result om_9bb4033a6afb0cc25b4d87ed_d 27 bytes
 The turn decided ask_if_refund.
 The turn is undecided: unsupported.
 ```

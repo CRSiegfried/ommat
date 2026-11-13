@@ -81,7 +81,7 @@ def test_check_11_refuses_the_stored_format_2_design_naming_its_format() -> None
     with pytest.raises(InvalidDesign) as info:
         load((FORMAT_2 / "design.json").read_bytes())
     assert [f.check for f in info.value.failures] == [11]
-    assert "the document's format 2 is not 10" in str(info.value)
+    assert "the document's format 2 is not 11" in str(info.value)
 
 
 def test_a_format_2_record_reads_back_to_its_own_hash_with_no_hash_member() -> None:
@@ -224,7 +224,7 @@ def test_a_described_design_loads_and_writes_its_labels_as_declared() -> None:
     loaded = load(described())
     asked = decode(loaded.document)["sources"]["ask"]["provides"]["q:tone"]
     assert asked["labels"] == [WARM, "cold"]
-    assert decode(loaded.document)["format"] == 10
+    assert decode(loaded.document)["format"] == 11
     assert loaded._labels["q:tone"] == (("warm", "cold"), ("Friendly or grateful", None))
     assert loaded._labels["q:other"] == (("yes", "no"), (None, None))
 
@@ -559,10 +559,10 @@ def test_a_late_result_keeps_no_warnings() -> None:
 
 def test_redact_digests_the_warnings_as_one_value() -> None:
     record = ran(answering(warnings=("one", "two")))
-    view = decode(redact(record, bytes(range(32))))
+    view = decode(redact(record, bytes(range(32)), {}))
     (key,) = record.unhashed["calls"]
     assert record.log[int(key)]["item"] == "call"
-    assert view["unhashed"]["calls"][key]["warnings"] == digest(["one", "two"], record)
+    assert view["unhashed"]["calls"][key]["warnings"] == digest(["one", "two"], view)
     assert view["hash"] == record.record_hash
 
 
@@ -1069,8 +1069,8 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden described record
 
-GOLDEN_DESIGN = "sha256:c887a76113f5675949a93968e450a67a53b38617ea656458412e696b3acb8fd6"
-GOLDEN_RECORD = "sha256:edf08a3cef9456d9eceaf9e50e87704129dcf72add7f0dfda04d67e0d468674d"
+GOLDEN_DESIGN = "sha256:ba34693f085e4e902cfd2745facfb9990aafd6ce9ebffb7bdf930f97ac61110d"
+GOLDEN_RECORD = "sha256:752747236833898566046f4c56904c5771d4c784c9f7d6df97903c65309ece83"
 
 
 def golden() -> Record:
@@ -1079,7 +1079,7 @@ def golden() -> Record:
 
 def test_the_golden_described_record() -> None:
     record = golden()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 8, "helpers": 4}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 9, "helpers": 4}
     assert record.log[1]["policy"] == "d:decision"
     assert entry(record, "d:tone")["value"] == "warm"
     assert entry(record, "d:decision")["value"] is True

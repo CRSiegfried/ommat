@@ -26,7 +26,6 @@ from ommat.outline._reach import reach
 from ommat.outline._types import cell_text, input_text, output_text, parse_type, target_values
 
 KNOWN_DESIGN = (
-    "classes",
     "format",
     "groups",
     "name",
@@ -334,30 +333,10 @@ def rounds_of(
     return at
 
 
-def _class_summary(tree: object) -> str:
-    if isinstance(tree, str):
-        return tree
-    leaves: list[str] = []
-
-    def walk(t: object) -> None:
-        if is_dict(t):
-            for v in obj(t).values():
-                walk(v)
-        elif is_list(t):
-            for v in arr(t):
-                walk(v)
-        else:
-            leaves.append(str(t))
-
-    walk(tree)
-    counts = {c: leaves.count(c) for c in sorted(set(leaves))}
-    return "tree: " + ", ".join(f"{c} ×{k}" for c, k in counts.items())  # noqa: RUF001
-
-
 def design_outline(document: object) -> dict[str, Any]:
     """One design document, ``bytes`` or parsed, as a plain dict of fixed shape: its header,
-    parameters, nodes by round and wavefront, edges, a ref-to-node map, groups, targets and
-    classes; and, computed from these, a layout, a fingerprint and a short label per ref.
+    parameters, nodes by round and wavefront, edges, a ref-to-node map, groups and targets;
+    and, computed from these, a layout, a fingerprint and a short label per ref.
     ``ValueError`` for a document that is neither, or bytes that are not one strict JSON
     object."""
     doc, digest, hash_source = parsed(document, "the design")
@@ -482,10 +461,6 @@ def design_outline(document: object) -> dict[str, Any]:
             for g, v in sorted(obj(doc.get("groups")).items())
         ],
         "targets": targets,
-        "classes": [
-            {"ref": k, "class": _class_summary(v)}
-            for k, v in sorted(obj(doc.get("classes")).items())
-        ],
         "requirements": requirements,
         "other_members": sorted(k for k in doc if k not in KNOWN_DESIGN),
         "layout": layout_of(nodes, edges),

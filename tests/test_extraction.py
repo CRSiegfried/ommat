@@ -261,7 +261,7 @@ def only(design: Any, check: int, says: str) -> None:
 def test_a_valid_extraction_design_loads_and_writes_the_questions_object() -> None:
     loaded = x.loaded()
     provides = decode(loaded.document)["sources"]["read"]["provides"]
-    assert decode(loaded.document)["format"] == 10
+    assert decode(loaded.document)["format"] == 11
     assert provides["q:amount"] == {
         "kind": "extraction",
         "wording": {
@@ -410,55 +410,11 @@ def test_check_10s_label_bound_does_not_apply_to_an_extraction_question(
     load(x.design())
 
 
-def test_check_3_an_extraction_q_ref_may_key_the_classes_block() -> None:
-    loaded = load(x.design(classes={"q:amount": "identifier"}))
-    assert loaded._classes["q:amount"] == {
-        "kind": "open",
-        "value_type": "open",
-        "is_list": "open",
-        "value": "identifier",
-        "guess": "identifier",
-        "p_null": "open",
-        "confidence": "open",
-        "span": "identifier",
-    }
-    opened = load(x.design(classes={"q:amount": {"value": "open", "p_null": "content"}}))
-    assert opened._classes["q:amount"]["value"] == "open"
-    assert opened._classes["q:amount"]["p_null"] == "content"
-    assert opened._classes["q:amount"]["guess"] == "content"
-    noul = x.with_question("q:spam", Question("noul", Text("Is it?")), classes={"q:spam": "open"})
-    only(noul, 3, "an extraction q: ref")
-
-
-def test_a_classes_key_at_an_extraction_question_check_10_refused_fails_once() -> None:
-    money = x.question(cast(Any, "money"))
-    only(x.with_question("q:amount", money, classes={"q:amount": "identifier"}), 10, "value_type")
-
-
-def test_an_extraction_answers_default_tree_is_by_member() -> None:
-    assert x.loaded()._classes["q:dates"] == {
-        "kind": "open",
-        "value_type": "open",
-        "is_list": "open",
-        "value": "content",
-        "guess": "content",
-        "p_null": "open",
-        "confidence": "open",
-        "span": "content",
-    }
-
-
-@pytest.mark.parametrize(
-    ("tree", "says"),
-    [
-        ({"amount": "open"}, "not a member of an extraction answer"),
-        ({"value": {"x": "open"}}, 'holds an object at "value"'),
-    ],
-)
-def test_check_10_a_tree_at_an_extraction_ref_conforms_to_its_eight_members(
-    tree: Any, says: str
-) -> None:
-    only(x.design(classes={"q:amount": tree}), 10, says)
+def test_an_extraction_answers_shape_is_a_record_of_its_eight_members() -> None:
+    assert x.loaded()._shapes["q:dates"] == dict.fromkeys(
+        ("kind", "value_type", "is_list", "value", "guess", "p_null", "confidence", "span"),
+        "leaf",
+    )
 
 
 def bounded(entry: Any, ref: str = "q:amount", **changes: Any) -> Any:

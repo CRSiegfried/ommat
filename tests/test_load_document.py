@@ -53,7 +53,7 @@ def alike(a: LoadedDesign, b: LoadedDesign) -> None:
     assert dict(a._grid) == dict(b._grid)
     assert dict(a._graph) == dict(b._graph)
     assert dict(a._providers) == dict(b._providers)
-    assert a._classes == b._classes
+    assert a._shapes == b._shapes
     assert dict(a._needs) == dict(b._needs)
     assert dict(a._types) == dict(b._types)
     assert dict(a._leaf_types) == dict(b._leaf_types)
@@ -220,12 +220,13 @@ def parsed_cases() -> list[tuple[Any, str]]:
         ({**with_check_1_defect(), "name": float("nan")}, "outside the value domain"),
         ({**with_check_1_defect(), "name": b"x"}, "outside the value domain"),
         ({**with_check_1_defect(), "extra": 1}, 'the member "extra"'),
+        ({**with_check_1_defect(), "classes": {}}, 'the member "classes"'),
     ]
     for value in (0, 9, DESIGN_FORMAT + 1):
-        cases.append(({**with_check_1_defect(), "format": value}, f"format {value} is not 10"))
+        cases.append(({**with_check_1_defect(), "format": value}, f"format {value} is not 11"))
     for value in (True, "1", 1.0, None):
         cases.append(({**with_check_1_defect(), "format": value}, "format is not an integer"))
-    for member in ("state", "classes"):
+    for member in ("state", "targets"):
         doc = with_check_1_defect()
         del doc[member]
         cases.append((doc, f'no member "{member}"'))
@@ -705,10 +706,7 @@ def _places() -> list[tuple[str, Callable[[dict[str, Any], Any], None]]]:
     def leaf(doc: dict[str, Any], value: Any) -> None:
         doc["parameters"]["list/cap"]["value"] = value
 
-    def tree(doc: dict[str, Any], value: Any) -> None:
-        doc["classes"]["t:state"] = {f"k{i}": "open" for i in range(40)} if value is None else value
-
-    return [("payload", payload), ("requirement", requirement), ("leaf", leaf), ("tree", tree)]
+    return [("payload", payload), ("requirement", requirement), ("leaf", leaf)]
 
 
 @pytest.mark.parametrize(("place", "put"), _places())

@@ -170,41 +170,32 @@ def question(template: str = "Is it?", *slots: dict[str, Any], **changes: Any) -
 
 
 def gated(**changes: Any) -> Design:
-    """``full`` with a source gated by a function ``when`` and a source requirement, and a
-    declared classes block."""
+    """``full`` with a source gated by a function ``when`` and a source requirement."""
     gate = Source(
         {"t:gated": t.record(note=t.string, n=t.integer())},
         needs=["t:lookup"],
         when=When(route, version="w1"),
         requirement=SourceRequirement("d:route", ["yes", "no"]),
     )
-    design = with_source(full(), "gate", gate)
-    classes = {"t:state": {"subject": "identifier"}, "t:gated": "open", "d:route": "content"}
-    return dataclasses.replace(design, classes=classes, **changes)
+    return dataclasses.replace(with_source(full(), "gate", gate), **changes)
 
 
 def ungated() -> Design:
-    """``gated`` with a failure under checks 1, 3, 7 and 10's form test in its new members;
-    check 3's failure gates check 9 and check 10's tree test off."""
+    """``gated`` with a failure under checks 3 and 10's form test in its new members; check 3's
+    failure gates check 9 off."""
     gate = Source(
         {"t:bad": t.string},
         when=When(route),
         requirement=SourceRequirement("d:score", [2, 2.0, "x"]),
     )
-    return dataclasses.replace(
-        with_source(gated(), "bad", gate),
-        classes={"t:state": {"nope": "open"}, "q:intent/tone": "open", "T:x": "open"},
-    )
+    return with_source(gated(), "bad", gate)
 
 
 def held_back() -> Design:
-    """``gated`` failing only the gated checks: check 9, a source requirement value that
-    cannot hold, and check 10's tree test, a class tree naming no field."""
+    """``gated`` failing only a gated check: check 9, a source requirement value that cannot
+    hold."""
     gate = Source({"t:held": t.string}, requirement=SourceRequirement("d:score", [0.5, 2, 3]))
-    return dataclasses.replace(
-        with_source(gated(), "held", gate),
-        classes={"t:state": {"nope": "open", "sender": {"x": "content"}}},
-    )
+    return with_source(gated(), "held", gate)
 
 
 def roles(**given: Any) -> dict[str, Any]:

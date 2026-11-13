@@ -22,14 +22,17 @@ from ledger_logs import (
     CANCELLED_8,
     DESIGN,
     DESIGN_8,
+    DESIGN_9,
     ENTRY_CAUSE,
     LOGS,
     NORMAL,
     NORMAL_8,
+    NORMAL_9,
     PLAN,
     QUESTIONS,
     SETTINGS,
     SETTINGS_8,
+    SETTINGS_9,
     STATE,
     VERDICT,
     call,
@@ -520,7 +523,7 @@ def settings_with(**classes: Any) -> dict[str, Any]:
         ({"a": "nope"}, {}, "malformed"),
         (3, "x", "malformed"),
         (None, "x", "has no class tree"),
-        ({"a": "open"}, {"b": 1}, r"the value has the key 'b', which its class tree does not"),
+        ({"a": "open"}, {"b": 1}, r"the value has the key 'b', which its tree does not list"),
         ({"a": "open"}, "x", "the value is not an object"),
         ({"a": {"b": "open"}}, {"a": {"c": 1}}, r"the value\['a'\] has the key 'c'"),
         (["content"], "x", "not an object"),
@@ -534,6 +537,65 @@ def test_a_value_must_fit_its_refs_class_tree(tree: Any, value: Any, match: str)
     if tree is None:
         del settings["classes"]["d:x"]
     refused([DESIGN, settings, STATE], entry("d:x", 0, None, value), match)
+
+
+def shapes_with(**shapes: Any) -> dict[str, Any]:
+    out = fresh([SETTINGS_9])[0]
+    out["shapes"].update(shapes)
+    for ref in shapes:
+        out["providers"].setdefault(ref, "other")
+    return out
+
+
+@pytest.mark.parametrize(
+    ("tree", "value", "match"),
+    [
+        (None, "x", "has no shape tree in the settings' shapes"),
+        ({"a": "leaf"}, {"b": 1}, r"the value has the key 'b', which its tree does not list"),
+        ({"a": "leaf"}, "x", "the value is not an object"),
+        (["leaf"], ["x"], r"the value\[0\] is not an object"),
+    ],
+)
+def test_a_format_9_value_must_fit_its_refs_shape_tree(tree: Any, value: Any, match: str) -> None:
+    settings = shapes_with(**{"d:x": tree})
+    if tree is None:
+        del settings["shapes"]["d:x"]
+    refused([DESIGN_9, settings, STATE], entry("d:x", 0, None, value), match)
+
+
+@pytest.mark.parametrize(
+    "tree", ["open", {"a": "content"}, [], ["leaf", "leaf"], {"a": 1}, 3, None]
+)  # a class name is no shape leaf
+def test_a_format_9_settings_item_holding_a_malformed_shape_tree_is_refused(tree: Any) -> None:
+    # Every shape tree, held to by an entry or not, so redact reads only well-formed ones.
+    refused([DESIGN_9], shapes_with(**{"d:x": tree}), "shape tree of 'd:x' is malformed")
+
+
+def test_a_format_9_value_fitting_its_shape_tree_is_appended() -> None:
+    settings = shapes_with(**{"d:x": [{"a": "leaf"}]})
+    ledger_of([DESIGN_9, settings, STATE, entry("d:x", 0, None, {"k": {"a": [1, "x"]}})])
+
+
+@pytest.mark.parametrize(
+    ("fmt", "held", "refused_member"), [(9, "shapes", "classes"), (8, "classes", "shapes")]
+)
+def test_a_settings_item_holds_the_tree_member_its_format_has(
+    fmt: int, held: str, refused_member: str
+) -> None:
+    design = DESIGN_9 if fmt >= 9 else DESIGN_8
+    settings = fresh([SETTINGS_9 if fmt >= 9 else SETTINGS_8])[0]
+    both = {**settings, refused_member: copy.deepcopy(settings[held])}
+    refused([design], both, f"holds {refused_member}, which a format-{fmt} record does not")
+    swapped = {k: v for k, v in both.items() if k != held}
+    refused([design], swapped, f"holds {refused_member}, which a format-{fmt} record does not")
+    neither = {k: v for k, v in settings.items() if k != held}
+    refused([design], neither, f"has no {held!r} member")
+
+
+def test_a_format_9_log_reads_back_to_its_own_hash() -> None:
+    record = read_record(rehashed({"log": fresh(NORMAL_9), "unhashed": {}}))
+    assert record.log[1]["shapes"] == SETTINGS_9["shapes"]
+    assert read_record(record.document).record_hash == record.record_hash
 
 
 @pytest.mark.parametrize(
@@ -686,6 +748,7 @@ def question(**members: Any) -> dict[str, Any]:
             ([], {**DESIGN, "hash": None}, "'hash' is not a string"),
             ([DESIGN], {**SETTINGS, "providers": []}, "'providers' is not an object"),
             ([DESIGN], {**SETTINGS, "classes": None}, "'classes' is not an object"),
+            ([DESIGN_9], {**SETTINGS_9, "shapes": None}, "'shapes' is not an object"),
             ([DESIGN], {**SETTINGS, "settings": {}}, "has no 'round_bound'"),
             (
                 [DESIGN],
@@ -1947,7 +2010,7 @@ def test_the_ledger_refuses_a_set_naming_no_set() -> None:
 def test_the_ledger_refuses_a_literal_that_does_not_fit_its_sets_tree() -> None:
     log = grounded_plan_log()
     plan_of(log)["steps"][0]["arguments"]["who"]["literal"] = {"nick": "x"}
-    refused_read(log, "which its class tree does not list")
+    refused_read(log, "which its tree does not list")
 
 
 def test_the_ledger_refuses_a_candidate_origin() -> None:
@@ -1971,12 +2034,18 @@ def test_the_ledger_refuses_a_set_in_a_format_6_record() -> None:
 
 def test_redact_digests_a_set_literal_under_its_sets_tree() -> None:
     record = read_log(grounded_plan_log())
-    view = json.loads(redact(record, ROOT))
+    view = json.loads(redact(record, ROOT, {SET: "open"}))  # the stored tree, a floor
     step = plan_of(view["log"])["steps"][0]
     assert step["arguments"]["who"]["set"] == SET
-    assert step["arguments"]["who"]["literal"]["name"] == digest("Bo", record)
+    assert step["arguments"]["who"]["literal"]["name"] == digest("Bo", view)
     assert step["arguments"]["who"]["literal"]["age"] == 41
-    assert step["arguments"]["to"]["ref"] == grounded_ref(ADDR, digest("Bo", record))
+    assert step["arguments"]["to"]["ref"] == grounded_ref(ADDR, digest("Bo", view))
+    view = json.loads(redact(record, ROOT, {}))  # the policy names nothing: all content
+    step = plan_of(view["log"])["steps"][0]
+    assert step["arguments"]["who"]["literal"]["age"] == digest(41, view)
+    view = json.loads(redact(record, ROOT, {SET: "content"}))
+    step = plan_of(view["log"])["steps"][0]
+    assert step["arguments"]["who"]["literal"]["age"] == digest(41, view)
 
 
 # ---------------------------------------------------------------------------------------------

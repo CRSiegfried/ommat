@@ -442,16 +442,11 @@ def test_sources_and_rules_share_one_id_namespace() -> None:
     ]
 
 
-def test_conflicting_classes_are_refused_and_equal_ones_kept() -> None:
-    def classed(part: Part, tree: str) -> Part:
-        return Part(dataclasses.replace(part.design, classes={"t:state": tree}), part.ports)
-
-    email, calendar = classed(EMAIL, "open"), classed(CALENDAR, "content")
-    assert refused(Part(SELECTOR), email, calendar) == [
-        'part 2 ("email") and part 3 ("calendar") declare different classes at "t:state"'
-    ]
-    design = combine(Part(SELECTOR), email, classed(CALENDAR, "open"), bind=BIND, policy=ACT)
-    assert dict(design.classes) == {"t:state": "open"}
+def test_the_combined_design_holds_the_design_fields_and_no_class_block() -> None:
+    design = combine(Part(SELECTOR), EMAIL, CALENDAR, bind=BIND, policy=ACT)
+    fields = {f.name for f in dataclasses.fields(design)}
+    assert "classes" not in fields
+    assert fields == {f.name for f in dataclasses.fields(Design)}
 
 
 def test_a_port_some_part_provides_is_refused() -> None:

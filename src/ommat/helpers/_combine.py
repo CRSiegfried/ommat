@@ -304,7 +304,6 @@ def combine(
     types = _shared(labelled, "types named", lambda d: d.types, failures)
     groups = _shared(labelled, "groups with the id", lambda d: d.groups, failures)
     targets = _shared(labelled, "targets with the id", lambda d: d.targets, failures)
-    classes = _shared(labelled, "classes at", lambda d: d.classes, failures)
 
     ports, refused = _port_failures(labelled, failures)
     added: dict[str, Rule | Table] = {}
@@ -368,7 +367,6 @@ def combine(
         parameters=_merged(designs, "parameters"),
         types=types,
         groups=groups,
-        classes=classes,
         name=name,
         targets=targets,
     )

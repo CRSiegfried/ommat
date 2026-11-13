@@ -1066,9 +1066,6 @@ GATED_REPLIES = {
     "skip": raising(AssertionError("skip is never asked")),
     "unheld": raising(AssertionError("unheld is never asked")),
 }
-CLASSED = slice_design(
-    classes={"t:state": {"subject": "identifier"}, "t:body": "content", "d:route": "open"}
-)
 BOUNDED = slice_design(
     rules={
         **RULES,
@@ -1105,7 +1102,6 @@ FEATURES: dict[str, Callable[[], tuple[Record, LoadedDesign]]] = {
         live(GATED, **GATED_REPLIES),
         GATED,
     ),
-    "declared classes": lambda: (live(CLASSED), CLASSED),
     "boundaries": lambda: (live(BOUNDED), BOUNDED),
     "a design loaded from its document": lambda: (go().record, FROM_DOCUMENT),
     "a turn under a design loaded from its document": lambda: (live(FROM_DOCUMENT), LOADED),
@@ -1132,7 +1128,6 @@ def test_the_features_round_trips_exercise_what_they_name() -> None:
     assert entry(gated.log, "t:held")["value"] == "h"
     for ref, refs in (("t:skip", ["skip"]), ("t:unheld", ["d:route"])):
         assert entry(gated.log, ref)["marker"]["cause"] == {"code": "when-false", "refs": refs}
-    assert live(CLASSED).log[1]["classes"]["d:route"] == "open"
     assert dict(BOUNDED._grid)
     assert FROM_DOCUMENT.design_hash == LOADED.design_hash
     assert FROM_DOCUMENT.document == LOADED.document

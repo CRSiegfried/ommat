@@ -211,7 +211,6 @@ def swept(version: str = "1") -> LoadedDesign:
                 "g/stated": Parameter(t.number(0, 1), 0.5),
             },
             policy="d:act",
-            classes={SET: {"name": "identifier"}},
         )
     )
 

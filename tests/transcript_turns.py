@@ -78,7 +78,6 @@ def design(**changes: Any) -> Design:
         "sources": SOURCES,
         "rules": RULES,
         "policy": "d:act",
-        "classes": {"t:state": {"account": "identifier"}},
     }
     fields.update(changes)
     return Design(**fields)
