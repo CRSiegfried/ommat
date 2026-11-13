@@ -59,6 +59,8 @@ from ommat._values import (
     RECORD_FORMAT,
     RECORD_FORMATS,
     SETS_FORMAT,
+    SHAPE_LEAF,
+    SHAPES_FORMAT,
     UNCALIBRATED_FORMAT,
     UNSUPPORTED_FORMAT,
     WARNINGS_FORMAT,
@@ -204,7 +206,7 @@ def _unordered_item(item: object, fmt: int, index: int) -> object:
 def _value_places(item: Any, where: str) -> list[tuple[str, Any]]:
     """Each value an item holds where the size bounds apply, read off the item as given, of
     any shape, so each is size-tested before the item is copied or encoded: an entry's
-    value, each class tree, a plan's reason and reply and each step's argument names,
+    value, each class or shape tree, a plan's reason and reply and each step's argument names,
     literal arguments and requirement values, each verdict failure's requirement value, and
     a call item's string provenance and runtime. A member of the wrong shape is left for
     the shape checks. Members are found by their keys' string data, so no code of a key
@@ -224,6 +226,8 @@ def _value_places(item: Any, where: str) -> list[tuple[str, Any]]:
     elif type(kind) is str and kind == "settings":
         for i, tree in enumerate(members_of(member_named(item, "classes"))):
             places.append((f"{where}'s class tree {i}", tree))
+        for i, tree in enumerate(members_of(member_named(item, "shapes"))):
+            places.append((f"{where}'s shape tree {i}", tree))
     elif type(kind) is str and kind == "call":
         put(item, ("snapshot", *STRING_DETAILS, "runtime", "claimed", "precision"), where)
     elif type(kind) is str and kind == "verdict":
@@ -754,8 +758,15 @@ _CALLS_PROFILE = ("request_id", "calibrated", "missing", "clients")
 _SHAPES: dict[str, _Check] = {
     "design": _shape({"hash": _STR, "format": _INT, "helpers": _INT}),
     "settings": _shape(
-        {"settings": _run_settings, "providers": _OBJECT, "classes": _OBJECT},
-        {"grounded": _OBJECT, "sets": _OBJECT, "policy": _STR},
+        {"settings": _run_settings, "providers": _OBJECT},
+        # Each format's own: the format check tests which tree member it holds.
+        {
+            "classes": _OBJECT,
+            "shapes": _OBJECT,
+            "grounded": _OBJECT,
+            "sets": _OBJECT,
+            "policy": _STR,
+        },
     ),
     "entry": cast(_Check, _entry_shape),
     "call": _shape(
@@ -880,13 +891,13 @@ def _grounded_refs(
     kind: str,
     item: dict[str, Any],
     grounded: Mapping[str, str],
-    classes: Mapping[str, Any],
+    trees: Mapping[str, Any],
     where: str,
     fmt: int = SETS_FORMAT,
 ) -> None:
     """Refuse a grounded ref outside the places a record admits one, a step argument's from
     format 7, whose declared ref is not a key of the ``settings`` item's ``grounded``, or
-    whose field path names a field its declared ref's class tree does not hold."""
+    whose field path names a field its declared ref's tree, of ``trees``, does not hold."""
     for place, ref, admitted in _ref_places(kind, item, fmt):
         if not _grounded(ref):
             continue
@@ -899,17 +910,21 @@ def _grounded_refs(
                 f"{where}: {place} {ref!r} is a grounded ref whose declared ref is not grounded "
                 "in the settings"
             )
-        tree: Any = classes.get(declared)
+        tree: Any = trees.get(declared)
         for name in parsed.fields:  # a slot's needs key keeps its field path
             if type(tree) is not dict or name not in tree:
                 raise _LedgerError(
-                    f"{where}: {place} {ref!r} names a field its class tree does not hold"
+                    f"{where}: {place} {ref!r} names a field its {_tree_word(fmt)} does not hold"
                 )
             tree = cast("dict[str, Any]", tree)[name]
 
 
 # ---------------------------------------------------------------------------------------------
-# Class trees
+# Class trees and shape trees
+#
+# A record before format 9 holds each ref's class tree under ``classes``; from format 9 its
+# shape tree under ``shapes``, the same structure with ``SHAPE_LEAF`` at every leaf. Every
+# structural check reads the one the record's format holds.
 
 
 class _ClassName(enum.StrEnum):
@@ -923,14 +938,52 @@ class _ClassName(enum.StrEnum):
 _CLASS_NAMES = frozenset(_ClassName)
 
 
-def _tree_malformed(tree: Any) -> bool:
+def _tree_member(fmt: int) -> str:
+    """The ``settings`` item's member holding each ref's tree in a format-``fmt`` record."""
+    return "classes" if fmt < SHAPES_FORMAT else "shapes"
+
+
+def _leaf_word(fmt: int) -> str:
+    """What a format-``fmt`` record's tree holds at a leaf, in a refusal."""
+    return "class name" if fmt < SHAPES_FORMAT else "leaf"
+
+
+def _tree_word(fmt: int) -> str:
+    """What a format-``fmt`` record's tree is called in a refusal."""
+    return "class tree" if fmt < SHAPES_FORMAT else "shape tree"
+
+
+def _trees(item: dict[str, Any], fmt: int) -> dict[str, Any]:
+    """A ``settings`` item's trees, from the member its format holds; the format check has
+    passed it."""
+    return cast("dict[str, Any]", item[_tree_member(fmt)])
+
+
+def _check_trees(item: dict[str, Any], fmt: int, where: str) -> None:
+    """Refuse a ``settings`` item's ``shapes`` before format 9 and its ``classes`` from it, the
+    absence of the one its format holds, and from format 9 a malformed shape tree."""
+    held = _tree_member(fmt)
+    refused = "shapes" if fmt < SHAPES_FORMAT else "classes"
+    if refused in item:
+        raise _LedgerError(f"{where} holds {refused}, which a format-{fmt} record does not")
+    if held not in item:
+        raise _LedgerError(f"{where} has no {held!r} member")
+    if fmt >= SHAPES_FORMAT:  # every shape tree, whether or not an entry is held to it
+        for ref, tree in cast("dict[str, Any]", item[held]).items():
+            if _tree_malformed(tree, fmt):
+                raise _LedgerError(f"{where}'s shape tree of {clipped(ref)} is malformed")
+
+
+def _tree_malformed(tree: Any, fmt: int) -> bool:
+    """Whether a tree is not of its format's form: an object of trees, a one-member list of
+    one, or a leaf, a class name before format 9 and ``SHAPE_LEAF`` from it."""
     if type(tree) is str:
-        return tree not in _CLASS_NAMES
+        return tree not in _CLASS_NAMES if fmt < SHAPES_FORMAT else tree != SHAPE_LEAF
     if type(tree) is dict:
-        return any(_tree_malformed(t) for t in cast("dict[str, Any]", tree).values())
+        return any(_tree_malformed(t, fmt) for t in cast("dict[str, Any]", tree).values())
     if type(tree) is list:
         members = cast("list[Any]", tree)
-        return len(members) != 1 or _tree_malformed(members[0])
+        return len(members) != 1 or _tree_malformed(members[0], fmt)
     return True
 
 
@@ -947,13 +1000,13 @@ def _misfit(value: Any, tree: Any, where: str) -> str | None:
     if type(tree) is str:
         return None
     if type(value) is not dict:
-        return f"{where} is not an object, as its class tree needs"
+        return f"{where} is not an object, as its tree needs"
     members = cast("dict[str, Any]", value)
     if type(tree) is dict:
         nodes = cast("dict[str, Any]", tree)
         for key, member in members.items():
             if key not in nodes:
-                return f"{where} has the key {key!r}, which its class tree does not list"
+                return f"{where} has the key {key!r}, which its tree does not list"
             found = _misfit(member, nodes[key], f"{where}[{key!r}]")
             if found is not None:
                 return found
@@ -1133,7 +1186,7 @@ def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
         raise _LedgerError(f"{where} has no 'grounded' member")
     grounded = cast("dict[str, Any]", item["grounded"])
     providers = cast("dict[str, Any]", item["providers"])
-    classes = cast("dict[str, Any]", item["classes"])
+    trees = _trees(item, fmt)
     sets = _check_sets(item, fmt, where)
     for key, set_ref in grounded.items():
         if not _declared(key) or key not in providers:
@@ -1152,7 +1205,7 @@ def _check_grounded(item: dict[str, Any], fmt: int, where: str) -> None:
         if sets is not None:
             if set_ref not in sets:
                 raise _LedgerError(f"{where}'s grounded names {set_ref!r}, which is no key of sets")
-        elif type(classes.get(set_ref)) is not str:
+        elif type(trees.get(set_ref)) is not str:  # format 6 only: a class tree
             raise _LedgerError(
                 f"{where}'s grounded names {set_ref!r}, whose class tree is not a class name"
             )
@@ -1201,8 +1254,8 @@ def _check_broken(item: dict[str, Any], fmt: int, where: str) -> None:
 def _check_sets(item: dict[str, Any], fmt: int, where: str) -> dict[str, Any] | None:
     """Refuse a ``settings`` item's ``sets`` before format 7 or its absence from it, and a map
     that is not keyed by declared refs that are keys of ``providers``, each value null where
-    the set's class tree is a class name, or a field of its member record's tree whose node is
-    a class name. The map, from format 7; ``None`` before it."""
+    the set's tree is a leaf, or a field of its member record's tree whose node is a leaf. The
+    map, from format 7; ``None`` before it."""
     if fmt < SETS_FORMAT:
         if "sets" in item:
             raise _LedgerError(f"{where} holds sets, which a format-{fmt} record does not")
@@ -1211,11 +1264,11 @@ def _check_sets(item: dict[str, Any], fmt: int, where: str) -> dict[str, Any] | 
         raise _LedgerError(f"{where} has no 'sets' member")
     sets = cast("dict[str, Any]", item["sets"])
     providers = cast("dict[str, Any]", item["providers"])
-    classes = cast("dict[str, Any]", item["classes"])
+    trees = _trees(item, fmt)
     for key, field in sets.items():
         if not _declared(key) or key not in providers:
             raise _LedgerError(f"{where}'s sets has the key {key!r}, not a provided declared ref")
-        tree = classes.get(key)
+        tree = trees.get(key)
         if field is None:
             fits = type(tree) is str
         else:
@@ -1226,8 +1279,8 @@ def _check_sets(item: dict[str, Any], fmt: int, where: str) -> dict[str, Any] | 
             )
         if not fits:
             raise _LedgerError(
-                f"{where}'s sets names {field!r} for {key!r}, which is not null over a class "
-                "name or a field of its member record's tree"
+                f"{where}'s sets names {field!r} for {key!r}, which is not null over a "
+                f"{_leaf_word(fmt)} or a field of its member record's tree"
             )
     return sets
 
@@ -1367,7 +1420,8 @@ class Ledger:
         # Check state, taken off each copy before the observer sees it.
         self._phase = _EMPTY
         self._providers: dict[str, bytes] = {}
-        self._classes: dict[str, Any] = {}
+        # Each ref's tree: its class tree before format 9, its shape tree from it.
+        self._trees: dict[str, Any] = {}
         self._grounded: dict[str, str] = {}
         self._sets: dict[str, str | None] = {}
         self._policy: str | None = None  # the settings item's policy, from format 8
@@ -1413,7 +1467,7 @@ class Ledger:
         shape(stored, where)
         if kind != "design":
             self._check_format(cast(str, kind), stored, where)
-        _grounded_refs(cast(str, kind), stored, self._grounded, self._classes, where, self._format)
+        _grounded_refs(cast(str, kind), stored, self._grounded, self._trees, where, self._format)
         self._check_origins(cast(str, kind), stored, where)
         commit = self._check_order(cast(str, kind), stored, index, where)
         if kind in _ORDERED and self._format >= KEY_ORDER_FORMAT:
@@ -1457,6 +1511,7 @@ class Ledger:
         if kind == "plan":
             self._check_context(item, fmt, where)
         if kind == "settings":
+            _check_trees(item, fmt, where)
             _check_grounded(item, fmt, where)
             _check_policy(item, fmt, where)
         if kind == "entry" and item["ref"] == _STATE and "marker" in item:
@@ -1607,7 +1662,7 @@ class Ledger:
         providers = {
             k: encode(v, _ITEM_DEPTH) for k, v in cast("dict[str, Any]", item["providers"]).items()
         }
-        classes = _copy(item["classes"])
+        trees = _copy(_trees(item, self._format))
         grounded = cast("dict[str, str]", _copy(item.get("grounded", {})))
         sets = cast("dict[str, str | None]", _copy(item.get("sets", {})))
         bound = cast(int, item["settings"]["round_bound"])
@@ -1615,7 +1670,7 @@ class Ledger:
             _phase=_SETTLED,
             _policy=cast("str | None", item.get("policy")),
             _providers=providers,
-            _classes=classes,
+            _trees=trees,
             _grounded=grounded,
             _sets=sets,
             _round_bound=bound,
@@ -1624,7 +1679,7 @@ class Ledger:
     def _check_origins(self, kind: str, item: dict[str, Any], where: str) -> None:
         """Refuse an origin holding ``candidate``, and one holding ``set`` before format 7 or
         whose ``set`` names no key of the ``settings`` item's ``sets`` that an earlier entry
-        holds a value at, or whose literal does not fit that set's class tree. The item has
+        holds a value at, or whose literal does not fit that set's tree. The item has
         passed its shape check."""
         if kind != "plan":
             return
@@ -1652,7 +1707,7 @@ class Ledger:
                     raise _LedgerError(
                         f"{at} carries set {set_ref!r}, at which no earlier entry holds a value"
                     )
-                found = _misfit(members.get("literal"), self._classes.get(set_ref), "its literal")
+                found = _misfit(members.get("literal"), self._trees.get(set_ref), "its literal")
                 if found is not None:
                     raise _LedgerError(f"{at}: {found}")
 
@@ -1794,7 +1849,7 @@ class Ledger:
     def _check_context(self, item: dict[str, Any], fmt: int, where: str) -> None:
         """A ``plan`` item's ``context``: held from format 5 and refused before it; each
         entry's ref ``t:state`` or a ``d:`` key of the settings' providers, a field path on it
-        naming a key at each place of that ref's class tree."""
+        naming a key at each place of that ref's tree."""
         if fmt < CONTEXT_FORMAT:
             if "context" in item:
                 raise _LedgerError(f"{where} holds context, which a format-{fmt} record does not")
@@ -1813,10 +1868,10 @@ class Ledger:
                 base == _STATE or (parsed.level == "d" and base in self._providers)
             ):
                 raise _LedgerError(f"{at} is not t:state or a d: ref of the settings' providers")
-            tree: Any = self._classes.get(base)
+            tree: Any = self._trees.get(base)
             for name in parsed.fields:
                 if type(tree) is not dict or name not in tree:
-                    raise _LedgerError(f"{at} names a field its class tree does not hold")
+                    raise _LedgerError(f"{at} names a field its {_tree_word(fmt)} does not hold")
                 tree = cast("dict[str, Any]", tree)[name]
 
     def _entry(self, item: dict[str, Any], where: str) -> tuple[dict[str, object], list["_Grow"]]:
@@ -1853,11 +1908,14 @@ class Ledger:
                 raise _LedgerError(
                     f"{where}: {ref!r} is written beside the marker at its declared ref {key!r}"
                 )
-        tree = self._classes.get(key)
+        tree = self._trees.get(key)
+        word = _tree_word(self._format)
         if tree is None:
-            raise _LedgerError(f"{where}: {key!r} has no class tree in the settings' classes")
-        if _tree_malformed(tree):
-            raise _LedgerError(f"{where}: the class tree of {key!r} is malformed")
+            raise _LedgerError(
+                f"{where}: {key!r} has no {word} in the settings' {_tree_member(self._format)}"
+            )
+        if _tree_malformed(tree, self._format):
+            raise _LedgerError(f"{where}: the {word} of {key!r} is malformed")
         if "value" in item:
             misfit = _misfit(item["value"], tree, "the value")
             if misfit is not None:

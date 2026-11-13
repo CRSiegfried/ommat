@@ -8,27 +8,38 @@ policy gave.
 ``transcript(record)``, deprecated, returns every source call and the decision, unworded. Each
 of the escalation, the defects and the transcript gives ``None`` for a record before format 8,
 which holds no policy's entry, and the escalation and the transcript find the decision as
-``decision_entry`` does. ``redact(record, root_key)`` returns the redacted view's document as
-canonical bytes: the record's ``log`` and ``unhashed`` with a keyed digest where each
-``content`` or ``identifier`` value was, ``redacted``, the record hash its key came from, and
-from format 3 on the document's ``hash``, open. Each value's class is read from the
-``settings`` item's class tree for its ref. In an answer to a candidate-valued choice, each
-label and ``probabilities`` key that is not a fixed name takes its set's class, found through
-the call item the answer's entry names.
+``decision_entry`` does. ``redact(record, root_key, policy)`` returns the redacted view's
+document as canonical bytes: the record's ``log`` and ``unhashed`` with a keyed digest where
+each ``content`` or ``identifier`` value was, ``redacted``, the record hash its key came from,
+``applied``, the policy applied, each ref's class tree in full, and from format 3 on the
+document's ``hash``, open. The caller's policy names each value's class, as ``redact`` says. In
+an answer to a candidate-valued choice, each label and ``probabilities`` key that is not a fixed
+name takes its set's class, found through the call item the answer's entry names.
 
-This engine's record holds no origin carrying ``set``, which the ledger refuses, so every literal
-takes its JSON form's default; it holds a grounded ref only at an entry's ref, a cause's refs and
-a call's ``sums`` and ``truncated``, where its candidate is digested under its set's class, and
-every other ref passes unchanged. Each view raises ``ValueError`` before reading anything when
+Structure is open: refs but a grounded ref's candidate, kinds, cause codes, tool names, origin
+tags, positions, usage, the hashes, the codec's name, an exception's ``type``, the call item's
+members but ``prompt``, and the design and settings items. Text the engine records with no type
+is digested whatever the policy names: a call's ``prompt``, a plan's text, exception text,
+``reads`` values and ``unhashed``'s other text. The one exception to data being digested is the
+source's profile, which is structure though a binding writes it freely: the call item's
+``elicitation``, ``model_requested``, ``model_reported``, ``revision``, ``provider`` and
+``runtime`` strings and ``unhashed``'s ``clients`` strings pass open.
+
+A plan's literal is ``content`` whole, but in a stored record of format 7, whose ledger admits an
+origin carrying ``set``, that literal takes its set's applied tree. A grounded ref's candidate is
+digested under its set's class wherever the record holds one: an entry's ref, a cause's refs, a
+plan's ref origin and a call's ``sums`` and ``truncated``; every other ref passes unchanged.
+Each view raises ``ValueError`` before reading anything when
 ``record`` is not exactly a ``Record``. The continuation record is deferred, so it has no function
 here.
 """
 
 import warnings
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, cast
 
-from ommat._canonical import encode, keyed_digest, turn_key
+from ommat._canonical import encode, hash_value, keyed_digest, turn_key
 from ommat._ledger import (
     Record,
     _with_held_order,  # pyright: ignore[reportPrivateUsage]
@@ -37,7 +48,18 @@ from ommat._ledger import (
 from ommat._markers import CauseCode
 from ommat._refs import code_point_sorted, declared_ref, entry_ref, grounded_ref, parse_ref
 from ommat._typed import is_a
-from ommat._values import HASH_FORMAT, MAX_DOCUMENT_DEPTH, POLICY_FORMAT, type_name
+from ommat._values import (
+    HASH_FORMAT,
+    MAX_DOCUMENT_DEPTH,
+    POLICY_FORMAT,
+    SHAPE_LEAF,
+    SHAPES_FORMAT,
+    clipped,
+    described,
+    is_scalar_string,
+    string_data,
+    type_name,
+)
 
 _OPEN = "open"
 _CONTENT = "content"
@@ -223,30 +245,60 @@ def _tagged(entry: dict[str, Any]) -> dict[str, Any]:
 # The redacted view
 
 
-def redact(record: Record, root_key: bytes) -> bytes:
-    """The redacted view of a closed record, as canonical bytes, its digests under the key
-    derived from the record's own hash. Raises ``ValueError`` before reading anything when
-    ``record`` is not exactly a ``Record``, then before reading the record when ``root_key`` is
-    not an instance of ``bytes`` of length 32."""
+def redact(record: Record, root_key: bytes, policy: Mapping[str, Any]) -> bytes:
+    """The redacted view of a closed record under the caller's ``policy``, as canonical bytes,
+    its digests under the key derived from the record's own hash and the applied policy's.
+
+    ``policy`` maps a ref of the record, or a ref and a field path into its shape
+    (``ref.field.path``), to a class name, ``open``, ``identifier`` or ``content``, or an
+    object naming fields of the record there, each a class name or such an object; a class
+    name covers every value beneath it, and a list or mapping layer has no node of its own, or
+    takes a one-member list as ``applied`` writes it, so ``applied`` is a policy too. Keys
+    apply from the shortest path to the longest, so a longer one overrides beneath a shorter.
+    A candidate set's ref, or its candidate field, takes a class name. A mapping's keys are
+    digested whatever the policy names.
+
+    Every value the policy names nothing for is ``content``, at every format. In a record
+    before format 9 the ``settings`` item's stored class trees are only a floor: at each place
+    the more restrictive of the policy's class and the stored class applies, by ``open`` <
+    ``identifier`` < ``content``, so ``{}`` digests every value, and a value is open only where
+    the policy and the stored tree both name ``open``.
+
+    Raises ``ValueError``, the first error found in this order: ``record`` not exactly a
+    ``Record``, before anything is read; ``root_key`` not an instance of ``bytes`` of length
+    32, before the record is read; then ``policy`` not a mapping of that form over the
+    record's refs, its keys checked in its iteration order, each with whether a candidate
+    set's key holds a class name, and then its values from the shortest key to the longest."""
     closed = _closed(record)
     key = _root_key(root_key)
     record_hash = closed.record_hash
-    walk = _Walk(turn_key(key, record_hash))
     log = closed.log
-    classes: dict[str, Any] = {}
+    shapes: dict[str, Any] = {}
+    stored: dict[str, Any] | None = None
     fields: dict[str, str | None] = {}
+    grounded: dict[str, str] = {}
     for item in log:
         if item["item"] == "settings":
-            classes = cast("dict[str, Any]", item["classes"])
-            walk.grounded = cast("dict[str, str]", item.get("grounded", {}))
+            if log[0]["format"] >= SHAPES_FORMAT:
+                shapes = cast("dict[str, Any]", item["shapes"])
+            else:
+                # A tree no entry is held to may be malformed: it is content.
+                classes = cast("dict[str, Any]", item["classes"])
+                stored = {r: t if _sound(t) else _CONTENT for r, t in classes.items()}
+                shapes = {ref: _shape_of(tree) for ref, tree in stored.items()}
+            grounded = cast("dict[str, str]", item.get("grounded", {}))
             fields = cast("dict[str, str | None]", item.get("sets", {}))
-    walk.classes = classes
+    applied = _applied(policy, shapes, stored, fields)
+    walk = _Walk(turn_key(key, record_hash, hash_value(applied, MAX_DOCUMENT_DEPTH)))
+    walk.classes = applied
+    walk.grounded = grounded
     walk.fields = fields
-    walk.sets = _candidate_sets(log, classes, fields)
+    walk.sets = _candidate_sets(log, applied, fields)
     view = {
-        "log": [walk.item(item, classes) for item in log],
+        "log": [walk.item(item, applied) for item in log],
         "unhashed": walk.unhashed(closed.unhashed),
         "redacted": record_hash,
+        "applied": applied,
     }
     if log[0]["format"] >= HASH_FORMAT:  # the document's hash, open
         view["hash"] = record_hash
@@ -262,10 +314,151 @@ def _root_key(root_key: object) -> bytes:
     return key
 
 
-def candidate_class(classes: dict[str, Any], fields: dict[str, str | None], set_ref: str) -> Any:
+# ---------------------------------------------------------------------------------------------
+# The applied policy
+
+_RANK = {_OPEN: 0, "identifier": 1, _CONTENT: 2}
+"""The class names from least to most restrictive, by which ``_joined`` takes the floor."""
+
+
+def _sound(tree: Any) -> bool:
+    """Whether a stored class tree is well formed: a class name, an object of such trees, or a
+    one-member list of one."""
+    if type(tree) is str:
+        return tree in _RANK
+    if type(tree) is dict:
+        return all(_sound(t) for t in cast("dict[str, Any]", tree).values())
+    if type(tree) is list:
+        members = cast("list[Any]", tree)
+        return len(members) == 1 and _sound(members[0])
+    return False
+
+
+def _shape_of(tree: Any) -> Any:
+    """A class tree's shape: its structure with ``SHAPE_LEAF`` at every leaf."""
+    if type(tree) is dict:
+        return {name: _shape_of(node) for name, node in cast("dict[str, Any]", tree).items()}
+    if type(tree) is list:
+        return [_shape_of(cast("list[Any]", tree)[0])]
+    return SHAPE_LEAF
+
+
+def _filled(shape: Any, name: str) -> Any:
+    """A shape with the class ``name`` at every leaf."""
+    if type(shape) is dict:
+        return {field: _filled(node, name) for field, node in cast("dict[str, Any]", shape).items()}
+    if type(shape) is list:
+        return [_filled(cast("list[Any]", shape)[0], name)]
+    return name
+
+
+def _joined(a: Any, b: Any) -> Any:
+    """Two class trees of one shape joined leaf by leaf, the more restrictive class at each."""
+    if type(a) is dict:
+        nodes = cast("dict[str, Any]", a)
+        return {
+            field: _joined(node, cast("dict[str, Any]", b)[field]) for field, node in nodes.items()
+        }
+    if type(a) is list:
+        return [_joined(cast("list[Any]", a)[0], cast("list[Any]", b)[0])]
+    return a if _RANK[a] >= _RANK[b] else b
+
+
+def _applied(
+    policy: object,
+    shapes: dict[str, Any],
+    stored: dict[str, Any] | None,
+    sets: dict[str, str | None],
+) -> dict[str, Any]:
+    """Each ref's class tree in full under ``policy`` over ``content``, joined before format 9
+    with the ``stored`` class trees as ``redact`` says; ``ValueError`` for a policy of another
+    form or one naming what the record's shapes do not hold."""
+    if not isinstance(policy, Mapping):
+        raise ValueError(f"the policy is {described(policy)}, not a mapping")
+    named: list[tuple[int, str, str, tuple[str, ...], Any]] = []
+    seen: set[str] = set()
+    for key, given in cast("Mapping[object, Any]", policy).items():
+        if not is_scalar_string(key):
+            raise ValueError(f"the policy has the key {described(key)}, which is not a string")
+        text = string_data(cast(str, key))
+        try:
+            parsed = parse_ref(text)
+        except ValueError:
+            raise ValueError(f"the policy's key {clipped(text)} is not a ref") from None
+        if parsed.candidate is not None:
+            raise ValueError(f"the policy's key {clipped(text)} has a grounded bracket")
+        ref = f"{parsed.level}:{parsed.name}"
+        if ref not in shapes:
+            raise ValueError(f"the policy's key {clipped(text)} names no ref of the record")
+        if ref in sets and not parsed.fields and sets[ref] is None and not is_scalar_string(given):
+            raise ValueError(
+                f"the policy's key {clipped(text)} is a candidate set's, which takes a class name"
+            )
+        if text in seen:
+            raise ValueError(f"the policy has two keys of the string data {clipped(text)}")
+        seen.add(text)
+        named.append((len(parsed.fields), text, ref, parsed.fields, given))
+    applied = {ref: _filled(shape, _CONTENT) for ref, shape in shapes.items()}
+    for _, text, ref, path, given in sorted(named, key=lambda n: (n[0], n[1])):
+        applied[ref] = _at(applied[ref], shapes[ref], path, given, clipped(text))
+    if stored is not None:
+        applied = {ref: _joined(tree, stored[ref]) for ref, tree in applied.items()}
+    return applied
+
+
+def _at(tree: Any, shape: Any, path: tuple[str, ...], given: object, key: str) -> Any:
+    """``tree`` with ``given`` applied at the field ``path`` names in ``shape``, through any
+    mapping layer."""
+    if not path:
+        return _over(tree, shape, given, f"the policy's value at {key}")
+    if type(shape) is list:
+        return [_at(cast("list[Any]", tree)[0], cast("list[Any]", shape)[0], path, given, key)]
+    if type(shape) is not dict or path[0] not in shape:
+        raise ValueError(f"the policy's key {key} names a field the record's shape does not hold")
+    nodes = cast("dict[str, Any]", shape)
+    out = dict(cast("dict[str, Any]", tree))
+    out[path[0]] = _at(out[path[0]], nodes[path[0]], path[1:], given, key)
+    return out
+
+
+def _over(tree: Any, shape: Any, given: object, where: str) -> Any:
+    """``tree`` with ``given``, a class name or an object of fields each holding one or such an
+    object, applied over it, held to ``shape``."""
+    if is_scalar_string(given):
+        name = string_data(cast(str, given))
+        if name not in _RANK:
+            raise ValueError(f"{where} is {clipped(name)}, not open, identifier or content")
+        return _filled(shape, name)
+    if type(given) is list:  # a mapping layer, as ``applied`` writes it
+        members = cast("list[Any]", given)
+        if type(shape) is not list or len(members) != 1:
+            raise ValueError(f"{where} is a list, where the record's shape is no mapping layer")
+        return [_over(cast("list[Any]", tree)[0], cast("list[Any]", shape)[0], members[0], where)]
+    if not isinstance(given, Mapping):
+        raise ValueError(f"{where} is {described(given)}, not a class name or an object")
+    fields = cast("Mapping[object, Any]", given)
+    if type(shape) is list:
+        return [_over(cast("list[Any]", tree)[0], cast("list[Any]", shape)[0], fields, where)]
+    if type(shape) is not dict:
+        raise ValueError(f"{where} is an object, where the record's shape is not a record")
+    nodes = cast("dict[str, Any]", shape)
+    out = dict(cast("dict[str, Any]", tree))
+    seen: set[str] = set()
+    for field, member in fields.items():
+        name = string_data(cast(str, field)) if is_scalar_string(field) else None
+        if name is None or name not in nodes:
+            raise ValueError(f"{where} names {described(field)}, which is not a field there")
+        if name in seen:
+            raise ValueError(f"{where} has two keys of the string data {clipped(name)}")
+        seen.add(name)
+        out[name] = _over(out[name], nodes[name], member, f"{where}.{name}")
+    return out
+
+
+def _candidate_class(classes: dict[str, Any], fields: dict[str, str | None], set_ref: str) -> Any:
     """A candidate's class: the class name a ``list<string>`` set's tree is, or for a set of
     records its candidate field's node, by the ``settings`` item's ``sets``; ``content`` where
-    the item holds no class name for it."""
+    the tree holds no class name for it."""
     tree = classes.get(set_ref, _CONTENT)
     field = fields.get(set_ref)
     if field is not None and type(tree) is dict:
@@ -277,8 +470,8 @@ def _candidate_sets(
     log: list[dict[str, Any]], classes: dict[str, Any], fields: dict[str, str | None]
 ) -> dict[tuple[int, str], tuple[frozenset[str], Any]]:
     """Each candidate-valued choice a call item asked, keyed by the call's log index and its
-    ``q:`` ref: its fixed names and its candidates' class; under a set the settings item holds
-    no tree for, ``content``."""
+    ``q:`` ref: its fixed names and its candidates' class; under a set the record holds no
+    tree for, ``content``."""
     found: dict[tuple[int, str], tuple[frozenset[str], Any]] = {}
     for index, item in enumerate(log):
         if item["item"] != "call":
@@ -297,7 +490,7 @@ def _candidate_sets(
             except ValueError:  # a ref outside the grammar names no tree
                 tree: Any = _CONTENT
             else:
-                tree = candidate_class(classes, fields, set_ref)
+                tree = _candidate_class(classes, fields, set_ref)
             found[(index, ref)] = (fixed, tree)
     return found
 
@@ -325,7 +518,7 @@ class _Walk:
         if parsed.candidate is None:
             return ref
         declared = f"{parsed.level}:{parsed.name}"
-        if candidate_class(self.classes, self.fields, self.grounded[declared]) == _OPEN:
+        if _candidate_class(self.classes, self.fields, self.grounded[declared]) == _OPEN:
             return ref
         written = grounded_ref(declared, self.digest(parsed.candidate))
         return written + "".join(f".{field}" for field in parsed.fields)
@@ -427,13 +620,13 @@ class _Walk:
         }
 
     def requirement(self, requirement: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
-        """A verdict's requirement, in a record before format 8, with its value under its ref's
-        tree, as that ref's entry is; under a ref the settings item holds no tree for, the value
-        is digested whole."""
+        """A verdict's requirement, in a record before format 8, with its value under the
+        applied tree at its ref exactly. A ref with a field path (``t:state.to``) or outside the
+        grammar has no tree of its own, so its value is digested whole, and no policy opens it."""
         try:
-            tree = classes.get(declared_ref(requirement["ref"]), "content")
+            tree = classes.get(declared_ref(requirement["ref"]), _CONTENT)
         except ValueError:  # a ref outside the grammar names no tree
-            tree = "content"
+            tree = _CONTENT
         return {**requirement, "value": self.value(requirement["value"], tree)}
 
     def step(self, step: dict[str, Any], classes: dict[str, Any]) -> dict[str, Any]:
@@ -444,30 +637,17 @@ class _Walk:
                 arguments[name] = given
                 continue
             origin = cast("dict[str, Any]", given)
-            if "set" in origin:  # a candidate-value literal: its set's tree
+            if "set" in origin:  # a candidate-value literal, from format 7: its set's tree
                 tree = classes.get(cast(str, origin["set"]), _CONTENT)
                 arguments[name] = {**origin, "literal": self.value(origin["literal"], tree)}
-            elif "literal" in origin:  # its JSON form's default
-                arguments[name] = {**origin, "literal": self.literal(origin["literal"])}
+            elif "literal" in origin:  # no ref names it: content
+                arguments[name] = {**origin, "literal": self.value(origin["literal"], _CONTENT)}
             elif "ref" in origin:  # open, but a grounded ref's candidate
                 arguments[name] = {**origin, "ref": self.ref(origin["ref"])}
             else:  # a binding: open
                 arguments[name] = origin
         requirements = [self.requirement(r, classes) for r in step["requirements"]]
         return {**step, "arguments": arguments, "requirements": requirements}
-
-    def literal(self, value: Any) -> Any:
-        """A literal argument's default by its JSON form: a string ``content``, any other
-        scalar ``open``, a list or object member by member, an object's keys ``content``."""
-        if type(value) is str:
-            return self.digest(value)
-        if type(value) is list:
-            return [self.literal(v) for v in cast("list[Any]", value)]
-        if type(value) is dict:
-            return {
-                self.digest(k): self.literal(v) for k, v in cast("dict[str, Any]", value).items()
-            }
-        return value
 
     def value(self, value: Any, tree: Any) -> Any:
         """A value redacted beside its full class tree, read from the tree: a record opened

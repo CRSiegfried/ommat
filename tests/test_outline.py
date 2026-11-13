@@ -157,7 +157,7 @@ def test_every_fixture_prints_as_text_and_json(
         assert text.endswith("\n")
         assert text == render(json.loads(ordered(outline)))  # the text is the outline's
         assert json.loads(ordered(outline)) == outline
-        assert outline["outline_version"] == 5
+        assert outline["outline_version"] == 6
     if record is not None and design is not None:
         assert turn_outline(record, design)["design_hash_matches"] is True
 
@@ -576,9 +576,21 @@ def test_each_kind_of_bound_measures_and_sides_as_its_helper() -> None:
     assert "    bound on t:size.n size/max = 10  (by pick)  t:size.n 12  distance 2\n" in text
     assert "warm 0.45 vs 0.5 distance -0.05 short  cold 0.4 vs 0.3 distance 0.1 clear" in text
     design = design_outline(BOUNDED)
-    assert design["classes"] == [{"ref": "t:state", "class": "tree: content ×2, open ×1"}]  # noqa: RUF001
+    assert "classes" not in design
+    assert design["other_members"] == ["classes"]
+    assert "\nclasses  " not in render_design(design)
     check_shape(o)
     check_shape(design)
+
+
+def test_a_format_11_design_outline_has_no_classes_key_and_no_classes_line() -> None:
+    document = load(full()).document
+    assert "classes" not in json.loads(document)
+    o = design_outline(document)
+    assert "classes" not in o
+    assert "classes" not in o["other_members"]
+    assert "classes" not in render_design(o)
+    check_shape(o)
 
 
 def test_escalation_and_defects_are_the_engines_views(shown: dict[str, Any]) -> None:

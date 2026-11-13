@@ -114,7 +114,6 @@ def design(**changes: Any) -> Design:
             "act": Rule("d:act", t.string, act, version="1", reads=["d:cities"]),
         },
         "policy": "d:act",
-        "classes": {SET: {"name": "identifier"}},
     }
     fields.update(changes)
     return Design(**fields)
@@ -390,10 +389,13 @@ def test_from_record_refuses_a_source_whose_grounded_slot_need_differs() -> None
 
 def test_redact_digests_a_grounded_t_refs_candidate() -> None:
     record = decided()
-    view = json.loads(redact(record, ROOT))
-    written = [i["ref"] for i in view["log"] if i["item"] == "entry"]
-    assert grounded_ref(CITY, digest("Ana", record)) in written
-    assert grounded_ref(CITY, "Ana") not in written
+    for policy in ({}, {SET: {"name": "identifier"}}, {SET: "identifier"}):
+        view = json.loads(redact(record, ROOT, policy))
+        written = [i["ref"] for i in view["log"] if i["item"] == "entry"]
+        assert grounded_ref(CITY, digest("Ana", view)) in written
+        assert grounded_ref(CITY, "Ana") not in written
+    opened = json.loads(redact(record, ROOT, {SET: {"name": "open"}}))
+    assert grounded_ref(CITY, "Ana") in [i["ref"] for i in opened["log"] if i["item"] == "entry"]
 
 
 def test_a_record_holding_a_grounded_t_ref_reads_back() -> None:

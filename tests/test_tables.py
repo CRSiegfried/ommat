@@ -257,7 +257,7 @@ def test_a_stored_earlier_format_document_holding_a_table_is_refused_naming_its_
     }
     found = failures(encode(doc))
     assert [c for c, _ in found] == [11]
-    assert "format 6 is not 10" in found[0][1]
+    assert "format 6 is not 11" in found[0][1]
 
 
 def test_a_document_rows_member_set_differing_fails_load() -> None:
@@ -742,8 +742,8 @@ def edited(record: Record, change: Callable[[dict[str, Any]], object]) -> dict[s
     return doc
 
 
-GOLDEN_DESIGN = "sha256:2ea189ff88ad7dbdbcb28ecd9fab4d4bcfdc0e7c8c54037cb4ee95b92b479515"
-GOLDEN_RECORD = "sha256:bedd268b9cbb68e17e1b8f16dd082bd036abbf61b8d41acf8f3deb401c8c3592"
+GOLDEN_DESIGN = "sha256:df7ab30bda3987770d58231ff26a36e5785741b278adb9e8acf280ca5a5c7cfd"
+GOLDEN_RECORD = "sha256:f4a363d762c952d4b0c30ccaa236c9fccfc17e0b63ff0982040195da48ae87f7"
 
 
 def test_a_golden_table_turn() -> None:
@@ -1429,7 +1429,7 @@ def test_a_known_cell_stands_over_a_bare_question_and_a_record() -> None:
 def test_a_known_cell_is_written_tagged_and_round_trips() -> None:
     loaded = load(design(("tab", tab("F", ["t:state.n"], [["Known", 1], ["-", 0]]))))
     doc = json.loads(loaded.document)
-    assert doc["format"] == 10
+    assert doc["format"] == 11
     assert doc["rules"]["tab"]["rows"][0]["cells"][0] == {"known": True}
     assert load(loaded.document).design_hash == loaded.design_hash
 

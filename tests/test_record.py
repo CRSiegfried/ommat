@@ -24,11 +24,13 @@ from ledger_logs import (
     LOGS,
     NORMAL,
     NORMAL_8,
+    NORMAL_9,
     PLAN,
     SETTINGS,
     STATE,
     VERDICT,
     fresh,
+    rehashed,
 )
 from ommat import (
     InvalidRecord,
@@ -300,8 +302,8 @@ def test_bytes_that_are_not_utf8_json_are_refused_with_the_parse_error_chained(
         (document(["design"]), "no design item first"),
         ({"log": {"item": "design"}, "unhashed": {}}, "no design item first"),
         (
-            document([{**DESIGN, "format": 9}]),
-            "format 9 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8",
+            document([{**DESIGN, "format": 10}]),
+            "format 10 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8, 9",
         ),
         (document([{**DESIGN, "format": True}]), "format True is not one"),
         (document([{**DESIGN, "format": 1.0}]), "format 1.0 is not one"),
@@ -623,6 +625,15 @@ def test_a_value_place_is_named_without_the_strings_it_holds(small_bounds: Small
     assert "3333" not in str(info.value)
 
 
+def test_a_shape_tree_place_is_named_without_the_strings_it_holds(
+    small_bounds: SmallBounds,
+) -> None:
+    keyed = _with(NORMAL_9, 1, "shapes", to={"k" * 300: list(_WIDE)})
+    with pytest.raises(InvalidRecord, match="shape tree 0") as info:
+        read_record(rehashed(document(keyed)))
+    assert "kkkk" not in str(info.value)
+
+
 class _Colliding:
     """A key whose hash is a member name's and whose comparison raises."""
 
@@ -707,7 +718,7 @@ def test_a_long_format_string_is_clipped_in_its_message() -> None:
         read_record(document(log))
     assert str(info.value) == (
         f"the record is invalid: the record's format {'f' * 64!r}... (1000000 code points) "
-        "is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8"
+        "is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8, 9"
     )
 
 

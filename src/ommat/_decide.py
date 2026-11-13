@@ -536,7 +536,7 @@ def _opening(loaded: LoadedDesign, settings: dict[str, object]) -> list[dict[str
             "item": "settings",
             "settings": settings,
             "providers": dict(loaded._providers),
-            "classes": loaded._classes,
+            "shapes": loaded._shapes,
             "grounded": dict(loaded._grounded),
             "sets": dict(loaded._candidate_sets),
             "policy": loaded._design.policy,

@@ -21,7 +21,7 @@ import rfc8785
 
 import extraction as x
 from counting import SmallBounds
-from ledger_logs import before_profile, rehashed
+from ledger_logs import before_profile, before_shapes, rehashed
 from ommat import (
     CallResult,
     Cause,
@@ -605,7 +605,7 @@ def test_a_format_1_record_holds_only_format_1s_rules() -> None:
     doc = stored(record)
     doc["unhashed"]["calls"][key]["invalid"] = {"truncated": "[1]"}
     format_2 = copy.deepcopy(doc)
-    format_2["log"][0]["format"] = 2
+    before_shapes(format_2, 2)
     read_record(format_2)
 
 
@@ -639,16 +639,16 @@ def test_a_format_1_record_reads_back_to_its_own_hash() -> None:
 
 def test_the_append_refuses_a_design_item_of_an_unknown_format() -> None:
     ledger = Ledger()
-    with pytest.raises(_LedgerError, match="the format 9 is not one this ledger knows"):
-        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 9, "helpers": 2})
+    with pytest.raises(_LedgerError, match="the format 10 is not one this ledger knows"):
+        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 10, "helpers": 2})
 
 
 def test_a_record_of_an_unknown_format_is_refused() -> None:
     def change(doc: dict[str, Any]) -> None:
-        doc["log"][0]["format"] = 9
+        doc["log"][0]["format"] = 10
 
     with pytest.raises(
-        InvalidRecord, match="format 9 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8"
+        InvalidRecord, match="format 10 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8, 9"
     ):
         read_record(edited(change))
 
@@ -656,8 +656,8 @@ def test_a_record_of_an_unknown_format_is_refused() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden extraction record
 
-GOLDEN_X_DESIGN = "sha256:bcb1b661a334bf0768b8b84dda0f54fbf81f2dffe62dd95eb0e8389fb668092d"
-GOLDEN_X_RECORD = "sha256:1a86ca280f963aa5be08d5885db0ebca9d4b550b649e2f73021068efe3070565"
+GOLDEN_X_DESIGN = "sha256:59c2489df31aed2ead677fabbd0866cd670bde788f46dd93c459729b131f4012"
+GOLDEN_X_RECORD = "sha256:9fd9d4da4cd8e991cde62ae3a9fabf3fd7f089b9affab144db0a84aa4dbb31f0"
 
 
 def test_the_golden_extraction_record() -> None:
@@ -665,7 +665,7 @@ def test_the_golden_extraction_record() -> None:
     assert record.log[0] == {
         "item": "design",
         "hash": GOLDEN_X_DESIGN,
-        "format": 8,
+        "format": 9,
         "helpers": HELPERS,
     }
     assert entry(record, "d:reply")["value"] == "big; 2024-02-29"
@@ -778,7 +778,7 @@ def test_a_recorded_probability_answer_asked_now_as_an_extraction_is_not_answere
 
 
 def test_a_format_1_design_is_refused_naming_its_format() -> None:
-    with pytest.raises(InvalidDesign, match="format 1 is not 10"):
+    with pytest.raises(InvalidDesign, match="format 1 is not 11"):
         load((FORMAT_1 / "design.json").read_bytes())
 
 
@@ -933,53 +933,67 @@ def test_an_extraction_read_with_no_grid_entry_that_changes_nothing_is_not_on_gr
 ROOT = bytes(range(32))
 
 
-def digest(value: Any, record: Record) -> str:
-    """A keyed digest computed apart from the code under test."""
-    key = hmac.digest(ROOT, record.record_hash.encode("ascii") + b"\x01", "sha256")
+def digest(value: Any, view: dict[str, Any]) -> str:
+    """A keyed digest computed apart from the code under test, under the view's key: the
+    record hash and then the applied policy's hash its info."""
+    applied = "sha256:" + hashlib.sha256(rfc8785.dumps(view["applied"])).hexdigest()
+    info = (view["redacted"] + applied).encode("ascii") + b"\x01"
+    key = hmac.digest(ROOT, info, "sha256")
     return "hmac-sha256:" + hmac.new(key, rfc8785.dumps(value), hashlib.sha256).hexdigest()
 
 
-def redacted(record: Record) -> dict[str, Any]:
-    return cast("dict[str, Any]", decode(redact(record, ROOT)))
+def redacted(record: Record, policy: dict[str, Any] | None = None) -> dict[str, Any]:
+    return cast("dict[str, Any]", decode(redact(record, ROOT, policy or {})))
 
 
 def test_an_invalid_truncated_redacts_to_a_digest() -> None:
     record = ran(truncated=["q:amount"])
     text = calls(record)["invalid"]["truncated"]
-    (keyed,) = redacted(record)["unhashed"]["calls"].values()
-    assert keyed["invalid"] == {"truncated": digest(text, record)}
+    view = redacted(record)
+    (keyed,) = view["unhashed"]["calls"].values()
+    assert keyed["invalid"] == {"truncated": digest(text, view)}
+
+
+STRUCTURE = dict.fromkeys(("kind", "value_type", "is_list", "p_null", "confidence"), "open")
+"""A policy over an extraction answer opening each member but the extracted text's."""
 
 
 def test_an_extraction_answer_redacts_field_by_field() -> None:
     record = ran()
-    view = redacted(record)
+    view = redacted(record, {"q:amount": STRUCTURE, "q:dates": STRUCTURE})
     amount = next(i for i in view["log"] if i.get("ref") == "q:amount")["value"]
     assert amount == {
         "kind": "extraction",
         "value_type": "number",
         "is_list": False,
-        "value": digest(120.0, record),
-        "guess": digest(120.0, record),
+        "value": digest(120.0, view),
+        "guess": digest(120.0, view),
         "p_null": 0.1,
         "confidence": 0.9,
-        "span": digest([4, 7], record),
+        "span": digest([4, 7], view),
     }
     dates = next(i for i in view["log"] if i.get("ref") == "q:dates")["value"]
-    assert dates["value"] == digest(["2024-02-29"], record)  # a list of content: one digest
-    assert dates["span"] == digest([[11, 21]], record)
+    assert dates["value"] == digest(["2024-02-29"], view)  # a list of content: one digest
+    assert dates["span"] == digest([[11, 21]], view)
 
 
-def test_a_declared_tree_redacts_an_extraction_answer_by_it() -> None:
-    record = ran(
-        {"q:amount": {**x.AMOUNT, "guess": None}},
-        loaded=x.loaded(classes={"q:amount": "open", "q:dates": {"p_null": "identifier"}}),
-    )
+def test_an_extraction_answer_the_policy_names_nothing_for_is_digested_member_by_member() -> None:
+    record = ran()
     view = redacted(record)
+    amount = next(i for i in view["log"] if i.get("ref") == "q:amount")["value"]
+    original = next(i for i in record.log if i.get("ref") == "q:amount")["value"]
+    assert amount == {name: digest(v, view) for name, v in original.items()}
+
+
+def test_a_policy_redacts_an_extraction_answer_by_it() -> None:
+    record = ran({"q:amount": {**x.AMOUNT, "guess": None}})
+    view = redacted(record, {"q:amount": "open", "q:dates": {**STRUCTURE, "p_null": "identifier"}})
     amount = next(i for i in view["log"] if i.get("ref") == "q:amount")["value"]
     assert (amount["value"], amount["guess"], amount["span"]) == (120.0, None, [4, 7])
     dates = next(i for i in view["log"] if i.get("ref") == "q:dates")["value"]
-    assert dates["p_null"] == digest(0, record)
-    assert dates["value"] == digest(["2024-02-29"], record)
+    assert dates["p_null"] == digest(0, view)
+    assert dates["value"] == digest(["2024-02-29"], view)
+    assert dates["kind"] == "extraction"
 
 
 def test_a_truncated_ref_passes_redaction_open() -> None:

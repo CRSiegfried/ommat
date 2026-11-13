@@ -1,11 +1,11 @@
 # pyright: reportPrivateUsage=false
 """Load: the load checks, the design document and its hash, the graph and the
-ref-to-provider map, the class trees and the answer grid.
+ref-to-provider map, the shape trees and the answer grid.
 
 Load gathers the providers, a refused form's included, then runs
 checks 1 to 4, 7, 8, 10 and 12. Once 10 and 12 pass it builds the document and hashes it.
-Once 1 to 4, 10 and 12 pass it runs check 8's leaf-type test, check 9, check 10's test of
-each declared class tree, and builds the graph for check 5. It raises ``InvalidDesign`` with
+Once 1 to 4, 10 and 12 pass it runs check 8's leaf-type test and check 9, and builds the
+graph for check 5. It raises ``InvalidDesign`` with
 every failure, or returns the loaded design.
 
 A document passes check 11's gate first, a failure there the only one; then load builds a
@@ -110,6 +110,7 @@ from ommat._values import (
     GROUP_REASONS,
     MAX_DOCUMENT_DEPTH,
     MISSING,
+    SHAPE_LEAF,
     domain_error,
     in_domain,
     member_named,
@@ -145,19 +146,11 @@ _NUMBER = Scalar("number")
 _NUMBERS = MappingOf(_NUMBER)
 _UNIT = Interval("number", 0, 1)
 _STRING = Scalar("string")
-_EXTRACTION_TREE = {
-    "kind": "open",
-    "value_type": "open",
-    "is_list": "open",
-    "value": "content",
-    "guess": "content",
-    "p_null": "open",
-    "confidence": "open",
-    "span": "content",
-}
-"""An extraction answer's default class tree, which is also its full tree."""
-_EXTRACTION_SET = ("value", "guess", "span")
-"""The members a class name declared at an extraction ``q:`` ref sets."""
+_EXTRACTION_SHAPE = dict.fromkeys(
+    ("kind", "value_type", "is_list", "value", "guess", "p_null", "confidence", "span"),
+    SHAPE_LEAF,
+)
+"""An extraction answer's shape tree: a record of its eight members, each a leaf."""
 _UNITS = MappingOf(_UNIT)
 _COUNT = Interval("integer", 0, 2**53 - 1)
 """What ``size`` returns: an integer, at least 0, within the value domain."""
@@ -171,7 +164,7 @@ _SIGNATURES: dict[str, dict[str, Type]] = {
 to."""
 _TYPE_SIZE = 2**20
 """The most code points a type spells with its definitions resolved, and the types of the
-refs the class trees cover, summed."""
+refs the shape trees cover, summed."""
 _ANSWER_SIZE = len("answer")
 
 
@@ -219,7 +212,7 @@ _NO_TABLE = "\0"  # no table owns the use
 class _Use:
     """A ref a declaration reads: the declaration, its role and the parsed ref."""
 
-    owner: str  # the declared name, or "" for the policy or a classes key
+    owner: str  # the declared name, or "" for the policy
     where: str
     role: str  # need, slot, candidate, label-set, text, read, helper, boundary, grounding,
     # policy, source-requirement, group
@@ -267,7 +260,6 @@ class _Loader:
         self.leaf_types: dict[str, Type] = {}
         self.leaf_written: dict[str, Type] = {}  # each leaf's type as declared, for messages
         self.state_type: Type | None = None
-        self.class_keys: list[tuple[str, _ParsedRef]] = []  # each classes key check 7 passed
         # Each leaf check 8 refuses under a boundaries field, left out of check 9's boundaries
         # clauses.
         self.refused_leaves: set[str] = set()
@@ -336,7 +328,6 @@ class _Loader:
         if not self.failed(_GATING):
             self.check_8_types()
             self.check_9()
-            self.check_10_trees()
             graph = self.graph()
             self.check_5(graph)
         if self.parsed is not None and not self.failed(_GATING | {11}):
@@ -511,10 +502,6 @@ class _Loader:
                 self.fail(7, (policy,), f"the policy names {_q(policy)}, which has a field path")
             elif parsed is not None:
                 self.uses.append(_Use("", "the policy", "policy", policy, parsed))
-        for key in self.d.classes:
-            parsed = self.ref(key, "the classes block", "")
-            if parsed is not None:
-                self.class_keys.append((key, parsed))
 
     def table_refs(
         self, owner: str, where: str, inputs: Sequence[Any], rows: Sequence[Any]
@@ -587,21 +574,6 @@ class _Loader:
         for names, where, target in self.target_links():
             if target not in self.d.targets:
                 self.fail(3, names, f"{where} names the target {_q(target)}, which is not declared")
-        form_refused = {ref for ref, _ in self.form_providers}  # check 10 has failed them
-        for key, parsed in self.class_keys:
-            where = f"the classes block's key {_q(key)}"
-            if parsed.candidate is not None:
-                self.fail(3, (key,), f"{where} has a grounded bracket")
-            elif parsed.fields:
-                self.fail(3, (key,), f"{where} has a field path")
-            elif key not in self.providers:
-                self.fail(3, (key,), f"{where} has no provider")
-            elif parsed.level == "q" and key not in form_refused and not self.extraction_ref(key):
-                self.fail(
-                    3,
-                    (key,),
-                    f"{where} is not t:state, a source's t: ref, a d: ref or an extraction q: ref",
-                )
 
     def target_links(self) -> Iterator[tuple[tuple[str, ...], str, str]]:
         """Each target id a question or a rule names: the question's ref or the rule's id,
@@ -1092,7 +1064,7 @@ class _Loader:
         ref: str | None = None,
     ) -> Type | None:
         """A type that passes check 10 with every definition it names, or ``None``; the size
-        of the type ``ref`` is declared with is kept for the class trees' sum."""
+        of the type ``ref`` is declared with is kept for the shape trees' sum."""
         t = self.parse(text, nullable, where, names)
         if t is None or set(named(t)) & self.tainted:
             return None  # a definition it names failed, and that failure stands
@@ -1213,7 +1185,7 @@ class _Loader:
                     10, (rid,), f"rule {_q(rid)}'s inputs or rows are outside the value domain"
                 )
         if sum(self.ref_sizes.values()) > _TYPE_SIZE:
-            # Every record's settings item writes each of these refs' class trees in full.
+            # Every record's settings item writes each of these refs' shape trees in full.
             self.fail(
                 10,
                 (_STATE, *self.provider_map()),
@@ -2141,19 +2113,6 @@ class _Loader:
         assert isinstance(provided, Question)
         return provided
 
-    def check_10_trees(self) -> None:
-        """Check 10's test of each declared class tree against its ref's type, run once checks
-        1 to 4, 10 and 12 pass."""
-        for key, _ in self.class_keys:  # a key check 7 refused is left out
-            if key.startswith("q:"):
-                messages = _extraction_conformance(self.d.classes[key])
-            else:
-                t = self.state_type if key == _STATE else self.types[key]
-                assert t is not None
-                messages = _conformance(self.d.classes[key], t, self.defs, "")
-            for message in messages:
-                self.fail(10, (key,), f"the class tree of {_q(key)} {message}")
-
     def read_type(self, u: _Use) -> Type | TypeFailure:
         if u.base == _STATE:
             assert self.state_type is not None
@@ -2271,7 +2230,6 @@ class _Loader:
                 }
                 for g, group in d.groups.items()
             },
-            "classes": dict(d.classes),  # each tree plain data, from check 10's form test
             "targets": {
                 tid: {"statement": target.statement, "values": target.values}
                 for tid, target in d.targets.items()
@@ -2378,16 +2336,15 @@ class _Loader:
     def loaded(self, document: bytes, graph: Mapping[str, frozenset[str]]) -> LoadedDesign:
         decoded = cast("dict[str, Any]", decode(document))
         providers = self.provider_map()
-        classes: dict[str, Any] = {}
+        shapes: dict[str, Any] = {}
         assert self.state_type is not None
         typed = {_STATE: self.state_type, **self.types}
         resolutions: dict[str, Type] = {}
         for ref in (_STATE, *providers):
-            declared = self.d.classes.get(ref)
             if ref.startswith("q:") and self.extraction_ref(ref):
-                classes[ref] = _extraction_tree(declared)
+                shapes[ref] = dict(_EXTRACTION_SHAPE)
             else:
-                classes[ref] = _tree(typed[ref], self.defs, declared)
+                shapes[ref] = _shape(typed[ref], self.defs)
         callables: dict[str, Callable[..., Any]] = {
             rid: rule.function for rid, rule in self.rules()
         }
@@ -2431,7 +2388,7 @@ class _Loader:
                     if ref[:2] in ("t:", "d:") and (field := self.set_field(ref))
                 }
             ),
-            classes_bytes=encode(classes, MAX_DOCUMENT_DEPTH),
+            shapes_bytes=encode(shapes, MAX_DOCUMENT_DEPTH),
             # Each in the order the document holds, which the turn hands on.
             payload_bytes=MappingProxyType(
                 {
@@ -3109,34 +3066,6 @@ def _extraction_origins(question: Question) -> Iterator[tuple[str, Mapping[str, 
             yield member, origin
 
 
-def _extraction_tree(declared: Any) -> dict[str, Any]:
-    """An extraction answer's class tree in full: a declared class name sets ``value``,
-    ``guess`` and ``span``, a declared object the members it names; the rest keep the
-    default."""
-    tree = dict(_EXTRACTION_TREE)
-    if isinstance(declared, str):
-        tree.update(dict.fromkeys(_EXTRACTION_SET, declared))
-    elif isinstance(declared, dict):
-        tree.update(cast("dict[str, Any]", declared))
-    return tree
-
-
-def _extraction_conformance(tree: Any) -> list[str]:
-    """Why a class tree does not conform to an extraction answer, a record of its eight
-    members, each a scalar or a list of scalars, so each takes a class name."""
-    if isinstance(tree, str):
-        return []
-    out: list[str] = []
-    for key, member in cast("dict[str, Any]", tree).items():
-        if key not in _EXTRACTION_TREE:
-            out.append(
-                f"names {_q(key)} at its root, which is not a member of an extraction answer"
-            )
-        elif not isinstance(member, str):
-            out.append(f"holds an object at {_q(key)}, where its type is not a record")
-    return out
-
-
 def _scalar(t: Type) -> bool:
     return isinstance(t, Scalar | Interval | Label)
 
@@ -3150,53 +3079,20 @@ def _leaf_shape(t: Type) -> bool:
     return _scalar(t)
 
 
-def _tree(t: Type, defs: Mapping[str, Type], declared: Any = None) -> Any:
-    """A type's class tree in full, ``declared`` applied over the default:
-    an object at every record, a one-member list at every mapping layer, a class name at every
-    other node. A declared class name covers every value beneath it; a field a declared object
-    leaves out keeps its default. ``declared`` conforms to ``t`` (check 10)."""
+def _shape(t: Type, defs: Mapping[str, Type]) -> Any:
+    """A type's shape tree: an object at every record, a one-member list at every mapping
+    layer, ``SHAPE_LEAF`` at every other node; a list and an ``or null`` layer have no node."""
     t = resolve(t, defs)
     if isinstance(t, Nullable):
-        return _tree(t.inner, defs, declared)
+        return _shape(t.inner, defs)
     if isinstance(t, ListOf):
-        return _tree(t.item, defs, declared)
+        return _shape(t.item, defs)
     if isinstance(t, MappingOf):
-        return [_tree(t.value, defs, declared)]
+        return [_shape(t.value, defs)]
     if isinstance(t, RecordOf):
-        fields = cast("dict[str, Any]", declared) if isinstance(declared, dict) else {}
-        return {
-            n: _tree(ft, defs, declared if isinstance(declared, str) else fields.get(n))
-            for n, ft in t.fields
-        }
-    if isinstance(declared, str):
-        return declared
-    if isinstance(t, Scalar) and t.name in ("string", "bytes"):
-        return "content"
+        return {n: _shape(ft, defs) for n, ft in t.fields}
     assert not isinstance(t, Named)
-    return "open"
-
-
-def _conformance(tree: Any, t: Type, defs: Mapping[str, Type], path: str) -> list[str]:
-    """Why a class tree does not conform to ``t``: a class name conforms anywhere, and an
-    object where ``t``, through list, mapping and ``or null`` layers and definitions' names,
-    is a record, each key naming a field whose tree conforms."""
-    if isinstance(tree, str):
-        return []
-    t = resolve(t, defs)
-    while isinstance(t, Nullable | ListOf | MappingOf):
-        inner = t.inner if isinstance(t, Nullable) else t.item if isinstance(t, ListOf) else t.value
-        t = resolve(inner, defs)
-    where = f"at {_q(path)}" if path else "at its root"
-    if not isinstance(t, RecordOf):
-        return [f"holds an object {where}, where its type is not a record"]
-    fields = dict(t.fields)
-    out: list[str] = []
-    for key, member in cast("dict[str, Any]", tree).items():
-        if key not in fields:
-            out.append(f"names {_q(key)} {where}, which is not a field of the record")
-        else:
-            out += _conformance(member, fields[key], defs, f"{path}.{key}" if path else key)
-    return out
+    return SHAPE_LEAF
 
 
 # ---------------------------------------------------------------------------------------------
@@ -3214,7 +3110,6 @@ _DOCUMENT = frozenset(
         "parameters",
         "types",
         "groups",
-        "classes",
         "targets",
     }
 )
@@ -3273,7 +3168,6 @@ _KINDS = {
     "parameters": "parameter",
     "groups": "group",
     "types": "type definition",
-    "classes": "the classes block's key",
 }
 
 
@@ -3326,7 +3220,7 @@ def _gate(given: bytes | Mapping[str, Any]) -> tuple[dict[str, Any] | None, Any]
 
 def _value_places(doc: dict[str, Any]) -> Iterator[object]:
     """Each value the document holds where the size bounds apply too: each payload, leaf
-    value, source requirement value and declared class tree, wherever the member checks will
+    value and source requirement value, wherever the member checks will
     find it; the document itself is held to its depth alone. Members are found by their
     keys' string data, so no code of a caller's key runs."""
     for source in _objects_in(member_named(doc, "sources")):
@@ -3340,7 +3234,6 @@ def _value_places(doc: dict[str, Any]) -> Iterator[object]:
         value = member_named(leaf, "value")
         if value is not MISSING:
             yield value
-    yield from members_of(member_named(doc, "classes"))
 
 
 def _objects_in(block: object) -> Iterator[object]:
@@ -3727,7 +3620,6 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
         ),
         types=doc["types"],
         groups=_each(doc["groups"], _group_of),
-        classes=doc["classes"],
         name=doc["name"],
         targets=block(doc["targets"], lambda _, v: Target(v["statement"], v["values"])),
     )

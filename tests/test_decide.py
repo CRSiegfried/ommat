@@ -161,16 +161,16 @@ UNCLEAR = {"q:spam": {"yes": 0.52, "no": 0.48}, "t:body": "text of the mail"}
 """Within the margin, so ``route`` abstains."""
 REPLIES: dict[str, object] = {"ask": returns(SPAM), "look": returns({"t:size": 4})}
 
-GOLDEN_DESIGN = "sha256:f9f63dd387fed20583784895b4212501bb750a3717c35ebaa5c766c767cc8bb8"
-GOLDEN_RECORD = "sha256:eac4b883e564ef1528a223825340abb3b0516bf067d68f251afe4dfae25f1f2f"
-GOLDEN_BROKEN = "sha256:87116dbff18451aa04ad3a2fb85ee750696f103caba257c603ad5e0b42340822"
+GOLDEN_DESIGN = "sha256:72808e4db44f0bb70524f6853fa2edf74e8ab9253da03132eadbad84a50b10a8"
+GOLDEN_RECORD = "sha256:5118a298ef01e6f96221c2d96f9684f244fc4823819febc3401deda7eac71b11"
+GOLDEN_BROKEN = "sha256:53086368542f6e9d1008a54421b09263861b03cfd98d5af9455ddb8efc96dc29"
 GOLDEN_CANCELLED = (
-    "sha256:9657cecd82a522226d0eb004d6743c31371a251d2834f3d278ab7dbc65c21574",
-    "sha256:4be24d9a01741c473aef8e050a9adc4fd88387283cc70cb61535bdd395ae84e7",
+    "sha256:8225b6c22617032bf8737427fe1a601f5ad0e8ddd1388ec47aa6ecfa7ddd9a04",
+    "sha256:60ce0d1cdf618871de45abe49693164b002be385d715405d628cf47d90bad538",
 )
 GOLDEN_UNDECIDED = (
-    "sha256:fd616aeadf632cf3760774b847f1c1437e361d0dc70054e09c4dbaa1b1531a89",
-    "sha256:95bbe1bdbd52064b72916ddb25f85a367477b5b935dd68ec34ffe5d054c56a08",
+    "sha256:7b40de51d98074f7b23acb336a80a4b56e1651da96e2298fe4c82e4d8c8910ef",
+    "sha256:b42374c69a698cb98f88ffa54cd8e03a3f31114166bc59b67230f17264a19d48",
 )
 """Each a pair: the design hash, then the record hash."""
 
@@ -275,7 +275,7 @@ class Counting:
 def roundtrips(record: Record) -> None:
     """A record decide wrote reads back with the same bytes, and both views take it."""
     assert read_record(record.document).document == record.document
-    redact(record, b"\x07" * 32)
+    redact(record, b"\x07" * 32, {})
     escalation(record)
 
 
@@ -395,7 +395,7 @@ def test_the_golden_hashes_hold_under_every_hash_seed(seed: str) -> None:
 
 def test_the_design_and_settings_items_bytes() -> None:
     log = go().record.log
-    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 8, "helpers": 4}
+    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 9, "helpers": 4}
     assert log[1] == {
         "item": "settings",
         "settings": {
@@ -406,13 +406,13 @@ def test_the_design_and_settings_items_bytes() -> None:
             "certificate_cap": None,
         },
         "providers": dict(LOADED._providers),
-        "classes": LOADED._classes,
+        "shapes": LOADED._shapes,
         "grounded": {},
         "sets": {},
         "policy": "d:act",
     }
     assert "t:state" not in log[1]["providers"]
-    assert "t:state" in log[1]["classes"]
+    assert "t:state" in log[1]["shapes"]
 
 
 def test_no_settings_writes_the_bytes_of_the_default_settings() -> None:

@@ -72,8 +72,19 @@ def test_the_design_defaults() -> None:
     design = Design(state=t.record(), policy="d:decision")
     assert design.policy == "d:decision"
     assert design.name is None
-    for name in ("sources", "rules", "parameters", "types", "groups", "classes"):
+    for name in ("sources", "rules", "parameters", "types", "groups", "targets"):
         assert dict(getattr(design, name)) == {}
+
+
+def test_a_design_declares_no_classes() -> None:
+    with pytest.raises(TypeError, match="classes"):
+        Design(state=t.record(), policy="d:decision", classes={})  # type: ignore[call-arg]
+
+
+def test_a_design_takes_only_its_state_and_policy_positionally() -> None:
+    assert Design("t:state", "d:decision").policy == "d:decision"
+    with pytest.raises(TypeError, match="positional"):
+        Design("t:state", "d:decision", {})  # type: ignore[misc]
 
 
 def test_source_defaults_and_its_provides() -> None:

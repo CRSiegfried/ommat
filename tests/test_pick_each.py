@@ -185,7 +185,7 @@ def test_a_rule_passing_one_candidate_s_abstention_on_records_cleanly() -> None:
     # The record reads back, replays and redacts with the candidate digested in the cause.
     stored = read_record(record.document)
     assert replay_sync(stored, LOADED)[1] == []
-    redacted = redact(record, b"k" * 32).decode("utf-8")
+    redacted = redact(record, b"k" * 32, {}).decode("utf-8")
     assert "Elm Row" not in redacted
 
 
@@ -198,7 +198,7 @@ def test_redact_digests_a_grounded_ref_in_the_policy_s_own_cause() -> None:
         "cause": {"code": "required", "refs": [grounded_ref(OUT, "Elm Row")]},
     }
     record = read_record(json.dumps(rehashed(doc)).encode("utf-8"))
-    redacted = json.loads(redact(record, b"k" * 32))
+    redacted = json.loads(redact(record, b"k" * 32, {}))
     (cause_ref,) = next(i for i in redacted["log"] if i["item"] == "entry" and i["ref"] == "d:act")[
         "marker"
     ]["cause"]["refs"]

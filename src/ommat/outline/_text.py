@@ -118,8 +118,6 @@ def render_design(o: dict[str, Any]) -> str:
             lines.append(f"  read by {', '.join(t['readers'])}")
         if t["path"]:
             lines.append(f"  path {' -> '.join(t['path'])}")
-    if o["classes"]:
-        lines.append("classes  " + ", ".join(f"{c['ref']} {c['class']}" for c in o["classes"]))
     return "\n".join(lines) + "\n"
 
 

@@ -3,35 +3,45 @@
 ends at, whether that is a defect, and when a record holds none; the transcript of a decided
 turn; and the redacted view, its digests recomputed here independently with ``hmac`` and the
 ``rfc8785`` oracle, over records decide wrote and over the synthetic logs and every prefix of
-them."""
+them. A candidate-valued answer's labels are tested in ``test_label_sets.py``; a grounded ref's
+candidate, ``sums`` and ``truncated`` in ``test_per_candidate.py``, ``test_grounded_rules.py``,
+``test_grounded_sources.py``, ``test_record_sets.py`` and ``test_extraction_turn.py``; a set
+literal in ``test_ledger.py``."""
 
 import copy
 import hashlib
 import hmac
 import json
+import re
+import types
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import rfc8785
 
 from designs import minimal
 from ledger_logs import (
+    ANSWER,
     BROKEN_8,
     CANCEL,
     CANCELLED_8,
     DESIGN,
+    DESIGN_9,
     ENTRY_CAUSE,
     LOGS,
     NORMAL,
     NORMAL_8,
+    NORMAL_9,
     SETTINGS,
+    SETTINGS_9,
     STATE,
     call,
     entry,
     fresh,
     rehashed,
     round_item,
+    shape_of,
     unhashed_of,
 )
 from ommat import (
@@ -65,14 +75,23 @@ pytestmark = [
 ROOT = bytes(range(32))
 
 
-def key_of(record_hash: str, root: bytes = ROOT) -> bytes:
-    return hmac.digest(root, record_hash.encode("ascii") + b"\x01", "sha256")
+def key_of(view: dict[str, Any], root: bytes = ROOT) -> bytes:
+    """The per-turn key a verifier recomputes from a redacted view alone: HKDF-Expand under the
+    root key, its info the record hash and then the hash of the applied policy."""
+    applied = "sha256:" + hashlib.sha256(rfc8785.dumps(view["applied"])).hexdigest()
+    info = view["redacted"].encode("ascii") + applied.encode("ascii")
+    return hmac.digest(root, info + b"\x01", "sha256")
 
 
-def digest(value: Any, record: Record, root: bytes = ROOT) -> str:
-    """A keyed digest computed apart from the code under test."""
-    mac = hmac.new(key_of(record.record_hash, root), rfc8785.dumps(value), hashlib.sha256)
+def digest(value: Any, view: dict[str, Any], root: bytes = ROOT) -> str:
+    """A keyed digest computed apart from the code under test, under ``view``'s key."""
+    mac = hmac.new(key_of(view, root), rfc8785.dumps(value), hashlib.sha256)
     return "hmac-sha256:" + mac.hexdigest()
+
+
+def redacted(record: Record, policy: Any = None, root: bytes = ROOT) -> dict[str, Any]:
+    """The redacted view of ``record`` under ``policy``, none named by default, decoded."""
+    return cast("dict[str, Any]", decode(redact(record, root, {} if policy is None else policy)))
 
 
 def read(log: list[dict[str, Any]], unhashed: dict[str, Any] | None = None) -> Record:
@@ -82,8 +101,8 @@ def read(log: list[dict[str, Any]], unhashed: dict[str, Any] | None = None) -> R
     return read_record(rehashed({"log": unshared, "unhashed": unhashed or {}}))
 
 
-def view(record: Record, root: bytes = ROOT) -> dict[str, Any]:
-    out = redact(record, root)
+def view(record: Record, root: bytes = ROOT, policy: Any = None) -> dict[str, Any]:
+    out = redact(record, root, {} if policy is None else policy)
     assert encode(decode(out), MAX_DOCUMENT_DEPTH) == out  # canonical bytes
     return decode(out)
 
@@ -461,43 +480,305 @@ def test_a_record_cancelled_after_the_policy_fired_still_shows_its_decision() ->
 
 
 # ---------------------------------------------------------------------------------------------
-# The redacted view over the synthetic normal log
+# The redacted view under the caller's policy, over the synthetic format-9 log
 
 
-def test_redact_digests_by_class_and_passes_open_values() -> None:
-    record = read(fresh(NORMAL))
+def filled(shape: Any, name: str) -> Any:
+    """A shape tree with the class ``name`` at every leaf."""
+    if isinstance(shape, dict):
+        return {k: filled(v, name) for k, v in cast("dict[str, Any]", shape).items()}
+    if isinstance(shape, list):
+        return [filled(cast("list[Any]", shape)[0], name)]
+    return name
+
+
+DIGEST = re.compile(r"hmac-sha256:[0-9a-f]{64}")
+
+
+def digests_in(out: dict[str, Any]) -> set[str]:
+    return set(re.findall(r"hmac-sha256:[0-9a-f]{64}", json.dumps(out)))
+
+
+def test_redact_digests_every_value_the_policy_names_nothing_for() -> None:
+    record = read(fresh(NORMAL_9))
     out = view(record)
     log = out["log"]
 
     def d(value: Any) -> str:
-        return digest(value, record)
+        return digest(value, out)
 
-    assert log[:2] == NORMAL[:2]  # the design and settings items are open
+    assert log[:2] == NORMAL_9[:2]  # the design and settings items are open
     assert log[2]["value"] == {"subject": d("hello"), "to": d("dana@example.com")}
-    assert log[3] == NORMAL[3]  # a call item with no prompt
+    assert log[3] == record.log[3]  # a call item with no prompt
     assert log[4]["value"] == d("text of the mail")
-    assert log[5]["value"] == d("hello")
     assert log[7]["prompt"] == d("Is this spam?")
-    assert log[7]["questions"] == NORMAL[7]["questions"]
-    assert log[8] == NORMAL[8]  # an answer is open
-    assert log[9] == NORMAL[9]
+    assert log[7]["questions"] == record.log[7]["questions"]
+    assert log[8]["value"] == d(ANSWER)  # an answer, whole
+    assert log[9]["value"] == d("archive")
+    assert log[10]["value"] == d([{"a": "x"}, None])  # a list under content: one digest
+    assert {k: v for k, v in log[9].items() if k != "value"} == {
+        k: v for k, v in record.log[9].items() if k != "value"
+    }
+    assert out["applied"] == {
+        ref: filled(shape, "content") for ref, shape in SETTINGS_9["shapes"].items()
+    }
+    assert out["unhashed"] == {}
+    assert out["redacted"] == out["hash"] == record.record_hash
+    assert set(out) == {"log", "unhashed", "redacted", "applied", "hash"}
+
+
+def test_the_policy_names_each_class_and_the_rest_stays_content() -> None:
+    record = read(fresh(NORMAL_9))
+    policy = {
+        "t:state": {"subject": "open", "to": "identifier"},
+        "q:spam": "open",
+        "d:tags": "open",
+    }
+    out = view(record, policy=policy)
+    log = out["log"]
+
+    def d(value: Any) -> str:
+        return digest(value, out)
+
+    assert log[2]["value"] == {"subject": "hello", "to": d("dana@example.com")}
+    assert log[8]["value"] == ANSWER
     assert log[10]["value"] == [{d("a"): "x"}, None]  # a mapping's keys, under every tree
-    plan = log[12]
+    assert log[4]["value"] == d("text of the mail")
+    assert log[9]["value"] == d("archive")
+    assert out["applied"]["t:state"] == {"subject": "open", "to": "identifier"}
+    assert out["applied"]["d:tags"] == ["open"]
+    assert out["applied"]["d:route"] == "content"
+
+
+def test_a_field_path_key_names_a_field_and_overrides_a_shorter_key_whatever_their_order() -> None:
+    record = read(fresh(NORMAL_9))
+    out = view(record, policy={"t:state": "open", "t:state.to": "identifier"})
+    assert out["applied"]["t:state"] == {"subject": "open", "to": "identifier"}
+    assert out["log"][2]["value"] == {"subject": "hello", "to": digest("dana@example.com", out)}
+    assert view(record, policy={"t:state.to": "identifier", "t:state": "open"}) == out
+
+
+def test_the_policy_is_required() -> None:
+    with pytest.raises(TypeError, match="policy"):
+        redact(read(fresh(NORMAL_9)), ROOT)  # type: ignore[call-arg]
+    record = read(fresh(NORMAL_9))
+    assert redact(record, ROOT, policy={}) == redact(record, ROOT, {})
+
+
+@pytest.mark.parametrize(
+    ("policy", "says"),
+    [
+        ({"d:none": "open"}, "names no ref of the record"),
+        ({"t:state.nofield": "open"}, "names a field the record's shape does not hold"),
+        ({"t:mail/body.x": "open"}, "names a field the record's shape does not hold"),
+        ({"T:x": "open"}, "is not a ref"),
+        ({'t:mail/body["a"]': "open"}, "has a grounded bracket"),
+        ({1: "open"}, "is not a string"),
+        ({"t:state": "secret"}, "not open, identifier or content"),
+        ({"t:state": {"subject": "secret"}}, "not open, identifier or content"),
+        ({"t:state": {"nofield": "open"}}, "which is not a field there"),
+        ({"t:state": {"subject": {"x": "open"}}}, "where the record's shape is not a record"),
+        ({"d:route": {}}, "where the record's shape is not a record"),
+        ({"d:tags": {"a": "open"}}, "where the record's shape is not a record"),
+        ({"t:state": None}, "not a class name or an object"),
+        ({"t:state": ["open"]}, "is a list, where the record's shape is no mapping layer"),
+        ({"d:tags": ["open", "open"]}, "is a list, where the record's shape is no mapping layer"),
+        ({"t:state": 1}, "not a class name or an object"),
+        (["t:state"], "not a mapping"),
+        (None, "not a mapping"),
+    ],
+)
+def test_a_policy_of_another_form_or_naming_what_the_record_lacks_is_refused(
+    policy: Any, says: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(says)):
+        redact(read(fresh(NORMAL_9)), ROOT, policy)
+
+
+class OddKey(str):
+    """A key equal to nothing but itself, so a dict holds it beside its string data."""
+
+    __slots__ = ()
+
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    def __hash__(self) -> int:
+        return id(self)
+
+
+def test_a_policy_with_two_keys_of_one_string_data_is_refused() -> None:
+    policy = {OddKey("t:state"): "open", "t:state": "content"}
+    with pytest.raises(ValueError, match="two keys of the string data 't:state'"):
+        redact(read(fresh(NORMAL_9)), ROOT, policy)
+
+
+@pytest.mark.parametrize("first", [0, 1], ids=["subclass first", "str first"])
+def test_a_policy_object_with_two_fields_of_one_string_data_is_refused(first: int) -> None:
+    keys = [OddKey("subject"), "subject"]
+    fields = {keys[first]: "open", keys[1 - first]: "content"}
+    with pytest.raises(ValueError, match="at 't:state' has two keys of the string data 'subject'"):
+        redact(read(fresh(NORMAL_9)), ROOT, {"t:state": fields})
+
+
+def test_a_policy_may_be_any_mapping() -> None:
+    record = read(fresh(NORMAL_9))
+    proxy = types.MappingProxyType({"t:state": types.MappingProxyType({"subject": "open"})})
+    assert view(record, policy=proxy) == view(record, policy={"t:state": {"subject": "open"}})
+
+
+def test_a_tuple_at_a_mapping_layer_is_refused() -> None:
+    with pytest.raises(ValueError, match="at 'd:tags' is <tuple>, not a class name or an object"):
+        redact(read(fresh(NORMAL_9)), ROOT, {"d:tags": ("open",)})
+
+
+def test_two_policies_over_one_record_share_no_digest() -> None:
+    record = read(fresh(NORMAL_9))
+    plain, opened = view(record), view(record, policy={"q:spam": "open"})
+    assert digests_in(plain)
+    assert digests_in(opened)
+    assert not digests_in(plain) & digests_in(opened)
+    assert view(record, policy={"q:spam": "open"}) == opened
+    # A policy naming what the default gives is the policy the default applies: one key.
+    assert view(record, policy={"d:route": "content"}) == plain
+
+
+def test_a_policy_that_digests_differently_changes_the_key_of_every_digest() -> None:
+    record = read(fresh(NORMAL_9))
+    plain = view(record)
+    identifier = view(record, policy={"q:spam": "identifier"})
+    # Each digest is of the same value, under another key.
+    assert plain["log"][4]["value"] != identifier["log"][4]["value"]
+    assert identifier["log"][4]["value"] == digest("text of the mail", identifier)
+    assert identifier["log"][8]["value"] == digest(ANSWER, identifier)
+
+
+# ---------------------------------------------------------------------------------------------
+# A record before format 9: its stored class trees are a floor under the policy
+
+
+@pytest.mark.parametrize("log", [NORMAL, NORMAL_8], ids=["format 1", "format 8"])
+def test_an_empty_policy_over_a_stored_class_tree_leaves_no_data_in_clear(
+    log: list[dict[str, Any]],
+) -> None:
+    record = read(fresh(log))
+    out = view(record)
+    redacted_log = out["log"]
+
+    def d(value: Any) -> str:
+        return digest(value, out)
+
+    assert out["applied"] == {
+        ref: filled(shape_of(tree), "content") for ref, tree in SETTINGS["classes"].items()
+    }
+    assert redacted_log[:2] == record.log[:2]  # the design and settings items are open
+    assert redacted_log[2]["value"] == {"subject": d("hello"), "to": d("dana@example.com")}
+    assert redacted_log[4]["value"] == d("text of the mail")
+    assert redacted_log[5]["value"] == d("hello")
+    assert redacted_log[7]["prompt"] == d("Is this spam?")
+    assert redacted_log[8]["value"] == d(ANSWER)  # the stored open does not open it
+    assert redacted_log[9]["value"] == d("archive")
+    assert redacted_log[10]["value"] == d([{"a": "x"}, None])
+    assert not [
+        leaf
+        for item in redacted_log
+        if item["item"] == "entry"
+        for leaf in clear_leaves(item.get("value"))
+    ]
+
+
+def clear_leaves(value: Any) -> list[Any]:
+    """The leaves of a value, field by field and member by member, that are neither a null nor
+    a keyed digest."""
+    if isinstance(value, dict):
+        members = cast("dict[str, Any]", value)
+        return [leaf for v in members.values() for leaf in clear_leaves(v)]
+    if isinstance(value, list):
+        return [leaf for v in cast("list[Any]", value) for leaf in clear_leaves(v)]
+    if value is None or (isinstance(value, str) and DIGEST.fullmatch(value)):
+        return []
+    return [value]
+
+
+@pytest.mark.parametrize("log", [NORMAL, NORMAL_8], ids=["format 1", "format 8"])
+def test_a_policy_opens_only_where_the_stored_class_tree_is_open_too(
+    log: list[dict[str, Any]],
+) -> None:
+    record = read(fresh(log))
+    policy = {"q:spam": "open", "d:route": "open", "t:state": "open", "t:mail/body": "open"}
+    out = view(record, policy=policy)
+    applied = out["applied"]
+    assert (applied["q:spam"], applied["d:route"]) == ("open", "open")  # both open
+    assert applied["t:mail/body"] == "content"  # the stored content holds
+    assert applied["t:state"] == {"subject": "content", "to": "identifier"}
+    assert applied["d:tags"] == ["content"]  # named nothing: content over the stored open
+    assert out["log"][8]["value"] == ANSWER
+    assert out["log"][9]["value"] == "archive"
+    assert out["log"][4]["value"] == digest("text of the mail", out)
+
+
+def test_a_malformed_stored_class_tree_no_entry_is_held_to_is_content() -> None:
+    log = fresh(NORMAL[:3])
+    log[1]["classes"]["d:unused"] = "secret"
+    log[1]["providers"]["d:unused"] = "other"
+    out = view(read(log))
+    assert out["applied"]["d:unused"] == "content"
+    with pytest.raises(ValueError, match="where the record's shape is not a record"):
+        redact(read(log), ROOT, {"d:unused": {"a": "open"}})
+
+
+@pytest.mark.parametrize("log", [NORMAL, NORMAL_8], ids=["format 1", "format 8"])
+def test_a_policy_digests_more_than_a_stored_class_tree_never_less(
+    log: list[dict[str, Any]],
+) -> None:
+    record = read(fresh(log))
+    policy = {
+        "t:mail/body": "open",  # stored content: not opened
+        "q:spam": "content",  # stored open: digested
+        "d:route": "open",  # stored open: opened
+        "t:state": {"subject": "identifier", "to": "open"},
+    }
+    out = view(record, policy=policy)
+    applied = out["applied"]
+    assert applied["t:mail/body"] == "content"
+    assert applied["q:spam"] == "content"
+    # content is above identifier, and the stored identifier above open.
+    assert applied["t:state"] == {"subject": "content", "to": "identifier"}
+    assert applied["d:route"] == "open"
+    assert out["log"][4]["value"] == digest("text of the mail", out)
+    assert out["log"][8]["value"] == digest(ANSWER, out)
+    assert out["log"][9]["value"] == "archive"
+
+
+@pytest.mark.parametrize("log", [NORMAL, NORMAL_8], ids=["format 1", "format 8"])
+def test_the_applied_policy_of_a_stored_class_tree_applies_itself(
+    log: list[dict[str, Any]],
+) -> None:
+    record = read(fresh(log))
+    out = view(record, policy={"d:tags": "content", "t:state": {"to": "open"}})
+    assert out["applied"]["d:tags"] == ["content"]
+    assert out["applied"]["t:state"] == {"subject": "content", "to": "identifier"}
+    assert view(record, policy=out["applied"]) == out
+
+
+def test_the_plan_of_a_record_before_format_8_redacts_under_the_applied_trees() -> None:
+    record = read(fresh(NORMAL))
+    out = view(record)
+    plan = out["log"][12]
     assert plan["steps"][0]["arguments"] == {
-        "folder": {"literal": d("spam")},
+        "folder": {"literal": digest("spam", out)},
         "what": {"ref": "d:route"},
     }
-    assert plan["steps"][0]["requirements"] == NORMAL[12]["steps"][0]["requirements"]
+    assert plan["steps"][0]["requirements"] == [{"ref": "d:route", "value": digest("archive", out)}]
+    opened = view(record, policy={"d:route": "open"})["log"][12]  # open in the stored tree too
+    assert opened["steps"][0]["requirements"] == NORMAL[12]["steps"][0]["requirements"]
     assert (plan["reason"], plan["reply"]) == (None, None)
-    assert log[13] == NORMAL[13]
-    assert out["unhashed"] == {}
-    assert out["redacted"] == record.record_hash
-    assert set(out) == {"log", "unhashed", "redacted"}
+    assert out["log"][13] == NORMAL[13]
+    assert set(out) == {"log", "unhashed", "redacted", "applied"}
 
 
 def test_a_requirement_value_takes_its_refs_tree_in_the_plan_and_the_verdict() -> None:
     log = fresh(NORMAL)
-    log[1]["classes"]["d:route"] = "content"
     log[13] = {
         "item": "verdict",
         "kind": "refused",
@@ -506,39 +787,45 @@ def test_a_requirement_value_takes_its_refs_tree_in_the_plan_and_the_verdict() -
         ],
     }
     record = read(log)
-    out = view(record)["log"]
-    hidden = {"ref": "d:route", "value": digest("archive", record)}
-    assert out[12]["steps"][0]["requirements"] == [hidden]
-    assert out[13]["failures"][0]["requirement"] == hidden
-    assert out[13]["failures"][0]["ref"] == "d:route"
+    out = view(record)
+    hidden = {"ref": "d:route", "value": digest("archive", out)}
+    assert out["log"][12]["steps"][0]["requirements"] == [hidden]
+    assert out["log"][13]["failures"][0]["requirement"] == hidden
+    assert out["log"][13]["failures"][0]["ref"] == "d:route"
+    opened = view(record, policy={"d:route": "open"})["log"]
+    assert opened[13]["failures"][0]["requirement"] == {"ref": "d:route", "value": "archive"}
 
 
-def test_a_requirement_whose_ref_is_outside_the_grammar_is_digested_whole() -> None:
+@pytest.mark.parametrize("ref", ["garbage", "t:state.to"], ids=["outside", "field path"])
+def test_a_requirement_at_a_ref_with_no_tree_of_its_own_is_digested_whole(ref: str) -> None:
     log = fresh(NORMAL)
-    failure = {"step": 1, "requirement": {"ref": "garbage", "value": "x"}, "ref": "garbage"}
+    failure = {"step": 1, "requirement": {"ref": ref, "value": "x"}, "ref": ref}
     log[13] = {"item": "verdict", "kind": "refused", "failures": [failure]}
     record = read(log)
-    assert view(record)["log"][13]["failures"][0]["requirement"]["value"] == digest("x", record)
+    for policy in ({}, {"t:state": "open"}, {"t:state.to": "open"}):
+        out = view(record, policy=policy)
+        assert out["log"][13]["failures"][0]["requirement"]["value"] == digest("x", out)
 
 
-def test_equal_values_show_equal_digests_within_one_record() -> None:
-    log = view(read(fresh(NORMAL)))["log"]
+def test_equal_values_show_equal_digests_within_one_view() -> None:
+    log = view(read(fresh(NORMAL_9)))["log"]
     assert log[2]["value"]["subject"] == log[5]["value"]
 
 
 def test_the_key_is_the_records_own_and_one_log_has_one_key() -> None:
-    plain = read(fresh(NORMAL))
-    with_text = read(fresh(NORMAL), {"engine": "0.0.1", "reads": {"9": "t:x"}})
+    plain = read(fresh(NORMAL_9))
+    with_text = read(fresh(NORMAL_9), {"engine": "0.0.1", "reads": {"9": "t:x"}})
     assert plain.record_hash == with_text.record_hash
     assert view(plain)["log"] == view(with_text)["log"]
-    other = view(plain, bytes(32))["log"]
-    assert other[4]["value"] == digest("text of the mail", plain, bytes(32))
-    assert other[4]["value"] != view(plain)["log"][4]["value"]
+    other = view(plain, bytes(32))
+    assert other["log"][4]["value"] == digest("text of the mail", other, bytes(32))
+    assert other["log"][4]["value"] != view(plain)["log"][4]["value"]
 
 
 def test_the_redacted_view_is_refused_by_read_record() -> None:
-    with pytest.raises(InvalidRecord, match="redacted"):
-        read_record(redact(read(fresh(NORMAL)), ROOT))
+    for log in (NORMAL, NORMAL_9):
+        with pytest.raises(InvalidRecord, match="redacted"):
+            read_record(redact(read(fresh(log)), ROOT, {}))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -555,38 +842,66 @@ TREES: dict[str, Any] = {
     "d:note": "content",
     "d:deep": "open",
 }
+POLICY: dict[str, Any] = {
+    **TREES,
+    "d:map": "content",
+    "d:mapo": "open",
+    "d:mapr": {"k": "content"},
+}
+"""``TREES`` as a policy names them, with no node at a mapping layer."""
+FORMATS = [1, 9]
+"""The grain under ``POLICY``, over ``TREES`` stored as class trees in a format-1 record and
+over a format-9 record's shape trees."""
 
 
-def grain(values: dict[str, Any]) -> tuple[Record, dict[str, Any]]:
-    """A round-0 log holding each value at its ref under ``TREES``."""
-    settings = copy.deepcopy(SETTINGS)
+def grain(values: dict[str, Any], fmt: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A round-0 log holding each value at its ref under ``TREES``: the view and each value."""
+    settings = copy.deepcopy(SETTINGS_9 if fmt >= 9 else SETTINGS)
     settings["providers"] = {ref: ref[2:] for ref in TREES}
-    settings["classes"] = {"t:state": SETTINGS["classes"]["t:state"], **TREES}
-    log = [DESIGN, settings, fresh([STATE])[0]]
+    state = SETTINGS["classes"]["t:state"]
+    if fmt >= 9:
+        settings["shapes"] = {
+            "t:state": shape_of(state),
+            **{r: shape_of(t) for r, t in TREES.items()},
+        }
+        settings["policy"] = "d:words"
+    else:
+        settings["classes"] = {"t:state": state, **TREES}
+    log = [DESIGN_9 if fmt >= 9 else DESIGN, settings, fresh([STATE])[0]]
     log += [entry(ref, 0, None, values[ref]) for ref in sorted(values)]
-    record = read(log)
-    redacted = view(record)["log"]
-    return record, {item["ref"]: item.get("value") for item in redacted[3:]}
+    out = view(read(log), policy=POLICY)  # over format 1, the stored floor is the same trees
+    assert out["applied"] == {"t:state": out["applied"]["t:state"], **TREES}
+    return out, {item["ref"]: item.get("value") for item in out["log"][3:]}
 
 
-def test_a_list_or_mapping_with_no_open_and_no_record_is_one_digest() -> None:
-    record, out = grain({"d:words": ["a", None, "b"], "d:map": {"x": "y"}})
-    assert out["d:words"] == digest(["a", None, "b"], record)  # the null inside included
-    assert out["d:map"] == digest({"x": "y"}, record)
+def test_the_applied_policy_is_a_policy_that_applies_itself() -> None:
+    record = read(fresh(NORMAL_9))
+    out = view(record, policy={"t:state.subject": "open", "d:tags": ["open"]})
+    assert out["applied"]["d:tags"] == ["open"]
+    assert view(record, policy=out["applied"]) == out
 
 
-def test_any_other_list_or_mapping_is_opened() -> None:
-    record, out = grain(
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_a_list_or_mapping_with_no_open_and_no_record_is_one_digest(fmt: int) -> None:
+    view_, out = grain({"d:words": ["a", None, "b"], "d:map": {"x": "y"}}, fmt)
+    assert out["d:words"] == digest(["a", None, "b"], view_)  # the null inside included
+    assert out["d:map"] == digest({"x": "y"}, view_)
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_a_list_or_mapping_whose_tree_opens_a_value_is_opened(fmt: int) -> None:
+    view_, out = grain(
         {
             "d:recs": [{"k": "a", "n": 1}, None],
             "d:mapo": {"x": "y"},
             "d:mapr": {"x": {"k": "a"}},
             "d:nums": [1, 2, [3]],
-        }
+        },
+        fmt,
     )
 
     def d(value: Any) -> str:
-        return digest(value, record)
+        return digest(value, view_)
 
     assert out["d:recs"] == [{"k": d("a"), "n": 1}, None]
     assert out["d:mapo"] == {d("x"): "y"}
@@ -594,21 +909,29 @@ def test_any_other_list_or_mapping_is_opened() -> None:
     assert out["d:nums"] == [1, 2, [3]]
 
 
-def test_a_null_passes_under_every_class() -> None:
-    _, out = grain({"d:note": None, "d:who": None, "d:words": None})
-    assert out == {"d:note": None, "d:who": None, "d:words": None}
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_a_null_passes_under_every_class(fmt: int) -> None:
+    _, out = grain({"d:note": None, "d:who": None, "d:words": None, "d:nums": None}, fmt)
+    assert out == {"d:note": None, "d:who": None, "d:words": None, "d:nums": None}
 
 
-def test_identifier_and_content_digest_alike() -> None:
-    record, out = grain({"d:who": "dana", "d:note": "dana"})
-    assert out["d:who"] == out["d:note"] == digest("dana", record)
+def test_a_null_passes_where_the_policy_names_nothing() -> None:
+    out = view(read([*fresh(NORMAL_9[:9]), entry("d:route", 2, None, None, derivation=[])]))
+    assert out["log"][9]["value"] is None
 
 
-def test_a_value_64_deep_redacts() -> None:
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_identifier_and_content_digest_alike(fmt: int) -> None:
+    view_, out = grain({"d:who": "dana", "d:note": "dana"}, fmt)
+    assert out["d:who"] == out["d:note"] == digest("dana", view_)
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_a_value_64_deep_redacts(fmt: int) -> None:
     deep: Any = 1
     for _ in range(63):
         deep = [deep]
-    _, out = grain({"d:deep": deep})
+    _, out = grain({"d:deep": deep}, fmt)
     assert out["d:deep"] == deep
 
 
@@ -629,7 +952,7 @@ def plan_with(arguments: dict[str, Any], **members: Any) -> dict[str, Any]:
     }
 
 
-def test_a_literal_takes_the_default_of_its_json_form() -> None:
+def test_a_literal_is_content_whole_whatever_the_policy() -> None:
     arguments = {
         "text": {"literal": "spam"},
         "n": {"literal": 3},
@@ -640,20 +963,21 @@ def test_a_literal_takes_the_default_of_its_json_form() -> None:
         "bound": {"step": 1, "path": None},
     }
     record = read([*fresh(NORMAL[:12]), plan_with(arguments)])
-    out = view(record)["log"][12]["steps"][0]["arguments"]
+    for policy in ({}, {"d:route": "open", "t:state": "open"}):
+        out = view(record, policy=policy)
 
-    def d(value: Any) -> str:
-        return digest(value, record)
+        def d(value: Any, out: dict[str, Any] = out) -> str:
+            return digest(value, out)
 
-    assert out == {
-        "text": {"literal": d("spam")},
-        "n": {"literal": 3},
-        "yes": {"literal": True},
-        "none": {"literal": None},
-        "list": {"literal": [d("x"), 1, None]},
-        "object": {"literal": {d("a"): [d("x"), 2]}},
-        "bound": {"step": 1, "path": None},
-    }
+        assert out["log"][12]["steps"][0]["arguments"] == {
+            "text": {"literal": d("spam")},
+            "n": {"literal": d(3)},
+            "yes": {"literal": d(True)},
+            "none": {"literal": None},
+            "list": {"literal": d(["x", 1, None])},
+            "object": {"literal": d({"a": ["x", 2]})},
+            "bound": {"step": 1, "path": None},
+        }
 
 
 @pytest.mark.parametrize("set_", ["d:route", "t:mail/body", "a set", None])
@@ -667,10 +991,9 @@ def test_read_record_refuses_an_origin_carrying_set(set_: Any) -> None:
 
 def test_a_plans_reason_and_reply_are_content() -> None:
     plan = plan_with({}, kind="escalate", steps=[], reason="why")
-    record = read([*fresh(NORMAL[:12]), plan])
-    out = view(record)["log"][12]
-    assert out["reason"] == digest("why", record)
-    assert out["reply"] is None
+    out = view(read([*fresh(NORMAL[:12]), plan]))["log"]
+    assert out[12]["reason"] == digest("why", view(read([*fresh(NORMAL[:12]), plan])))
+    assert out[12]["reply"] is None
 
 
 UNHASHED: dict[str, Any] = {
@@ -700,14 +1023,19 @@ UNHASHED: dict[str, Any] = {
 }
 
 
-def test_unhashed_text_is_content_and_its_names_keys_and_usage_open() -> None:
+@pytest.mark.parametrize(
+    "policy", [{}, {"t:state": "open", "q:spam": "open"}], ids=["none", "open"]
+)
+def test_unhashed_text_is_content_whatever_the_policy_and_its_names_keys_and_usage_open(
+    policy: dict[str, Any],
+) -> None:
     record = read(fresh(NORMAL), copy.deepcopy(UNHASHED))
-    out = view(record)["unhashed"]
+    out = view(record, policy=policy)
 
     def d(value: Any) -> str:
-        return digest(value, record)
+        return digest(value, out)
 
-    assert out == {
+    assert out["unhashed"] == {
         "turn": UNHASHED["turn"],
         "engine": "0.0.1",
         "codec": "encode",
@@ -728,6 +1056,7 @@ def test_unhashed_text_is_content_and_its_names_keys_and_usage_open() -> None:
         "reads": {"9": d("t:secret")},
         "later": d({"a": [1]}),  # a member the engine does not know, whole
     }
+    assert out["log"][7]["prompt"] == d("Is this spam?")  # the policy never names it
 
 
 # ---------------------------------------------------------------------------------------------
@@ -750,27 +1079,30 @@ class LongKey(bytes):
 )
 def test_a_bad_root_key_is_refused_before_the_record_is_read(root: Any) -> None:
     with pytest.raises(ValueError, match="root key"):
-        redact(read(fresh(NORMAL)), root)
+        redact(read(fresh(NORMAL)), root, {})
     # The record is tested first: a non-Record with a bad key takes the record's refusal,
     # and nothing of it is read.
     with pytest.raises(ValueError, match="takes a Record"):
-        redact(Untouchable(), root)  # type: ignore[arg-type]
+        redact(Untouchable(), root, {})  # type: ignore[arg-type]
+    # The key is tested before the policy.
+    with pytest.raises(ValueError, match="root key"):
+        redact(read(fresh(NORMAL)), root, None)  # type: ignore[arg-type]
 
 
 def test_a_bytes_subclass_root_key_is_taken_by_its_bytes_alone() -> None:
     record = read(fresh(NORMAL))
-    assert redact(record, Key(ROOT)) == redact(record, ROOT)
-    assert redact(record, LongKey(ROOT)) == redact(record, ROOT)
+    assert redact(record, Key(ROOT), {}) == redact(record, ROOT, {})
+    assert redact(record, LongKey(ROOT), {}) == redact(record, ROOT, {})
     with pytest.raises(ValueError, match="root key"):
-        redact(record, LongKey(bytes(31)))
+        redact(record, LongKey(bytes(31)), {})
 
 
 @pytest.mark.parametrize("record", NOT_RECORDS, ids=["a log", "None", "untouchable"])
 def test_redact_refuses_what_is_not_a_record_with_a_good_key(record: Callable[[], Any]) -> None:
     with pytest.raises(ValueError, match="takes a Record"):
-        redact(record(), ROOT)
+        redact(record(), ROOT, {})
     with pytest.raises(ValueError, match="takes a Record"):
-        redact(object.__new__(SubRecord), ROOT)
+        redact(object.__new__(SubRecord), ROOT, {})
 
 
 # ---------------------------------------------------------------------------------------------
@@ -789,7 +1121,7 @@ def test_every_prefix_of_the_test_logs_redacts_and_escalates(name: str, n: int) 
             assert out["unhashed"]["calls"][key]["truncated"] == keyed["truncated"]
         if "warnings" in keyed:  # the binding's text, one digest
             warned = out["unhashed"]["calls"][key]["warnings"]
-            assert warned == digest(keyed["warnings"], record)
+            assert warned == digest(keyed["warnings"], out)
     assert out["redacted"] == record.record_hash
     assert out.get("hash") == (record.record_hash if record.log[0]["format"] >= 3 else None)
     assert len(out["log"]) == n
@@ -800,15 +1132,11 @@ def test_every_prefix_of_the_test_logs_redacts_and_escalates(name: str, n: int) 
 def test_a_cause_item_passes_through_and_a_design_only_record_has_nothing_digested() -> None:
     cancelled = read(fresh(LOGS["cancelled"]))
     assert view(cancelled)["log"][-1] == LOGS["cancelled"][-1]
-    assert view(read(fresh([DESIGN])))["log"] == [DESIGN]
-
-
-def test_a_redacted_turn_decide_wrote_digests_its_state() -> None:
-    loaded = loaded_with(send, name="mail")
-    record = decide_sync(loaded, {"subject": "secret"}, {}, RunSettings()).record
-    out = view(record)
-    assert out["log"][2]["value"] == {"subject": digest("secret", record)}
-    assert out["unhashed"]["engine"] == record.unhashed["engine"]
+    design_only = view(read(fresh([DESIGN])))
+    assert design_only["log"] == [DESIGN]
+    assert design_only["applied"] == {}
+    with pytest.raises(ValueError, match="names no ref of the record"):
+        redact(read(fresh([DESIGN])), ROOT, {"t:state": "open"})
 
 
 def test_a_round_item_and_a_call_item_without_prompt_pass() -> None:
@@ -820,30 +1148,44 @@ def test_a_round_item_and_a_call_item_without_prompt_pass() -> None:
     assert out[-1] == log[-1]
 
 
-def test_a_declared_class_tree_is_the_one_the_ledger_fits_and_redact_reads() -> None:
-    # The settings item carries load's tree in full, the declared tree over the default, so the
-    # ledger fits each value to it and redact digests by it.
-    classes = {"t:state": {"subject": "open"}, "d:flag": "identifier"}
-    loaded = loaded_with(send, classes=classes)
+# ---------------------------------------------------------------------------------------------
+# Turns decide wrote
+
+
+def at(record: Record, ref: str) -> int:
+    (index,) = [i for i, item in enumerate(record.log) if item.get("ref") == ref]
+    return index
+
+
+def test_a_decided_turn_holds_its_shapes_and_digests_what_the_policy_names_nothing_for() -> None:
+    loaded = loaded_with(send, name="mail")
     record = decide_sync(loaded, {"subject": "secret"}, {}, RunSettings()).record
-    assert record.log[1]["classes"]["t:state"] == {"subject": "open"}
-    assert record.log[1]["classes"]["d:flag"] == "identifier"
+    assert record.log[0]["format"] == 9
+    assert record.log[1]["shapes"]["t:state"] == {"subject": "leaf"}
+    assert "classes" not in record.log[1]
     out = view(record)
+    assert out["log"][2]["value"] == {"subject": digest("secret", out)}
+    assert out["log"][at(record, "d:flag")]["value"] == digest(False, out)  # a boolean too
+    assert out["log"][at(record, "d:act")]["value"] == digest("send", out)
+    assert out["unhashed"]["engine"] == record.unhashed["engine"]
+
+
+def test_a_decided_turns_policy_names_a_class_over_its_shapes() -> None:
+    record = decide_sync(loaded_with(send), {"subject": "secret"}, {}, RunSettings()).record
+    out = view(record, policy={"t:state": {"subject": "open"}, "d:flag": "identifier"})
     assert out["log"][2]["value"] == {"subject": "secret"}
-    (index,) = [i for i, item in enumerate(record.log) if item.get("ref") == "d:flag"]
-    assert out["log"][index]["value"] == digest(False, record)
+    assert out["log"][at(record, "d:flag")]["value"] == digest(False, out)
+    assert out["applied"]["t:state"] == {"subject": "open"}
+    assert out["applied"]["d:flag"] == "identifier"
 
 
-def test_a_decided_policy_entry_is_digested_by_its_class_and_a_marker_passes() -> None:
-    loaded = loaded_with(send, classes={"d:act": "identifier"})
-    record = decide_sync(loaded, {"subject": "hi"}, {}, RunSettings()).record
-    (index,) = [i for i, item in enumerate(record.log) if item.get("ref") == "d:act"]
-    assert view(record)["log"][index]["value"] == digest("send", record)
+def test_a_decided_policy_entry_is_digested_unless_opened_and_a_marker_passes() -> None:
+    record = decide_sync(loaded_with(send), {"subject": "hi"}, {}, RunSettings()).record
+    out = view(record)
+    assert out["log"][at(record, "d:act")]["value"] == digest("send", out)
+    assert view(record, policy={"d:act": "open"})["log"][at(record, "d:act")]["value"] == "send"
 
-    undecided = decide_sync(
-        loaded_with(requiring, classes={"d:act": "identifier"}), {"subject": "hi"}, {}
-    ).record
-    (index,) = [i for i, item in enumerate(undecided.log) if item.get("ref") == "d:act"]
-    policy_entry = undecided.log[index]
+    undecided = decide_sync(loaded_with(requiring), {"subject": "hi"}, {}).record
+    policy_entry = undecided.log[at(undecided, "d:act")]
     assert policy_entry["marker"]["kind"] == "Unavailable"
-    assert view(undecided)["log"][index] == policy_entry
+    assert view(undecided)["log"][at(undecided, "d:act")] == policy_entry

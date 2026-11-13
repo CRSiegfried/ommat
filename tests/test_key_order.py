@@ -521,7 +521,7 @@ def check_param_functions() -> dict[str, Any]:
 def test_a_document_from_format_6_writes_each_order_and_loads_back_to_its_own_hash() -> None:
     loaded = load(ordered_design())
     doc = decode(loaded.document)
-    assert doc["format"] == 10
+    assert doc["format"] == 11
     assert doc["sources"]["ask"]["payload_order"] == {"0": [1, 2, 0], "1": [1, 0]}
     assert doc["parameters"]["weights"]["order"] == {"0": [1, 0]}
     assert doc["sources"]["ask"]["provides"]["q:it"]["wording"]["order"] == {"0": [2, 1, 0]}
@@ -629,7 +629,7 @@ def test_a_documents_order_that_does_not_fit_is_refused_at_check_11() -> None:
 
 def test_a_redacted_views_order_fits_its_own_items() -> None:
     record = weights_record(load(weights_design()))
-    view = json.loads(redact(record, b"\x07" * 32))
+    view = json.loads(redact(record, b"\x07" * 32, {"t:weights": "open"}))
     held = [i for i in view["log"] if i["item"] in ("entry",)]
     assert held
     for item in held:

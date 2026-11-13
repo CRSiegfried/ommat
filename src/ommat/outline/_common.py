@@ -10,7 +10,7 @@ from typing import Any, TypeGuard, cast
 from ommat._canonical import encode, ordered, sha256_ref
 from ommat._documents import read_document
 
-OUTLINE_VERSION = 5
+OUTLINE_VERSION = 6
 CUT = 120  # prompts, warnings and long values are cut to this many characters, then "…"
 STATE = "t:state"
 STATE_NODE = "state"
