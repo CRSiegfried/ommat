@@ -16,7 +16,7 @@ from typing import Any, cast
 import pytest
 
 from designs import minimal, rule, slot, with_rule
-from ledger_logs import before_key_order, rehashed
+from ledger_logs import before_key_order, before_shapes, rehashed
 from ommat import (
     Answer,
     CallResult,
@@ -415,7 +415,7 @@ def test_the_settings_item_names_each_grounded_refs_set() -> None:
     record = decided()
     assert record.log[1]["grounded"] == {OUT: SET}
     assert record.log[1]["sets"] == {SET: None}
-    assert record.log[0]["format"] == 8
+    assert record.log[0]["format"] == 9
 
 
 def test_a_question_identity_is_one_across_candidates_and_turns() -> None:
@@ -707,16 +707,15 @@ def test_a_malformed_grounded_member_is_refused(grounded: dict[str, Any], match:
     refused(edited(decided([]), change), match)
 
 
-def test_a_grounding_set_whose_class_tree_is_no_class_name_is_refused() -> None:
+def test_a_grounding_set_whose_shape_tree_is_no_leaf_is_refused() -> None:
     def change(log: list[dict[str, Any]]) -> None:
-        log[1]["classes"][SET] = ["open"]
+        log[1]["shapes"][SET] = ["leaf"]
 
-    refused(edited(decided([]), change), "which is not null over a class name")
+    refused(edited(decided([]), change), "which is not null over a leaf")
 
 
 def test_a_format_6_grounding_set_whose_class_tree_is_no_class_name_is_refused() -> None:
-    doc = document(decided([]))
-    doc["log"][0]["format"] = 6
+    doc = before_shapes(document(decided([])), 6)
     del doc["log"][1]["sets"]
     doc["log"][1]["classes"][SET] = ["open"]
     refused(rehashed(doc), "whose class tree is not a class name")
@@ -777,8 +776,8 @@ def test_an_unhashed_grounded_ref_whose_declared_ref_is_not_grounded_is_refused(
 DIGESTED = re.compile(r'q:lamps/out\["hmac-sha256:[0-9a-f]{64}"\]')
 
 
-def redacted(record: Record) -> dict[str, Any]:
-    return cast("dict[str, Any]", decode(redact(record, ROOT)))
+def redacted(record: Record, policy: dict[str, Any] | None = None) -> dict[str, Any]:
+    return cast("dict[str, Any]", decode(redact(record, ROOT, policy or {})))
 
 
 async def unexpected(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
@@ -793,7 +792,7 @@ async def drops_first(batch: tuple[SourceCall, ...], *, seconds: float) -> CallR
 def test_redact_digests_each_candidate_inside_a_grounded_ref_under_its_sets_class() -> None:
     record = decided(STREETS[:3], binding=drops_first)
     view = redacted(record)
-    expected = {grounded_ref(OUT, s): grounded_ref(OUT, digest(s, record)) for s in STREETS[:3]}
+    expected = {grounded_ref(OUT, s): grounded_ref(OUT, digest(s, view)) for s in STREETS[:3]}
     refs = [i["ref"] for i in view["log"] if i["item"] == "entry" and i["ref"].startswith(OUT)]
     assert refs == [expected[r] for r in q_refs(record) if r != URGENT]
     assert all(DIGESTED.fullmatch(r) for r in refs)
@@ -808,17 +807,19 @@ def test_redact_digests_a_failed_calls_cause_refs() -> None:
     record = decided(STREETS[:1], binding=unexpected)
     view = redacted(record)
     (call,) = [i for i in view["log"] if i["item"] == "call"]
-    hidden = grounded_ref(OUT, digest(STREETS[0], record))
+    hidden = grounded_ref(OUT, digest(STREETS[0], view))
     assert call["outcome"]["failed"]["refs"] == [hidden, URGENT]
     entry = next(i for i in view["log"] if i.get("ref") == hidden)
     assert entry["marker"]["cause"]["refs"] == [hidden, URGENT]
 
 
 def test_redact_passes_a_grounded_ref_whose_set_is_open() -> None:
-    record = decided(STREETS[:3], load(design(classes={SET: "open"})))
-    view = redacted(record)
+    record = decided(STREETS[:3])
+    view = redacted(record, {SET: "open"})
     refs = [i["ref"] for i in view["log"] if i["item"] == "entry" and i["ref"].startswith("q:")]
     assert refs == q_refs(record)
+    (entry,) = view["unhashed"]["calls"].values()
+    assert set(entry.get("sums", {})) <= set(q_refs(record))
 
 
 @pytest.mark.filterwarnings("ignore:transcript is deprecated:DeprecationWarning")
@@ -1067,9 +1068,19 @@ def test_redact_digests_a_candidate_valued_answer_at_a_grounded_entry() -> None:
                 }
 
     back = read_record(edited(record, candidate_valued))
-    text = redact(back, ROOT).decode()
+    # Every copy of a candidate follows its set: the grounded bracket and, the answer opened,
+    # each label and probabilities key.
+    for policy in ({}, {OUT: "open"}, {SET: "identifier", OUT: "open"}):
+        text = redact(back, ROOT, policy).decode()
+        for name in STREETS[:2]:
+            assert json.dumps(name)[1:-1] not in text
+    view = redacted(back, {OUT: "open"})
+    answers = [i for i in view["log"] if i["item"] == "entry" and i["ref"].startswith(OUT + "[")]
+    assert [a["value"]["labels"][0] for a in answers] == ["other", "other"]
+    assert {a["value"]["labels"][1] for a in answers} == {digest(n, view) for n in STREETS[:2]}
+    opened = redact(back, ROOT, {SET: "open", OUT: "open"}).decode()
     for name in STREETS[:2]:
-        assert json.dumps(name)[1:-1] not in text
+        assert json.dumps(name, ensure_ascii=False)[1:-1] in opened
 
 
 def test_a_grounded_ref_with_a_field_path_is_refused() -> None:
@@ -1079,7 +1090,7 @@ def test_a_grounded_ref_with_a_field_path_is_refused() -> None:
         call = next(i for i in log if i["item"] == "call")
         call["outcome"]["failed"]["refs"][0] += ".f"
 
-    refused(edited(record, with_field), "names a field its class tree does not hold")
+    refused(edited(record, with_field), "names a field its shape tree does not hold")
 
 
 GROUNDED_REF = grounded_ref(OUT, "Elm Row")

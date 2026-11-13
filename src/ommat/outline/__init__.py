@@ -2,8 +2,8 @@
 or a program reads line by line, outside the compatibility promise while it is validated.
 
 ``design_outline(document)`` gives a design document's header, parameters, nodes by round and
-wavefront, the dependency graph's edges and the state's, groups, targets and
-classes. ``turn_outline(record_document, design_document=None)`` gives a record document round
+wavefront, the dependency graph's edges and the state's, groups and
+targets. ``turn_outline(record_document, design_document=None)`` gives a record document round
 by round, each call's provenance and each entry's value or marker, the decision and the
 escalation; with the design the record ran under, each entry also holds what its component
 declares, marked as declared since the record holds no read set, and each bound its design

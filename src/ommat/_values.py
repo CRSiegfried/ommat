@@ -30,14 +30,14 @@ deepest member."""
 MAX_DOCUMENT_DEPTH = 128
 """The deepest a document the encoder writes or a reader parses nests."""
 
-RECORD_FORMAT = 8
+RECORD_FORMAT = 9
 """The format number this engine writes into a record. It reads every record format from 1 up
 to it, each under that format's rules."""
 
 RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
 """The record formats this engine reads."""
 
-DESIGN_FORMAT = 10
+DESIGN_FORMAT = 11
 """The format number this engine writes into a design document, which changes only when a
 design rule changes, and the only design format it reads."""
 
@@ -104,6 +104,16 @@ POLICY_FORMAT = 8
 """The first record format whose turn ends at the policy's entry: its
 ``settings`` item names the ``policy``, its ``t:state`` entry may hold ``Unavailable`` at a broken
 entry, it holds no ``plan`` or ``verdict`` item, and its ``usage`` keys are the closed set."""
+
+SHAPES_FORMAT = 9
+"""The first record format whose ``settings`` item holds ``shapes``, each ref's shape tree, in
+place of ``classes``, its class tree: the redaction policy is the caller's, given to ``redact``."""
+
+SHAPE_LEAF = "leaf"
+"""The one leaf of a shape tree. A shape tree is a class tree's structure with no class: an
+object at every record, a one-member list at every mapping layer, and this string at every
+other node. It is a string, so no object or list it could be taken for, and it names no class,
+so a shape tree is never read as a class tree."""
 
 
 def string_data(value: str) -> str:

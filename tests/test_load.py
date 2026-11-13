@@ -20,7 +20,7 @@ from typing import Any, cast
 import pytest
 
 import designs
-from counting import SmallBounds, bound, counted
+from counting import SmallBounds
 from designs import full, minimal, question, rule, slot, with_rule, with_source
 from ommat import (
     Design,
@@ -44,7 +44,6 @@ from ommat._canonical import decode, encode, sha256_ref
 from ommat._design import _BUILT_BY_LOAD, UnvaluedParts, _rebuild_invalid_design
 from ommat._load import _takes_a_load, with_parameters
 from ommat._types import Interval, Label, ListOf, MappingOf, Nullable, RecordOf, Scalar, parse_type
-from ommat._values import MAX_DEPTH
 
 TESTS = Path(__file__).parent
 
@@ -70,13 +69,13 @@ def src_hash(fn: Callable[..., Any]) -> str:
 
 
 # ---------------------------------------------------------------------------------------------
-# Valid designs: the document, the hash, the graph, the providers, the classes
+# Valid designs: the document, the hash, the graph, the providers, the shapes
 
 
 def test_a_minimal_design_writes_every_member_with_its_default() -> None:
     loaded = load(minimal())
     assert decode(loaded.document) == {
-        "format": 10,
+        "format": 11,
         "name": None,
         "state": "record{}",
         "policy": "d:decision",
@@ -101,13 +100,12 @@ def test_a_minimal_design_writes_every_member_with_its_default() -> None:
         "parameters": {},
         "types": {},
         "groups": {},
-        "classes": {},
         "targets": {},
     }
     assert loaded.design_hash == sha256_ref(loaded.document)
     assert dict(loaded._graph) == {"decision": frozenset()}
     assert dict(loaded._providers) == {"d:decision": "decision"}
-    assert loaded._classes == {"t:state": {}, "d:decision": "open"}
+    assert loaded._shapes == {"t:state": {}, "d:decision": "leaf"}
 
 
 def test_the_document_is_canonical() -> None:
@@ -286,20 +284,20 @@ def test_the_provider_map_has_no_state_key() -> None:
     assert list(loaded._providers) == sorted(loaded._providers)
 
 
-def test_class_trees_are_computed_in_full_for_the_state_and_every_provided_ref() -> None:
-    assert load(full())._classes == {
-        "t:state": {"sender": {"address": "content"}, "subject": "content"},
-        "q:intent/email": "open",
-        "q:intent/tone": "open",
-        "t:lookup": "content",
-        "t:profile": {"age": "open", "name": "content"},
-        "d:act": "open",
-        "d:route": "open",
-        "d:score": "open",
+def test_shape_trees_are_computed_for_the_state_and_every_provided_ref() -> None:
+    assert load(full())._shapes == {
+        "t:state": {"sender": {"address": "leaf"}, "subject": "leaf"},
+        "q:intent/email": "leaf",
+        "q:intent/tone": "leaf",
+        "t:lookup": "leaf",
+        "t:profile": {"age": "leaf", "name": "leaf"},
+        "d:act": "leaf",
+        "d:route": "leaf",
+        "d:score": "leaf",
     }
 
 
-def test_class_trees_through_lists_mappings_nullables_and_definitions() -> None:
+def test_shape_trees_through_lists_mappings_nullables_and_definitions() -> None:
     kind = t.record(text=t.string, blob=t.bytes_, n=t.nullable(t.integer()))
     design = with_source(
         minimal(types={"item": kind}),
@@ -307,15 +305,20 @@ def test_class_trees_through_lists_mappings_nullables_and_definitions() -> None:
         Source(
             provides={
                 "t:list": t.list_("item"),
-                "t:map": t.mapping(t.list_(t.label("a"))),
+                "t:map": t.mapping("item"),
+                "t:deep": t.mapping(t.list_(t.mapping(t.integer()))),
+                "t:labels": t.mapping(t.list_(t.label("a"))),
                 "t:maybe": t.nullable(t.string),
             }
         ),
     )
-    classes = load(design)._classes
-    assert classes["t:list"] == {"blob": "content", "n": "open", "text": "content"}
-    assert classes["t:map"] == ["open"]
-    assert classes["t:maybe"] == "content"
+    shapes = load(design)._shapes
+    assert shapes["t:list"] == {"blob": "leaf", "n": "leaf", "text": "leaf"}
+    leaves = {"blob": "leaf", "n": "leaf", "text": "leaf"}
+    assert shapes["t:map"] == [leaves]  # a mapping layer is a one-member list
+    assert shapes["t:deep"] == [["leaf"]]  # the list between two mapping layers has no node
+    assert shapes["t:labels"] == ["leaf"]
+    assert shapes["t:maybe"] == "leaf"
 
 
 def test_question_slots_become_needs_but_not_document_needs() -> None:
@@ -387,7 +390,7 @@ def test_a_refs_type_naming_a_definition_under_a_mapping_and_a_field_is_held_res
 
 def test_the_state_may_be_a_definitions_name() -> None:
     design = minimal(state="envelope", types={"envelope": t.record(subject=t.string)})
-    assert load(design)._classes["t:state"] == {"subject": "content"}
+    assert load(design)._shapes["t:state"] == {"subject": "leaf"}
 
 
 def test_payloads_and_leaf_values_are_held_as_decoded() -> None:
@@ -447,7 +450,7 @@ def test_a_changed_word_changes_the_hash() -> None:
 _HASH_PROBE = (
     "import designs; from ommat import load, InvalidDesign\n"
     "print(load(designs.full()).design_hash)\n"
-    "print(load(designs.gated()).design_hash, sorted(load(designs.gated())._classes.items()))\n"
+    "print(load(designs.gated()).design_hash, sorted(load(designs.gated())._shapes.items()))\n"
     "print(load(designs.bounded()).design_hash, list(load(designs.bounded())._grid.items()))\n"
     "try:\n"
     "    load(designs.ungated())\n"
@@ -878,7 +881,6 @@ FORMS: list[Design] = [
     minimal(parameters=None),
     minimal(types=None),
     minimal(groups=None),
-    minimal(classes=None),
     minimal(name=1),
     minimal(policy=1),
     minimal(sources={"s": 1}),
@@ -1556,7 +1558,7 @@ def test_the_cost_sum_is_exact_not_a_float_sum() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# A function when, a source requirement and a declared classes block
+# A function when and a source requirement
 
 
 def gate(**changes: Any) -> Design:
@@ -1662,66 +1664,6 @@ def test_a_source_requirement_each_of_whose_values_can_hold_loads(design: Design
     load(design)
 
 
-def test_a_declared_object_overrides_its_fields_and_leaves_the_rest_their_default() -> None:
-    loaded = load(full(classes={"t:state": {"subject": "identifier"}}))
-    assert loaded._classes["t:state"] == {
-        "sender": {"address": "content"},
-        "subject": "identifier",
-    }
-    assert decode(loaded.document)["classes"] == {"t:state": {"subject": "identifier"}}
-
-
-def test_a_class_name_over_a_record_covers_every_field_beneath_it() -> None:
-    loaded = load(full(classes={"t:profile": "identifier", "t:state": {"sender": "open"}}))
-    assert loaded._classes["t:profile"] == {"age": "identifier", "name": "identifier"}
-    assert loaded._classes["t:state"] == {"sender": {"address": "open"}, "subject": "content"}
-
-
-def test_a_d_key_and_an_empty_object_override_the_default() -> None:
-    loaded = load(full(classes={"d:route": "content", "t:state": {}}))
-    assert loaded._classes["d:route"] == "content"
-    assert loaded._classes["d:score"] == "open"
-    assert loaded._classes["t:state"] == load(full())._classes["t:state"]
-
-
-def test_a_declared_tree_through_list_mapping_and_null_layers_and_a_definition() -> None:
-    kind = t.record(text=t.string, n=t.nullable(t.integer()))
-    provides = {
-        "t:list": t.list_("item"),
-        "t:map": t.mapping("item"),
-        "t:maybe": t.nullable("item"),
-        "t:deep": t.mapping(t.list_(t.mapping(t.integer()))),
-    }
-    design = with_source(minimal(types={"item": kind}), "s", Source(provides))
-    classes = {
-        "t:list": {"text": "identifier"},
-        "t:map": {"n": "content"},
-        "t:maybe": "identifier",
-        "t:deep": "content",
-    }
-    loaded = load(dataclasses.replace(design, classes=classes))
-    assert loaded._classes["t:list"] == {"n": "open", "text": "identifier"}
-    assert loaded._classes["t:map"] == [{"n": "content", "text": "content"}]
-    assert loaded._classes["t:maybe"] == {"n": "identifier", "text": "identifier"}
-    assert loaded._classes["t:deep"] == [["content"]]
-
-
-def test_a_declared_tree_is_written_as_plain_data_and_hashed() -> None:
-    nested = MappingProxyType({"sender": MappingProxyType({"address": "identifier"})})
-    loaded = load(full(classes={"t:state": nested}))
-    assert decode(loaded.document)["classes"] == {"t:state": {"sender": {"address": "identifier"}}}
-    plain = load(full(classes={"t:state": {"sender": {"address": "identifier"}}}))
-    assert plain.design_hash == loaded.design_hash != load(full()).design_hash
-
-
-def test_a_later_change_to_a_declared_tree_changes_no_loaded_design() -> None:
-    tree: dict[str, Any] = {"subject": "identifier"}
-    loaded = load(full(classes={"t:state": tree}))
-    tree["subject"] = "open"
-    assert decode(loaded.document)["classes"] == {"t:state": {"subject": "identifier"}}
-    assert loaded._classes["t:state"]["subject"] == "identifier"
-
-
 @pytest.mark.parametrize(
     "design",
     [
@@ -1748,14 +1690,9 @@ def test_true_and_1_are_not_a_repeat() -> None:
     "design",
     [
         gate(requirement=SourceRequirement("d:none", ["a"])),
-        full(classes={"q:intent/tone": "open"}),
-        full(classes={'t:lookup["a"]': "open"}),
-        full(classes={"t:state.subject": "open"}),
-        full(classes={"d:none": "open"}),
-        full(classes={"t:none": "open"}),
     ],
 )
-def test_check_3_a_requirement_ref_and_a_classes_key(design: Design) -> None:
+def test_check_3_a_requirement_ref(design: Design) -> None:
     only(design, 3)
 
 
@@ -1787,11 +1724,9 @@ def test_check_5_a_cycle_through_a_source_requirements_edge() -> None:
         gate(requirement=SourceRequirement("d:Route", ["yes"])),
         gate(requirement=SourceRequirement("d:route.f", ["yes"])),
         gate(requirement=SourceRequirement("d:none.f", ["yes"])),
-        full(classes={"T:x": "open"}),
-        full(classes={"d:": "open"}),
     ],
 )
-def test_check_7_a_requirement_ref_and_a_classes_key(design: Design) -> None:
+def test_check_7_a_requirement_ref(design: Design) -> None:
     only(design, 7)
 
 
@@ -1828,13 +1763,6 @@ def test_check_9_names_each_value_that_cannot_hold() -> None:
     assert {f.names for f in failures} == {("d:route", "s")}
 
 
-def too_deep(depth: int) -> dict[str, Any]:
-    tree: dict[str, Any] = {}
-    for _ in range(depth):
-        tree = {"a": tree}
-    return tree
-
-
 @pytest.mark.parametrize(
     "design",
     [
@@ -1848,35 +1776,10 @@ def too_deep(depth: int) -> dict[str, Any]:
         gate(requirement=SourceRequirement(1, ["yes"])),  # type: ignore[arg-type]
         gate(requirement=needs_route(float("nan"))),
         gate(requirement=needs_route({"a", "b"}, "yes")),
-        full(classes={"t:state": "secret"}),
-        full(classes={"t:state": ["open"]}),
-        full(classes={"t:state": {"subject": ["open"]}}),
-        full(classes={"t:state": {1: "open"}}),
-        full(classes={"t:state": None}),
-        full(classes=["t:state"]),
-        full(classes={"t:state": too_deep(70)}),
-        full(classes={"t:lookup": {"x": "open"}}),
-        full(classes={"t:state": {"subject": {}}}),
-        full(classes={"t:state": {"sender": {"address": {"x": "open"}}}}),
-        full(classes={"t:state": {"nofield": "open"}}),
-        full(classes={"d:route": {}}),
     ],
 )
-def test_check_10_a_when_a_source_requirement_and_a_class_tree(design: Design) -> None:
+def test_check_10_a_when_and_a_source_requirement(design: Design) -> None:
     only(design, 10)
-
-
-def test_check_10_names_where_a_tree_does_not_conform() -> None:
-    design = full(classes={"t:state": {"sender": {"address": {}, "x": "open"}}})
-    assert [f.message for f in only(design, 10)] == [
-        'the class tree of "t:state" holds an object at "sender.address", where its type is '
-        "not a record",
-        'the class tree of "t:state" names "x" at "sender", which is not a field of the record',
-    ]
-
-
-def test_check_10s_tree_conformance_does_not_run_while_check_3_fails() -> None:
-    assert checks(full(classes={"t:state": {"nofield": "open"}, "d:none": "open"})) == {3}
 
 
 def test_a_refused_when_or_requirement_leaves_its_source_standing() -> None:
@@ -1887,11 +1790,10 @@ def test_a_refused_when_or_requirement_leaves_its_source_standing() -> None:
     assert checks(gate(requirement=SourceRequirement("d:none", "x"))) == {10}  # type: ignore[arg-type]
 
 
-def test_the_held_back_design_fails_only_check_9_and_check_10s_tree_test() -> None:
+def test_the_held_back_design_fails_only_check_9() -> None:
     found = refused(designs.held_back())
-    assert {f.check for f in found} == {9, 10}
-    assert all(f.message.startswith('the class tree of "t:state"') for f in found if f.check == 10)
-    assert len([f for f in found if f.check == 9]) == 2
+    assert {f.check for f in found} == {9}
+    assert len(found) == 2
 
 
 def test_an_invalid_designs_pickled_state_leaves_out_its_failures() -> None:
@@ -1911,7 +1813,7 @@ def test_an_invalid_designs_pickled_state_leaves_out_its_failures() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Check 10: a type's size with its definitions resolved, and the class trees' sum
+# Check 10: a type's size with its definitions resolved, and the shape trees' sum
 
 _BOUND = 2**20
 _OVER = "the type spells more than 2^20 code points with its definitions resolved"
@@ -1948,13 +1850,13 @@ def test_a_modest_chain_loads_and_resolves_each_definition_once() -> None:
     assert isinstance(state, RecordOf)
     x, y = (ft for _, ft in state.fields)
     assert x is y  # one resolution of t11, standing at each use
-    tree: Any = loaded._classes["t:state"]
+    tree: Any = loaded._shapes["t:state"]
     assert tree["x"] == tree["y"]
     tree = tree["x"]
     for _ in range(11):
         assert tree["a"] == tree["b"]
         tree = tree["a"]
-    assert tree == {"a": "content", "b": "content"}
+    assert tree == {"a": "leaf", "b": "leaf"}
 
 
 def _long(size: int) -> str:
@@ -1996,7 +1898,7 @@ def test_check_10_names_each_declaration_whose_type_is_over_the_bound(where: str
 
 
 def _summed(state_field: str) -> Design:
-    """A design whose class trees' types sum to 2^20 code points with ``state_field`` ``ab``:
+    """A design whose shape trees' types sum to 2^20 code points with ``state_field`` ``ab``:
     the state, ``t:x``, the answer's six and the policy's ``number``."""
     big = _long((_BOUND - len("record{ab: }") - len("answer") - len("number")) // 2)
     policy_rule = dataclasses.replace(designs.DECISION, outputs=t.number())
@@ -2010,7 +1912,7 @@ def _summed(state_field: str) -> Design:
     )
 
 
-def test_check_10_bounds_the_class_trees_types_summed_naming_every_ref() -> None:
+def test_check_10_bounds_the_provided_refs_types_summed_naming_every_ref() -> None:
     def total(design: Design) -> int:
         big = design.types["big"]
         return len(design.state) - 3 + len(big) + len(big) + len("answer") + len("number")
@@ -2026,7 +1928,7 @@ def test_check_10_bounds_the_class_trees_types_summed_naming_every_ref() -> None
     )
 
 
-def test_the_class_trees_sum_leaves_out_a_type_check_10_already_refused() -> None:
+def test_the_shape_trees_sum_leaves_out_a_type_check_10_already_refused() -> None:
     design = with_source(
         minimal(state="record{a: string}"), "s", Source({"t:x": _long(_BOUND + 1)})
     )
@@ -2036,13 +1938,6 @@ def test_the_class_trees_sum_leaves_out_a_type_check_10_already_refused() -> Non
 
 # ---------------------------------------------------------------------------------------------
 # Check 10: each value of a Design within the value domain's size bounds
-
-
-def _shared_tree(n: int) -> Any:
-    tree: Any = "open"
-    for _ in range(n):
-        tree = {"a": tree, "b": tree}
-    return tree
 
 
 def test_check_10_size_tests_every_value_of_a_design_where_it_stands(
@@ -2055,38 +1950,6 @@ def test_check_10_size_tests_every_value_of_a_design_where_it_stands(
     leaf = Parameter("list<string>", rows)
     (failure,) = only(minimal(parameters={"p": leaf}), 10)
     assert failure.message == 'parameter "p"\'s value is outside the value domain'
-
-
-def test_check_10_refuses_a_shared_class_tree_fast(small_bounds: SmallBounds) -> None:
-    design = minimal(state="record{a: string, b: string}", classes={"t:state": _shared_tree(60)})
-    with counted() as n:
-        (failure,) = only(design, 10)
-    assert n[0] < 4 * bound()  # the copy stops past the bound
-    assert failure.message == 'the class tree of "t:state" is outside the value domain'
-    # A shared tree within the bounds is read once and stands at each place.
-    small = minimal(
-        state="record{a: record{a: string, b: string}, b: record{a: string, b: string}}"
-    )
-    loaded = load(dataclasses.replace(small, classes={"t:state": _shared_tree(2)}))
-    assert loaded._classes["t:state"] == _shared_tree(2)
-
-
-def test_check_10_refuses_a_class_tree_too_deep_where_a_shared_member_stands() -> None:
-    shared = {"a": "open"}
-    deep: Any = shared
-    for _ in range(MAX_DEPTH - 1):
-        deep = {"a": deep}
-    (failure,) = only(minimal(classes={"t:state": {"a": shared, "b": deep}}), 10)
-    assert "is not a class name or an object of trees" in failure.message
-    looped: dict[str, Any] = {}
-    looped["a"] = looped
-    (failure,) = only(minimal(classes={"t:state": looped}), 10)
-    assert "is not a class name or an object of trees" in failure.message
-
-
-def test_check_10_counts_a_class_trees_keys_as_values(small_bounds: SmallBounds) -> None:
-    (failure,) = only(minimal(classes={"t:state": {"k" * 257: "open"}}), 10)
-    assert failure.message == 'the class tree of "t:state" is outside the value domain'
 
 
 # ---------------------------------------------------------------------------------------------

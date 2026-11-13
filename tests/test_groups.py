@@ -66,7 +66,7 @@ def test_an_earlier_format_is_refused_at_check_11_naming_it(earlier: int) -> Non
     doc["groups"] = {"intents": ["q:intent/email", "q:intent/tone"]}
     found = failures(encode(doc, 128))
     assert [(c, n) for c, n, _ in found] == [(11, ())]
-    assert f"format {earlier} is not 10" in found[0][2]
+    assert f"format {earlier} is not 11" in found[0][2]
 
 
 @pytest.mark.parametrize(

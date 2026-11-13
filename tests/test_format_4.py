@@ -219,13 +219,13 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
     assert any("t:c/size" in line for line in lines)
 
 
-GOLDEN_DESIGN = "sha256:c9170d5a65f09d9dfb23829b1ef597b5cfbe83c1f77a50ce519d0ac783bfb0f6"
-GOLDEN_RECORD = "sha256:d78b16f8e3cc2dfe42c4cf8a29653c2f7b75bd79102d136455f6ee2ac25b61ee"
+GOLDEN_DESIGN = "sha256:e25116359956ed3601d67d1e7d2c31007a4ad9bbfd0ddc9f1936a98a0d8ab9d7"
+GOLDEN_RECORD = "sha256:632094f77fa6246bbda0c6f2b18286d7a19aa86a8c3721956d856e6c50b0fc15"
 
 
 def test_the_golden_per_ref_record() -> None:
     record = per_ref_turn()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 8, "helpers": 4}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 9, "helpers": 4}
     assert record.log[1]["policy"] == "d:report"
     assert entry(record, "d:report")["value"] == "value, marker, marker"
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)
@@ -293,7 +293,7 @@ def test_check_11_refuses_the_stored_format_3_design_naming_its_format() -> None
     with pytest.raises(InvalidDesign) as info:
         load((FORMAT_3 / "design.json").read_bytes())
     assert [f.check for f in info.value.failures] == [11]
-    assert "the document's format 3 is not 10" in str(info.value)
+    assert "the document's format 3 is not 11" in str(info.value)
 
 
 def test_a_format_3_record_reads_back_to_its_own_hash() -> None:

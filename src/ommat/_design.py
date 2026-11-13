@@ -13,7 +13,7 @@ given, so a caller who changes those before load changes the design load sees.
 
 import enum
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import InitVar, dataclass, field
+from dataclasses import KW_ONLY, InitVar, dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
@@ -472,18 +472,19 @@ class Design:
 
     ``policy`` is the ``d:`` ref of the rule whose estimate is the decision. ``sources``,
     ``rules``, ``types`` and ``groups`` map each declared name to its declaration;
-    ``parameters`` maps each leaf's full path to a ``Parameter``; ``classes`` maps a ref to its
-    class tree; ``targets`` maps each target id to a ``Target``; each defaults to empty.
+    ``parameters`` maps each leaf's full path to a ``Parameter``; ``targets`` maps each target id
+    to a ``Target``; each defaults to empty. ``state`` and ``policy`` are positional; every
+    other field is keyword-only, so a field added or removed never rebinds a positional argument.
     """
 
     state: str
     policy: str
+    _: KW_ONLY
     sources: Mapping[str, Source] = field(default_factory=_empty)
     rules: Mapping[str, Rule | Table] = field(default_factory=_empty)
     parameters: Mapping[str, Parameter] = field(default_factory=_empty)
     types: Mapping[str, str] = field(default_factory=_empty)
     groups: Mapping[str, Group] = field(default_factory=_empty)
-    classes: Mapping[str, Any] = field(default_factory=_empty)
     name: str | None = None
     targets: Mapping[str, Target] = field(default_factory=_empty)
 
@@ -502,7 +503,6 @@ class Design:
             parameters=_mapping(self.parameters),
             groups=_mapping(self.groups),
             types=types,
-            classes=_mapping(self.classes),
             name=_string(self.name),
             targets=_mapping(self.targets),
         )
@@ -650,7 +650,7 @@ class LoadedDesign:
     document, so that its leaf values are in document form, ``bytes`` as base64url, rather than
     the live form a caller's ``Design`` holds; and ``_unvalued``, the document's
     ``UnvaluedParts``, shared with each design ``with_parameters`` builds from this one. The
-    class trees, payloads and leaf values are decoded afresh at each read, so nothing a caller
+    shape trees, payloads and leaf values are decoded afresh at each read, so nothing a caller
     changes after load reaches a turn; ``_unvalued``'s decoded sources, decoded once, are
     shared by every design built from this one and are read-only by convention.
     """
@@ -658,7 +658,6 @@ class LoadedDesign:
     __slots__ = (
         "_callables",
         "_candidate_sets",
-        "_classes_bytes",
         "_design",
         "_document",
         "_document_form",
@@ -681,6 +680,7 @@ class LoadedDesign:
         "_read_leaves",
         "_reads",
         "_requirement_bytes",
+        "_shapes_bytes",
         "_table_bytes",
         "_types",
         "_unvalued",
@@ -701,7 +701,7 @@ class LoadedDesign:
     _label_at: Mapping[str, int]
     _candidate_sets: Mapping[str, str | None]
     _grounded: Mapping[str, str]
-    _classes_bytes: bytes
+    _shapes_bytes: bytes
     _payload_bytes: Mapping[str, bytes]
     _leaf_bytes: Mapping[str, bytes]
     _requirement_bytes: Mapping[str, frozenset[bytes]]
@@ -738,9 +738,9 @@ class LoadedDesign:
         return self._document
 
     @property
-    def _classes(self) -> dict[str, Any]:
-        """Each ref's class tree in full, keyed by ``t:state`` and every provided ref."""
-        return cast("dict[str, Any]", decode(self._classes_bytes))
+    def _shapes(self) -> dict[str, Any]:
+        """Each ref's shape tree, keyed by ``t:state`` and every provided ref."""
+        return cast("dict[str, Any]", decode(self._shapes_bytes))
 
     def _payload(self, source: str) -> Any:
         """A source's payload as decoded from the document."""

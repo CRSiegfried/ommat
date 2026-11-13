@@ -516,7 +516,7 @@ const basename = p => String(p || '').split('/').pop();
 const num = x => typeof x === 'number' ? String(+x.toPrecision(6)) : String(x);
 
 /* ---------- data ---------- */
-const OUTLINE_VERSION = 5;
+const OUTLINE_VERSION = 6;
 let DATA = {sets: []};
 try {
   const raw = $('lens-data').textContent.trim();
@@ -569,7 +569,7 @@ const rootOf = T => { const c = mainChain(lineage(T)); return c.length ? c[c.len
 function prepareSet(set) {
   const all = set.docs || [];
   const drawable = d => d && d.outline && (d.outline.kind === 'design' || d.outline.kind === 'turn');
-  // The page draws outline version 5 alone; another version is counted and left out.
+  // The page draws outline version 6 alone; another version is counted and left out.
   set.other = all.filter(d => drawable(d) && d.outline.outline_version !== OUTLINE_VERSION).length;
   set.docs = all.filter(d => drawable(d) && d.outline.outline_version === OUTLINE_VERSION);
   set.designs = set.docs.filter(d => d.outline.kind === 'design');
@@ -1674,7 +1674,6 @@ function drawDetail(host = $('detail'), nodeId = S.node) {
     h += dl([['types', (D.types || []).map(x => `${x.name} = ${x.type.text}`).join('; ')],
       ['groups', (D.groups || []).map(g => `${g.name}: ${g.refs.join(', ')} (${[].concat(g.reason).join(', ')})`).join('; ')],
       ['targets', (D.targets || []).map(x => `${x.id}: ${x.statement}${x.values_text ? ' [' + x.values_text + ']' : ''}`).join('; ')],
-      ['classes', (D.classes || []).map(c => `${c.ref} ${c.class}`).join('; ')],
       ['not drawn', (D.other_members || []).join(', ')]]);
     host.innerHTML = h; return;
   }

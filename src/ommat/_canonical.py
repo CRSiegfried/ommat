@@ -371,22 +371,38 @@ def _expand32(prk: bytes, info: bytes) -> bytes:
     return hmac.digest(prk, info + b"\x01", "sha256")
 
 
-def turn_key(root_key: bytes, record_hash: str) -> bytes:
-    """The per-turn key: HKDF-Expand under the root key, the record hash as the info.
+def turn_key(root_key: bytes, record_hash: str, policy_hash: str) -> bytes:
+    """The per-turn key of one export: HKDF-Expand under the root key, its info the record
+    hash and then the policy hash, each as ASCII. Each hash is ``sha256:`` and 64 hex
+    characters, so the info is fixed-length and names one pair; the policy hash is the hash of
+    the applied policy a redacted view holds under ``applied``, so two exports of one record
+    under different policies share no digest, and a verifier given the root key recomputes the
+    key from the view alone.
 
     Raises ``ValueError`` unless ``root_key`` is an instance of ``bytes`` of length 32,
-    before anything else is read.
+    before anything else is read; then ``_CanonicalError`` for a record hash, and after it a
+    policy hash, that is not a string of ``sha256:`` and 64 hex.
     """
     # By its type and bytes' own length, so no override of a subclass runs.
     if not issubclass(type(root_key), bytes) or bytes.__len__(root_key) != 32:  # pyright: ignore[reportUnnecessaryIsInstance]
         raise ValueError("the root key is not an instance of bytes of length 32")
     key = bytes.__getitem__(root_key, slice(None))  # its data, as exactly bytes
-    if not issubclass(type(record_hash), str):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise _CanonicalError(f"record hash of type {type_name(record_hash)} is not a string")
-    text = string_data(record_hash)
-    if not _SHA256_REF.fullmatch(text):
-        raise _CanonicalError(f"record hash {clipped(text)} is not sha256: and 64 hex")
-    return _expand32(key, text.encode("ascii"))
+    info = b"".join(
+        _hash_text(text, what)
+        for text, what in ((record_hash, "record hash"), (policy_hash, "policy hash"))
+    )
+    return _expand32(key, info)
+
+
+def _hash_text(text: object, what: str) -> bytes:
+    """A hash string's ASCII bytes, read by its string data; ``_CanonicalError`` for another
+    value or a string that is not ``sha256:`` and 64 hex."""
+    if not issubclass(type(text), str):
+        raise _CanonicalError(f"{what} of type {type_name(text)} is not a string")
+    data = string_data(cast(str, text))
+    if not _SHA256_REF.fullmatch(data):
+        raise _CanonicalError(f"{what} {clipped(data)} is not sha256: and 64 hex")
+    return data.encode("ascii")
 
 
 def keyed_digest(key: bytes, data: bytes) -> str:

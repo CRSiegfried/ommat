@@ -102,7 +102,6 @@ def design(**changes: Any) -> Design:
             "act": Rule("d:act", t.string, act, version="1", reads=["d:out", "d:known"]),
         },
         "policy": "d:act",
-        "classes": {SET: {"name": "identifier"}},
     }
     fields.update(changes)
     return Design(**fields)
@@ -150,7 +149,7 @@ def failures(d: Design) -> list[tuple[int, str]]:
 def test_a_record_set_loads_with_its_candidate_field() -> None:
     assert dict(LOADED._candidate_sets) == {SET: "name"}
     doc = json.loads(LOADED.document)
-    assert doc["format"] == 10
+    assert doc["format"] == 11
     assert doc["rules"]["people"]["candidates"] == "name"
 
 
@@ -372,8 +371,8 @@ _DROP = object()
     ("members", "says"),
     [
         ({"sets": _DROP}, "has no 'sets' member"),
-        ({"sets": {SET: "nick"}}, "which is not null over a class name or a field"),
-        ({"sets": {SET: None}}, "which is not null over a class name or a field"),
+        ({"sets": {SET: "nick"}}, "which is not null over a leaf or a field"),
+        ({"sets": {SET: None}}, "which is not null over a leaf or a field"),
         ({"sets": {"d:nope": None}}, "not a provided declared ref"),
         ({"sets": {}}, "which is no key of sets"),
     ],
@@ -388,8 +387,9 @@ def test_the_ledger_refuses_a_settings_item_with_a_wrong_sets(
 
 
 def test_the_ledger_refuses_sets_in_a_format_6_record() -> None:
-    doc = with_settings(decided(), sets={})
-    doc["log"][0]["format"] = 6
+    from ledger_logs import before_shapes
+
+    doc = before_shapes(with_settings(decided(), sets={}), 6)
     with pytest.raises(InvalidRecord) as info:
         read_record(rehashed(doc))
     assert "holds sets, which a format-6 record does not" in str(info.value)
@@ -397,21 +397,24 @@ def test_the_ledger_refuses_sets_in_a_format_6_record() -> None:
 
 def test_redact_digests_a_record_candidate_under_its_field_s_class() -> None:
     record = decided()
-    view = json.loads(redact(record, ROOT))
+    # The answer opened, so each copy of a candidate in it shows its set's class.
+    view = json.loads(redact(record, ROOT, {SET: {"name": "identifier"}, WHICH: "open"}))
     refs = [i["ref"] for i in view["log"] if i["item"] == "entry"]
-    hidden = grounded_ref(OUT, digest("Ana", record))
+    hidden = grounded_ref(OUT, digest("Ana", view))
     assert hidden in refs
     assert grounded_ref(OUT, "Ana") not in refs
     which = next(i for i in view["log"] if i["item"] == "entry" and i["ref"] == WHICH)
-    assert digest("Ana", record) in json.dumps(which["value"])
+    assert digest("Ana", view) in json.dumps(which["value"])
 
 
 def test_redact_passes_a_candidate_whose_field_is_open() -> None:
-    loaded = load(design(classes={SET: {"name": "open", "note": "identifier"}}))
-    record = decided(loaded=loaded)
-    view = json.loads(redact(record, ROOT))
+    record = decided()
+    view = json.loads(redact(record, ROOT, {SET: {"name": "open", "note": "identifier"}}))
     refs = [i["ref"] for i in view["log"] if i["item"] == "entry"]
     assert grounded_ref(OUT, "Ana") in refs
+    assert json.loads(redact(record, ROOT, {f"{SET}.name": "open"}))["applied"][SET]["name"] == (
+        "open"
+    )
 
 
 def test_a_record_set_turn_replays_with_no_finding() -> None:
@@ -495,7 +498,6 @@ def test_a_slot_on_a_record_set_renders_its_candidate_values() -> None:
     )
     d = design(
         sources={**design().sources, "all": ask},
-        classes={},
     )
     decided(loaded=load(d))
     found = [s for b in ASKED for s in b if "q:all/ok" in s.questions]

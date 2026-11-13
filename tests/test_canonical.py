@@ -687,21 +687,28 @@ def test_expand_matches_rfc5869_appendix_a(case: str) -> None:
     assert _expand32(prk, info) == okm[:32]
 
 
-def test_turn_key_expands_the_ascii_record_hash() -> None:
+PH = hash_value({})
+"""A policy hash: the hash of an empty applied policy."""
+
+
+def test_turn_key_expands_the_ascii_record_hash_then_the_policy_hash() -> None:
     root = bytes(range(32))
     rh = hash_value([])
-    key = turn_key(root, rh)
-    assert key == hmac.digest(root, rh.encode("ascii") + b"\x01", "sha256")
+    key = turn_key(root, rh, PH)
+    assert key == hmac.digest(root, (rh + PH).encode("ascii") + b"\x01", "sha256")
     assert len(key) == 32
-    assert turn_key(root, hash_value([1])) != key
+    assert turn_key(root, hash_value([1]), PH) != key
+    assert turn_key(root, rh, hash_value({"t:state": "open"})) != key
+    assert turn_key(root, PH, rh) != key  # the order of the two is part of the info
 
 
 def test_turn_key_matches_a_fixed_vector() -> None:
     # Computed once outside the engine, with hmac and hashlib, as HKDF-Expand's T(1).
     rh = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
-    assert hash_value([]) == rh
-    assert turn_key(bytes(range(32)), rh) == bytes.fromhex(
-        "f2baca6918751922568b6a3ec7b34747807fb6d77d8e005e7096732c489d8442"
+    ph = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    assert (hash_value([]), hash_value({})) == (rh, ph)
+    assert turn_key(bytes(range(32)), rh, ph) == bytes.fromhex(
+        "8eeb4cb947e1206b2db26c000342f0ffbc5e34ee8d468760aefcae9242a44128"
     )
 
 
@@ -719,15 +726,26 @@ def test_turn_key_matches_a_fixed_vector() -> None:
         "sha256:" + "\uff10" * 64,
     ],
 )
-def test_turn_key_refuses_a_malformed_record_hash(bad: str) -> None:
-    with pytest.raises(_CanonicalError):
-        turn_key(bytes(32), bad)
+def test_turn_key_refuses_a_malformed_record_or_policy_hash(bad: str) -> None:
+    with pytest.raises(_CanonicalError, match="record hash"):
+        turn_key(bytes(32), bad, PH)
+    with pytest.raises(_CanonicalError, match="policy hash"):
+        turn_key(bytes(32), PH, bad)
 
 
 @pytest.mark.parametrize("bad", [None, b"sha256:" + b"0" * 64, 1])
-def test_turn_key_refuses_a_record_hash_that_is_not_a_string(bad: Any) -> None:
-    with pytest.raises(_CanonicalError, match="not a string"):
-        turn_key(bytes(32), bad)
+def test_turn_key_refuses_a_record_or_policy_hash_that_is_not_a_string(bad: Any) -> None:
+    with pytest.raises(_CanonicalError, match=r"record hash of type .* is not a string"):
+        turn_key(bytes(32), bad, PH)
+    with pytest.raises(_CanonicalError, match=r"policy hash of type .* is not a string"):
+        turn_key(bytes(32), PH, bad)
+
+
+def test_turn_key_reports_a_bad_record_hash_before_a_bad_policy_hash() -> None:
+    with pytest.raises(_CanonicalError, match=r"^record hash"):
+        turn_key(bytes(32), "sha256:", None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="root key"):  # and the root key before both
+        turn_key(bytes(31), "sha256:", None)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -746,12 +764,12 @@ def test_turn_key_refuses_a_record_hash_that_is_not_a_string(bad: Any) -> None:
 )
 def test_turn_key_refuses_a_root_key_that_is_not_32_bytes(root: Any) -> None:
     with pytest.raises(ValueError, match="root key"):
-        turn_key(root, hash_value([]))
+        turn_key(root, hash_value([]), PH)
 
 
-def test_the_root_key_is_checked_before_the_record_hash() -> None:
+def test_the_root_key_is_checked_before_the_record_and_policy_hashes() -> None:
     with pytest.raises(ValueError, match="root key"):
-        turn_key(bytes(31), "not a hash")
+        turn_key(bytes(31), "not a hash", "nor this")
 
 
 def test_turn_key_reads_the_record_hash_by_its_string_data() -> None:
@@ -765,9 +783,9 @@ def test_turn_key_reads_the_record_hash_by_its_string_data() -> None:
             return "sha256:" + "f" * 64
 
     rh = hash_value([])
-    assert turn_key(bytes(32), Loud(rh)) == turn_key(bytes(32), rh)
+    assert turn_key(bytes(32), Loud(rh), Loud(PH)) == turn_key(bytes(32), rh, PH)
     with pytest.raises(_CanonicalError):
-        turn_key(bytes(32), Loud("x"))
+        turn_key(bytes(32), Loud("x"), PH)
 
 
 def test_a_bytes_subclass_of_length_32_is_a_root_key() -> None:
@@ -775,11 +793,11 @@ def test_a_bytes_subclass_of_length_32_is_a_root_key() -> None:
         __slots__ = ()
 
     rh = hash_value([])
-    assert turn_key(Key(bytes(32)), rh) == turn_key(bytes(32), rh)
+    assert turn_key(Key(bytes(32)), rh, PH) == turn_key(bytes(32), rh, PH)
 
 
 def test_keyed_digest_form() -> None:
-    key = turn_key(bytes(32), hash_value([]))
+    key = turn_key(bytes(32), hash_value([]), PH)
     data = encode("Dana")
     d = keyed_digest(key, data)
     assert HMAC.fullmatch(d)
@@ -814,14 +832,14 @@ def test_turn_key_names_a_bad_record_hash_without_its_repr_or_whole_text() -> No
             raise RuntimeError("repr")
 
     with pytest.raises(_CanonicalError, match=r"^record hash of type .*NoRepr is not a string$"):
-        turn_key(bytes(32), NoRepr())  # type: ignore[arg-type]
+        turn_key(bytes(32), NoRepr(), PH)  # type: ignore[arg-type]
     with pytest.raises(_CanonicalError) as info:
-        turn_key(bytes(32), "x" * 10**5)
+        turn_key(bytes(32), "x" * 10**5, PH)
     assert str(info.value) == (
         f"record hash {'x' * 64!r}... (100000 code points) is not sha256: and 64 hex"
     )
     with pytest.raises(_CanonicalError, match=r"^record hash 'short' is not sha256"):
-        turn_key(bytes(32), "short")
+        turn_key(bytes(32), "short", PH)
 
 
 class _LoudBytes(bytes):
@@ -839,9 +857,9 @@ class _LoudBytes(bytes):
 
 def test_turn_key_reads_a_bytes_subclass_root_key_by_bytes_own_methods() -> None:
     rh = hash_value([])
-    assert turn_key(_LoudBytes(bytes(32)), rh) == turn_key(bytes(32), rh)
+    assert turn_key(_LoudBytes(bytes(32)), rh, PH) == turn_key(bytes(32), rh, PH)
     with pytest.raises(ValueError, match="root key"):
-        turn_key(_LoudBytes(bytes(31)), rh)
+        turn_key(_LoudBytes(bytes(31)), rh, PH)
 
 
 @pytest.mark.parametrize(

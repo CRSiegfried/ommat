@@ -169,7 +169,7 @@ To use ommat with idia, add idia's own skill too, from its [skills/idia](https:/
 
 ## Status
 
-Pre-release, at 0.4.0. On `main` it writes format-8 records and format-10 design documents. It reads record formats 1 to 8, but replays only format 8, and loads only design format 10; a design of an earlier format is refused, naming its format.
+Pre-release, at 0.4.0. On `main` it writes format-9 records and format-11 design documents. It reads record formats 1 to 9, replays formats 8 and 9 (a format-8 record replayed under a loaded format-11 design reports `design-mismatch` and `helpers-mismatch`), and loads only design format 11; a design of an earlier format is refused, naming its format.
 
 0.4.0 refuses decision tables and data rules at load; the next release, unreleased on `main`, runs them. 0.4.0 asks a `choice` over a candidate set of strings, and a question once per candidate of one, but leaves out candidate sets of records and grounded rules, tables and `t:` sources, which `main` runs. `load` refuses the forms the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
 

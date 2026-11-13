@@ -1,9 +1,10 @@
 """Synthetic record logs for the ledger, record and view tests: a format-1 normal turn, broken
 entry, cancelled turn and turn whose codec raised a cancellation, a format-2 extraction turn and
 a format-3 turn with a described label, a call's precision and warnings and an ``unsupported``
-marker; and the format-8 normal turn, broken entry and cancelled turn, a finished one ending
-with interpret's last item. Each is built item by item so a test can take any prefix or
-swap one item."""
+marker; the format-8 normal turn, broken entry and cancelled turn, a finished one ending
+with interpret's last item; and the format-9 normal turn and broken entry, whose settings item
+holds shape trees in place of class trees. Each is built item by item so a test can take any
+prefix or swap one item."""
 
 import copy
 from typing import Any, cast
@@ -264,6 +265,26 @@ BROKEN_8: list[dict[str, Any]] = [
 ]
 CANCELLED_8: list[dict[str, Any]] = [*NORMAL_8[:7], CANCEL]
 
+
+def shape_of(tree: Any) -> Any:
+    """A class tree's shape tree: its structure, ``"leaf"`` at every leaf."""
+    if isinstance(tree, dict):
+        return {k: shape_of(v) for k, v in cast("dict[str, Any]", tree).items()}
+    if isinstance(tree, list):
+        return [shape_of(cast("list[Any]", tree)[0])]
+    return "leaf"
+
+
+# Format 9: the settings item holds ``shapes``, never ``classes``.
+DESIGN_9: dict[str, Any] = {**DESIGN, "format": 9, "helpers": 4}
+SETTINGS_9: dict[str, Any] = {
+    **{k: v for k, v in SETTINGS_8.items() if k != "classes"},
+    "shapes": {ref: shape_of(tree) for ref, tree in SETTINGS["classes"].items()},
+}
+# Indices as NORMAL_8's.
+NORMAL_9: list[dict[str, Any]] = [DESIGN_9, SETTINGS_9, *NORMAL_8[2:]]
+BROKEN_9: list[dict[str, Any]] = [DESIGN_9, SETTINGS_9, *BROKEN_8[2:]]
+
 LOGS = {
     "normal": NORMAL,
     "broken": BROKEN,
@@ -274,6 +295,8 @@ LOGS = {
     "normal-8": NORMAL_8,
     "broken-8": BROKEN_8,
     "cancelled-8": CANCELLED_8,
+    "normal-9": NORMAL_9,
+    "broken-9": BROKEN_9,
 }
 
 # Each log's unhashed members by log-index key, written once the keyed item is in a prefix.
@@ -366,12 +389,31 @@ def rehashed(doc: dict[str, Any], *, reorder: bool = True) -> dict[str, Any]:
     return doc
 
 
-def before_key_order(doc: dict[str, Any], fmt: int = KEY_ORDER_FORMAT - 1) -> dict[str, Any]:
-    """A current record document made format ``fmt``, before format 6: the format number set,
-    each item's ``order`` and the settings item's ``grounded``, ``sets`` and ``policy`` dropped,
-    its objects
-    left in the order they hold. Its ``hash`` is left to recompute."""
+def classes_of(shape: Any, name: str = "content") -> Any:
+    """A shape tree's class tree with the class ``name`` at every leaf."""
+    if isinstance(shape, dict):
+        return {k: classes_of(v, name) for k, v in cast("dict[str, Any]", shape).items()}
+    if isinstance(shape, list):
+        return [classes_of(cast("list[Any]", shape)[0], name)]
+    return name
+
+
+def before_shapes(doc: dict[str, Any], fmt: int = 8, name: str = "content") -> dict[str, Any]:
+    """A current record document made format ``fmt``, before format 9: the format number set
+    and the settings item's ``shapes`` written as ``classes``, ``name`` at every leaf. Its
+    ``hash`` is left to recompute."""
     doc["log"][0]["format"] = fmt
+    for item in doc["log"]:
+        if item["item"] == "settings" and "shapes" in item:
+            item["classes"] = classes_of(item.pop("shapes"), name)
+    return doc
+
+
+def before_key_order(doc: dict[str, Any], fmt: int = KEY_ORDER_FORMAT - 1) -> dict[str, Any]:
+    """A current record document made format ``fmt``, before format 6: ``before_shapes``, then
+    each item's ``order`` and the settings item's ``grounded``, ``sets`` and ``policy`` dropped,
+    its objects left in the order they hold. Its ``hash`` is left to recompute."""
+    before_shapes(doc, fmt)
     for item in doc["log"]:
         item.pop("order", None)
         if item["item"] == "settings":
