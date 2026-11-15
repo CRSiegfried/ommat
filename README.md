@@ -129,7 +129,7 @@ pip install "ommat @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 The core imports only the Python standard library. `ommat[idia]` is the binding ommat ships to decision-model providers, through the [idia](https://github.com/CRSiegfried/idia) library; install idia from its tag first, with the extras for the providers you use, as the [tutorial](docs/tutorials/decide-with-idia.md) shows, since pip ignores ommat's `[tool.uv.sources]` and `pip install "ommat[idia] @ git+…"` alone cannot find idia, which is on no package index yet:
 
 ```sh
-pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
+pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.2.0"
 pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 
@@ -165,7 +165,7 @@ To look at stored records, write them to `.json` files as `decision.record.docum
 cp -r skills/ommat ~/.claude/skills/
 ```
 
-To use ommat with idia, add idia's own skill too, from its [skills/idia](https://github.com/CRSiegfried/idia/tree/v0.1.0/skills/idia).
+To use ommat with idia, add idia's own skill too, from its [skills/idia](https://github.com/CRSiegfried/idia/tree/v0.2.0/skills/idia).
 
 ## Status
 

@@ -332,7 +332,7 @@ before the event loop runs, since building it imports its runtime, which takes s
 the leaf's worker. Under pip, torch comes from PyPI, the large GPU wheel on Linux.
 
 ```sh
-pip install "idia[gliner] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
+pip install "idia[gliner] @ git+https://github.com/CRSiegfried/idia@v0.2.0"
 pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 
