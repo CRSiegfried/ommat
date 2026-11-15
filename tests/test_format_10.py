@@ -133,7 +133,7 @@ def test_a_stored_format_8_record_replays_under_todays_design_as_a_design_mismat
         {"kind": FindingKind.helpers_mismatch, "recorded": 3, "replayed": 4},
     ]
     assert rerun is not None
-    assert rerun.log[0]["format"] == 9
+    assert rerun.log[0]["format"] == 10
     entries = [i for i in record.log if i["item"] == "entry"]
     assert [i for i in rerun.log if i["item"] == "entry"] == entries
 

@@ -337,13 +337,13 @@ def test_each_temporal_grammar_and_value_type_at_the_write(
 
 
 # ---------------------------------------------------------------------------------------------
-# truncated and passes
+# truncated and usage
 
 
 def test_truncated_is_written_under_its_call_in_code_point_order() -> None:
-    record = ran(truncated=("q:dates", "q:amount"), usage={"passes": 3, "input_tokens": 10})
+    record = ran(truncated=("q:dates", "q:amount"), usage={"output_tokens": 3, "input_tokens": 10})
     assert calls(record)["truncated"] == ["q:amount", "q:dates"]
-    assert calls(record)["usage"] == {"passes": 3, "input_tokens": 10}
+    assert calls(record)["usage"] == {"output_tokens": 3, "input_tokens": 10}
     # It changes no outcome: the log is the log of a turn without it.
     assert ran().record_hash == record.record_hash
 
@@ -639,16 +639,16 @@ def test_a_format_1_record_reads_back_to_its_own_hash() -> None:
 
 def test_the_append_refuses_a_design_item_of_an_unknown_format() -> None:
     ledger = Ledger()
-    with pytest.raises(_LedgerError, match="the format 10 is not one this ledger knows"):
-        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 10, "helpers": 2})
+    with pytest.raises(_LedgerError, match="the format 11 is not one this ledger knows"):
+        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 11, "helpers": 2})
 
 
 def test_a_record_of_an_unknown_format_is_refused() -> None:
     def change(doc: dict[str, Any]) -> None:
-        doc["log"][0]["format"] = 10
+        doc["log"][0]["format"] = 11
 
     with pytest.raises(
-        InvalidRecord, match="format 10 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8, 9"
+        InvalidRecord, match="format 11 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
     ):
         read_record(edited(change))
 
@@ -657,7 +657,7 @@ def test_a_record_of_an_unknown_format_is_refused() -> None:
 # The golden extraction record
 
 GOLDEN_X_DESIGN = "sha256:59c2489df31aed2ead677fabbd0866cd670bde788f46dd93c459729b131f4012"
-GOLDEN_X_RECORD = "sha256:9fd9d4da4cd8e991cde62ae3a9fabf3fd7f089b9affab144db0a84aa4dbb31f0"
+GOLDEN_X_RECORD = "sha256:12e92f8a85630a7973942c3a9220792bfe4b86aa9a8316203e41f6ff57048f73"
 
 
 def test_the_golden_extraction_record() -> None:
@@ -665,7 +665,7 @@ def test_the_golden_extraction_record() -> None:
     assert record.log[0] == {
         "item": "design",
         "hash": GOLDEN_X_DESIGN,
-        "format": 9,
+        "format": 10,
         "helpers": HELPERS,
     }
     assert entry(record, "d:reply")["value"] == "big; 2024-02-29"

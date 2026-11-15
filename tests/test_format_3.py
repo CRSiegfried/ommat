@@ -1070,7 +1070,7 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # The golden described record
 
 GOLDEN_DESIGN = "sha256:ba34693f085e4e902cfd2745facfb9990aafd6ce9ebffb7bdf930f97ac61110d"
-GOLDEN_RECORD = "sha256:752747236833898566046f4c56904c5771d4c784c9f7d6df97903c65309ece83"
+GOLDEN_RECORD = "sha256:34fe1853d47faab01a1fcd2787dbfe59a4e6c9fdc8cca7ddbae8e7854c2360df"
 
 
 def golden() -> Record:
@@ -1079,7 +1079,7 @@ def golden() -> Record:
 
 def test_the_golden_described_record() -> None:
     record = golden()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 9, "helpers": 4}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 10, "helpers": 4}
     assert record.log[1]["policy"] == "d:decision"
     assert entry(record, "d:tone")["value"] == "warm"
     assert entry(record, "d:decision")["value"] is True

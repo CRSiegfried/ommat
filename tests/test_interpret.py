@@ -47,7 +47,7 @@ from ommat import (
     read_record,
 )
 from ommat import types as t
-from ommat._canonical import hash_value
+from ommat._canonical import encode, hash_value
 from ommat._read_view import _ViewError
 from ommat.helpers import pick_with_margin
 from scripted import (
@@ -1603,6 +1603,7 @@ def test_shuffled_latencies_give_identical_bytes() -> None:
 
     hashes: set[str] = set()
     orders: set[tuple[str, ...]] = set()
+    extras: set[bytes] = set()
     for seed in range(6):
         rng = random.Random(seed)  # one per seed, shared by every call, so each call differs
         finished: list[str] = []
@@ -1618,15 +1619,18 @@ def test_shuffled_latencies_give_identical_bytes() -> None:
             finished.append(batch[0].id)
             if batch[0].id == "s3":
                 raise RuntimeError("one fails")
-            return returns(valued(batch))
+            return returns(valued(batch), attempts=1, extras=({"source": batch[0].id},))
 
         scripted_ = Scripted(dict.fromkeys(sources, reply))
         binds = {"default": scripted_} | {f"o{i}": scripted_ for i in range(5)}
         record = turn(loaded, binds, STATE)
         hashes.add(record.record_hash)
         orders.add(tuple(finished))
+        calls = record.unhashed["calls"]
+        extras.add(encode({k: c.get("extras") for k, c in calls.items()}))
     assert len(orders) > 1
     assert len(hashes) == 1
+    assert len(extras) == 1  # each call's extras under its own index, whatever finished first
 
 
 # ---------------------------------------------------------------------------------------------

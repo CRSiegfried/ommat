@@ -210,16 +210,15 @@ def _with_usage(usage: Mapping[str, object]) -> BindingFn:
 
 
 def test_a_usage_of_the_closed_keys_passes() -> None:
-    usage = {"input_tokens": 10, "output_tokens": 3, "passes": 1}
+    usage = {"input_tokens": 10, "output_tokens": 3}
     assert check(_with_usage(usage), batches=_default_batches()[:1]) == []
 
 
-@pytest.mark.parametrize("key", ["cached_tokens", "total_tokens", ""])
+@pytest.mark.parametrize("key", ["cached_tokens", "total_tokens", "passes", ""])
 def test_a_usage_key_outside_the_closed_set_fails_the_provenance_check(key: str) -> None:
     failures = check(_with_usage({"input_tokens": 1, key: 2}), batches=_default_batches()[:1])
     assert any(
-        "usage is not null or a dict of input_tokens, output_tokens or passes" in f
-        for f in failures
+        "usage is not null or a dict of input_tokens or output_tokens" in f for f in failures
     )
 
 

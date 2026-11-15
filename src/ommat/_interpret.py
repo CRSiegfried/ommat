@@ -25,6 +25,7 @@ handed plain data.
 """
 
 import asyncio
+import copy
 import dataclasses
 import enum
 import threading
@@ -64,7 +65,10 @@ from ommat._markers import Cause, CauseCode, Failed, Unasked, Unavailable, Undet
 from ommat._provenance import (
     DETAILS,
     HASHED_DETAILS,
+    NAME_DETAILS,
     REASONS,
+    extras_conform,
+    name_conforms,
     precision_conforms,
     string_conforms,
     usage_conforms,
@@ -362,6 +366,9 @@ class _Judged:
     missing: dict[str, str] | None = None
     """Each null detail's reason; never on a failed call."""
     clients: dict[str, str] | None = None
+    extras: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    """One object per request the call sent, in the binding's order; none when each is
+    empty."""
 
 
 def _judge(
@@ -415,6 +422,11 @@ def _judge(
             cast(object, getattr(result, "truncated", ())), batch, judged.invalid
         )
         judged.warnings = _warnings(cast(object, getattr(result, "warnings", ())), judged.invalid)
+        judged.extras = _extras(
+            cast(object, getattr(result, "extras", ())),
+            cast(object, getattr(result, "attempts", None)),
+            judged.invalid,
+        )
         _unhashed_details(result, judged)
         if not _claimed(result, judged):
             codes.append(_C.invalid_return)
@@ -566,6 +578,8 @@ def _provenance(result: object, judged: _Judged) -> bool:
             ok = precision_conforms(value)
         elif name == "runtime":
             ok = versions_conform(value)
+        elif name in NAME_DETAILS:  # one service, one model: no line boundary
+            ok = name_conforms(value)
         else:  # a string's length is tested before its code points are read
             ok = string_conforms(value)
         if not ok:
@@ -644,6 +658,16 @@ def _warnings(value: object, invalid: dict[str, str]) -> list[str]:
     if warnings_conform(value):
         return list(cast("tuple[str, ...]", value))
     invalid["warnings"] = guarded_repr(value)
+    return []
+
+
+def _extras(value: object, attempts: object, invalid: dict[str, str]) -> list[dict[str, Any]]:
+    """A conforming ``extras`` (``extras_conform``) copied, in the binding's order, nothing when
+    every object is empty; else nothing, with the value kept in ``invalid``. Never a fault."""
+    if extras_conform(value, attempts):
+        members = cast("tuple[dict[str, Any], ...] | None", value) or ()
+        return cast("list[dict[str, Any]]", decode(encode(list(members)))) if any(members) else []
+    invalid["extras"] = guarded_repr(value)
     return []
 
 
@@ -1196,10 +1220,7 @@ class _Turn:
                 judged = _judge(batch, outcome, self.loaded._types, sums=self.sums)
                 item = self.call_item(batch, judged, n)
             else:  # the reference run's call, its live values fresh
-                judged = dataclasses.replace(
-                    asked.judged,
-                    written={r: _copied_written(w) for r, w in asked.judged.written.items()},
-                )
+                judged = _reused(asked.judged)
                 item = asked.item
             index = self.ledger.append(item)
             if self.keeps_calls():
@@ -1220,6 +1241,8 @@ class _Turn:
                 unhashed["truncated"] = judged.truncated
             if judged.warnings:
                 unhashed["warnings"] = judged.warnings
+            if judged.extras:
+                unhashed["extras"] = judged.extras
             for name in ("request_id", "missing", "clients"):
                 if getattr(judged, name) is not None:
                     unhashed[name] = getattr(judged, name)
@@ -1930,6 +1953,16 @@ async def _restored(binding: Replaying, asked: _Asked) -> _Returned:
     noted of it again, and its return is given."""
     binding.restore(asked.effects)
     return asked.returned
+
+
+def _reused(judged: _Judged) -> _Judged:
+    """A kept call's judgment for a later run: its live values fresh and its ``extras`` a copy,
+    so no run shares a container with another."""
+    return dataclasses.replace(
+        judged,
+        written={r: _copied_written(w) for r, w in judged.written.items()},
+        extras=copy.deepcopy(judged.extras),
+    )
 
 
 def _copied_written(written: Written) -> Written:

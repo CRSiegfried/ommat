@@ -285,6 +285,11 @@ SETTINGS_9: dict[str, Any] = {
 NORMAL_9: list[dict[str, Any]] = [DESIGN_9, SETTINGS_9, *NORMAL_8[2:]]
 BROKEN_9: list[dict[str, Any]] = [DESIGN_9, SETTINGS_9, *BROKEN_8[2:]]
 
+# Format 10: a ``calls`` entry may hold ``extras``. Indices as NORMAL_8's.
+DESIGN_10: dict[str, Any] = {**DESIGN_9, "format": 10}
+NORMAL_10: list[dict[str, Any]] = [DESIGN_10, SETTINGS_9, *NORMAL_8[2:]]
+BROKEN_10: list[dict[str, Any]] = [DESIGN_10, SETTINGS_9, *BROKEN_8[2:]]
+
 LOGS = {
     "normal": NORMAL,
     "broken": BROKEN,
@@ -297,6 +302,8 @@ LOGS = {
     "cancelled-8": CANCELLED_8,
     "normal-9": NORMAL_9,
     "broken-9": BROKEN_9,
+    "normal-10": NORMAL_10,
+    "broken-10": BROKEN_10,
 }
 
 # Each log's unhashed members by log-index key, written once the keyed item is in a prefix.
@@ -321,6 +328,24 @@ UNHASHED: dict[str, dict[str, dict[str, Any]]] = {
                 "attempts": None,
                 "warnings": ["q:other: this provider takes no noul question"],
             }
+        }
+    },
+    "normal-10": {
+        "calls": {
+            "3": {
+                "start": "2026-10-20T00:00:00Z",
+                "latency": 0.25,
+                "usage": {"input_tokens": 3},
+                "attempts": 2,
+                "extras": [{"passes": 1, "note": "Dear Ann, your account 4417 is overdue"}, {}],
+            },
+            "7": {
+                "start": "2026-10-20T00:00:01Z",
+                "latency": 0.5,
+                "usage": None,
+                "attempts": 1,
+                "extras": [{"customer": "user-8812"}],
+            },
         }
     },
 }

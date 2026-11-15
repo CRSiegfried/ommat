@@ -137,4 +137,6 @@ def test_a_stored_format_9_record_replays_under_its_design_with_no_finding() -> 
     rerun, findings = replay_sync(record, stored())
     assert findings == []
     assert rerun is not None
-    assert rerun.log == record.log
+    # The rerun is written at today's format, 10, and is the stored log but for that number.
+    assert rerun.log[0] == {**record.log[0], "format": 10}
+    assert rerun.log[1:] == record.log[1:]

@@ -202,7 +202,10 @@ class CallResult:
     hash: ``usage``, ``attempts``, ``request_id``, ``missing``, from each detail a call that
     sent a request leaves null to its reason, ``clients``, the versions of the libraries that
     made the call, ``truncated``, the ``q:`` refs whose answer came from a response the
-    provider cut short, and ``warnings``, the binding's own lines about the call. A binding that
+    provider cut short, ``warnings``, the binding's own lines about the call, and ``extras``,
+    one JSON object per request the call sent, in the order the requests were given, ``{}`` for
+    one that reports nothing more, holding whatever else the provider reports. ``provider`` and
+    ``model_requested`` each name the one service and model the call asked. A binding that
     sent no request returns no provenance. It checks nothing when built; interpret tests it at
     the write."""
 
@@ -224,6 +227,7 @@ class CallResult:
     clients: dict[str, str] | None = None
     truncated: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    extras: tuple[dict[str, Any], ...] = ()
 
 
 class OracleBinding(Protocol):

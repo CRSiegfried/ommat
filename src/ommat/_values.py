@@ -30,7 +30,7 @@ deepest member."""
 MAX_DOCUMENT_DEPTH = 128
 """The deepest a document the encoder writes or a reader parses nests."""
 
-RECORD_FORMAT = 9
+RECORD_FORMAT = 10
 """The format number this engine writes into a record. It reads every record format from 1 up
 to it, each under that format's rules."""
 
@@ -108,6 +108,12 @@ entry, it holds no ``plan`` or ``verdict`` item, and its ``usage`` keys are the 
 SHAPES_FORMAT = 9
 """The first record format whose ``settings`` item holds ``shapes``, each ref's shape tree, in
 place of ``classes``, its class tree: the redaction policy is the caller's, given to ``redact``."""
+
+EXTRAS_FORMAT = 10
+"""The first record format whose ``calls`` entry may hold ``extras``, one open object per
+request the call sent, whose ``usage`` keys are ``input_tokens`` and ``output_tokens`` alone,
+with no ``usage.passes`` as a ``missing`` key or a ``claimed`` name, and whose call item's
+``provider`` and ``model_requested`` each hold no line boundary."""
 
 SHAPE_LEAF = "leaf"
 """The one leaf of a shape tree. A shape tree is a class tree's structure with no class: an
