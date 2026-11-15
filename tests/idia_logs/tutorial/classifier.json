@@ -1,5 +1,5 @@
 {
-  "format": 3,
+  "format": 4,
   "name": "openai-decisions",
   "model": "gpt-6-luna",
   "enabled_features": [],
@@ -337,7 +337,6 @@
             ],
             "unreported": {
               "snapshot": "not-pinned",
-              "usage.passes": "not-reported",
               "versions": "not-applicable"
             }
           }
@@ -677,7 +676,6 @@
             ],
             "unreported": {
               "snapshot": "not-pinned",
-              "usage.passes": "not-reported",
               "versions": "not-applicable"
             }
           }

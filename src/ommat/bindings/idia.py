@@ -25,7 +25,8 @@ instruction the provider's capabilities do not carry, or that idia's ``Question`
 rendered with fewer than two labels among them, and the source's other questions are sent. Each
 outcome's provenance is written under ommat's names, idia's ``snapshot`` as ``revision``,
 ``versions`` as ``runtime``, ``prompt_sent`` as ``prompt`` and ``client_versions`` as ``clients``,
-with idia's reasons and claims under the same names.
+with idia's reasons and claims under the same names; its input and output tokens are ``usage``,
+and idia's ``extras``, whatever else the leaf reports, are its request's ``extras`` as given.
 """
 
 from __future__ import annotations
@@ -45,7 +46,6 @@ except ModuleNotFoundError as error:
     ) from error
 
 from ommat import AnswerKind, CallResult, Cause, Failed, RenderedQuestion, SourceCall, Unavailable
-from ommat._provenance import USAGE_KEYS
 from ommat.bindings import (
     OracleBinding,
     RequestProvenance,
@@ -152,7 +152,7 @@ class _Binding:
                 precision=_precision(sent[0].rounding) if sent else None,
                 warnings=bounded_warnings(lines),
             )
-        except ValueError:  # spec: The idia binding: one package at two versions in a call
+        except ValueError:  # spec: The idia binding: two providers, models or package versions
             return Failed(Cause("invalid-return"))
 
 
@@ -414,14 +414,16 @@ def _precision(rounding: idia.Rounding) -> int | str:
 
 def _provenance(outcome: idia.Outcome) -> RequestProvenance:
     """One wire request's provenance under ommat's names: the profile's details, the prompt as
-    text, the usage figures it reports, idia's reasons and claims, the client versions, and its
-    keys when idia warns the provider cut it short."""
+    text, the token counts it reports, idia's ``extras`` as given, idia's reasons and claims,
+    the client versions, and its keys when idia warns the provider cut it short."""
     usage = outcome.usage
-    figures = (
-        None
+    # A representation map: idia's two token counts are ommat's two usage keys.
+    tokens: dict[str, int | None] = (
+        {}
         if usage is None
-        else {name: getattr(usage, name) for name in USAGE_KEYS if getattr(usage, name) is not None}
+        else {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens}
     )
+    figures = {name: n for name, n in tokens.items() if n is not None}
     cut = any(w.code == idia.WARNING_PROVIDER_TRUNCATED for w in outcome.warnings)
     return RequestProvenance(
         provider=outcome.provider,
@@ -439,4 +441,5 @@ def _provenance(outcome: idia.Outcome) -> RequestProvenance:
         or None,
         clients=dict(outcome.client_versions) or None,
         truncated=tuple(outcome.keys) if cut else (),
+        extras=dict(outcome.extras) or None,
     )

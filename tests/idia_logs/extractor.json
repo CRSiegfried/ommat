@@ -1,5 +1,5 @@
 {
-  "format": 3,
+  "format": 4,
   "name": "cloudflare-clairic",
   "model": "clairic",
   "enabled_features": [],
@@ -102,7 +102,6 @@
               "type": "Usage",
               "input_tokens": 202,
               "output_tokens": 0,
-              "passes": 1,
               "raw_usage": {
                 "image_tokens": 0,
                 "input_tokens": 202,
@@ -165,6 +164,9 @@
             "unreported": {
               "snapshot": "not-pinned",
               "versions": "not-applicable"
+            },
+            "extras": {
+              "passes": 1
             }
           }
         }
@@ -233,7 +235,6 @@
               "type": "Usage",
               "input_tokens": 155,
               "output_tokens": 0,
-              "passes": 1,
               "raw_usage": {
                 "image_tokens": 0,
                 "input_tokens": 155,
@@ -283,6 +284,9 @@
             "unreported": {
               "snapshot": "not-pinned",
               "versions": "not-applicable"
+            },
+            "extras": {
+              "passes": 1
             }
           }
         }
