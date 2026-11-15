@@ -199,6 +199,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .focus .edge.dim { opacity: .14; }
 .edge.lineage { stroke: var(--cause); stroke-width: 2.6; opacity: 1; stroke-dasharray: none; }
 .edge.branch { stroke: var(--branch); stroke-width: 1.5; opacity: 1; stroke-dasharray: none; }
+.edge.lineage.declared, .edge.branch.declared { stroke-dasharray: 5 4; }
 .canvas .edge.hov:not(.hit) { opacity: 1 !important; stroke-width: 2.4; }
 .row-path { fill: none; stroke: var(--cause); stroke-width: 1.6; pointer-events: none; }
 .strip-path { fill: var(--cause); }
@@ -516,7 +517,7 @@ const basename = p => String(p || '').split('/').pop();
 const num = x => typeof x === 'number' ? String(+x.toPrecision(6)) : String(x);
 
 /* ---------- data ---------- */
-const OUTLINE_VERSION = 6;
+const OUTLINE_VERSION = 7;
 let DATA = {sets: []};
 try {
   const raw = $('lens-data').textContent.trim();
@@ -557,12 +558,19 @@ const hex12 = h => { const m = typeof h === 'string' && /[0-9a-f]{12}/i.exec(h.r
 
 // The lineage is a tree: each item after the first was found from its `from`. Its first branch,
 // as the outline's root_chain, runs from the policy's entry through each next item found from
-// the one before, to the root; the rest are branches.
+// the one before, to the root, and stops before a declared hop, since a declared read is not a
+// record of what the turn rested on; the rest are branches.
 const lineage = T => (T && Array.isArray(T.lineage) ? T.lineage : []);
 function mainChain(path) {
   const c = path.slice(0, 1);
-  for (const h of path.slice(1)) { if (h.from !== c[c.length - 1].ref) break; c.push(h); }
+  for (const h of path.slice(1)) { if (h.from !== c[c.length - 1].ref || h.via === 'declared') break; c.push(h); }
   return c;
+}
+// The refs reached from the policy by hops the record names alone, as the outline's precise_refs.
+function preciseRefs(path) {
+  const out = new Set();
+  for (const h of path) if (!h.from || (h.via !== 'declared' && out.has(h.from))) out.add(h.ref);
+  return out;
 }
 const rootOf = T => { const c = mainChain(lineage(T)); return c.length ? c[c.length - 1] : null; };
 
@@ -661,7 +669,7 @@ function briefFull(e) {
 }
 
 /* ---------- state ---------- */
-const S = {set: 0, design: 0, turn: null, node: null, stateEdges: false, sort: null, dir: 1, undecidedOnly: false, view: null, tmode: null, table: null};
+const S = {set: 0, design: 0, turn: null, node: null, stateEdges: false, declaredHops: true, sort: null, dir: 1, undecidedOnly: false, view: null, tmode: null, table: null};
 const sets = (DATA.sets || []).map(prepareSet);
 let theme = 'auto';
 try { theme = localStorage.getItem('ommat-lens-theme') || 'auto'; } catch (e) { /* storage blocked */ }
@@ -1024,6 +1032,7 @@ function drawSkeleton(D, turnDoc) {
   const ctx = {T, idx, tags: targetTags(D), root: T && main.length ? main[main.length - 1].ref : null, warn: T ? callWarnings(T) : new Map()};
   const L = layout(D, avail, !!T, ctx);
   const seen = new Set(), sel = S.node;
+  if (path.some(h => h.via === 'declared')) seen.add('declared'); // drawn or hidden, so the legend offers the toggle
   // edges: the uses of t:state only when the legend toggle is on; incoming ports spread across the target's left edge
   const edges = (D.edges || []).filter(e => e.dependency || S.stateEdges).sort((a, b) => (a.dependency === b.dependency ? 0 : a.dependency ? 1 : -1));
   const incoming = new Map(), bundles = new Map(), G = new Map(); // per-edge geometry, kept off the outline
@@ -1063,6 +1072,7 @@ function drawSkeleton(D, turnDoc) {
   // the lineage: each item joined to the item it was found from, the first branch heavy
   const nodeOfRef = r => (D.ref_node || {})[r] || (D.ref_node || {})[baseOf(r)] || null;
   if (T) path.slice(1).forEach((h, k) => {
+    if (h.via === 'declared' && !S.declaredHops) return;
     const prev = (h.from && path.find(p => p.ref === h.from)) || path[k];
     const fb = L.nodes.get(nodeOfRef(h.ref)), tb = L.nodes.get(nodeOfRef(prev.ref));
     if (!fb || !tb) return;
@@ -1086,10 +1096,10 @@ function drawSkeleton(D, turnDoc) {
     if (w.hop) {
       const cls = w.main ? 'lineage' : 'branch';
       seen.add(cls);
-      svg('path', {d: w.d, class: 'edge ' + cls, 'marker-end': `url(#ah-${cls})`, 'data-ends': `${w.fb.n.id} ${w.tb.n.id}`}, gC);
+      svg('path', {d: w.d, class: 'edge ' + cls + (w.hop.via === 'declared' ? ' declared' : ''), 'marker-end': `url(#ah-${cls})`, 'data-ends': `${w.fb.n.id} ${w.tb.n.id}`}, gC);
       tip(svg('path', {d: w.d, class: 'edge hit'}, gC), () => w.main
-        ? `lineage, first branch, hop ${w.n}\n${w.prev.ref} (${holdsText(w.prev.holds)}) ← ${w.hop.ref} (${holdsText(w.hop.holds)})\nvia ${w.hop.via}`
-        : `lineage branch, found from ${w.prev.ref}\n${w.hop.ref} (${holdsText(w.hop.holds)})\nvia ${w.hop.via}`);
+        ? `lineage, first branch, hop ${w.n}\n${w.prev.ref} (${holdsText(w.prev.holds)}) ← ${w.hop.ref} (${holdsText(w.hop.holds)})\n${viaText(w.hop.via)}`
+        : `lineage branch, found from ${w.prev.ref}\n${w.hop.ref} (${holdsText(w.hop.holds)})\n${viaText(w.hop.via)}`);
       continue;
     }
     const e = w.e, rc = ROLE_CLASS(e.role), tone = toneOf(e), ends = `${e.from} ${e.to}`;
@@ -1114,7 +1124,7 @@ function drawSkeleton(D, turnDoc) {
     tip(svg('path', {d, class: 'edge hit'}, gE), () => `${B.list.length} dependencies bundled into ${B.to} (fan-in ${B.tb.n.fan_in})\n` + B.list.map(e => `  ${roleName(e.role)}  ${e.ref}  from ${e.from}`).join('\n'));
   }
   const gN = svg('g', {}, root);
-  const onPath = T ? new Set(path.map(h => h.ref)) : null;
+  const onPath = T ? preciseRefs(path) : null;
   for (const box of L.nodes.values()) drawNode(gN, box, D, T, ctx, onPath, seen);
   return seen;
 }
@@ -1275,7 +1285,7 @@ function drawUnpaired(turnDoc) {
     svg('path', {d: x.d, class: 'edge ' + cls, 'marker-end': `url(#ah-${cls})`, 'data-ends': `${x.fb.n.id} ${x.tb.n.id}`}, gC);
     tip(svg('path', {d: x.d, class: 'edge hit'}, gC), () => `${x.main ? 'lineage, first branch, hop ' + x.n : 'lineage branch'}\n${x.prev.ref} ← ${x.hop.ref}\nvia ${x.hop.via}`);
   }
-  const onPath = new Set(path.map(x => x.ref));
+  const onPath = preciseRefs(path);
   for (const b of L.nodes.values()) {
     const e = b.e, st = dispState(e);
     const g = svg('g', {class: 'node-g' + (S.node === e.ref ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': `${e.ref} ${STATE_LABEL[st] || st}`, 'data-node': e.ref}, root);
@@ -1350,6 +1360,17 @@ function drawLegend(D, T, seen) {
     if (seen.has('lineage')) svg('line', {x1: 1, y1: seen.has('branch') ? 4 : 7, x2: 25, y2: seen.has('branch') ? 4 : 7, class: 'edge lineage'}, s);
     if (seen.has('branch')) svg('line', {x1: 1, y1: seen.has('lineage') ? 11 : 7, x2: 25, y2: seen.has('lineage') ? 11 : 7, class: 'edge branch'}, s);
   }, 'lineage (bold: first branch)');
+  if (T && seen.has('declared')) { // the design declares these reads; the record does not say they were read. Hidden is never unrelated
+    const n = lineage(T).filter(h => h.via === 'declared').length;
+    const b = document.createElement('button');
+    b.className = 'toggle'; b.setAttribute('aria-pressed', String(S.declaredHops));
+    b.title = 'Dashed: the design declares that a rule reads it; the record does not say it was read. Hidden is not unrelated.';
+    const sv = svg('svg', {width: 22, height: 10, 'aria-hidden': 'true'}, b);
+    svg('line', {x1: 1, y1: 5, x2: 21, y2: 5, class: 'edge branch declared'}, sv);
+    b.appendChild(document.createTextNode(`declared reads (${n}): ${S.declaredHops ? 'shown' : 'hidden'}`));
+    b.addEventListener('click', () => { S.declaredHops = !S.declaredHops; render(); });
+    er.appendChild(b); er.n++;
+  }
   if (T) {
     for (const st of ['value', 'short', 'nobounds', 'Unsure', 'Unasked', 'Unavailable', 'absent']) if (seen.has('st:' + st)) item(nr, s => stateIcon(s, st, 13, 7), STATE_LABEL[st]);
     const sides = ['clear', 'short'].filter(x => seen.has('side:' + x));
@@ -1363,7 +1384,7 @@ function drawLegend(D, T, seen) {
 const GLOSSARY = [
   ['round', 'A round asks the sources that are ready, then runs the rules that become ready, wavefront by wavefront. Round 0 asks no source: it holds the state and the rules that read only the state.', '§round-numbering'],
   ['wavefront', 'One step of a round\'s rules: every rule whose inputs are all in hand runs together; the rules that this makes ready run in the next wavefront.', '§dependency-graph'],
-  ['lineage', 'The entries from the decision back to what it rests on. Its first branch, from the policy to the root, is drawn heavy; the other items branch from the entry they were found from.', 'outline'],
+  ['lineage', 'The entries from the decision back to what it rests on. Its first branch, from the policy to the root, is drawn heavy; the other items branch from the entry they were found from. A dashed hop is a declared read: the design says the rule reads it, the record does not.', 'outline'],
   ['nearest bound', 'A bound the design declares for an entry, with the signed distance from what the entry measures to it; the outline lists them nearest first.', 'outline'],
   ['bar', 'A bound on an answer\'s top probability: a reject threshold.', 'outline'],
   ['margin', 'A bound on the lead.', 'outline'],
@@ -1372,7 +1393,7 @@ const GLOSSARY = [
   ['short / clear', 'Short: the measure falls short of clearing the bound. Clear: it clears it. A plain bound has no side.', 'outline'],
   ['determined', 'The entry holds a value, not a marker.', '§dependency-graph'],
   ['⊙', 'Determined, no bound declared: a question\'s value whose paired design declares no bound on it; hover shows the design\'s reason. A state field, a tool result or a rule\'s value carries no mark.', 'outline'],
-  ['root', 'Where the lineage\'s first branch ends: the entry an undecided decision rests on.', 'outline'],
+  ['root', 'Where the lineage\'s first branch ends: the entry an undecided decision rests on. It never lies beyond a declared read, so a policy whose record names nothing it rested on is its own root.', 'outline'],
   ['ties', 'How many of the nearest bounds lie as far from their parameter as the nearest one.', 'outline'],
   ['marker', 'What a read returns when there is no value: Unsure, Unavailable or Unasked, each with one cause.', '§absence-markers'],
   ['Unsure', 'A rule looked at its evidence and did not settle.', '§absence-markers'],
@@ -1401,12 +1422,15 @@ const fpHtml = D => { const x = fp(D); if (!x) return ''; const roles = D.finger
 // The lineage's other branches, after the first (which the why line already gives), grouped by
 // how and from where they were found: `+ q:tone, t:ticket (cause, from d:act)`.
 function branchesHtml(T) {
-  const path = lineage(T), rest = path.slice(mainChain(path).length);
-  if (!rest.length) return '';
+  const path = lineage(T), all = path.slice(mainChain(path).length);
+  const rest = all.filter(p => p.via !== 'declared'), nDecl = all.length - rest.length;
+  if (!all.length) return '';
   const ref = p => `<span title="${esc(holdsText(p.holds) + (p.via ? ', via ' + p.via : '') + (typeof p.index === 'number' ? ', log item ' + p.index : ''))}">${esc(p.ref)}</span>`;
   const by = new Map();
   for (const p of rest) { const k = `${p.via || '?'}, from ${p.from || '?'}`; if (!by.has(k)) by.set(k, []); by.get(k).push(p); }
-  return '<span class="br">+ ' + [...by].map(([k, ps]) => ps.map(ref).join(', ') + ` (${esc(k)})`).join('; ') + '</span>';
+  const parts = [...by].map(([k, ps]) => ps.map(ref).join(', ') + ` (${esc(k)})`);
+  if (nDecl) parts.push(`${nDecl} declared read${nDecl === 1 ? '' : 's'}, not a record of what was read`);
+  return '<span class="br">+ ' + parts.join('; ') + '</span>';
 }
 // The why line as the header shows it: "defect no" is left out, "defect yes" is red.
 const whyHtml = w => esc(w).replace(/, defect no\)/g, ')').replace(/defect yes/g, '<span class="defect">defect yes</span>');
@@ -1547,7 +1571,7 @@ const ROLE_RANK = r => { const k = ['bar', 'margin', 'thresholds', 'mass', 'null
 function stripRows(t) {
   let rows = [].concat(...t.idx.all.map(boundRows));
   const nm = Array.isArray(t.outline.nearest_bounds) ? t.outline.nearest_bounds : null;
-  const onLin = new Set(lineage(t.outline).map(h => h.ref));
+  const onLin = preciseRefs(lineage(t.outline));
   if (nm) { // the nearest bounds in their order, joined to the entries' bounds for the tick and dot; any others after
     const used = new Set(), out = [];
     for (const m of nm) {
@@ -1916,6 +1940,7 @@ function tableHTML(X, t, tb, open) {
     <p class="empty tnote">${esc(how + also)} ${plural(tb.rows.length, 'row')}, hit ${esc(tb.hit || '?')}.</p>
     <table class="rows"><thead><tr><th>row</th><th>result</th><th>output</th><th>what it tests, and what this turn held</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
+const viaText = v => 'via ' + (VIA_TEXT[v] || v);
 const VIA_TEXT = {rested_on: 'rested on', refs: 'read', row: 'tested by the row that matched', declared: 'declared read (not a record of what it read)', cause: "named by the marker's cause"};
 const WHY_HEAD = {requirement: 'Its source requirement did not hold', when: 'Its function when said no', need: 'Something it needs was not determined', stopped: 'The turn stopped asking', other: 'Other reasons'};
 function notAskedLine(X, t, s) {
@@ -1950,7 +1975,7 @@ function drawTurnView() {
   if (!R) h += `<p class="warnline">No design is paired with this record, so the page cannot say which sources were asked or which rows matched. The Graph tab draws its entries by round.</p>`;
   // 2. how it was decided: the tables the turn ran
   if (R) {
-    const onLin = new Set(lineage(T).map(p => p.ref));
+    const onLin = preciseRefs(lineage(T));
     const steps = tb => { const n = X && X.N['rule:' + tb.rule]; return n && n.steps_to_policy != null ? n.steps_to_policy : 1e9; };
     const tables = R.tables.slice().sort((a, b) => (b.policy - a.policy) || (onLin.has(b.ref) - onLin.has(a.ref)) || steps(a) - steps(b) || a.index - b.index);
     h += `<h3>How it was decided</h3>`;
@@ -1965,7 +1990,10 @@ function drawTurnView() {
   // 3. the lineage
   const lin = lineage(T);
   if (lin.length > 1) {
-    h += `<h3>What it rests on</h3><ol class="lin">${lin.map(p => { const e = p.index != null ? t.idx.all.find(x => x.index === p.index) : null; return `<li>${tRef(X, p.ref)} ${valueCell(e)}${p.via ? ` <span class="empty">· ${esc(VIA_TEXT[p.via] || p.via)}${p.from ? ' from ' + esc(p.from) : ''}</span>` : ''}</li>`; }).join('')}</ol>`;
+    const row = p => { const e = p.index != null ? t.idx.all.find(x => x.index === p.index) : null; return `<li>${tRef(X, p.ref)} ${valueCell(e)}${p.via ? ` <span class="empty">· ${esc(VIA_TEXT[p.via] || p.via)}${p.from ? ' from ' + esc(p.from) : ''}</span>` : ''}</li>`; };
+    const known = lin.filter(p => p.via !== 'declared'), declared = lin.filter(p => p.via === 'declared');
+    h += `<h3>What it rests on</h3><ol class="lin">${known.map(row).join('')}</ol>`;
+    if (declared.length) h += `<details class="decl"><summary>${plural(declared.length, 'declared read')}, not a record of what was read</summary><ol class="lin">${declared.map(row).join('')}</ol></details>`;
   }
   // 4. asked and answered
   if (R) {
@@ -2847,7 +2875,7 @@ addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(r
 function defaultView() { return cur().turns.length ? 'turn' : cur().designs.length ? 'overview' : 'graph'; }
 // A hash such as #view=explore&node=rule:act&up=2&turn=2&theme=dark&sort=-nearest&und=1 opens that view.
 function readHash() {
-  Object.assign(S, {view: null, turn: null, node: null, stateEdges: false, undecidedOnly: false, sort: null, dir: 1});
+  Object.assign(S, {view: null, turn: null, node: null, stateEdges: false, declaredHops: true, undecidedOnly: false, sort: null, dir: 1});
   try {
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.has('set')) { const i = sets.findIndex(s => s.name === h.get('set')); S.set = i >= 0 ? i : Math.min(+h.get('set') || 0, sets.length - 1); }

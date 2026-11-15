@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from ommat.outline._common import CUT, STATE, arr, base_of, is_dict, is_list, number, obj, text_of
-from ommat.outline._path import gap, root_chain
+from ommat.outline._path import gap, precise_refs, root_chain
 
 
 def cut(text: str, n: int = CUT) -> str:
@@ -337,7 +337,7 @@ def render_turn(o: dict[str, Any], *, detail: bool = False) -> str:
         shown = _marker_text(st["marker"]) if st["holds"] != "value" else text_of(st["value"])
         lines.append(f"state  {shown}")  # whole, never cut
     providers: dict[str, Any] = o["providers"] or {}
-    on_lineage = {p["ref"] for p in o["lineage"]}
+    on_lineage = precise_refs(o["lineage"])
     for r in o["rounds"]:
         if not r["calls"] and all(e["ref"] == STATE for e in r["entries"]):
             continue  # round 0 with the state's entry alone, shown on the state line
