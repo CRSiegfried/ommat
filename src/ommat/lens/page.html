@@ -517,7 +517,7 @@ const basename = p => String(p || '').split('/').pop();
 const num = x => typeof x === 'number' ? String(+x.toPrecision(6)) : String(x);
 
 /* ---------- data ---------- */
-const OUTLINE_VERSION = 7;
+const OUTLINE_VERSION = 8;
 let DATA = {sets: []};
 try {
   const raw = $('lens-data').textContent.trim();

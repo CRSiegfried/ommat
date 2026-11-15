@@ -35,7 +35,7 @@ Changelog = "https://github.com/CRSiegfried/ommat/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # The binding to idia, ommat.bindings.idia.
-idia = ["idia>=0.1,<0.2"]
+idia = ["idia>=0.2,<0.3"]
 # The Pydantic AI renderer, ommat.conversation.pydantic_ai.
 pydantic-ai = ["pydantic-ai-slim>=2.49"]
 

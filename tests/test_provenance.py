@@ -85,7 +85,6 @@ PROFILE: dict[str, Any] = {
     "missing": {
         "request_id": "not-reported",
         "usage.output_tokens": "not-applicable",
-        "usage.passes": "not-reported",
     },
     "clients": {"huggingface_hub": "0.26.0", "idia": "0.1.0"},
 }
@@ -441,7 +440,7 @@ def test_a_format_6_record_may_hold_calibrated_and_a_format_7_one_may_not(place:
     format_7 = with_calibrated(old_doc_of(turn(**PROFILE)), place)
     refused(format_7, f"{verb} calibrated, which a format-7 record does not")
     current = with_calibrated(doc_of(turn(**PROFILE)), place)
-    refused(current, f"{verb} calibrated, which a format-9 record does not")
+    refused(current, f"{verb} calibrated, which a format-10 record does not")
 
 
 def test_a_detail_is_missing_only_when_every_sent_request_lacks_it() -> None:

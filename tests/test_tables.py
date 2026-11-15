@@ -743,7 +743,7 @@ def edited(record: Record, change: Callable[[dict[str, Any]], object]) -> dict[s
 
 
 GOLDEN_DESIGN = "sha256:df7ab30bda3987770d58231ff26a36e5785741b278adb9e8acf280ca5a5c7cfd"
-GOLDEN_RECORD = "sha256:f4a363d762c952d4b0c30ccaa236c9fccfc17e0b63ff0982040195da48ae87f7"
+GOLDEN_RECORD = "sha256:e7ac03e54821f6be68ae02a50c2b824fb8cbdf6bee73fd0ed46244b09dde8c8e"
 
 
 def test_a_golden_table_turn() -> None:

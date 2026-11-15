@@ -753,12 +753,14 @@ def test_the_sources_run_concurrently_and_their_provenance_is_joined_and_summed(
         if started == 2:
             both.set()
         await asyncio.wait_for(both.wait(), 2)
-        usage = Usage(input_tokens=10, output_tokens=2, passes=1)
-        return Reply(answers=answer_all(wire_request, deadline), usage=usage)
+        usage = Usage(input_tokens=10, output_tokens=2)
+        extras = {"passes": 1}
+        return Reply(answers=answer_all(wire_request, deadline), usage=usage, extras=extras)
 
     binding, _ = built(script)
     result = call(binding, source(), source("other", {"q:other/x": NOUL}, OTHER))
-    assert result.usage == {"input_tokens": 20, "output_tokens": 4, "passes": 2}
+    assert result.usage == {"input_tokens": 20, "output_tokens": 4}
+    assert result.extras == ({"passes": 1}, {"passes": 1})  # one per request sent
     assert result.attempts == 2
     assert result.precision == 2
     assert result.revision is not None
@@ -946,7 +948,7 @@ def test_a_local_leafs_runtime_reasons_and_claims_reach_the_call_under_ommats_na
             usage=Usage(input_tokens=12, output_tokens=None),
             versions={"python": "3.11.9", "gliner2": "1.2.0", "torch": "2.5.1"},
             client_versions={"huggingface_hub": "0.26.0"},
-            unreported={"usage.output_tokens": "not-applicable", "usage.passes": "not-reported"},
+            unreported={"usage.output_tokens": "not-applicable"},
             claimed=frozenset({"model_reported", "snapshot"}),
         )
 
@@ -955,10 +957,8 @@ def test_a_local_leafs_runtime_reasons_and_claims_reach_the_call_under_ommats_na
     assert result.runtime == {"python": "3.11.9", "gliner2": "1.2.0", "torch": "2.5.1"}
     assert result.claimed == ("model_reported", "revision")  # idia's snapshot is the revision
     assert result.revision == "scripted-1"
-    assert result.missing == {
-        "usage.output_tokens": "not-applicable",
-        "usage.passes": "not-reported",
-    }
+    assert result.missing == {"usage.output_tokens": "not-applicable"}
+    assert result.extras == ()  # the leaf reports nothing more
     assert result.clients is not None
     assert "huggingface_hub" in result.clients
     assert result.clients["idia"] == idia.__version__
@@ -999,6 +999,55 @@ def test_idias_reason_for_calibrated_is_dropped() -> None:
         unreported={"calibrated": "not-reported", "snapshot": "not-pinned"},
     )
     assert _provenance(outcome).missing == {"revision": "not-pinned"}
+
+
+def test_a_call_whose_outcome_reports_extras_keeps_its_reasons_and_writes_them() -> None:
+    from ommat import Design, Question, Rule, Source, Text, decide_sync, load
+    from ommat import types as t
+
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        return Reply(
+            answers=answer_all(wire_request, deadline),
+            usage=Usage(input_tokens=12, output_tokens=None),
+            unreported={"usage.output_tokens": "not-applicable"},
+            extras={"passes": 2},
+        )
+
+    design = Design(
+        name="passes",
+        state=t.record(report=t.string),
+        sources={
+            "triage": Source(
+                {"q:triage/hazard": Question("noul", Text("Is anyone in danger?"))},
+                needs=["t:state.report"],
+                oracle="o",
+            )
+        },
+        rules={
+            "act": Rule(
+                "d:act", t.label("go"), lambda r: "go", version="1", reads=["q:triage/hazard"]
+            )
+        },
+        policy="d:act",
+    )
+    binding, _ = built(script)
+    record = decide_sync(load(design), {"report": TEXT}, {"o": binding}).record
+    (entry,) = record.unhashed["calls"].values()
+    assert entry["missing"]["usage.output_tokens"] == "not-applicable"
+    assert entry["extras"] == [{"passes": 2}]
+    assert "invalid" not in entry
+
+
+def test_idias_extras_go_in_extras_as_given_and_no_raw_usage_does() -> None:
+    def script(wire_request: WireRequest, deadline: Deadline) -> Any:
+        usage = Usage(input_tokens=1, output_tokens=1, raw_usage={"cached": 5})
+        extras = {"passes": 3, "route": {"via": "edge"}}
+        return Reply(answers=answer_all(wire_request, deadline), usage=usage, extras=extras)
+
+    binding, _ = built(script)
+    result = call(binding, source())
+    assert result.usage == {"input_tokens": 1, "output_tokens": 1}
+    assert result.extras == ({"passes": 3, "route": {"via": "edge"}},)
 
 
 def test_a_wire_alias_is_an_unpinned_revision_and_a_runtime_that_does_not_apply() -> None:

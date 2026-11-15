@@ -31,8 +31,12 @@ from ommat._canonical import (
 from ommat._markers import CauseCode, MarkerKind, OutcomeKind
 from ommat._provenance import (
     HASHED_DETAILS,
+    LINE_BOUNDARIES,
+    NAME_DETAILS,
+    PASSES,
     REASONS,
     RECORDED_DETAILS,
+    RECORDED_USAGE_KEYS,
     STRING_DETAILS,
     USAGE_KEYS,
     precision_conforms,
@@ -43,6 +47,7 @@ from ommat._values import (
     CONTEXT_FORMAT,
     DESCRIPTION_FORMAT,
     EXTRACTION_FORMAT,
+    EXTRAS_FORMAT,
     GROUNDED_FORMAT,
     HASH_FORMAT,
     KEY_ORDER_FORMAT,
@@ -1037,6 +1042,7 @@ _INVALID_NAMES = frozenset(
         "clients",
         "truncated",
         "warnings",
+        "extras",
     }
 )
 _NUMBERS = _kind(
@@ -1090,30 +1096,6 @@ def _warnings(value: Any, where: str) -> None:
         raise _LedgerError(f"{where} is empty; an empty member is not written")
 
 
-def _call_entry(value: Any, where: str) -> None:
-    _members(
-        value,
-        where,
-        {
-            "start": _STR,
-            "latency": _NUMBER,
-            "usage": _or_null(_NUMBERS),
-            "attempts": _INT_OR_NULL,
-        },
-        {
-            "unexpected": _unexpected,
-            "invalid": _invalid,
-            "sums": _sums,
-            "truncated": _truncated,
-            "warnings": _warnings,
-            "request_id": _STR,
-            "calibrated": _BOOL,
-            "missing": _missing,
-            "clients": _VERSIONS,
-        },
-    )
-
-
 def _missing(value: Any, where: str) -> None:
     _OBJECT(value, where)
     if not value:
@@ -1123,6 +1105,43 @@ def _missing(value: Any, where: str) -> None:
             raise _LedgerError(f"{where} has the key {clipped(name)}, which names no detail")
         if type(reason) is not str or reason not in REASONS:
             raise _LedgerError(f"{where}[{name!r}] is not a reason of the provenance profile")
+
+
+def _extras(value: Any, where: str) -> None:
+    """A binding's per-request objects: a list of objects, one not empty, in its order."""
+    _LIST(value, where)
+    for i, member in enumerate(cast("list[Any]", value)):
+        _OBJECT(member, f"{where}[{i}]")
+    if not any(cast("list[Any]", value)):
+        raise _LedgerError(f"{where} is empty; an empty member is not written")
+
+
+_CALL_REQUIRED: dict[str, _Check] = {
+    "start": _STR,
+    "latency": _NUMBER,
+    "usage": _or_null(_NUMBERS),
+    "attempts": _INT_OR_NULL,
+}
+"""A ``calls`` entry's members every format holds."""
+
+_CALL_OPTIONAL: dict[str, _Check] = {
+    "unexpected": _unexpected,
+    "invalid": _invalid,
+    "sums": _sums,
+    "truncated": _truncated,
+    "warnings": _warnings,
+    "request_id": _STR,
+    "calibrated": _BOOL,
+    "missing": _missing,
+    "clients": _VERSIONS,
+    "extras": _extras,
+}
+"""A ``calls`` entry's other members, each written only when it holds something; the format
+check refuses one its format does not have."""
+
+
+def _call_entry(value: Any, where: str) -> None:
+    _members(value, where, _CALL_REQUIRED, _CALL_OPTIONAL)
 
 
 def _sums_keys(
@@ -1353,6 +1372,7 @@ def _call_entry_format(entry: dict[str, Any], fmt: int, where: str) -> None:
         ("truncated", EXTRACTION_FORMAT),
         ("warnings", WARNINGS_FORMAT),
         ("precision", PRECISION_FORMAT),
+        ("extras", EXTRAS_FORMAT),
         *((name, PROFILE_FORMAT) for name in _PROFILE_ONLY),
         *((name, PROFILE_FORMAT) for name in _CALLS_PROFILE),
     )
@@ -1364,14 +1384,23 @@ def _call_entry_format(entry: dict[str, Any], fmt: int, where: str) -> None:
     missing = cast("dict[str, Any]", entry.get("missing", {}))
     if fmt >= UNCALIBRATED_FORMAT and any("calibrated" in m for m in (entry, invalid, missing)):
         raise _LedgerError(f"{where} holds calibrated, which a format-{fmt} record does not")
+    if fmt >= EXTRAS_FORMAT and f"usage.{PASSES}" in missing:
+        raise _LedgerError(f"{where} holds usage.{PASSES}, which a format-{fmt} record does not")
     usage = entry.get("usage")
+    keys = USAGE_KEYS if fmt >= EXTRAS_FORMAT else RECORDED_USAGE_KEYS
     if fmt >= POLICY_FORMAT and type(usage) is dict:
         for key in cast("dict[str, Any]", usage):
-            if key not in USAGE_KEYS:
+            if key not in keys:
                 raise _LedgerError(
                     f"{where} holds the usage key {clipped(key)}, which a format-{fmt} record "
                     "does not"
                 )
+    attempts, extras = entry.get("attempts"), cast(object, entry.get("extras"))
+    if type(attempts) is int and type(extras) is list and len(cast("list[Any]", extras)) > attempts:
+        raise _LedgerError(
+            f"{where} holds more objects than its {attempts} attempts in extras; a call holds one "
+            "per request it sent"
+        )
 
 
 def _codes(kind: str, item: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1536,6 +1565,17 @@ class Ledger:
                 raise _LedgerError(f"{where} holds {name}, which a format-{fmt} record does not")
         if fmt >= UNCALIBRATED_FORMAT and "calibrated" in item.get("claimed", ()):
             raise _LedgerError(f"{where} claims calibrated, which a format-{fmt} record does not")
+        if fmt >= EXTRAS_FORMAT and f"usage.{PASSES}" in item.get("claimed", ()):
+            raise _LedgerError(
+                f"{where} claims usage.{PASSES}, which a format-{fmt} record does not"
+            )
+        for name in NAME_DETAILS if fmt >= EXTRAS_FORMAT else ():
+            value = item.get(name)
+            if type(value) is str and any(c in LINE_BOUNDARIES for c in value):
+                raise _LedgerError(
+                    f"{where}'s {name} holds a line boundary, which a format-{fmt} record's does "
+                    "not: it names one"
+                )
         if fmt < NOUL_DESCRIPTION_FORMAT and any(
             q["kind"] == AnswerKind.noul and q["labels"] is not None
             for q in cast("dict[str, Any]", item["questions"]).values()
@@ -2235,7 +2275,7 @@ def _read(doc: object) -> Record:
     if err is not None:
         raise _LedgerError(f"unhashed is outside the value domain: {err}")
     for i, entry in enumerate(members_of(member_named(cast(object, unhashed), "calls"))):
-        for name in ("usage", "warnings", "request_id", "clients"):  # each a value
+        for name in ("usage", "warnings", "request_id", "clients", "extras"):  # each a value
             found = member_named(entry, name)
             if found is not MISSING:
                 _sized_value(found, f"unhashed 'calls' entry {i}'s {name!r}")

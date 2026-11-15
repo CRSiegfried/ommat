@@ -47,6 +47,9 @@ WEST = dt.timezone(dt.timedelta(hours=-5, minutes=-30))
 
 def test_the_package_re_exports_the_core_functions() -> None:
     assert ommat.bindings.__all__ == [
+        "DETAILS",
+        "REASONS",
+        "USAGE_KEYS",
         "OracleBinding",
         "RequestProvenance",
         "bounded_warnings",
@@ -58,11 +61,19 @@ def test_the_package_re_exports_the_core_functions() -> None:
         "json_value",
         "prompt_text",
     ]
-    assert ommat.bindings.__all__ == sorted(ommat.bindings.__all__)
-    from ommat import _binding
+    # Sorted as ruff sorts it: constants, then classes, then functions.
+    kinds = sorted(ommat.bindings.__all__, key=lambda n: (not n.isupper(), not n[0].isupper(), n))
+    assert ommat.bindings.__all__ == kinds
+    from ommat import _binding, _provenance
 
     for name in ommat.bindings.__all__:
-        home = _binding if name == "OracleBinding" else core
+        home = (
+            _binding
+            if name == "OracleBinding"
+            else _provenance
+            if name in ("DETAILS", "REASONS", "USAGE_KEYS")
+            else core
+        )
         assert getattr(ommat.bindings, name) is getattr(home, name)
 
 
@@ -411,9 +422,10 @@ def test_the_requests_provenance_is_joined_summed_and_sorted() -> None:
         revision="s1",
         elicitation="passthrough",
         prompt="p2",
-        usage={"input_tokens": 5, "passes": 2},
+        usage={"input_tokens": 5},
         attempts=2,
         truncated=("q:a",),
+        extras={"passes": 2},
     )
     values: dict[str, object] = {"q:a": {"yes": 1.0, "no": 0.0}}
     result = call_result(values, iter([first, second]), precision=2, warnings=("w",))
@@ -422,9 +434,10 @@ def test_the_requests_provenance_is_joined_summed_and_sorted() -> None:
         revision="s1",
         elicitation="passthrough",
         prompt="p1\np2",
-        usage={"input_tokens": 15, "output_tokens": 2, "passes": 2},
+        usage={"input_tokens": 15, "output_tokens": 2},
         attempts=3,
         truncated=("q:a", "q:b"),
+        extras=({}, {"passes": 2}),
         warnings=("w",),
         precision=2,
     )

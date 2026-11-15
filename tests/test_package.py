@@ -109,7 +109,10 @@ def test_the_public_names_are_exactly_the_decisions() -> None:
 
 
 BINDINGS = {
+    "DETAILS",
     "OracleBinding",
+    "REASONS",
+    "USAGE_KEYS",
     "RequestProvenance",
     "bounded_warnings",
     "call_result",

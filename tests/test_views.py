@@ -33,6 +33,7 @@ from ledger_logs import (
     NORMAL,
     NORMAL_8,
     NORMAL_9,
+    NORMAL_10,
     SETTINGS,
     SETTINGS_9,
     STATE,
@@ -43,6 +44,9 @@ from ledger_logs import (
     round_item,
     shape_of,
     unhashed_of,
+)
+from ledger_logs import (
+    UNHASHED as LOG_UNHASHED,
 )
 from ommat import (
     Cause,
@@ -1059,6 +1063,54 @@ def test_unhashed_text_is_content_whatever_the_policy_and_its_names_keys_and_usa
     assert out["log"][7]["prompt"] == d("Is this spam?")  # the policy never names it
 
 
+@pytest.mark.parametrize(
+    "policy", [{}, {"t:state": "open", "q:spam": "open"}], ids=["none", "open"]
+)
+def test_a_calls_extras_is_one_digest_whatever_the_policy(policy: dict[str, Any]) -> None:
+    unhashed = copy.deepcopy(LOG_UNHASHED["normal-10"])
+    record = read(fresh(NORMAL_10), unhashed)
+    out = view(record, policy=policy)
+
+    def d(value: Any) -> str:
+        return digest(value, out)
+
+    calls = out["unhashed"]["calls"]
+    for key, kept in unhashed["calls"].items():
+        assert calls[key] == {**kept, "extras": d(kept["extras"])}  # the rest open
+    # Text a user wrote and an id the caller gave are nowhere in the view.
+    assert "4417" not in json.dumps(out)
+    assert "user-8812" not in json.dumps(out)
+
+
+def test_the_applied_policy_and_the_key_are_the_same_with_and_without_extras() -> None:
+    bare = view(read(fresh(NORMAL_10)), policy={"q:spam": "open"})
+    extras = copy.deepcopy(LOG_UNHASHED["normal-10"])
+    held = view(read(fresh(NORMAL_10), extras), policy={"q:spam": "open"})
+    assert bare["applied"] == held["applied"]
+    assert key_of(bare) == key_of(held)
+    assert bare["log"] == held["log"]
+
+
+def test_every_calls_entry_member_the_ledger_admits_is_shown_or_digested() -> None:
+    from ommat._ledger import _CALL_OPTIONAL, _CALL_REQUIRED  # pyright: ignore[reportPrivateUsage]
+    from ommat._views import _CALL_DIGESTED, _CALL_SHOWN  # pyright: ignore[reportPrivateUsage]
+
+    admitted = {*_CALL_REQUIRED, *_CALL_OPTIONAL}
+    assert admitted == _CALL_SHOWN | _CALL_DIGESTED
+    assert not _CALL_SHOWN & _CALL_DIGESTED
+    assert "extras" in _CALL_DIGESTED
+    assert "usage" in _CALL_SHOWN
+
+
+def test_a_calls_entry_member_the_view_does_not_know_is_digested_whole() -> None:
+    from ommat._views import _Walk  # pyright: ignore[reportPrivateUsage]
+
+    walk = _Walk(bytes(32))
+    walk.digest = lambda value: f"d({json.dumps(value)})"  # type: ignore[method-assign]
+    out = walk.call({"start": "s", "latency": 0.5, "usage": None, "attempts": 1, "later": [1]})
+    assert out == {"start": "s", "latency": 0.5, "usage": None, "attempts": 1, "later": "d([1])"}
+
+
 # ---------------------------------------------------------------------------------------------
 # The root key
 
@@ -1122,6 +1174,8 @@ def test_every_prefix_of_the_test_logs_redacts_and_escalates(name: str, n: int) 
         if "warnings" in keyed:  # the binding's text, one digest
             warned = out["unhashed"]["calls"][key]["warnings"]
             assert warned == digest(keyed["warnings"], out)
+        if "extras" in keyed:  # the binding's figures and text, one digest
+            assert out["unhashed"]["calls"][key]["extras"] == digest(keyed["extras"], out)
     assert out["redacted"] == record.record_hash
     assert out.get("hash") == (record.record_hash if record.log[0]["format"] >= 3 else None)
     assert len(out["log"]) == n
@@ -1160,7 +1214,7 @@ def at(record: Record, ref: str) -> int:
 def test_a_decided_turn_holds_its_shapes_and_digests_what_the_policy_names_nothing_for() -> None:
     loaded = loaded_with(send, name="mail")
     record = decide_sync(loaded, {"subject": "secret"}, {}, RunSettings()).record
-    assert record.log[0]["format"] == 9
+    assert record.log[0]["format"] == 10
     assert record.log[1]["shapes"]["t:state"] == {"subject": "leaf"}
     assert "classes" not in record.log[1]
     out = view(record)

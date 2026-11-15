@@ -220,12 +220,12 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
 
 
 GOLDEN_DESIGN = "sha256:e25116359956ed3601d67d1e7d2c31007a4ad9bbfd0ddc9f1936a98a0d8ab9d7"
-GOLDEN_RECORD = "sha256:632094f77fa6246bbda0c6f2b18286d7a19aa86a8c3721956d856e6c50b0fc15"
+GOLDEN_RECORD = "sha256:e6901e8c9cb9c63eaf2862be2a334668699fe24709e8fbbf3511ebf472173105"
 
 
 def test_the_golden_per_ref_record() -> None:
     record = per_ref_turn()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 9, "helpers": 4}
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 10, "helpers": 4}
     assert record.log[1]["policy"] == "d:report"
     assert entry(record, "d:report")["value"] == "value, marker, marker"
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)

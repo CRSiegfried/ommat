@@ -608,7 +608,6 @@ NOT_GIVEN = {
     "request_id": "not-reported",
     "usage.input_tokens": "not-reported",
     "usage.output_tokens": "not-applicable",  # an encoder writes no tokens
-    "usage.passes": "not-reported",
 }
 ```
 

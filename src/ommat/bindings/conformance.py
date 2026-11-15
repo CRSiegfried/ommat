@@ -24,15 +24,19 @@ The checks, by name:
   when the binding sent a request, its ``attempts`` above 0; a result that sent none, as a
   replay's, owes none;
 - ``warnings`` and ``precision``: each conforms as interpret tests it;
-- ``provenance``: each detail of the provenance profile, ``request_id``, ``usage`` (only
-  ``input_tokens``, ``output_tokens`` and ``passes``), ``attempts`` and ``clients`` in its form,
-  ``claimed`` naming only details holding a value, ``missing`` only details and reasons of the
-  profile and never a detail holding a value; a result that sent a request gives each detail a
-  value or a reason, and one that sent none has no provenance;
+- ``provenance``: each detail of the provenance profile, ``provider`` and ``model_requested``
+  each with no line boundary, ``request_id``, ``usage`` (only ``input_tokens`` and
+  ``output_tokens``), ``attempts``, ``clients`` and ``extras`` (no more objects than
+  ``attempts``, and none when no request was sent) in its form, ``claimed`` naming only details
+  holding a value, ``missing`` only details and reasons of the profile and never a detail holding
+  a value; a result that sent a request gives each detail a value or a reason, and one that sent
+  none has no provenance;
 - ``unsupported-provenance``: a result whose every ref is ``unsupported`` has no provenance,
-  ``usage``, ``attempts``, ``request_id``, ``missing`` or ``clients``, and ``truncated`` empty;
+  ``usage``, ``attempts``, ``request_id``, ``missing`` or ``clients``, and ``truncated`` and
+  ``extras`` empty;
 - ``deterministic``, when asked: two calls with one batch return equal ``CallResult``s but
-  for ``request_id``, which a provider gives each request afresh.
+  for ``request_id``, which a provider gives each request afresh, and ``extras``, whose
+  per-request figures may differ from run to run.
 
 A binding that passes may still misread its provider: the suite holds it to the protocol only.
 A binding that returns a ``Failed`` for every batch passes every check but ``deterministic``.
@@ -57,8 +61,11 @@ from ommat._markers import Cause, CauseCode, Failed, Unavailable, Undetermined
 from ommat._provenance import (
     DETAILS,
     HASHED_DETAILS,
+    NAME_DETAILS,
     REASONS,
     STRING_DETAILS,
+    extras_conform,
+    name_conforms,
     precision_conforms,
     string_conforms,
     usage_conforms,
@@ -297,7 +304,9 @@ async def _check(binding: OracleBinding, batches: list[Batch], deterministic: bo
                 fail("deterministic", "a call did not return a CallResult")
             else:
                 try:  # the results' values are the binding's, whose __eq__ may raise
-                    same = replace(first, request_id=None) == replace(again, request_id=None)
+                    same = replace(first, request_id=None, extras=()) == replace(
+                        again, request_id=None, extras=()
+                    )
                 except Exception:
                     fail("deterministic", "two calls' results could not be compared")
                 else:
@@ -371,8 +380,15 @@ def _judge(batch: Batch, result: object, fail: Callable[[str, str], None]) -> No
                 type(cast(object, getattr(result, name))) is tuple and not getattr(result, name)
             )
         ]
+        if not _no_extras(cast(object, result.extras)):
+            set_.append("extras")
         if set_:
             fail("unsupported-provenance", f"every ref is unsupported, yet {', '.join(set_)} set")
+
+
+def _no_extras(value: object) -> bool:
+    """Whether an ``extras`` holds nothing: null, or an empty tuple or list, read by type."""
+    return value is None or (type(value) in (tuple, list) and not cast("tuple[object]", value))
 
 
 def _unset(value: object) -> bool:
@@ -406,6 +422,12 @@ def _provenance_problems(result: CallResult) -> list[str]:
         for name in STRING_DETAILS
         if not string_conforms(cast(object, getattr(result, name)))
     ]
+    problems += [
+        f"{name} holds a line boundary; it names the one the call asked"
+        for name in NAME_DETAILS
+        if string_conforms(cast(object, getattr(result, name)))
+        and not name_conforms(cast(object, getattr(result, name)))
+    ]
     if not versions_conform(cast(object, result.runtime)):
         problems.append("runtime is not null or a non-empty dict of strings")
     if not versions_conform(cast(object, result.clients), exact=True):
@@ -416,9 +438,15 @@ def _provenance_problems(result: CallResult) -> list[str]:
     if usage is not None and not (
         type(usage) is dict and usage_conforms(cast("dict[object, object]", usage))
     ):
+        problems.append("usage is not null or a dict of input_tokens or output_tokens to numbers")
+    extras = cast(object, result.extras)
+    if not extras_conform(extras, cast(object, result.attempts)):
         problems.append(
-            "usage is not null or a dict of input_tokens, output_tokens or passes to numbers"
+            "extras is not a tuple of JSON objects, no more of them than attempts, within the "
+            "bounds"
         )
+    elif not _sent(result) and not _no_extras(extras):
+        problems.append("no request was sent, yet extras is set")
     claimed = cast(object, result.claimed)
     names = cast("tuple[object, ...]", claimed) if type(claimed) is tuple else None
     strings = names is not None and all(type(n) is str for n in names)

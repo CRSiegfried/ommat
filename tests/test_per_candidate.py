@@ -415,7 +415,7 @@ def test_the_settings_item_names_each_grounded_refs_set() -> None:
     record = decided()
     assert record.log[1]["grounded"] == {OUT: SET}
     assert record.log[1]["sets"] == {SET: None}
-    assert record.log[0]["format"] == 9
+    assert record.log[0]["format"] == 10
 
 
 def test_a_question_identity_is_one_across_candidates_and_turns() -> None:

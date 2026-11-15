@@ -242,8 +242,9 @@ class RequestProvenance:
     profile's details, ``prompt`` the text ``prompt_text`` gives, ``runtime`` and ``clients``
     mappings from package to version, ``claimed`` the details the provider asserts and cannot
     verify, ``usage`` a mapping from string to number, ``attempts`` 0 for a request never
-    sent, ``missing`` from each detail the request left null to its reason, and ``truncated``
-    the ``q:`` refs the provider cut short. It checks nothing when built."""
+    sent, ``missing`` from each detail the request left null to its reason, ``truncated``
+    the ``q:`` refs the provider cut short, and ``extras`` whatever else the provider reports
+    for the request, as a JSON object. It checks nothing when built."""
 
     provider: str | None = None
     model_requested: str | None = None
@@ -259,6 +260,7 @@ class RequestProvenance:
     missing: Mapping[str, str] | None = None
     clients: Mapping[str, str] | None = None
     truncated: tuple[str, ...] = ()
+    extras: Mapping[str, object] | None = None
 
 
 def call_result(
@@ -269,19 +271,31 @@ def call_result(
     warnings: tuple[str, ...] = (),
 ) -> CallResult:
     """The ``CallResult`` of a call sent as ``requests``, read only from those whose
-    ``attempts`` is above 0: each distinct ``provider``, ``model_requested``,
+    ``attempts`` is above 0: the one ``provider`` and the one ``model_requested`` they name,
+    since a call asks one service and one model, ``None`` when none names one; each distinct
     ``model_reported``, ``revision``, ``elicitation``, ``prompt`` and ``request_id`` one per
     line in the order first given, ``None`` when none has one; ``runtime`` and ``clients`` each
     merged; ``claimed`` the union, sorted;
     ``missing`` a detail's reason when every request gives one for it and the result holds no
     value for it, the first code other than ``not-sent``, else ``not-sent``;
     ``usage`` summed per key over the requests that report it, ``None`` when none does;
-    ``attempts`` summed; ``truncated`` sorted and distinct; ``warnings`` as given. When no
-    request made an attempt, the result has no provenance and ``attempts``, ``precision`` and
-    ``missing`` are ``None``, as a binding that called no model returns them. A package at two
-    versions in ``runtime`` or ``clients`` is a ``ValueError``."""
+    ``attempts`` summed; ``truncated`` sorted and distinct; ``warnings`` as given; ``extras``
+    each request's as a ``dict``, ``{}`` for one with none, in the order given, and ``()`` when
+    every one is empty. When no request made an attempt, the result has no provenance and
+    ``attempts``, ``precision`` and ``missing`` are ``None``, as a binding that called no model
+    returns them. Two distinct ``provider`` or ``model_requested`` values among the sent
+    requests, a null mixing with none, and a package at two versions in ``runtime`` or
+    ``clients``, are each a ``ValueError``. A ``model_reported`` or ``elicitation`` of several
+    lines names several, so such a call has no one calibration key."""
     given = list(requests)
     sent = [r for r in given if type(r.attempts) is int and r.attempts > 0]
+    for name, says in (("provider", "providers"), ("model_requested", "requested models")):
+        named = list(dict.fromkeys(v for r in sent if (v := getattr(r, name)) is not None))
+        if len(named) > 1:
+            raise ValueError(
+                f"call_result: a call's requests name two {says}, {named[0]} and {named[1]}"
+            )
+    extras = tuple(dict(r.extras or {}) for r in sent)
     usage: dict[str, float] = {}
     for request in sent:
         for key, figure in (request.usage or {}).items():
@@ -307,6 +321,7 @@ def call_result(
         clients=_merged("clients", (r.clients for r in sent)),
         truncated=tuple(sorted({ref for r in sent for ref in r.truncated})),
         warnings=warnings,
+        extras=extras if any(extras) else (),
     )
     return replace(result, missing=_missing(result, sent))
 

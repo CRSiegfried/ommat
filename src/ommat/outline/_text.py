@@ -515,9 +515,9 @@ def _nearest_lines(near: list[dict[str, Any]], ties: int | None) -> list[str]:
 
 
 def _detail_line(c: dict[str, Any]) -> str | None:
-    """A call's prompt, request id, clients, missing members and warnings in one line: the
-    prompt's length, the count of missing members and of warnings, each warning code with its
-    count."""
+    """A call's prompt, request id, clients, missing members, extras and warnings in one line:
+    the prompt's length, the count of missing members, of extras objects (1 for a redacted
+    view's digest) and of warnings, each warning code with its count."""
     u = c["unhashed"]
     parts: list[str] = []
     if c["prompt"] is not None:
@@ -529,6 +529,8 @@ def _detail_line(c: dict[str, Any]) -> str | None:
     if u["missing"]:
         missing: object = u["missing"]
         parts.append(f"missing {len(arr(missing) or obj(missing)) or 1}")
+    if u["extras"]:
+        parts.append(f"extras {len(arr(u['extras'])) or 1}")
     warnings = [str(w) for w in arr(u["warnings"])]
     if warnings:
         codes: dict[str, int] = {}
@@ -578,7 +580,7 @@ def _call_lines(c: dict[str, Any], *, detail: bool = False) -> list[str]:
     else:
         if c["prompt"] is not None:
             out.append(f"    prompt {cut(_q(c['prompt']))}")
-        for k in ("missing", "truncated", "invalid", "clients", "request_id"):
+        for k in ("missing", "truncated", "invalid", "clients", "request_id", "extras"):
             if u[k]:
                 out.append(f"    {k} {cut(text_of(u[k]))}")
         out.extend(_warning_lines(u["warnings"]))
