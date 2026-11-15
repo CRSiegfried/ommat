@@ -158,7 +158,7 @@ def test_every_fixture_prints_as_text_and_json(
         assert text.endswith("\n")
         assert text == render(json.loads(ordered(outline)))  # the text is the outline's
         assert json.loads(ordered(outline)) == outline
-        assert outline["outline_version"] == 7
+        assert outline["outline_version"] == 8
     if record is not None and design is not None:
         assert turn_outline(record, design)["design_hash_matches"] is True
 
@@ -1144,10 +1144,12 @@ def test_a_calls_detail_members_fold_into_one_line() -> None:
     o = turn_outline((IDIA / "turn.record.json").read_bytes(), (IDIA / "design.json").read_bytes())
     folded, detail = render_turn(o), render_turn(o, detail=True)
     assert (
-        "    call detail  prompt 1136 chars, request_id, clients, missing 3, warnings 7 "
+        "    call detail  prompt 1136 chars, request_id, clients, missing 2, warnings 7 "
         "(no-snapshot x1, unchecked-limit x6)\n"
     ) in folded
-    for word in ("    prompt ", "    request_id ", "    clients ", "    missing ", "    warning "):
+    assert "missing 2, extras 2, warnings 2" in folded  # the classifier's passes, per request
+    words = ("    prompt ", "    request_id ", "    clients ", "    missing ", "    extras ")
+    for word in (*words, "    warning "):
         assert word not in folded
         assert word in detail
     assert "    call detail  " not in detail
@@ -1435,3 +1437,25 @@ def test_a_key_path_bound_is_its_leafs_value_at_the_key() -> None:
     document["parameters"]["part/at"]["value"] = {"phone": 0.5}
     state = entry(turn_outline(record.document, document), "t:state")
     assert {b["param"]: b["bound"] for b in state["bounds"]}["part/at.email"] is None
+
+
+def test_a_calls_extras_is_outlined_and_survives_redaction() -> None:
+    from ommat import redact
+    from test_provenance import turn as provenance_turn
+
+    record = provenance_turn(attempts=2, extras=({"passes": 2}, {"note": "x"}))
+    o = turn_outline(record.document)
+    (call,) = [c for r in o["rounds"] for c in r["calls"]]
+    assert call["unhashed"]["extras"] == [{"passes": 2}, {"note": "x"}]
+    assert "extras 2" in render_turn(o)
+    assert '    extras [{"passes":2},{"note":"x"}]' in render_turn(o, detail=True)
+    view = redact(record, bytes(32), {})
+    r = turn_outline(view)
+    (shown,) = [c for rnd in r["rounds"] for c in rnd["calls"]]
+    assert str(shown["unhashed"]["extras"]).startswith("hmac-sha256:")
+    assert "extras 1" in render_turn(r)
+    assert '    extras "hmac-sha256:' in render_turn(r, detail=True)
+    bare = turn_outline(provenance_turn(attempts=1).document)
+    (none,) = [c for rnd in bare["rounds"] for c in rnd["calls"]]
+    assert none["unhashed"]["extras"] is None
+    assert "extras" not in render_turn(bare)
