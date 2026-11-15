@@ -82,10 +82,10 @@ leaves to ask the customer and of a third turn whose source could not answer:
 
 ```text
 The turn decided refund_order.
-call om_9bb4033a6afb0cc25b4d87ed_c1 ask {}
-result om_9bb4033a6afb0cc25b4d87ed_c1 24 bytes
-call om_9bb4033a6afb0cc25b4d87ed_d decide {"d:refund":"yes"}
-result om_9bb4033a6afb0cc25b4d87ed_d 27 bytes
+call om_c1d1b43f5fa332d8322ba312_c1 ask {}
+result om_c1d1b43f5fa332d8322ba312_c1 24 bytes
+call om_c1d1b43f5fa332d8322ba312_d decide {"d:refund":"yes"}
+result om_c1d1b43f5fa332d8322ba312_d 27 bytes
 The turn decided ask_if_refund.
 The turn is undecided: unsupported.
 ```
