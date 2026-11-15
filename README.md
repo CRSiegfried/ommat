@@ -72,7 +72,7 @@ DESIGN = Design(
 
 The demo keeps everything in one script; in a real project keep the design in a module (see the tutorial [Write a design](docs/tutorials/write-a-design.md)).
 
-A binding answers a source's questions. `fixed` answers each ref it is asked from a mapping, here the probability of each topic, and stands in for a model in a test. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds a binding over a real provider: it receives a call's sources together and sends those that share a state and options to the provider as one request, split only where the provider's limits require; a source the provider's preflight refuses with the others, or whose state differs, goes on its own. A binding of your own is a plain async function, as [Add a source](docs/how-to/add-a-source.md) shows:
+A binding answers a source's questions. `fixed` answers each ref it is asked from a mapping, here the probability of each topic, and stands in for a model in a test. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds a binding over a real provider: it receives a call's sources together and sends those that share a state and options to the provider as one request, split only where the provider's limits require; a source the provider's preflight refuses with the others, or whose state differs, goes on its own. A binding of your own is a plain async function, as [Add a source](docs/how-to/add-a-source.md) shows; its [Path C](docs/how-to/add-a-source.md#path-c-write-a-binding-over-a-chat-endpoint) answers `noul` and `choice` questions with probabilities over a chat endpoint, importing only `ommat` and `ommat.bindings`:
 
 ```python
 classifier = fixed({"q:topic": {"billing": 0.8, "shipping": 0.1, "other": 0.1}})
@@ -129,7 +129,7 @@ pip install "ommat @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 The core imports only the Python standard library. `ommat[idia]` is the binding ommat ships to decision-model providers, through the [idia](https://github.com/CRSiegfried/idia) library; install idia from its tag first, with the extras for the providers you use, as the [tutorial](docs/tutorials/decide-with-idia.md) shows, since pip ignores ommat's `[tool.uv.sources]` and `pip install "ommat[idia] @ git+…"` alone cannot find idia, which is on no package index yet:
 
 ```sh
-pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
+pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.2.0"
 pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 
@@ -165,7 +165,7 @@ To look at stored records, write them to `.json` files as `decision.record.docum
 cp -r skills/ommat ~/.claude/skills/
 ```
 
-To use ommat with idia, add idia's own skill too, from its [skills/idia](https://github.com/CRSiegfried/idia/tree/v0.1.0/skills/idia).
+To use ommat with idia, add idia's own skill too, from its [skills/idia](https://github.com/CRSiegfried/idia/tree/v0.2.0/skills/idia).
 
 ## Status
 

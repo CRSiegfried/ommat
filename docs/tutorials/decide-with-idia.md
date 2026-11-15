@@ -18,7 +18,7 @@ package index. idia's `openai` and `cloudflare` extras bring the clients the two
 need:
 
 ```sh
-pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
+pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.2.0"
 pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 

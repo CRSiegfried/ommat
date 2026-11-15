@@ -10,16 +10,19 @@ There are two ways to answer a source. If idia has a provider for your model, bi
 through idia, as [Path A](#path-a-bind-an-idia-provider) shows; idia's `gliner` leaf, for one,
 runs the GLiNER2 span extractor in your process. Otherwise write a binding of your own, as
 [Path B](#path-b-write-a-binding-over-a-local-model) shows over a model run in your own
-process, such as a named-entity model on torch that idia has no leaf for.
+process, such as a named-entity model on torch that idia has no leaf for, and
+[Path C](#path-c-write-a-binding-over-a-chat-endpoint) over a hosted chat model that answers
+`noul` and `choice` questions with probabilities, with no idia at all.
 
 The example's files are in `docs/how-to/add_a_source/`: `street_spotter.py` is a small
 stand-in for a local span model, so the example runs with no model to download,
 `span_binding.py` is the binding over it, `reports_design.py` the design that asks it and
 `reports_run.py` the driver; `idia_path.py` and `idia_run.py` are Path A's, and need
-`ommat[idia]`. The design sits in a module of its own because a component's module is part of
-the design's hash, and one defined in the running script, `__main__`, replays with
-`design-mismatch`. Run the driver from that folder with `python reports_run.py`, in an
-environment where ommat is installed.
+`ommat[idia]`; `chat_binding.py`, `chat_endpoint.py`, a stand-in for a chat endpoint,
+`triage_design.py` and `chat_run.py` are Path C's. A design sits in a module of its own
+because a component's module is part of the design's hash, and one defined in the running
+script, `__main__`, replays with `design-mismatch`. Run a driver from that folder, such as
+`python reports_run.py`, in an environment where ommat is installed.
 
 ## Declare the source
 
@@ -329,7 +332,7 @@ before the event loop runs, since building it imports its runtime, which takes s
 the leaf's worker. Under pip, torch comes from PyPI, the large GPU wheel on Linux.
 
 ```sh
-pip install "idia[gliner] @ git+https://github.com/CRSiegfried/idia@v0.1.0"
+pip install "idia[gliner] @ git+https://github.com/CRSiegfried/idia@v0.2.0"
 pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 ```
 
@@ -623,9 +626,245 @@ return call_result(values, requests, precision="unrounded", warnings=warnings)
 A batch whose every ref is `unsupported` sends no request, so it has no provenance and owes
 no reason, as the protocol asks.
 
+## Path C: write a binding over a chat endpoint
+
+`chat_binding.py` binds a hosted chat model: it posts one chat-completions request per
+question, asks the model for its probabilities as JSON, and reads them from the reply. It
+answers `noul` and `choice` questions and marks every other ref `unsupported`. It imports
+nothing but `ommat` and `ommat.bindings`, so the same shape serves any provider or in-house
+service that takes a prompt and returns text, with no provider library and no idia.
+`chat_endpoint.py` stands in for the service, so the example runs with no key and no network;
+`triage_design.py` is the design that asks it and `chat_run.py` the driver.
+
+What any binding owes is the protocol, not a library: an async function that takes `seconds`
+as a keyword ([Seconds and timeouts](#seconds-and-timeouts)), returns a `CallResult` whose
+`values` hold each ref of the batch in its kind's form or one of the six markers
+([What a call returns](#what-a-call-returns), [Markers a binding
+returns](#markers-a-binding-returns)), and provenance that states who answered and how, a
+reason for each detail left null ([What the record keeps](#what-the-record-keeps)). The
+sections below show where each of those lands in a chat binding.
+
+### Take the transport, not a client
+
+The binding takes the HTTP post as an async callable, so it holds no client of its own and a
+test can pass a stand-in:
+
+```python
+class Post(Protocol):
+    """``await post(body, seconds=s)``: send one request body and return the reply's JSON,
+    raising ``TimeoutError`` when ``s`` seconds pass first."""
+```
+
+For a live endpoint, pass a function over your HTTP client that posts `body` as JSON with
+`seconds` as the request's timeout, sends your key, and returns the decoded reply. The binding
+names one provider and one model:
+
+```python
+    def __init__(self, post: Post, *, provider: str, model: str, timeout: float = 30.0) -> None:
+        self._post = post
+        self._provider = provider
+        self._model = model
+        self._timeout = timeout  # one request's own limit, within the call's seconds
+```
+
+A call names one `provider` and one `model_requested`, and `call_result` raises `ValueError`
+when its requests name two ([The provenance profile](../spec/README.md#the-provenance-profile)).
+A design that asks two models declares two oracles and binds one `ChatBinding` to each.
+
+### Ask for probabilities as JSON
+
+The model is told the form to answer in, and `elicitation` names the method, since the
+method is part of what ran: a changed instruction is a new elicitation.
+
+```python
+SYSTEM = (
+    "Answer the question about the needs. Reply with JSON alone, "
+    '{"probabilities": {"<label>": <probability>}}, a probability from 0 to 1 for each label, '
+    f"each with at most {PLACES} decimal places."
+)
+ELICITATION = f"verbalized: JSON probabilities to {PLACES} places, one request per question"
+```
+
+Each request carries the source's needs as JSON keyed by ref, written by `json_value` in the
+order received, then the wording and the labels, each label with its description where it
+has one. `prompt` records what the model read beside the needs, which the record already
+holds, written by `prompt_text` in the order sent:
+
+```python
+        asked = {"question": question.wording, "labels": _labels(question)}
+        body = {
+            "model": self._model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": json.dumps({"needs": needs, **asked})},
+            ],
+        }
+        prompt = prompt_text({"system": SYSTEM, **asked})  # the needs are in the record already
+```
+
+A source that needs an image, a need JSON cannot carry, a `t:` ref and any kind but `noul` and
+`choice` are `unsupported`, each with its reason as a line, before any request.
+
+### Map the reply to an answer
+
+A provider's refusal is `refused`. A reply that is not the JSON asked for, or holds other
+labels than the question's, or a figure that is not a probability to two places, is
+`invalid-answer`, the code interpret would write; each gets a line of `warnings`:
+
+```python
+    try:
+        message = reply["choices"][0]["message"]
+        if message.get("refusal"):
+            return Unavailable(Cause("refused")), f"{ref}: refused: {message['refusal']}"
+        found: dict[str, Any] = json.loads(message["content"])["probabilities"]
+    except (KeyError, IndexError, TypeError, AttributeError, ValueError) as error:
+        return _invalid(ref, f"the reply is not the JSON asked for: {error!r}")
+    if type(found) is not dict or sorted(found) != sorted(question.labels):
+        return _invalid(ref, f"{found!r} does not hold exactly the question's labels")
+    answer = {name: found[name] for name in question.labels}  # in the question's order
+    for name, p in answer.items():
+        if type(p) not in (int, float) or not 0 <= p <= 1 or round(p, PLACES) != p:
+            return _invalid(ref, f"{name}: {p!r} is not a probability to {PLACES} places")
+    return answer, None
+```
+
+Since no answer with a third place gets through, `precision=PLACES`, two decimal places, is
+true of every answer the call returns. `precision` is the binding's declaration: the engine
+records it and checks none of it ([The binding protocol](../spec/README.md#the-binding-protocol)).
+A binding that rounds a model's figures itself instead names that in `elicitation`. A
+verbalised probability is the model's word, not a calibrated one: set a rule's bars by
+measuring.
+
+### Mark a failed request on its own ref
+
+The requests of a call run at once, through `asyncio.gather`, which returns them in the order
+given. A request that raises marks only its own ref, `timed-out` when its own limit passed
+and `raised` for any other failure, with a line of `warnings`, and the other refs stand
+([The binding protocol](../spec/README.md#the-binding-protocol)):
+
+```python
+        try:
+            left = min(self._timeout, deadline - time.monotonic())
+            reply = await self._post(body, seconds=left)
+        except TimeoutError as error:  # the request's own limit passed before the call's end
+            line = f"{ref}: timed-out: {error}"
+            return ref, Unavailable(Cause("timed-out")), self._failed(prompt), line
+        except Exception as error:  # never BaseException: a cancellation propagates
+            line = f"{ref}: raised: {type(error).__name__}: {error}"
+            return ref, Unavailable(Cause("raised")), self._failed(prompt), line
+```
+
+A per-ref `timed-out` stands only when the request's own `timeout` ends it before the call's
+end; a request that runs to the call's end is ommat's timeout, and the whole call is `Failed`.
+
+### Record the provenance
+
+Each request is one `RequestProvenance`, read from the reply: the model the reply names as
+`model_reported`, claimed, since the binding cannot check it; the reply's token counts under
+the names `USAGE_KEYS` gives; the reply's id as `request_id`; and in `extras` the figure this
+provider reports that the profile has no detail for, here its `processing_ms`:
+
+```python
+        usage: Mapping[str, Any] = reply.get("usage") or {}
+        theirs = {"input_tokens": "prompt_tokens", "output_tokens": "completion_tokens"}
+        tokens = {key: usage[theirs[key]] for key in USAGE_KEYS if theirs[key] in usage}
+        model, request_id = reply.get("model"), reply.get("id")
+        missing = {
+            **SENT,
+            **{f"usage.{key}": "not-reported" for key in USAGE_KEYS if key not in tokens},
+            **({} if model else {"model_reported": "not-reported"}),
+            **({} if request_id else {"request_id": "not-reported"}),
+        }
+```
+
+Every detail the request leaves null takes a reason from `REASONS`. A model alias pins no
+weights, so `revision` is `not-pinned`, and a wire API has no `runtime` of the caller's, so
+it is `not-applicable`; a request that failed reports no model, usage or id, each `not-sent`:
+
+```python
+SENT = {"revision": "not-pinned", "runtime": "not-applicable"}  # an alias, over the wire
+FAILED = {
+    **SENT,
+    "model_reported": "not-sent",
+    "request_id": "not-sent",
+    "usage.input_tokens": "not-sent",
+    "usage.output_tokens": "not-sent",
+}
+```
+
+`extras` holds one object per request sent, `{}` for a failed one, in the order the requests
+were given; it is outside every hash, takes no reason and no claim, and the conformance
+suite's `deterministic` check does not compare it. A cost, a cache hit or a queue time goes
+there too. `call_result` folds the requests into the call's `CallResult`, its usage summed and
+its `extras` kept per request:
+
+```python
+        return call_result(values, requests, precision=PLACES, warnings=bounded_warnings(lines))
+```
+
+### Run Path C
+
+`chat_run.py` holds the binding to the protocol, decides two reports through it and replays
+each, counting the endpoint's calls:
+
+```python
+    endpoint = StubEndpoint()
+    binding = ChatBinding(endpoint, provider="example-chat", model="chat-small")
+    print("conformance:", check(binding, deterministic=True))
+```
+
+From `docs/how-to/add_a_source`, run `python chat_run.py`:
+
+```text
+conformance: []
+decision: emergency crew
+  answers: {'q:triage/asset': {'lighting': 0.9, 'road': 0.05, 'other': 0.05}, 'q:triage/hazard': {'yes': 0.9, 'no': 0.1}}
+  provider: example-chat
+  model_requested: chat-small
+  model_reported: chat-small-2026-06
+  precision: 2
+  claimed: ['model_reported']
+  usage: {'input_tokens': 57, 'output_tokens': 20}
+  attempts: 2
+  missing: {'revision': 'not-pinned', 'runtime': 'not-applicable'}
+  extras: [{'processing_ms': 66}, {'processing_ms': 62}]
+  replay findings: [] | endpoint calls: 0
+decision: roads team
+  answers: {'q:triage/asset': {'lighting': 0.05, 'road': 0.9, 'other': 0.05}, 'q:triage/hazard': {'yes': 0.1, 'no': 0.9}}
+  provider: example-chat
+  model_requested: chat-small
+  model_reported: chat-small-2026-06
+  precision: 2
+  claimed: ['model_reported']
+  usage: {'input_tokens': 43, 'output_tokens': 20}
+  attempts: 2
+  missing: {'revision': 'not-pinned', 'runtime': 'not-applicable'}
+  extras: [{'processing_ms': 37}, {'processing_ms': 33}]
+  replay findings: [] | endpoint calls: 0
+```
+
+The call asked `chat-small` and the reply named `chat-small-2026-06`, a claim. The call's two
+requests sum to its `usage` and keep an `extras` object each. Each replay rebuilds its decision
+from the record with no call to the endpoint. Against a live model, drop `deterministic=True`:
+a hosted model may not repeat itself exactly, even at temperature 0.
+
+### What Path C leaves to you
+
+The example covers verbalised probabilities, one question per request, and the markers and
+provenance of each request. These are the author's:
+
+- Probabilities from token log-probabilities, where a provider returns them, are another
+  elicitation, named so, and usually `unrounded`.
+- Sending several questions or sources in one request: the order they stand in is then part
+  of what ran, named in `elicitation`, and a failed request marks every ref it carried.
+- Retries and backoff, each within the call's `seconds`, counted in `attempts`, and a
+  `warnings` line for each retry that failed; return once.
+- `score`, `extraction`, images and `t:` refs, which this binding marks `unsupported`.
+
 ## Hold the binding to the protocol
 
-Run the conformance suite before you bind anything, over a binding of either path; `idia_run.py`
+Run the conformance suite before you bind anything, over a binding of any path; `idia_run.py`
 runs it over Path A's. Over a leaf that answers only text extractions, most of the suite's
 batches come back `unsupported` before any call, so a pass there mostly tests the refusals.
 `reports_run.py` runs it over Path B's:
