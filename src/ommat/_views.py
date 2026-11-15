@@ -20,7 +20,9 @@ Structure is open: refs but a grounded ref's candidate, kinds, cause codes, tool
 tags, positions, usage, the hashes, the codec's name, an exception's ``type``, the call item's
 members but ``prompt``, and the design and settings items. Text the engine records with no type
 is digested whatever the policy names: a call's ``prompt``, a plan's text, exception text,
-``reads`` values and ``unhashed``'s other text. The one exception to data being digested is the
+``reads`` values and ``unhashed``'s other text, a call's ``extras``, whatever its provider
+reports beyond the profile, among it as one value, and any ``calls`` entry member the view does
+not know, whole. The one exception to data being digested is the
 source's profile, which is structure though a binding writes it freely: the call item's
 ``elicitation``, ``model_requested``, ``model_reported``, ``revision``, ``provider`` and
 ``runtime`` strings and ``unhashed``'s ``clients`` strings pass open.
@@ -675,10 +677,11 @@ class _Walk:
 
     def unhashed(self, unhashed: dict[str, Any]) -> dict[str, Any]:
         """``unhashed`` with its text digested: exception text, ``unexpected``, ``warnings`` and
-        ``request_id`` each whole, ``invalid``'s ``repr`` text, the ``reads`` values and an
-        unknown member whole; member names, log-index keys, ``usage``, ``sums``, ``truncated``,
-        ``calibrated`` (before format 7), ``missing``, ``clients``, times, the engine and codec
-        names and an exception's ``type`` are open."""
+        ``request_id`` each whole, ``extras`` whole, ``invalid``'s ``repr`` text, the ``reads``
+        values, an unknown member whole and an unknown ``calls`` entry member whole; member
+        names, log-index keys, ``usage``, ``sums``, ``truncated``, ``calibrated`` (before format
+        7), ``missing``, ``clients``, times, the engine and codec names and an exception's
+        ``type`` are open."""
         out: dict[str, Any] = {}
         for member, value in unhashed.items():
             if member in ("turn", "engine", "codec"):
@@ -701,8 +704,14 @@ class _Walk:
         return out
 
     def call(self, entry: dict[str, Any]) -> dict[str, Any]:
-        # ``sums`` and ``truncated`` pass open but for a grounded ref's candidate.
-        out = dict(entry)
+        """A ``calls`` entry, failing closed: each member ``_CALL_SHOWN`` names open, ``sums``
+        and ``truncated`` but for a grounded ref's candidate; ``unexpected``, ``warnings``,
+        ``request_id`` and ``extras`` each one digest, and each ``invalid`` text digested; any
+        other member digested whole."""
+        out = {
+            name: value if name in _CALL_SHOWN else self.digest(value)
+            for name, value in entry.items()
+        }
         if "sums" in entry:
             sums = cast("dict[str, Any]", entry["sums"])
             out["sums"] = {self.ref(k): v for k, v in sums.items()}
@@ -713,12 +722,35 @@ class _Walk:
             out["unexpected"] = self.digest(entry["unexpected"])
         if "warnings" in entry:  # the binding's text, one value
             out["warnings"] = self.digest(entry["warnings"])
+        if "extras" in entry:  # whatever the provider reports, its length and order hidden
+            out["extras"] = self.digest(entry["extras"])
         if "request_id" in entry:  # the provider's id, which may echo the caller's
             out["request_id"] = self.digest(entry["request_id"])
         if "invalid" in entry:
             invalid = cast("dict[str, Any]", entry["invalid"])
             out["invalid"] = {name: self.digest(text) for name, text in invalid.items()}
         return out
+
+
+_CALL_SHOWN = frozenset(
+    {
+        "start",
+        "latency",
+        "usage",
+        "attempts",
+        "sums",
+        "truncated",
+        "calibrated",
+        "missing",
+        "clients",
+    }
+)
+"""The ``calls`` entry members the view shows: structure, the times and the profile's open
+members; ``sums`` and ``truncated`` with a grounded ref's candidate digested."""
+
+_CALL_DIGESTED = frozenset({"unexpected", "warnings", "request_id", "extras", "invalid"})
+"""The ``calls`` entry members the view digests, each whole but ``invalid``, whose texts are
+each digested."""
 
 
 def _keeps_open(tree: Any) -> bool:
