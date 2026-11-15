@@ -5,13 +5,20 @@ output."""
 # pyright: reportPrivateUsage=false
 
 import asyncio
+import json
 import re
+import subprocess
+import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import chat_run
 import reports_run
+from chat_binding import ChatBinding
+from chat_endpoint import StubEndpoint
 from ommat import (
     AnswerKind,
     Cause,
@@ -21,6 +28,7 @@ from ommat import (
     Unsure,
     ValueType,
 )
+from ommat.bindings.conformance import check
 from span_binding import SpanBinding
 from street_spotter import StreetSpotter
 
@@ -116,3 +124,133 @@ def test_a_call_that_waits_out_its_seconds_never_starts_the_model() -> None:
     assert result.values["q:places/street"] == Unavailable(Cause("timed-out"))
     assert model.calls == 0
     assert result.revision is None
+
+
+_WITHOUT_IDIA = """
+import importlib.abc
+import sys
+
+
+class _NoIdia(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name == "idia" or name.startswith("idia."):
+            raise ModuleNotFoundError(f"blocked: {name}")
+        return None
+
+
+sys.meta_path.insert(0, _NoIdia())
+sys.path.insert(0, sys.argv[1])
+import chat_run
+
+chat_run.main()
+loaded = sorted(m for m in sys.modules if m.split(".")[0] == "idia" or m == "ommat.bindings.idia")
+assert not loaded, loaded
+"""
+
+
+def test_the_chat_driver_prints_what_the_guide_shows_with_idia_blocked(tmp_path: Path) -> None:
+    script = tmp_path / "without_idia.py"
+    script.write_text(_WITHOUT_IDIA, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-I", script, EXAMPLE], capture_output=True, text=True, check=True
+    )
+    assert result.stdout == _output("endpoint calls: 0")
+
+
+def test_the_chat_driver_decides_and_replays_with_no_endpoint_call() -> None:
+    assert chat_run.main() == [("emergency crew", 0), ("roads team", 0)]
+
+
+class _Scripted(StubEndpoint):
+    """The stand-in, but for questions whose wording names what the request does instead."""
+
+    async def __call__(self, body: Mapping[str, Any], *, seconds: float) -> dict[str, Any]:
+        reply = await super().__call__(body, seconds=seconds)
+        wording = json.loads(body["messages"][-1]["content"])["question"]
+        message = reply["choices"][0]["message"]
+        if wording == "refuse":
+            message.update(content=None, refusal="I can't help with that.")
+        elif wording == "garble":
+            message["content"] = "Probably yes."
+        elif wording == "three places":
+            message["content"] = json.dumps({"probabilities": {"yes": 0.333, "no": 0.667}})
+        elif wording == "one label":
+            message["content"] = json.dumps({"probabilities": {"yes": 0.9}})
+        elif wording == "stall":
+            raise TimeoutError("no reply within the request's limit")
+        elif wording == "break":
+            raise ConnectionError("connection reset")
+        return reply
+
+
+def _nouls(*wordings: str) -> tuple[SourceCall, ...]:
+    questions = {
+        f"q:faults/{n}": RenderedQuestion(AnswerKind.noul, wording, ("yes", "no"))
+        for n, wording in enumerate(wordings)
+    }
+    return (
+        SourceCall("faults", None, {"t:state.text": "A wire is exposed."}, (), questions),
+        SourceCall(
+            "other",
+            None,
+            {"t:state.text": "A lamp is out."},
+            (),
+            {"q:other/ok": RenderedQuestion(AnswerKind.noul, "answer", ("yes", "no"))},
+        ),
+    )
+
+
+_CAUSES = ("refuse", "garble", "three places", "one label", "stall", "break")
+
+
+def test_a_chat_request_that_fails_marks_its_own_ref_and_the_rest_stand() -> None:
+    binding = ChatBinding(_Scripted(), provider="example-chat", model="chat-small")
+    result = asyncio.run(binding(_nouls(*_CAUSES), seconds=5))
+    codes = ["refused", "invalid-answer", "invalid-answer", "invalid-answer", "timed-out", "raised"]
+    for n, code in enumerate(codes):
+        assert result.values[f"q:faults/{n}"] == Unavailable(Cause(code))
+        assert any(line.startswith(f"q:faults/{n}: {code}: ") for line in result.warnings)
+    assert result.values["q:other/ok"] == {"yes": 0.1, "no": 0.9}
+    assert "q:faults/4: timed-out: no reply within the request's limit" in result.warnings
+    assert "q:faults/5: raised: ConnectionError: connection reset" in result.warnings
+    assert result.attempts == 7
+    assert result.precision == 2
+    assert result.model_reported == "chat-small-2026-06"
+    assert result.claimed == ("model_reported",)
+    assert result.extras[4] == result.extras[5] == {}
+    assert len(result.extras) == 7
+    assert check(binding, batches=[_nouls(*_CAUSES)], deterministic=True) == []
+
+
+def test_a_chat_call_whose_every_request_fails_gives_each_detail_a_reason() -> None:
+    binding = ChatBinding(_Scripted(), provider="example-chat", model="chat-small")
+    result = asyncio.run(binding(_nouls("stall", "break")[:1], seconds=5))
+    assert result.model_reported is None
+    assert result.usage is None
+    assert result.missing == {
+        "model_reported": "not-sent",
+        "request_id": "not-sent",
+        "revision": "not-pinned",
+        "runtime": "not-applicable",
+        "usage.input_tokens": "not-sent",
+        "usage.output_tokens": "not-sent",
+    }
+    assert check(binding, batches=[_nouls("stall", "break")[:1]]) == []
+
+
+def test_a_chat_reply_that_leaves_out_a_detail_gives_its_reason() -> None:
+    class _Bare(StubEndpoint):
+        async def __call__(self, body: Mapping[str, Any], *, seconds: float) -> dict[str, Any]:
+            reply = await super().__call__(body, seconds=seconds)
+            return {"choices": reply["choices"]}
+
+    result = asyncio.run(ChatBinding(_Bare(), provider="p", model="m")(_nouls()[1:], seconds=5))
+    assert result.values["q:other/ok"] == {"yes": 0.1, "no": 0.9}
+    assert result.claimed == ()
+    assert result.extras == ()
+    assert result.missing is not None
+    assert {k: result.missing[k] for k in ("model_reported", "request_id")} == {
+        "model_reported": "not-reported",
+        "request_id": "not-reported",
+    }
+    assert result.missing["usage.input_tokens"] == "not-reported"

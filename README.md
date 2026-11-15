@@ -72,7 +72,7 @@ DESIGN = Design(
 
 The demo keeps everything in one script; in a real project keep the design in a module (see the tutorial [Write a design](docs/tutorials/write-a-design.md)).
 
-A binding answers a source's questions. `fixed` answers each ref it is asked from a mapping, here the probability of each topic, and stands in for a model in a test. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds a binding over a real provider: it receives a call's sources together and sends those that share a state and options to the provider as one request, split only where the provider's limits require; a source the provider's preflight refuses with the others, or whose state differs, goes on its own. A binding of your own is a plain async function, as [Add a source](docs/how-to/add-a-source.md) shows:
+A binding answers a source's questions. `fixed` answers each ref it is asked from a mapping, here the probability of each topic, and stands in for a model in a test. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds a binding over a real provider: it receives a call's sources together and sends those that share a state and options to the provider as one request, split only where the provider's limits require; a source the provider's preflight refuses with the others, or whose state differs, goes on its own. A binding of your own is a plain async function, as [Add a source](docs/how-to/add-a-source.md) shows; its [Path C](docs/how-to/add-a-source.md#path-c-write-a-binding-over-a-chat-endpoint) answers `noul` and `choice` questions with probabilities over a chat endpoint, importing only `ommat` and `ommat.bindings`:
 
 ```python
 classifier = fixed({"q:topic": {"billing": 0.8, "shipping": 0.1, "other": 0.1}})
