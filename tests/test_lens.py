@@ -581,6 +581,52 @@ def test_an_entry_is_marked_by_its_nearest_bound(tmp_path: Path, turns: dict[str
 
 
 @needs_node
+def test_declared_hops_are_dashed_never_the_root_and_can_be_hidden(tmp_path: Path) -> None:
+    html = page({"plain.json": showcase.plain_turn().document}, [load(showcase.PLAIN).document])
+    shown = _run(
+        html,
+        tmp_path,
+        """(() => {
+          const out = {};
+          const T = cur().turns[0];
+          out.chain = mainChain(T.outline.lineage).map((h) => h.ref);
+          out.precise = [...preciseRefs(T.outline.lineage)];
+          selectTurn(0);
+          out.drawn = LAST.wires.filter((w) => w.hop).map((w) => [w.hop.ref, w.hop.via, w.main]);
+          S.declaredHops = false; render();
+          out.hidden = LAST.wires.filter((w) => w.hop).length;
+          S.declaredHops = true; render();
+          out.shownAgain = LAST.wires.filter((w) => w.hop).length;
+          out.branches = strip(branchesHtml(T.outline));
+          return out; })()""",
+    )
+    # Neither rule names what it read: the root is the policy's own entry, and every hop drawn
+    # is a declared one, not on the lineage's precise refs.
+    assert shown["chain"] == ["d:verdict"]
+    assert shown["precise"] == ["d:verdict"]
+    assert [d[:2] for d in shown["drawn"]] == [
+        ["d:flag", "declared"],
+        ["q:urgent", "declared"],
+        ["t:state", "declared"],
+    ]
+    assert not any(d[2] for d in shown["drawn"])
+    assert shown["hidden"] == 0
+    assert shown["shownAgain"] == 3
+    assert "3 declared reads, not a record of what was read" in shown["branches"]
+
+
+@needs_node
+def test_a_declared_hop_has_its_own_class_and_wording(tmp_path: Path) -> None:
+    html = page({"plain.json": showcase.plain_turn().document}, [load(showcase.PLAIN).document])
+    (tmp_path / "page.html").write_text(html, encoding="utf-8")
+    assert ".edge.lineage.declared, .edge.branch.declared { stroke-dasharray: 5 4; }" in html
+    assert "'edge ' + cls + (w.hop.via === 'declared' ? ' declared' : '')" in html
+    # the legend's toggle says how many declared hops there are and whether they are drawn
+    assert "`declared reads (${n}): ${S.declaredHops ? 'shown' : 'hidden'}`" in html
+    assert "Hidden is not unrelated." in html
+
+
+@needs_node
 def test_the_lineage_s_first_branch_is_the_outline_s(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
@@ -603,7 +649,7 @@ def test_the_lineage_s_first_branch_is_the_outline_s(
         # The first branch: from the policy's entry, each next entry found from the one before.
         chain = outline["lineage"][:1]
         for item in outline["lineage"][1:]:
-            if item["from"] != chain[-1]["ref"]:
+            if item["from"] != chain[-1]["ref"] or item["via"] == "declared":
                 break
             chain.append(item)
         assert shown[doc["path"]] == [item["ref"] for item in chain]

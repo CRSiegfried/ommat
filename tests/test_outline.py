@@ -20,6 +20,7 @@ from ommat._canonical import ordered
 from ommat.outline import design_outline, render_design, render_turn, turn_outline
 from ommat.outline.__main__ import main
 from ommat.outline._common import base_of
+from ommat.outline._path import precise_refs, root_chain
 
 TESTS = Path(__file__).parent
 FORMAT_10 = TESTS / "format_10"
@@ -157,7 +158,7 @@ def test_every_fixture_prints_as_text_and_json(
         assert text.endswith("\n")
         assert text == render(json.loads(ordered(outline)))  # the text is the outline's
         assert json.loads(ordered(outline)) == outline
-        assert outline["outline_version"] == 6
+        assert outline["outline_version"] == 7
     if record is not None and design is not None:
         assert turn_outline(record, design)["design_hash_matches"] is True
 
@@ -954,6 +955,46 @@ def test_the_lineage_walks_back_from_the_decision(shown: dict[str, Any]) -> None
     assert path_of(broken) == [("d:route", None, None), ("t:state", "cause", "d:route")]
     assert turn_outline(ledger("cancelled-8"))["lineage"] == []
     assert turn_outline((FORMAT_9 / "record.json").read_bytes())["lineage"] == []
+
+
+def test_a_plain_rule_s_declared_reads_follow_the_record_s_own_hops() -> None:
+    record, design = showcase.plain_turn().document, load(showcase.PLAIN).document
+    paired = turn_outline(record, design)
+    # Neither rule names what it read, so the design's declared reads are followed: the
+    # policy's in declared order, then those of the entries they reach.
+    assert path_of(paired) == [
+        ("d:verdict", None, None),
+        ("d:flag", "declared", "d:verdict"),
+        ("q:urgent", "declared", "d:flag"),
+        ("t:state", "declared", "d:verdict"),
+    ]
+    # The root stops before a declared hop, so it is the policy's own entry.
+    assert [p["ref"] for p in root_chain(paired["lineage"])] == ["d:verdict"]
+    assert paired["summary"].split("  ")[3] == "root d:verdict"
+    # Unpaired, a record holds no declared reads, so the lineage is the policy's entry alone.
+    assert path_of(turn_outline(record)) == [("d:verdict", None, None)]
+
+
+def test_a_ref_the_record_names_keeps_its_hop_when_a_declared_read_also_reaches_it() -> None:
+    idia = turn_outline(
+        (IDIA / "turn.record.json").read_bytes(), (IDIA / "design.json").read_bytes()
+    )
+    # d:route declares many reads, among them d:hazard, whose own reads reach q:triage/hazard;
+    # the marker's cause names q:triage/hazard, which keeps its ``cause`` hop.
+    assert ("q:triage/hazard", "cause", "d:route") in path_of(idia)
+    assert all(via != "declared" for _, via, _ in path_of(idia))
+
+
+def test_only_hops_the_record_names_put_an_entry_on_the_lineage() -> None:
+    record, design = showcase.plain_turn().document, load(showcase.PLAIN).document
+    o = turn_outline(record, design)
+    assert precise_refs(o["lineage"]) == {"d:verdict"}
+    marked = turn_outline(
+        showcase.turn(showcase.loaded(), *showcase.DECIDED).document, showcase.loaded().document
+    )
+    assert precise_refs(marked["lineage"]) == {p["ref"] for p in marked["lineage"]}
+    assert "d:flag *" not in render_turn(o)
+    assert "d:verdict *" in render_turn(o)
 
 
 def test_the_nearest_bounds_are_every_bound_nearest_first(shown: dict[str, Any]) -> None:

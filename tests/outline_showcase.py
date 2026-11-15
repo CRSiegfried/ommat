@@ -150,3 +150,54 @@ def loaded() -> LoadedDesign:
 def turn(design: LoadedDesign, p_yes: float, tone: dict[str, float]) -> Record:
     """The record of one turn under the showcase design with the answers given."""
     return decide_sync(design, STATE, {"llm": llm(p_yes, tone), "desk": desk}).record
+
+
+def flag(r: ReadView) -> object:
+    return True
+
+
+def verdict(r: ReadView) -> object:
+    return "yes"
+
+
+PLAIN = Design(
+    name="plain",
+    state=t.record(subject=t.string),
+    policy="d:verdict",
+    sources={
+        "ask": Source(
+            {
+                "q:urgent": Question(
+                    "noul",
+                    Text(
+                        "Does the mail titled {subject} need an answer today?",
+                        [{"name": "subject", "origin": {"ref": "t:state.subject"}}],
+                    ),
+                )
+            },
+            needs=["t:state.subject"],
+            oracle="llm",
+        )
+    },
+    rules={
+        "flag": Rule("d:flag", t.boolean, flag, version="1", reads=["q:urgent"]),
+        "verdict": Rule(
+            "d:verdict",
+            t.label("no", "yes"),
+            verdict,
+            version="1",
+            reads=["d:flag", "q:urgent", "t:state.subject"],
+        ),
+    },
+)
+"""Two plain function rules, no derivation and no table: the policy reads ``d:flag``, which
+reads the one question, so the record names nothing either rests on."""
+
+
+def plain_turn() -> Record:
+    """The record of one decided turn under ``PLAIN``."""
+
+    async def ask(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResult:
+        return CallResult({"q:urgent": {"yes": 0.9, "no": 0.1}}, provider="example")
+
+    return decide_sync(load(PLAIN), {"subject": "Server down"}, {"llm": ask}).record

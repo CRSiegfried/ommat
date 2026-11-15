@@ -32,9 +32,10 @@ def _hit_reads(e: dict[str, Any], design: dict[str, Any], provider: object) -> l
 def _followed(
     e: dict[str, Any], design: dict[str, Any] | None, providers: dict[str, Any]
 ) -> list[tuple[str, str]]:
-    """The refs an entry rests on, each with how it was found: a derivation's ``rested_on``,
-    or its ``refs`` where that is empty; else, for a table's entry and paired, the hit rows'
-    inputs, or the declared reads when its rows name none; and then a marker's cause refs."""
+    """The refs an entry rests on that its record names, each with how it was found: a
+    derivation's ``rested_on``, or its ``refs`` where that is empty; else, for a table's entry
+    and paired, the hit rows' inputs when its rows name some; and then a marker's cause refs.
+    Empty when the record names none, whatever the entry declares."""
     out: list[tuple[str, str]] = []
     derivations = [obj(d) for d in arr(e["derivation"])]
     if derivations:
@@ -48,12 +49,15 @@ def _followed(
         reads = _hit_reads(e, design, providers.get(base_of(e["ref"]) or ""))
         if reads is not None:
             out += [(r, "row") for r in reads]
-        else:
-            out += [(r["ref"], "declared") for r in arr(e["declared_reads"])]
     if e["holds"] != "value":
         cause = obj(obj(e["marker"]).get("cause"))
         out += [(r, "cause") for r in arr(cause.get("refs")) if isinstance(r, str)]
     return out
+
+
+def _declared(e: dict[str, Any]) -> list[tuple[str, str]]:
+    """The reads an entry's design declares for its rule, each with ``declared``."""
+    return [(r["ref"], "declared") for r in arr(e["declared_reads"])]
 
 
 def lineage_of(
@@ -65,7 +69,13 @@ def lineage_of(
     """From the policy's entry back to what it rests on, depth first, each entry once: each
     ``{ref, holds, via, from, index}``, ``via`` how it was found from the entry at ``from``,
     both ``None`` for the policy's. A ref no entry holds closes its branch, ``holds`` and
-    ``index`` ``None``. Empty with no entry at the policy's ref."""
+    ``index`` ``None``. Empty with no entry at the policy's ref.
+
+    The walk has two phases. The first follows only what the record names (``rested_on``,
+    ``refs``, ``row``, ``cause``). The second then follows, from each entry the first found no
+    such hop for, the reads its design declares, each ``declared``, and from the entries
+    those reach what their records name, so a ref a record names is never taken by a
+    declared hop."""
     by_ref = {e["ref"]: e for e in entries}
 
     def find(ref: str) -> dict[str, Any] | None:
@@ -75,34 +85,57 @@ def lineage_of(
         return []
     lineage: list[dict[str, Any]] = []
     seen: set[str] = set()
-    stack: list[tuple[str, str | None, str | None]] = [(policy, None, None)]
-    while stack:
-        ref, via, parent = stack.pop()
-        e = find(ref)
-        key = str(e["ref"]) if e is not None else ref
-        if key in seen:
-            continue
-        seen.add(key)
-        lineage.append(
-            {
-                "ref": key,
-                "holds": None if e is None else e["holds"],
-                "via": via,
-                "from": parent,
-                "index": None if e is None else e["index"],
-            }
-        )
-        if e is not None:
-            stack += [(r, how, key) for r, how in reversed(_followed(e, design, providers))]
+    bare: list[dict[str, Any]] = []  # entries the record names no hop for, in walk order
+
+    def walk(stack: list[tuple[str, str | None, str | None]], declared: bool) -> None:
+        while stack:
+            ref, via, parent = stack.pop()
+            e = find(ref)
+            key = str(e["ref"]) if e is not None else ref
+            if key in seen:
+                continue
+            seen.add(key)
+            lineage.append(
+                {
+                    "ref": key,
+                    "holds": None if e is None else e["holds"],
+                    "via": via,
+                    "from": parent,
+                    "index": None if e is None else e["index"],
+                }
+            )
+            if e is not None:
+                followed = _followed(e, design, providers)
+                if not followed:
+                    if declared:
+                        followed = _declared(e)
+                    else:
+                        bare.append(e)
+                stack += [(r, how, key) for r, how in reversed(followed)]
+
+    walk([(policy, None, None)], False)
+    for e in bare:
+        walk([(r, "declared", str(e["ref"])) for r, _ in reversed(_declared(e))], True)
     return lineage
+
+
+def precise_refs(lineage: list[dict[str, Any]]) -> set[str]:
+    """The refs reached from the policy's entry by hops the record names alone: the policy's,
+    and each whose hop is not ``declared`` and whose ``from`` is one of them."""
+    out: set[str] = set()
+    for p in lineage:
+        if p["from"] is None or (p["via"] != "declared" and p["from"] in out):
+            out.add(p["ref"])
+    return out
 
 
 def root_chain(lineage: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The lineage's first branch: the policy's entry and each next entry found from the one
-    before, to the first that rests on nothing new, the root."""
+    before, to the first that rests on nothing new, the root. It stops before a ``declared``
+    hop, since a declared read is not a record of what the turn rested on."""
     chain = lineage[:1]
     for item in lineage[1:]:
-        if item["from"] != chain[-1]["ref"]:
+        if item["from"] != chain[-1]["ref"] or item["via"] == "declared":
             break
         chain.append(item)
     return chain
@@ -126,8 +159,9 @@ def nearest_bounds(
     entries: list[dict[str, Any]], lineage: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Every bound of every entry, each ``{ref, param, role, by, distance, side, on_lineage}``,
-    nearest first: by absolute distance, a bound with none last, then ref and param."""
-    on = {p["ref"] for p in lineage}
+    nearest first: by absolute distance, a bound with none last, then ref and param.
+    ``on_lineage`` holds for an entry reached by hops the record names alone."""
+    on = precise_refs(lineage)
     out: list[dict[str, Any]] = []
     for e in entries:
         for b in arr(e["bounds"]):
