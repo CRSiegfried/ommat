@@ -316,6 +316,21 @@ Both renderers take an optional `turn`, exactly a `str` or an `int` in the value
 
 A source's tool name is its name with each `/` as `-`, which no ommat name holds. Both renderers raise `ValueError` for a source whose tool name is `decide` or is over 64 characters.
 
+## The authoring reader
+
+`ommat.authoring` is outside the compatibility promise and may change in any minor release, as `ommat.lens` is: its public names, `design_from`, `slice_from`, `Slice` and `AuthoringError`, carry no stability promise before 1.0. It takes nothing beyond the standard library, reads no file, and `import ommat` does not import it. The code and tests are the spec for each convention; this section says what the reader is.
+
+`design_from(doc, version=None, values=None, types=None)` reads a parsed mapping, such as a TOML document read with `tomllib` or a JSON one, as the `Design` its author would write in Python; `slice_from` reads the same document as a `Slice`, the sources, rules and parameters a larger design merges. It runs before `load` and changes no hash: a design read from a document has the hash of its Python twin. It refuses only what it cannot build, with `AuthoringError`, a `ValueError`, whose message names the path of the slip, such as `rules.op: unknown key 'read'`; the design checks, and a shape such as a `reads` that is not a list, are `load`'s to refuse.
+
+The reader imports each rule's `fn`, which runs that module's top-level code, so a document is as trusted as source code.
+
+The conventions a document adds expand away before `load`:
+
+- Every table holds only the keys its kind allows, and the reader refuses any other. A question is one key naming its kind, holding its wording; `slot` fills `{name}` in the wording per candidate of its source's `grounded` rule, or names another rule.
+- A decision table is a rule with `rows`, each row naming only the inputs it tests and its result in `then`; `like` copies another table's rows and changes only the `provides`, `type`, `target` or inputs it names.
+- `[labels]` names label sets a question's `labels` may use, and `[types]` names type strings that `$name` expands, an entry written `{ required = true }` left to the caller's `types`.
+- A `version`, a parameter's `value` and a `[types]` string each have one owner, the document or the caller, and a value given by both is refused.
+
 ## The record lens
 
 `ommat.lens` is outside the compatibility promise and may change in any minor release. It takes nothing beyond the standard library, `import ommat` does not import it, and the page it writes loads nothing from the network, which its content-security policy also forbids. The page holds each record's outline and text form whole, user text included, so keep it as you keep the records, or pass a redacted view.

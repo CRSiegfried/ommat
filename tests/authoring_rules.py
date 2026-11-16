@@ -21,3 +21,19 @@ def folder_act(r: Any) -> str:
 
 def act(r: Any) -> str:
     return "keep"
+
+
+def streets(r: Any) -> list[str]:
+    return ["a", "b"]
+
+
+def pick(r: Any) -> str:
+    return "x"
+
+
+class Kit:
+    """A class whose method a rule may name by a dotted qualname."""
+
+    @staticmethod
+    def pick(r: Any) -> str:
+        return "x"

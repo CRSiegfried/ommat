@@ -255,21 +255,37 @@ def test_a_misspelt_key_is_refused_with_its_table() -> None:
 
 
 SLIPS: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
-    ("question kind twice", lambda d: move(d).update(choice="x"), "exactly one kind"),
+    (
+        "question kind twice",
+        lambda d: move(d).update(choice="x"),
+        "sources.ask_move.ask.q:move: a question names exactly one kind",
+    ),
     (
         "only_when two refs",
         lambda d: d["sources"]["ask_move"]["only_when"].update({"d:x": ["y"]}),
-        "sources.ask_move.only_when",
+        "sources.ask_move.only_when: one ref and its values, found ['d:kind', 'd:x']",
     ),
-    ("unknown alias", lambda d: d["rules"]["op"].update(type="$opp"), "unknown type alias $opp"),
-    ("alias cycle", lambda d: d["types"].update(op="$op"), "refers to itself"),
-    ("unknown labels entry", lambda d: move(d).update(labels="nope"), "no [labels] entry"),
-    ("rule without fn", lambda d: d["rules"]["op"].pop("fn"), "missing key 'fn'"),
-    ("rule without type", lambda d: d["rules"]["op"].pop("type"), "missing key 'type'"),
+    (
+        "unknown alias",
+        lambda d: d["rules"]["op"].update(type="$opp"),
+        "rules.op.type: unknown type alias $opp",
+    ),
+    (
+        "alias cycle",
+        lambda d: d["types"].update(op="$op"),
+        "rules.op.type: type alias $op refers to itself (op -> op)",
+    ),
+    (
+        "unknown labels entry",
+        lambda d: move(d).update(labels="nope"),
+        "sources.ask_move.ask.q:move.labels: no [labels] entry 'nope'",
+    ),
+    ("rule without fn", lambda d: d["rules"]["op"].pop("fn"), "rules.op: missing key 'fn'"),
+    ("rule without type", lambda d: d["rules"]["op"].pop("type"), "rules.op: missing key 'type'"),
     (
         "parameter without type",
         lambda d: d["parameters"]["bars/move_at"].pop("type"),
-        "missing key 'type'",
+        "parameters.bars/move_at: missing key 'type'",
     ),
     (
         "bad function",
@@ -279,7 +295,7 @@ SLIPS: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
     (
         "function without a module",
         lambda d: (d.pop("module"), d["rules"]["op"].update(fn="folder_op")),
-        "has no module",
+        "rules.kind.fn: 'folder_kind' has no module",
     ),
     (
         "target without a statement",
@@ -305,13 +321,21 @@ def probe(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("probe")
 def test_an_async_or_non_function_rule_is_refused() -> None:
-    slip(lambda d: d["rules"]["op"].update(fn="slip_probe:a"), "is an async function")
-    slip(lambda d: d["rules"]["op"].update(fn="slip_probe:const"), "is not a function")
+    slip(
+        lambda d: d["rules"]["op"].update(fn="slip_probe:a"),
+        "rules.op.fn: 'slip_probe:a' is an async function",
+    )
+    slip(
+        lambda d: d["rules"]["op"].update(fn="slip_probe:const"),
+        "rules.op.fn: 'slip_probe:const' is not a function",
+    )
 
 
 def test_a_rule_function_and_a_relative_module_are_imported_by_name() -> None:
-    refused({"rules": {"r": {"fn": "..x:y", "type": "string"}}}, "cannot import")
-    refused({"rules": {"r": {"fn": ":", "type": "string"}}}, "cannot import")
+    refused(
+        {"rules": {"r": {"fn": "..x:y", "type": "string"}}}, "rules.r.fn: cannot import '..x:y'"
+    )
+    refused({"rules": {"r": {"fn": ":", "type": "string"}}}, "rules.r.fn: cannot import ':'")
 
 
 # ---- types ----------------------------------------------------------------------------------
@@ -361,7 +385,12 @@ def test_a_written_type_may_not_be_supplied_and_an_unknown_name_is_refused() -> 
         slice_doc(), "types.op: the document already gives a type", values=VALUES, types={"op": "x"}
     )
     refused(slice_doc(), "types.nope", values=VALUES, types={"nope": "x"})
-    refused(required(slice_doc()), "refers to itself", values=VALUES, types={"op": "$op"})
+    refused(
+        required(slice_doc()),
+        "rules.op.type: type alias $op refers to itself (op -> op)",
+        values=VALUES,
+        types={"op": "$op"},
+    )
 
 
 def test_design_from_takes_values_and_types_and_expands_names_in_state() -> None:
@@ -384,7 +413,7 @@ def test_design_from_takes_values_and_types_and_expands_names_in_state() -> None
 
 
 def test_a_value_has_one_owner() -> None:
-    refused(slice_doc(), "leaves its value to the caller")
+    refused(slice_doc(), "parameters.bars/move_at: the document leaves its value to the caller")
     refused(
         slice_doc(),
         "values.bars/keep_at: the document already gives a value",
@@ -398,7 +427,12 @@ def test_a_value_has_one_owner() -> None:
 
 
 def test_a_version_has_one_owner() -> None:
-    refused(slice_doc(), "keep one", version="V", values=VALUES)
+    refused(
+        slice_doc(),
+        "version: the document gives one and so does the caller; keep one",
+        version="V",
+        values=VALUES,
+    )
     got = slice_from(as_slice(slice_doc()), values=VALUES)
     assert at(got.rules, "op").version == "1"
 
@@ -409,17 +443,25 @@ def test_a_version_has_one_owner() -> None:
 def test_a_params_pattern_matches_this_documents_parameters_only() -> None:
     plan = at(slice_from(as_slice(slice_doc()), values=VALUES).rules, "plan")
     assert list(plan.params) == ["bars/move_at", "bars/keep_at"]
-    slip(lambda d: d["rules"]["plan"].update(params=["nope/*"]), "matches no parameter")
+    slip(
+        lambda d: d["rules"]["plan"].update(params=["nope/*"]),
+        "rules.plan.params: pattern 'nope/*' matches no parameter",
+    )
     slip(
         lambda d: d["rules"]["plan"].update(params=["bars/move_at", "bars/*"]),
-        "'bars/move_at' is named twice (pattern 'bars/*')",
+        "rules.plan.params: 'bars/move_at' is named twice (pattern 'bars/*')",
     )
     other = {
         "parameters": {"other/bar": {"type": UNIT}},
         "rules": {"r": {"fn": "folder_op", "type": OP, "params": ["bars/*"]}},
         "module": "authoring_rules",
     }
-    refused(other, "matches no parameter of this document", version="V", values={"other/bar": 0.1})
+    refused(
+        other,
+        "rules.r.params: pattern 'bars/*' matches no parameter of this document",
+        version="V",
+        values={"other/bar": 0.1},
+    )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -446,18 +488,20 @@ def test_a_row_naming_an_unknown_input_or_without_then_is_refused() -> None:
         "rules.grade.rows[4]: unknown input 'rulez'",
     )
     table_slip(
-        lambda d: grade(d)["rows"].append({"n": ">= 1"}), "rows[4]: a row is a table with `then`"
+        lambda d: grade(d)["rows"].append({"n": ">= 1"}),
+        "rules.grade.rows[4]: a row is a table with `then`",
     )
     table_slip(
         lambda d: grade(d)["rows"].__setitem__(2, {"thenn": "none"}),
-        "rows[2]: a row is a table with `then`",
+        "rules.grade.rows[2]: a row is a table with `then`",
     )
     table_slip(
         lambda d: grade(d)["rows"].__setitem__(2, {"then": {"ref": "q:x", "x": 1}}),
-        "rows[2].then: a value, or { ref",
+        "rules.grade.rows[2].then: a value, or { ref",
     )
     table_slip(
-        lambda d: grade(d)["rows"].__setitem__(2, {"then": {"ref": 3}}), "then.ref: a string"
+        lambda d: grade(d)["rows"].__setitem__(2, {"then": {"ref": 3}}),
+        "rules.grade.rows[2].then.ref: a string",
     )
 
 
@@ -470,7 +514,8 @@ def test_a_table_is_refused_for_what_it_may_not_hold() -> None:
     table_slip(lambda d: grade(d).update(hit="C#"), "rules.grade.hit")
     table_slip(lambda d: grade(d).update(order=["a"]), "rules.grade: unknown key 'order'")
     table_slip(
-        lambda d: grade(d).update(fn="x:y"), "a function (`fn`) or a table (`rows`), not both"
+        lambda d: grade(d).update(fn="x:y"),
+        "rules.grade: a rule is a function (`fn`) or a table (`rows`), not both",
     )
     table_slip(lambda d: grade(d).update(inputs={}), "rules.grade.inputs: one entry per input")
     table_slip(lambda d: grade(d).update(rows={}), "rules.grade.rows: a list of rows")
@@ -484,18 +529,20 @@ def test_an_input_named_then_is_refused() -> None:
 
 
 def test_a_table_input_is_a_ref_or_a_helper_call() -> None:
-    table_slip(lambda d: grade(d)["inputs"].update(n=5), "inputs.n: a ref, or a helper call")
+    table_slip(
+        lambda d: grade(d)["inputs"].update(n=5), "rules.grade.inputs.n: a ref, or a helper call"
+    )
     table_slip(
         lambda d: grade(d)["inputs"].update(n={"size": 5}),
-        "inputs.n: names 1 helpers (size) or reads no ref",
+        "rules.grade.inputs.n: names 1 helpers (size) or reads no ref",
     )
     table_slip(
         lambda d: grade(d)["inputs"].update(n={"mass": "q:x", "size": "q:y"}),
-        "inputs.n: names 2 helpers (mass, size)",
+        "rules.grade.inputs.n: names 2 helpers (mass, size)",
     )
     table_slip(
         lambda d: grade(d)["inputs"].update(n={"labl": "q:x", "labels": "p"}),
-        "inputs.n: no key names a helper; the helpers are",
+        "rules.grade.inputs.n: no key names a helper; the helpers are",
     )
 
 
@@ -522,18 +569,29 @@ def test_a_copy_keeps_its_bases_input_order_and_rows_and_changes_only_what_it_na
 
 
 def test_a_bad_like_is_refused() -> None:
-    table_slip(lambda d: again(d).update(like="nope"), "grade_again.like: 'nope' is not a table")
-    table_slip(lambda d: again(d).update(like="folder_op"), "is not a table")
-    table_slip(lambda d: d["rules"].update(third={"like": "grade_again"}), "is itself a copy")
-    table_slip(lambda d: again(d).update(rows=[{"then": "x"}]), "grade_again: unknown key 'rows'")
+    table_slip(
+        lambda d: again(d).update(like="nope"),
+        "rules.grade_again.like: 'nope' is not a table of this document",
+    )
+    table_slip(
+        lambda d: again(d).update(like="folder_op"),
+        "rules.grade_again.like: 'folder_op' is not a table of this document",
+    )
+    table_slip(
+        lambda d: d["rules"].update(third={"like": "grade_again"}),
+        "rules.third.like: 'grade_again' is itself a copy",
+    )
+    table_slip(
+        lambda d: again(d).update(rows=[{"then": "x"}]), "rules.grade_again: unknown key 'rows'"
+    )
     table_slip(
         lambda d: again(d)["inputs"].update(nope="x:y"),
-        "grade_again.inputs.nope: 'grade' has no such input",
+        "rules.grade_again.inputs.nope: 'grade' has no such input",
     )
-    table_slip(lambda d: again(d).update(hit="F"), "unknown key 'hit'")
+    table_slip(lambda d: again(d).update(hit="F"), "rules.grade_again: unknown key 'hit'")
     table_slip(
         lambda d: (again(d).pop("inputs"), again(d).pop("provides")),
-        "grade_again.like: changes nothing from 'grade'",
+        "rules.grade_again.like: changes nothing from 'grade'",
     )
     table_slip(
         lambda d: (
@@ -541,7 +599,7 @@ def test_a_bad_like_is_refused() -> None:
             again(d).pop("provides"),
             again(d).update(type="$grade"),
         ),
-        "changes nothing",
+        "rules.grade_again.like: changes nothing from 'grade'",
     )
     refused(
         {
@@ -550,10 +608,11 @@ def test_a_bad_like_is_refused() -> None:
                 "b": {"type": "string", "hit": "F", "rows": [{"then": "x"}]},
             }
         },
-        "has no `inputs` to copy",
+        "rules.c.like: 'b' has no `inputs` to copy",
     )
     refused(
-        {"rules": {"r": {"like": "b", "type": "string"}, "b": 3}}, "is not a table of this document"
+        {"rules": {"r": {"like": "b", "type": "string"}, "b": 3}},
+        "rules.r.like: 'b' is not a table of this document",
     )
 
 
@@ -573,41 +632,47 @@ def test_a_bad_like_is_refused() -> None:
             },
             "rules.r.params: a list of strings",
         ),
-        ({"sources": {"s": {"only_when": {}}}}, "only_when: one ref and its values, found none"),
-        ({"sources": {"s": {"only_when": False}}}, "found bool"),
+        (
+            {"sources": {"s": {"only_when": {}}}},
+            "sources.s.only_when: one ref and its values, found none",
+        ),
+        (
+            {"sources": {"s": {"only_when": False}}},
+            "sources.s.only_when: one ref and its values, found bool",
+        ),
         (
             {"sources": {"s": {"ask": {"q:a": {"noul": "?"}}, "fetch": {"q:a": "string"}}}},
-            "a ref has one provider",
+            "sources.s.fetch.q:a: the source already asks 'q:a'",
         ),
-        ({"rules": []}, "rules: a table"),
-        ({"rules": {"r": {"fn": 3, "type": "string"}}}, "rules.r.fn: a string"),
+        ({"rules": []}, "rules: a table, found list"),
+        ({"rules": {"r": {"fn": 3, "type": "string"}}}, "rules.r.fn: a string, found int"),
         (
             {"rules": {"r": {"fn": "authoring_rules:folder_op", "type": 3}}},
-            "rules.r.type: a string",
+            "rules.r.type: a string, found int",
         ),
         (
             {"sources": {"s": {"grounded": "d:f", "ask": {"q:a": {"noul": "?", "slot": []}}}}},
-            "an empty list names no slot",
+            "sources.s.ask.q:a.slot: an empty list names no slot",
         ),
         (
             {"sources": {"s": {"ask": {"q:a": {"noul": "?", "slot": "x"}}}}},
-            "names a slot but its source has no `grounded` rule",
+            "sources.s.ask.q:a.slot: names a slot but its source has no `grounded` rule",
         ),
         (
             {"sources": {"s": {"ask": {"q:a": {"noul": "?", "latent": ["a"]}}}}},
-            "latent: a table",
+            "sources.s.ask.q:a.latent: a table",
         ),
         (
             {"sources": {"s": {"grounded": "d:f", "ask": {"q:a": {"noul": "?", "slot": 3}}}}},
-            "slot: a name",
+            "sources.s.ask.q:a.slot: a name",
         ),
         (
             {"sources": {"s": {"grounded": "d:f", "ask": {"q:a": {"noul": "?", "slot": [["b"]]}}}}},
-            "slot: a list of strings",
+            "sources.s.ask.q:a.slot: a list of strings",
         ),
         (
             {"sources": {"s": {"ask": {"q:a": {"noul": "?", "latent": {"t": 3}}}}}},
-            "latent.t: a role",
+            "sources.s.ask.q:a.latent.t: a role",
         ),
         ([], "document: a table"),
     ],
@@ -675,11 +740,18 @@ def test_a_misspelt_then_is_refused_by_load_not_by_the_reader() -> None:
         load(Design(STATE, "d:grade", rules={"grade": bad}, parameters=dict(twin.parameters)))
 
 
-def test_a_row_key_that_is_not_an_input_is_the_readers_to_refuse() -> None:
-    # `then` misspelt as a key of a row is the reader's slip: a row names no result.
+def test_a_row_without_then_is_refused_even_when_its_other_key_is_an_input() -> None:
+    # `then` misspelt as `thenn`: the row names no result, whatever else it holds.
     doc = table_doc()
     grade(doc)["rows"][0] = {"n": ">= bars/high", "thenn": "high"}
-    with pytest.raises(AuthoringError, match=re.escape("rows[0]: a row is a table with `then`")):
+    with pytest.raises(AuthoringError, match=re.escape("rules.grade.rows[0]: a row is a table")):
+        design_from(doc)
+
+
+def test_a_row_key_that_is_not_an_input_is_refused_as_an_unknown_input() -> None:
+    doc = table_doc()
+    grade(doc)["rows"][0] = {"nn": ">= bars/high", "then": "high"}
+    with pytest.raises(AuthoringError, match=re.escape("rules.grade.rows[0]: unknown input 'nn'")):
         design_from(doc)
 
 
@@ -687,4 +759,386 @@ def test_the_reader_reads_a_mapping_and_not_a_file() -> None:
     import ommat.authoring
 
     assert not hasattr(ommat.authoring, "read_toml")
-    assert isinstance(SLICE_DOC, Mapping)
+
+
+@pytest.mark.parametrize("document", ["authoring_slice.toml", HERE / "authoring_slice.toml"])
+def test_a_path_or_its_text_is_not_a_document(document: Any) -> None:
+    for read in (slice_from, design_from):
+        with pytest.raises(AuthoringError, match=r"^document: a table, found (str|\w+Path)"):
+            read(document)
+
+
+# ---------------------------------------------------------------------------------------------
+# A grounded source, a candidates rule, slots and a text ref
+
+
+GROUNDED_DOC: dict[str, Any] = tomllib.loads((HERE / "authoring_grounded.toml").read_text())
+
+
+def grounded_twin() -> Design:
+    street = [{"name": "street", "origin": {"candidate": "d:streets"}}]
+    pair = [*street, {"name": "lamp", "origin": {"candidate": "d:streets"}}]
+    return Design(
+        "record{text: string}",
+        "d:pick",
+        sources={
+            "lamps": Source(
+                {
+                    "q:lamps/out": Question("noul", Text("Is {street} lit?", street)),
+                    "q:lamps/pair": Question("noul", Text("Is {street} lit by {lamp}?", pair)),
+                    "q:lamps/rule": Question("noul", Text("Is {street} lit?", street)),
+                },
+                needs=["t:state"],
+                oracle="jev",
+                cost=3,
+                grounded="d:streets",
+            ),
+            "reader": Source(
+                {
+                    "q:reader/words": Question(
+                        "extraction",
+                        Text("Which words name a street?"),
+                        value_type="text",
+                        is_list=True,
+                        text={"ref": "t:state.text"},
+                    )
+                },
+                needs=["t:state"],
+                oracle="jev",
+            ),
+        },
+        rules={
+            "streets": Rule(
+                "d:streets",
+                "list<string>",
+                rules.streets,
+                version="1",
+                reads=["t:state.text"],
+                candidates=True,
+            ),
+            "pick": Rule("d:pick", "string", rules.pick, version="1", reads=["q:lamps/out"]),
+        },
+    )
+
+
+def test_a_grounded_document_has_its_twins_hash() -> None:
+    built = design_from(copy.deepcopy(GROUNDED_DOC))
+    assert hash_of(built) == hash_of(grounded_twin())
+    assert built.sources == grounded_twin().sources
+    assert at(built.rules, "streets").candidates is True
+
+
+def test_a_slot_name_a_list_and_a_rule_fill_the_wording_per_candidate() -> None:
+    questions = design_from(copy.deepcopy(GROUNDED_DOC)).sources["lamps"].provides
+    one = cast("Question", questions["q:lamps/out"]).wording
+    two = cast("Question", questions["q:lamps/pair"]).wording
+    named = cast("Question", questions["q:lamps/rule"]).wording
+    assert isinstance(one, Text)
+    assert isinstance(two, Text)
+    assert isinstance(named, Text)
+    assert [dict(s) for s in one.slots] == [
+        {"name": "street", "origin": {"candidate": "d:streets"}}
+    ]
+    assert [s["name"] for s in two.slots] == ["street", "lamp"]
+    assert all(s["origin"] == {"candidate": "d:streets"} for s in two.slots)
+    assert one.slots == named.slots
+
+
+def test_a_slot_naming_another_rule_needs_no_grounded_source() -> None:
+    doc = {"sources": {"s": {"ask": {"q:a": {"noul": "{x}?", "slot": {"x": "d:other"}}}}}}
+    wording = cast("Question", slice_from(doc).sources["s"].provides["q:a"]).wording
+    assert isinstance(wording, Text)
+    assert [dict(s) for s in wording.slots] == [{"name": "x", "origin": {"candidate": "d:other"}}]
+
+
+def test_a_text_ref_is_wrapped_and_a_question_without_slots_has_none() -> None:
+    reader = design_from(copy.deepcopy(GROUNDED_DOC)).sources["reader"].provides["q:reader/words"]
+    assert cast("Question", reader).text == {"ref": "t:state.text"}
+    assert cast("Question", reader).wording == Text("Which words name a street?")
+
+
+def test_a_candidates_rule_defaults_to_false() -> None:
+    assert at(slice_from(as_slice(slice_doc()), values=VALUES).rules, "op").candidates is False
+
+
+def test_a_slot_that_is_not_a_name_list_or_table_is_refused() -> None:
+    base: dict[str, Any] = {"grounded": "d:f", "ask": {"q:a": {"noul": "?"}}}
+    for bad in [("a",), (), 1.5]:
+        doc = {"sources": {"s": copy.deepcopy(base)}}
+        doc["sources"]["s"]["ask"]["q:a"]["slot"] = bad
+        refused(doc, "sources.s.ask.q:a.slot: a name, a list of names")
+
+
+def test_a_tuple_of_latent_roles_is_refused() -> None:
+    doc = {"sources": {"s": {"ask": {"q:a": {"noul": "?", "latent": {"tg:x": ("reflective",)}}}}}}
+    refused(doc, "sources.s.ask.q:a.latent.tg:x: a role, or a list of roles")
+
+
+# ---- latent targets -------------------------------------------------------------------------
+
+
+def latent_of(question: dict[str, Any]) -> list[dict[str, str]]:
+    doc = {"sources": {"s": {"ask": {"q:a": {"noul": "?", **question}}}}}
+    got = cast("Question", slice_from(doc).sources["s"].provides["q:a"])
+    return [{"target": m["target"], "role": str(m["role"])} for m in got.latent_targets]
+
+
+def test_latent_targets_pass_through_and_roles_may_be_a_list() -> None:
+    explicit = [{"target": "tg:a", "role": "reflective"}]
+    assert latent_of({"latent_targets": explicit}) == explicit
+    assert latent_of({"latent": {"tg:b": ["reflective", "formative"]}}) == [
+        {"target": "tg:b", "role": "reflective"},
+        {"target": "tg:b", "role": "formative"},
+    ]
+
+
+def test_explicit_latent_targets_come_before_the_latent_table() -> None:
+    got = latent_of(
+        {
+            "latent_targets": [{"target": "tg:a", "role": "formative"}],
+            "latent": {"tg:b": "reflective", "tg:c": ["formative"]},
+        }
+    )
+    assert got == [
+        {"target": "tg:a", "role": "formative"},
+        {"target": "tg:b", "role": "reflective"},
+        {"target": "tg:c", "role": "formative"},
+    ]
+
+
+def test_latent_targets_must_be_a_list_and_latent_a_table() -> None:
+    base: dict[str, Any] = {"sources": {"s": {"ask": {"q:a": {"noul": "?"}}}}}
+    for key, value, expect in [
+        ("latent_targets", "tg:a", "sources.s.ask.q:a.latent_targets: a list"),
+        ("latent", ["tg:a"], "sources.s.ask.q:a.latent: a table"),
+    ]:
+        doc = copy.deepcopy(base)
+        doc["sources"]["s"]["ask"]["q:a"][key] = value
+        refused(doc, expect)
+
+
+# ---- tables: like, target, provides ---------------------------------------------------------
+
+BASE_TYPE = 'label{"a", "b"}'
+
+
+def small() -> dict[str, Any]:
+    return {
+        "state": "record{n: integer, m: integer}",
+        "policy": "d:base",
+        "version": "1",
+        "targets": {"tg:t": {"statement": "S"}},
+        "rules": {
+            "base": {
+                "type": BASE_TYPE,
+                "hit": "F",
+                "inputs": {"n": "t:state.n"},
+                "rows": [{"n": ">= 1", "then": "a"}, {"then": "b"}],
+            }
+        },
+    }
+
+
+def small_table(provides: str = "d:base", **kw: Any) -> Table:
+    outputs = kw.pop("outputs", BASE_TYPE)
+    return Table(provides, outputs, "F", ["t:state.n"], [[">= 1", "a"], ["-", "b"]], **kw)
+
+
+def small_twin(**rules_: Table | Rule) -> Design:
+    return Design(
+        "record{n: integer, m: integer}",
+        "d:base",
+        rules={"base": small_table(), **rules_},
+        targets={"tg:t": Target("S")},
+    )
+
+
+def with_copy(**spec: Any) -> dict[str, Any]:
+    doc = small()
+    doc["rules"]["copy"] = {"like": "base", **spec}
+    return doc
+
+
+def test_a_copy_that_changes_the_type_only_keeps_the_rest_of_its_base() -> None:
+    built = design_from(with_copy(type='label{"a", "b", "c"}'))
+    twin = small_twin(copy=small_table("d:copy", outputs='label{"a", "b", "c"}'))
+    assert hash_of(built) == hash_of(twin)
+    assert at(built.rules, "copy").target is None
+
+
+def test_a_copy_that_changes_the_target_only_keeps_the_rest_of_its_base() -> None:
+    built = design_from(with_copy(target="tg:t"))
+    assert at(built.rules, "copy").target == "tg:t"
+    assert at(built.rules, "copy").outputs == BASE_TYPE
+    assert at(built.rules, "base").target is None
+    assert hash_of(built) == hash_of(small_twin(copy=small_table("d:copy", target="tg:t")))
+
+
+def test_a_copy_that_changes_the_provides_only_keeps_the_rest_of_its_base() -> None:
+    built = design_from(with_copy(provides="d:copy"))
+    assert hash_of(built) == hash_of(small_twin(copy=small_table("d:copy")))
+    # The reader passes `provides` on as written; load refuses a ref that is not the rule's own.
+    other = design_from(with_copy(provides="d:other"))
+    assert at(other.rules, "copy").provides == "d:other"
+    with pytest.raises(InvalidDesign, match="a rule provides its own d: ref"):
+        load(other)
+
+
+def test_a_copy_takes_its_base_target_unless_it_names_its_own() -> None:
+    doc = small()
+    doc["rules"]["base"]["target"] = "tg:t"
+    doc["rules"]["copy"] = {"like": "base", "provides": "d:copy"}
+    assert at(design_from(doc).rules, "copy").target == "tg:t"
+    doc["targets"]["tg:u"] = {"statement": "U"}
+    doc["rules"]["copy"]["target"] = "tg:u"
+    assert at(design_from(doc).rules, "copy").target == "tg:u"
+
+
+def test_a_copy_of_a_base_without_rows_or_of_a_function_rule_is_refused() -> None:
+    doc = with_copy(provides="d:copy")
+    del doc["rules"]["base"]["rows"]
+    refused(doc, "rules.base: missing key 'rows'")
+    doc = with_copy(provides="d:copy")
+    doc["rules"]["fn_rule"] = {"fn": "authoring_rules:pick", "type": "string"}
+    doc["rules"]["copy"]["like"] = "fn_rule"
+    refused(doc, "rules.copy.like: 'fn_rule' is not a table of this document")
+
+
+def test_a_copy_that_repeats_its_base_is_refused() -> None:
+    expect = "rules.copy.like: changes nothing from 'base'"
+    refused(with_copy(type=BASE_TYPE), expect)
+    refused(with_copy(inputs={"n": "t:state.n"}), expect)
+    base = small()
+    base["rules"]["base"]["target"] = "tg:t"
+    base["rules"]["copy"] = {"like": "base", "target": "tg:t"}
+    refused(base, expect)
+
+
+def test_a_table_may_name_a_target_and_a_provides() -> None:
+    doc = small()
+    doc["rules"]["base"].update(target="tg:t", provides="d:base")
+    built = design_from(doc)
+    assert hash_of(built) == hash_of(
+        Design(
+            "record{n: integer, m: integer}",
+            "d:base",
+            rules={"base": small_table(target="tg:t")},
+            targets={"tg:t": Target("S")},
+        )
+    )
+    assert at(built.rules, "base").target == "tg:t"
+    doc["rules"]["base"]["provides"] = "d:custom"
+    assert at(design_from(doc).rules, "base").provides == "d:custom"
+
+
+def test_a_function_rule_may_name_its_own_provides_and_a_design_its_name() -> None:
+    doc: dict[str, Any] = {
+        "name": "mine",
+        "state": "record{}",
+        "policy": "d:r",
+        "rules": {"r": {"fn": "authoring_rules:pick", "type": "string", "provides": "d:r"}},
+    }
+    built = design_from(doc, version="V")
+    assert built.name == "mine"
+    twin = Design(
+        "record{}",
+        "d:r",
+        rules={"r": Rule("d:r", "string", rules.pick, version="V")},
+        name="mine",
+    )
+    assert hash_of(built) == hash_of(twin)
+    doc["rules"]["r"]["provides"] = "d:custom"
+    assert at(design_from(doc, version="V").rules, "r").provides == "d:custom"
+
+
+def test_a_function_named_by_a_dotted_qualname_is_found() -> None:
+    kit = {"r": {"fn": "authoring_rules:Kit.pick", "type": "string"}}
+    assert at(slice_from({"rules": kit}).rules, "r").function is rules.Kit.pick
+    under_module = {
+        "module": "authoring_rules",
+        "rules": {"r": {"fn": "Kit.pick", "type": "string"}},
+    }
+    assert at(slice_from(under_module).rules, "r").function is rules.Kit.pick
+    refused(
+        {"rules": {"r": {"fn": "authoring_rules:Kit.nope", "type": "string"}}},
+        "rules.r.fn: cannot import 'authoring_rules:Kit.nope'",
+    )
+
+
+# ---- patterns: `?`, `[...]` and case ---------------------------------------------------------
+
+
+def pattern_doc(*params: str) -> dict[str, Any]:
+    return {
+        "module": "authoring_rules",
+        "parameters": {
+            "bars/a1": {"type": "integer", "value": 1},
+            "bars/a2": {"type": "integer", "value": 2},
+            "bars/b1": {"type": "integer", "value": 3},
+        },
+        "rules": {"r": {"fn": "pick", "type": "string", "params": list(params)}},
+    }
+
+
+def test_a_params_pattern_may_use_a_question_mark_or_a_bracket_set() -> None:
+    def got(pattern: str) -> list[str]:
+        return list(at(slice_from(pattern_doc(pattern), version="V").rules, "r").params)
+
+    assert got("bars/a?") == ["bars/a1", "bars/a2"]
+    assert got("bars/[ab]1") == ["bars/a1", "bars/b1"]
+    assert got("bars/[!a]1") == ["bars/b1"]
+
+
+def test_a_params_pattern_is_case_sensitive() -> None:
+    refused(
+        pattern_doc("BARS/*"),
+        "rules.r.params: pattern 'BARS/*' matches no parameter of this document",
+        version="V",
+    )
+    refused(
+        pattern_doc("bars/A?"),
+        "rules.r.params: pattern 'bars/A?' matches no parameter",
+        version="V",
+    )
+
+
+# ---- more refusals --------------------------------------------------------------------------
+
+
+def test_design_from_without_state_is_refused() -> None:
+    with pytest.raises(AuthoringError, match=r"^document: missing key 'state'"):
+        design_from({"policy": "d:a"})
+
+
+def test_an_unknown_key_in_a_question_a_parameter_or_a_target_is_refused() -> None:
+    refused(
+        {"sources": {"s": {"ask": {"q:a": {"noul": "?", "labelz": []}}}}},
+        "sources.s.ask.q:a: unknown key 'labelz'",
+    )
+    refused(
+        {"parameters": {"p": {"type": "integer", "valeu": 1}}},
+        "parameters.p: unknown key 'valeu'",
+    )
+    refused(
+        {
+            "state": "record{}",
+            "policy": "d:a",
+            "targets": {"tg:x": {"statement": "S", "valuez": 1}},
+        },
+        "targets.tg:x: unknown key 'valuez'",
+    )
+
+
+def test_a_module_that_is_not_a_string_is_refused() -> None:
+    refused({"module": 3, "rules": {"r": {"fn": "pick", "type": "string"}}}, "module: a string")
+
+
+def test_ask_that_is_not_a_table_is_refused() -> None:
+    refused({"sources": {"s": {"ask": ["q:a"]}}}, "sources.s.ask: a table, found list")
+    refused({"sources": {"s": {"fetch": "string"}}}, "sources.s.fetch: a table, found str")
+
+
+def test_a_helper_call_with_no_key_is_refused() -> None:
+    doc = table_doc()
+    grade(doc)["inputs"]["n"] = {}
+    refused(doc, "rules.grade.inputs.n: a ref, or a helper call such as")

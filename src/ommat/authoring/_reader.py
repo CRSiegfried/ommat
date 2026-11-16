@@ -103,8 +103,7 @@ class AuthoringError(ValueError):
 
 @dataclass(frozen=True)
 class Slice:
-    """The sources, rules and parameters of a slice that a larger design merges, as a function
-    such as `folder_stage(version, bars)` returns them."""
+    """The sources, rules and parameters that a larger design merges into itself."""
 
     sources: dict[str, Source]
     rules: dict[str, Rule | Table]
@@ -249,7 +248,7 @@ def _question(
     (kind,) = kinds
     rest = {k: v for k, v in spec.items() if k != kind}
     slot = rest.pop("slot", None)  # per-candidate slots over a candidates rule
-    if slot is not None and not (isinstance(slot, str) or _is_seq(slot) or _is_map(slot)):
+    if slot is not None and not isinstance(slot, str | list | Mapping):
         raise AuthoringError(f'{path}.slot: a name, a list of names, or {{ name = "ref" }}')
     if isinstance(slot, list) and not slot:
         raise AuthoringError(f"{path}.slot: an empty list names no slot")
@@ -261,7 +260,7 @@ def _question(
             )
         names = [slot] if isinstance(slot, str) else _strings(f"{path}.slot", slot)
         slot = dict.fromkeys(names, grounded)
-    pairs: dict[str, str] = dict(slot) if slot else {}
+    pairs: dict[str, str] = dict(cast("Mapping[str, str]", slot)) if slot else {}
     wording = (
         Text(spec[kind], [{"name": n, "origin": {"candidate": ref}} for n, ref in pairs.items()])
         if slot
@@ -275,9 +274,9 @@ def _question(
         rest["text"] = {"ref": rest["text"]}
     latent = _list(f"{path}.latent_targets", rest.pop("latent_targets", []))
     for target, roles in _mapping(f"{path}.latent", rest.pop("latent", {})).items():
-        if not (isinstance(roles, str) or _is_seq(roles)):
+        if not isinstance(roles, str | list):
             raise AuthoringError(f"{path}.latent.{target}: a role, or a list of roles")
-        for role in [roles] if isinstance(roles, str) else roles:
+        for role in [roles] if isinstance(roles, str) else cast("list[Any]", roles):
             latent.append({"target": target, "role": role})
     if latent:
         rest["latent_targets"] = latent
