@@ -11,6 +11,7 @@ The spec covers what record format 10 and design format 11 hold and the engine d
 - the targets a design declares, the properties its questions ask about, bear on and estimate, for a reader;
 - the record views: the escalation view, the defects view, the transcript view, which is deprecated, and the redacted view;
 - the conversation renderers, which render a record as its turn history in Chat Completions or Pydantic AI messages;
+- the authoring reader, `ommat.authoring`, which reads a parsed mapping as a design or a slice of one, the design the author would write in Python;
 - the record lens, which draws stored records and designs, from their outlines, as an HTML page a person reads;
 - replay of a recorded turn with no model call, the do-and-diff evaluation jobs `intervene`, `scenario` and `use_answers`, the deciding inputs, the switching-value job, the question-reach job, the gold-answers job, the gold record and the answers table, a design's groups, and the design store and the evaluation store;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;
@@ -314,6 +315,21 @@ ommat's bookkeeping is the source calls and decide, with their results. `is_book
 Both renderers take an optional `turn`, exactly a `str` or an `int` in the value domain, an `int` of magnitude at most 2^53 - 1 and a `str` with no surrogate, else `ValueError`, checked before the record is read. With one, every rendered id's stem, `om_` and 24 hexadecimal digits, is instead the first 24 of SHA-256 over the canonical JSON of `[record hash, turn]`; its suffix stays, so an id keeps its form and bound. The same design, state and answers give the same record, so one conversation holds a record once unless each rendering takes its own `turn`, as an exact retry must, since a provider may refuse a repeated tool-call id. The Pydantic AI mark then holds `turn`, and each filter's record is the record and the turn. With `None`, the ids are the record's.
 
 A source's tool name is its name with each `/` as `-`, which no ommat name holds. Both renderers raise `ValueError` for a source whose tool name is `decide` or is over 64 characters.
+
+## The authoring reader
+
+`ommat.authoring` is outside the compatibility promise and may change in any minor release, as `ommat.lens` is: its public names, `design_from`, `slice_from`, `Slice` and `AuthoringError`, carry no stability promise before 1.0. It takes nothing beyond the standard library, reads no file, and `import ommat` does not import it. The code and tests are the spec for each convention; this section says what the reader is.
+
+`design_from(doc, version=None, values=None, types=None)` reads a parsed mapping, such as a TOML document read with `tomllib` or a JSON one, as the `Design` its author would write in Python; `slice_from` reads the same document as a `Slice`, the sources, rules and parameters a larger design merges. It runs before `load` and changes no hash: a design read from a document has the hash of its Python twin. It refuses only what it cannot build, with `AuthoringError`, a `ValueError`, whose message names the path of the slip, such as `rules.op: unknown key 'read'`; the design checks, and a shape such as a `reads` that is not a list, are `load`'s to refuse.
+
+The reader imports each rule's `fn`, which runs that module's top-level code, so a document is as trusted as source code.
+
+The conventions a document adds expand away before `load`:
+
+- Every table holds only the keys its kind allows, and the reader refuses any other. A question is one key naming its kind, holding its wording; `slot` fills `{name}` in the wording per candidate of its source's `grounded` rule, or names another rule.
+- A decision table is a rule with `rows`, each row naming only the inputs it tests and its result in `then`; `like` copies another table's rows and changes only the `provides`, `type`, `target` or inputs it names.
+- `[labels]` names label sets a question's `labels` may use, and `[types]` names type strings that `$name` expands, an entry written `{ required = true }` left to the caller's `types`.
+- A `version`, a parameter's `value` and a `[types]` string each have one owner, the document or the caller, and a value given by both is refused.
 
 ## The record lens
 

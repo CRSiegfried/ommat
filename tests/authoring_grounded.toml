@@ -1,0 +1,47 @@
+# A design with a candidates rule and a source grounded on it: questions that fill a slot per
+# candidate, per rule, or as a plain name. `grounded_twin()` in test_authoring.py is the same
+# design written in Python.
+
+module = "authoring_rules"
+version = "1"
+state = "record{text: string}"
+policy = "d:pick"
+
+[rules.streets]
+fn         = "streets"
+type       = "list<string>"
+candidates = true
+reads      = ["t:state.text"]
+
+[rules.pick]
+fn    = "pick"
+type  = "string"
+reads = ["q:lamps/out"]
+
+[sources.lamps]
+oracle   = "jev"
+grounded = "d:streets"
+needs    = ["t:state"]
+cost     = 3
+
+[sources.lamps.ask."q:lamps/out"]
+noul = "Is {street} lit?"
+slot = "street"
+
+[sources.lamps.ask."q:lamps/pair"]
+noul = "Is {street} lit by {lamp}?"
+slot = ["street", "lamp"]
+
+[sources.lamps.ask."q:lamps/rule"]
+noul = "Is {street} lit?"
+slot = { street = "d:streets" }
+
+[sources.reader]
+oracle = "jev"
+needs  = ["t:state"]
+
+[sources.reader.ask."q:reader/words"]
+extraction = "Which words name a street?"
+text       = "t:state.text"
+value_type = "text"
+is_list    = true

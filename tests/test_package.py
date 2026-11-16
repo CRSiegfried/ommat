@@ -13,7 +13,15 @@ def test_version_matches_metadata() -> None:
 
 
 @pytest.mark.parametrize(
-    "module", ["ommat", "ommat.conversation", "ommat.evaluation", "ommat.lens", "ommat.outline"]
+    "module",
+    [
+        "ommat",
+        "ommat.authoring",
+        "ommat.conversation",
+        "ommat.evaluation",
+        "ommat.lens",
+        "ommat.outline",
+    ],
 )
 def test_core_imports_only_the_standard_library(module: str) -> None:
     # A fresh interpreter, so modules loaded by pytest or plugins don't count.
@@ -103,7 +111,17 @@ def test_the_public_names_are_exactly_the_decisions() -> None:
     # Submodules imported by tests appear as attributes; `types`, `helpers`, `evaluation` and
     # `bindings` are public subpackages, not names in `ommat.__all__`.
     assert (
-        public - {"types", "helpers", "evaluation", "bindings", "conversation", "lens", "outline"}
+        public
+        - {
+            "types",
+            "helpers",
+            "evaluation",
+            "bindings",
+            "conversation",
+            "lens",
+            "outline",
+            "authoring",
+        }
         == PUBLIC
     )
 
@@ -164,6 +182,26 @@ def test_import_ommat_imports_no_outline_module() -> None:
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "[]"
+
+
+def test_import_ommat_imports_neither_authoring_nor_tomllib() -> None:
+    probe = (
+        "import sys, ommat; "
+        "print(sorted(m for m in sys.modules if m.startswith('ommat.authoring') or m == 'tomllib'))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "[]"
+
+
+def test_ommat_authoring_exports_exactly_its_reader() -> None:
+    import ommat.authoring
+
+    assert "authoring" not in ommat.__all__
+    assert set(ommat.authoring.__all__) == {"AuthoringError", "Slice", "design_from", "slice_from"}
+    public = {n for n in vars(ommat.authoring) if not n.startswith("_")}
+    assert public == set(ommat.authoring.__all__)
 
 
 def test_ommat_outline_exports_exactly_its_builders_and_renderers() -> None:
@@ -303,7 +341,15 @@ def test_no_public_module_holds_a_plan_guard_or_context_name() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["ommat", "ommat.types", "ommat.helpers", "ommat.evaluation", "ommat.bindings"]
+    "name",
+    [
+        "ommat",
+        "ommat.types",
+        "ommat.helpers",
+        "ommat.evaluation",
+        "ommat.bindings",
+        "ommat.authoring",
+    ],
 )
 def test_each_public_module_publishes_its_all(name: str) -> None:
     module = importlib.import_module(name)

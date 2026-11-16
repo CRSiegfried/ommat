@@ -143,6 +143,8 @@ pip install "ommat[pydantic-ai] @ git+https://github.com/CRSiegfried/ommat@v0.4.
 
 To look at stored records, write them to `.json` files as `decision.record.document`, with the design's `loaded.document` beside them, and run `python -m ommat.lens <file or folder> --open`. The page opens on what the turn did, in plain words: the decision, each decision table's rows, and each source asked or not and why. It gives an overview of the design; explores it a slice at a time around one node, with a turn's entries marked on it; lists its targets and its decision tables' rows; and draws the whole dependency graph by round, each turn over it with every entry marked against the bounds its design declares and the lineage from the decision to its root, and the turns as a table. A design file alone is enough to see the design. It holds the records whole, so keep it as you keep them. `ommat.lens` is outside the compatibility promise too. For the same files as text, one node, call or entry per line, or as JSON, run `python -m ommat.outline <file or folder>`.
 
+To write a design as a TOML file instead of Python, read it with `tomllib` and pass the mapping to `ommat.authoring.design_from`, or `slice_from` for a part a larger design merges; a slip is an `AuthoringError` naming its path, and `load` still refuses what the design gets wrong. The reader imports each rule's `fn`, so read only documents you trust as source code.
+
 ## Where next
 
 - [Write your first design](docs/tutorials/write-a-design.md), the tutorial to start with.
