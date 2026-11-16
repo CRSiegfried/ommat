@@ -1,0 +1,32 @@
+# Two decision tables in the authoring form: sparse rows, a helper input, a `{ one_of }` cell over
+# a boolean, a ref result, and a `like` copy. `authoring_table_twin()` in test_authoring.py is the
+# same design written in Python.
+
+version = "1"
+state = "record{n: integer, flag: boolean, items: list<string>, word: string, m: integer}"
+policy = "d:grade"
+
+[types]
+grade = 'label{"high", "low", "none"}'
+
+[parameters]
+"bars/high" = { type = "integer", value = 5 }
+
+[rules.grade]
+type = "$grade"
+hit  = "F"
+inputs.n     = "t:state.n"
+inputs.flag  = "t:state.flag"
+inputs.count = { size = "t:state.items" }
+rows = [
+  { n = ">= bars/high", flag = { one_of = [true, false] }, then = "high" },
+  { count = ">= 2", then = "low" },
+  { flag = { is = true }, then = "low" },
+  { then = "none" },
+]
+
+[rules.grade_again]
+like = "grade"
+type = "$grade"
+provides = "d:grade_again"
+inputs.n = "t:state.m"

@@ -11,6 +11,7 @@ The spec covers what record format 10 and design format 11 hold and the engine d
 - the targets a design declares, the properties its questions ask about, bear on and estimate, for a reader;
 - the record views: the escalation view, the defects view, the transcript view, which is deprecated, and the redacted view;
 - the conversation renderers, which render a record as its turn history in Chat Completions or Pydantic AI messages;
+- the authoring reader, `ommat.authoring`, which reads a parsed mapping as a design or a slice of one, the design the author would write in Python;
 - the record lens, which draws stored records and designs, from their outlines, as an HTML page a person reads;
 - replay of a recorded turn with no model call, the do-and-diff evaluation jobs `intervene`, `scenario` and `use_answers`, the deciding inputs, the switching-value job, the question-reach job, the gold-answers job, the gold record and the answers table, a design's groups, and the design store and the evaluation store;
 - the binding protocol between the engine and a model adapter, the provenance profile each call states, the binding kit and the binding conformance suite;

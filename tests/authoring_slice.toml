@@ -1,0 +1,69 @@
+# A folder-stage-like design in the authoring form: sources with questions, rules and parameters.
+# `authoring_slice_twin()` in test_authoring.py is the same design written in Python.
+
+module = "authoring_rules"
+version = "1"
+state = "record{text: string}"
+policy = "d:act"
+
+[types]
+op     = 'label{"keep", "move"}'
+unit   = 'number [0, 1]'
+folder = 'record{id: string, name: string}'
+
+[targets."tg:op"]
+statement = "Whether the request moves a message"
+values = 'label{"keep", "move"}'
+
+[labels]
+yes_no = [
+  { name = "yes", description = "It does" },
+  { name = "no", description = "It does not" },
+]
+
+[parameters]
+"bars/move_at" = { type = "$unit" }
+"bars/keep_at" = { type = "$unit", value = 0.25 }
+
+[sources.list_folders]
+oracle  = "read"
+timeout = 10.0
+fetch   = { "t:folders" = "list<$folder>" }
+
+[sources.ask_move]
+oracle    = "jev"
+needs     = ["t:state"]
+only_when = { "d:kind" = ["move", "copy"] }
+
+[sources.ask_move.ask."q:move"]
+noul   = "Does the request ask to move the message?"
+target = "tg:op"
+labels = "yes_no"
+
+[sources.ask_move.ask."q:where"]
+choice = "Where should it go?"
+labels = ["inbox", "archive"]
+latent = { "tg:op" = "reflective" }
+
+[rules.kind]
+fn    = "folder_kind"
+type  = 'label{"copy", "move", "none"}'
+reads = ["t:state.text"]
+
+[rules.op]
+fn     = "folder_op"
+type   = "$op"
+reads  = ["q:move", "t:folders"]
+target = "tg:op"
+
+[rules.plan]
+fn     = "folder_plan"
+type   = "$unit"
+reads  = ["d:op"]
+params = ["bars/*"]
+
+[rules.act]
+fn      = "folder_act"
+type    = "$op"
+reads   = ["d:op", "d:plan"]
+version = "2"
