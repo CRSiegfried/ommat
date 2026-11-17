@@ -4,7 +4,8 @@ their outlines, outside the compatibility promise while it is validated.
 ``page(records, designs=())`` returns a self-contained page. It takes each document's outline
 (``ommat.outline``) and text form, and the page draws from the outline alone: a turn's path,
 one card per rule with a dependency path to the policy, in the layout's columns, each folding in
-the answers it declares, the ones the record shows it read filled; a design's
+the answers it declares, the ones the record shows it read filled, over a map of every node
+and dependency with the selected rule's reads lit; a design's
 overview; a slice of its dependency graph around one node, by round and in the layout's rows,
 with the selected turn's entries marked on it; its targets and its tables' rows; and the design
 as its whole dependency graph, one band per round, a sub-column per wavefront, the sources,

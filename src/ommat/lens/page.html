@@ -394,6 +394,25 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .dv .pathv .pbar i { display: block; height: 100%; background: var(--r-read); }
 .dv .pathv .prow.decl .pbar i { background: var(--muted); }
 .dv .pathv .pans .p { text-align: right; color: var(--ink2); }
+.dv .pathv .pmap { overflow-x: auto; margin: 4px 0 2px; }
+.dv .pathv .pmap svg { display: block; }
+.dv .pathv .pmap .mh { fill: var(--ink2); font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.dv .pathv .pmap .ml { fill: none; stroke: var(--axis); stroke-width: 1; }
+.dv .pathv .pmap .ml.out { stroke: var(--ink2); stroke-width: 1.4; }
+.dv .pathv .pmap .ml.decl { stroke: var(--r-read); stroke-width: 1.6; stroke-dasharray: 4 3; }
+.dv .pathv .pmap .ml.read { stroke: var(--r-read); stroke-width: 2; }
+.dv .pathv .pmap .mn rect { fill: var(--surface); stroke: var(--axis); stroke-width: 1; }
+.dv .pathv .pmap .mn text { fill: var(--ink2); font: 11px var(--mono); }
+.dv .pathv .pmap .mn.other rect { stroke-dasharray: 3 3; }
+.dv .pathv .pmap .mn.rule { cursor: pointer; }
+.dv .pathv .pmap .mn.near rect { stroke: var(--r-read); }
+.dv .pathv .pmap .mn.near text, .dv .pathv .pmap .mn.lin text, .dv .pathv .pmap .mn.sel text { fill: var(--ink); }
+.dv .pathv .pmap .mn.lin rect { stroke: var(--ink); stroke-width: 2; }
+.dv .pathv .pmap .mn.sel rect { stroke: var(--sel); stroke-width: 3; }
+.dv .pathv .pmap .mn.none { opacity: .45; }
+.dv .pathv .pmap .mn:focus-visible { outline: none; }
+.dv .pathv .pmap .mn:focus-visible rect { stroke: var(--r-read); stroke-width: 3; }
+.dv .pathv .pmapcap { font-size: 12px; color: var(--ink2); max-width: 100ch; margin: 0 0 4px; }
 @media (max-width: 700px) { .dv .pathv .prow { grid-template-columns: minmax(0, 1fr); } }
 .dv details.ttable .sep { color: var(--ink2); margin: 0 4px; }
 .dv details.ttable .tnote { margin: 8px 0 0; font-size: 12.5px; }
@@ -2133,6 +2152,44 @@ function pathDetail(X, t, P) {
   if (P.given.length) h += `<h3>State it declares</h3><p>${P.given.map(r => `<span class="mono">${esc(r)}</span>`).join(', ')}</p>`;
   return h + '</div>';
 }
+// A hub feeds more than half of the design's other nodes, and four at least: its lines say little, so the map
+// draws them only where they reach the selected rule.
+function pathHubs(X) {
+  const all = Object.keys(X.N).length;
+  return new Set(Object.keys(X.N).filter(id => X.succs[id].size >= 4 && X.succs[id].size > (all - 1) / 2));
+}
+// The whole design under the cards: every node a box at its layout column and row, a line per dependency, the
+// selected rule's reads lit, solid where the record shows the read and dashed where it is declared alone.
+function pathMap(X, t, P, lin) {
+  const D = X.D, W = 150, H = 20, CW = 178, RH = 26, sel = P ? P.n.id : null, hubs = pathHubs(X);
+  const cols = (D.layout && D.layout.columns) || [], x = id => 8 + X.col(id) * CW, y = id => 26 + X.row(id) * RH;
+  const pairs = new Map();
+  for (const e of D.edges || []) {
+    if (!e.dependency || !X.N[e.from] || !X.N[e.to]) continue;
+    const k = e.from + '\n' + e.to, was = e.to === sel && P.was(e.ref);
+    pairs.set(k, {from: e.from, to: e.to, read: was || (pairs.has(k) && pairs.get(k).read)});
+  }
+  const cls = l => (l.to === sel ? (l.read ? 'read' : 'decl') : l.from === sel ? 'out' : '');
+  const lines = [...pairs.values()].filter(l => l.to === sel || l.from === sel || !hubs.has(l.from)).map(l => Object.assign(l, {cls: cls(l)}));
+  const left = pairs.size - lines.length, rank = {'': 0, out: 1, decl: 2, read: 3};
+  lines.sort((a, b) => rank[a.cls] - rank[b.cls]);
+  const near = new Set(lines.filter(l => l.to === sel).map(l => l.from));
+  const path = l => { const x1 = x(l.from) + W, y1 = y(l.from) + H / 2, x2 = x(l.to), y2 = y(l.to) + H / 2, m = (x1 + x2) / 2; return `<path class="ml ${l.cls}" d="M${x1} ${y1} C${m} ${y1} ${m} ${y2} ${x2} ${y2}"/>`; };
+  const box = n => {
+    const rule = n.kind === 'rule', st = nodeMark(n, t), name = n.kind === 'state' ? 't:state' : rule ? shortOf(D, (n.refs || [])[0] || n.name) : n.name;
+    const c = [rule ? 'rule' : 'other', n.id === sel ? 'sel' : '', near.has(n.id) ? 'near' : '', lin.has(n.id) ? 'lin' : '', st === 'none' ? 'none' : ''].filter(Boolean).join(' ');
+    const tipText = `${n.name}${n.policy ? ' · the policy' : ''} · ${STATE_LABEL[st] || (st === 'none' ? 'no entry' : st)}${lin.has(n.id) ? ' · on the lineage' : ''}`;
+    return `<g class="mn ${c}"${rule ? ` data-pnode="${esc(n.id)}" tabindex="0" role="button"` : ''}><title>${esc(tipText)}</title><rect x="${x(n.id)}" y="${y(n.id)}" width="${W}" height="${H}" rx="4"/>
+      <text x="${x(n.id) + 7}" y="${y(n.id) + 14}">${esc(cut(name, fitChars(W - 26, 11)))}</text><circle cx="${x(n.id) + W - 9}" cy="${y(n.id) + H / 2}" r="3.5" fill="${DOT[st] || DOT.none}"/></g>`;
+  };
+  const rows = Math.max(0, ...Object.keys(X.N).map(id => X.row(id))), ranks = Math.max(0, ...Object.keys(X.N).map(id => X.col(id)));
+  const VW = 16 + ranks * CW + W, VH = 26 + (rows + 1) * RH + 4;
+  const heads = cols.map((c, i) => `<text class="mh" x="${8 + i * CW}" y="14">round ${c.round} · ${esc(subHead(c, false))}</text>`).join('');
+  const hubNames = [...hubs].map(id => X.N[id].name);
+  const cap = `Every node of the design at its layout column and row: solid boxes are rules, dashed ones the state and the sources. A dot is what the node held in this turn, an inked box is on the lineage and a faded one wrote no entry. The selected rule's reads are blue, solid where the record shows the read and dashed where it is declared alone.${hubNames.length ? ` ${plural(left, 'line')} from ${hubNames.join(', ')} ${left === 1 ? 'is' : 'are'} left out: ${hubNames.length === 1 ? 'it feeds' : 'each feeds'} more than half of the design.` : ''}`;
+  return {html: `<h3>Where it sits in the whole design</h3><div class="pmap"><svg width="${VW}" height="${VH}" viewBox="0 0 ${VW} ${VH}" role="img" aria-label="${esc('The design ' + (D.name || '') + ' by layout column, the selected rule and its reads lit')}">${heads}${lines.map(path).join('')}${(D.nodes || []).map(box).join('')}</svg></div><p class="pmapcap">${esc(cap)}</p>`,
+    model: {hubs: [...hubs].sort(), left, lines: lines.map(l => [l.from, l.to, l.cls])}};
+}
 let LAST_PATH = null; // the last path drawn, for the smoke test
 function drawPathView() {
   const host = $('vPath'), s = cur(), t = curTurn();
@@ -2152,9 +2209,11 @@ function drawPathView() {
     <div class="pkey"><span><span class="psq"><i class="read"></i></span> read: through a helper, or tested by a table row that matched; deeper when its top label is surer</span><span><span class="psq"><i class="decl"></i></span> declared, not recorded as read</span><span><span class="psq"><i class="mk"></i></span> no value in this turn</span></div>
     <div class="pcols">${cols.map(c => `<div class="pcol"><span class="kk">round ${c[0].round}${c[0].wavefront ? ' · wavefront ' + c[0].wavefront : ''}</span>${c.map(n => pathCard(X, t, model.get(n.id), sel, lin)).join('')}</div>`).join('')}</div>`;
   if (off.length) h += `<div class="poff"><span class="empty">${plural(off.length, 'rule')} with no path to the policy:</span>${off.map(n => `<button class="ref rule" data-pnode="${esc(n.id)}">${esc(n.name)}</button>`).join('')}</div>`;
+  const map = pathMap(X, t, sel ? model.get(sel) : null, lin);
+  h += map.html;
   if (sel) h += pathDetail(X, t, model.get(sel));
   host.innerHTML = h + '</div>';
-  LAST_PATH = {selected: sel, columns: cols.map(c => c.map(n => n.id)), off: off.map(n => n.id), read: [...read].sort(), declared: [...declared].sort(),
+  LAST_PATH = {map: map.model, selected: sel, columns: cols.map(c => c.map(n => n.id)), off: off.map(n => n.id), read: [...read].sort(), declared: [...declared].sort(),
     rules: Object.fromEntries([...model].map(([id, P]) => [id, {answers: P.answers, read: P.readAnswers, results: P.results, given: P.given}]))};
 }
 // What the turn was given: each field of the state's entry, text in full.
@@ -2969,6 +3028,7 @@ $('copy').addEventListener('click', () => {
 });
 for (const v of VIEWS) $('tab-' + v).addEventListener('click', () => showView(v));
 $('views').addEventListener('click', viewsClick);
+$('views').addEventListener('keydown', ev => { const g = (ev.key === 'Enter' || ev.key === ' ') && ev.target && ev.target.closest ? ev.target.closest('g[data-pnode]') : null; if (g) { ev.preventDefault(); viewsClick(ev); } });
 $('views').addEventListener('pointerover', viewsHover);
 $('views').addEventListener('pointerleave', () => { clearTimeout(hoverT); $('hovercard').hidden = true; });
 $('views').addEventListener('change', ev => {
