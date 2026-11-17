@@ -80,8 +80,8 @@ From format 7, targets name, for a reader, the property a question asks about or
 from ommat import Question, Target, Text
 
 targets = {
-    "tg:danger": Target("Whether people are at risk where the report was made", values="yes or no"),
-    "tg:priority": Target("How soon a crew should go out"),
+    "tg:danger": Target("The risk to people where the report was made", values="yes or no"),
+    "tg:priority": Target("The urgency of sending a crew out"),
 }
 danger = Question(
     "noul",

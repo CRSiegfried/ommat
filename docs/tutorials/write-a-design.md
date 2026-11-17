@@ -94,27 +94,32 @@ Each `q:` ref maps to a `Question`: its kind, its wording as a `Text`, and any l
 5. The `text` ref joins the source's needs: `lookup` declared only `t:state`, but its
    binding also receives `t:state.message`.
 
-6. Say what each question is for. A target is what the design is trying to determine about
-   the state, and its statement says what counts, so a reader can judge how a question's
-   answer bears on it:
+6. Say what each question is for. A target is the property of the state the design is trying
+   to determine. Its statement is a noun phrase saying what the property is, plus at most one
+   clause naming the neighbouring thing it is most easily confused with, so a reader can judge
+   how a question's answer bears on it. The cases that count go in the question's wording:
 
    ```python
    TARGETS = {
        "tg:urgent": Target(
-           "Determine whether the customer needs an answer today: a deadline, a missed delivery or "
-           "a safety issue counts; impatience alone does not.",
+           "The customer's need for an answer today, not their impatience.",
            values="yes or no",
        ),
        "tg:topic": Target(
-           "Determine what the customer's message is mainly about; when it raises several things, "
-           "the one it most asks to have dealt with.",
+           "The subject the customer most asks to have dealt with, not every subject the "
+           "message mentions.",
            values="one of delivery, return, damaged or other",
        ),
    }
    ```
 
-   `q:triage/urgent` names `target="tg:urgent"`, `q:triage/topic` names `target="tg:topic"`,
-   and the design declares `targets=TARGETS`. Targets gate nothing: they tell a reader what
+   Each question names its target and takes the cases into its wording, in place of the
+   wording from the first step. `q:triage/urgent` names `target="tg:urgent"` and asks
+   `Text("Does the customer need an answer today? A deadline, a missed delivery or a safety
+   issue counts; impatience alone does not.")`. `q:triage/topic` names `target="tg:topic"`
+   and asks `Text("What is the customer's message about? If it raises several things, answer
+   for the one it most asks to have dealt with.")`. The design declares
+   `targets=TARGETS`. Targets gate nothing: they tell a reader what
    each question is for.
 
 ## Rules
