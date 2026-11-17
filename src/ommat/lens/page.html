@@ -394,25 +394,31 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .dv .pathv .pbar i { display: block; height: 100%; background: var(--r-read); }
 .dv .pathv .prow.decl .pbar i { background: var(--muted); }
 .dv .pathv .pans .p { text-align: right; color: var(--ink2); }
+.dv .pathv .pcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; align-items: start; margin: 0 0 6px; }
+.dv .pathv .pcard.pol { border-width: 2px; border-color: var(--ink); }
+.dv .pathv .pc-b { font-size: 11.5px; color: var(--ink2); }
 .dv .pathv .pmap { overflow-x: auto; margin: 4px 0 2px; }
-.dv .pathv .pmap svg { display: block; }
-.dv .pathv .pmap .mh { fill: var(--ink2); font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
-.dv .pathv .pmap .ml { fill: none; stroke: var(--axis); stroke-width: 1; }
-.dv .pathv .pmap .ml.out { stroke: var(--ink2); stroke-width: 1.4; }
-.dv .pathv .pmap .ml.decl { stroke: var(--r-read); stroke-width: 1.6; stroke-dasharray: 4 3; }
-.dv .pathv .pmap .ml.read { stroke: var(--r-read); stroke-width: 2; }
-.dv .pathv .pmap .mn rect { fill: var(--surface); stroke: var(--axis); stroke-width: 1; }
-.dv .pathv .pmap .mn text { fill: var(--ink2); font: 11px var(--mono); }
-.dv .pathv .pmap .mn.other rect { stroke-dasharray: 3 3; }
-.dv .pathv .pmap .mn.rule { cursor: pointer; }
-.dv .pathv .pmap .mn.near rect { stroke: var(--r-read); }
-.dv .pathv .pmap .mn.near text, .dv .pathv .pmap .mn.lin text, .dv .pathv .pmap .mn.sel text { fill: var(--ink); }
-.dv .pathv .pmap .mn.lin rect { stroke: var(--ink); stroke-width: 2; }
-.dv .pathv .pmap .mn.sel rect { stroke: var(--sel); stroke-width: 3; }
-.dv .pathv .pmap .mn.none { opacity: .45; }
-.dv .pathv .pmap .mn:focus-visible { outline: none; }
-.dv .pathv .pmap .mn:focus-visible rect { stroke: var(--r-read); stroke-width: 3; }
+.dv .pathv .pgrid { display: grid; min-width: min-content; font-size: 12px; }
+.dv .pathv .pmapkey .mc { max-width: none; }
+.dv .pathv .pgrid > div { border-top: 1px solid var(--grid); padding: 5px 8px 5px 0; min-width: 0; }
+.dv .pathv .pgrid > .gh { border-top: 0; font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--ink2); }
+.dv .pathv .pgrid > .gl { display: grid; gap: 2px; align-content: start; }
+.dv .pathv .pgrid > .gl.on { box-shadow: inset 3px 0 0 var(--sel); padding-left: 8px; }
+.dv .pathv .pgrid > .gc { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; }
+.dv .pathv .mc { font: 11px var(--mono); color: var(--ink2); background: var(--surface); border: 1px solid var(--axis); border-radius: 4px; padding: 1px 6px 1px 4px; display: inline-flex; gap: 4px; align-items: center; max-width: 180px; white-space: nowrap; }
+.dv .pathv .mc span { overflow: hidden; text-overflow: ellipsis; }
+.dv .pathv button.mc { cursor: pointer; }
+.dv .pathv .mc i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dv .pathv .mc.other { border-style: dashed; }
+.dv .pathv .mc.none { opacity: .45; }
+.dv .pathv .mc.lin { font-weight: 700; color: var(--ink); }
+.dv .pathv .mc.back { border-color: var(--r-read); color: var(--ink); }
+.dv .pathv .mc.decl { border: 1px dashed var(--r-read); box-shadow: 0 0 0 1px var(--r-read); color: var(--ink); opacity: 1; }
+.dv .pathv .mc.read { border: 1px solid var(--r-read); box-shadow: 0 0 0 1px var(--r-read); color: var(--ink); opacity: 1; }
+.dv .pathv .mc.out { border-color: var(--ink); color: var(--ink); }
+.dv .pathv .mc.sel { border-color: var(--sel); box-shadow: 0 0 0 2px var(--sel); color: var(--ink); opacity: 1; }
 .dv .pathv .pmapcap { font-size: 12px; color: var(--ink2); max-width: 100ch; margin: 0 0 4px; }
+.dv .pathv .pmapkey { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink2); margin: 0 0 6px; align-items: center; }
 @media (max-width: 700px) { .dv .pathv .prow { grid-template-columns: minmax(0, 1fr); } }
 .dv details.ttable .sep { color: var(--ink2); margin: 0 4px; }
 .dv details.ttable .tnote { margin: 8px 0 0; font-size: 12.5px; }
@@ -2076,22 +2082,18 @@ function drawTurnView() {
 }
 /* path: the rules the decision can rest on, in the layout's columns, each one card that folds in the
    answers it declares; the record's derivations and matched rows say which of them it read */
-// The rules with a dependency path to the policy node, the policy among them; every rule when the design names none.
-function pathRules(X) {
-  const rules = (X.D.nodes || []).filter(n => n.kind === 'rule'), pol = X.D.policy_node && X.N[X.D.policy_node] ? X.D.policy_node : null;
-  if (!pol) return {on: rules, off: []};
-  const up = new Set(), todo = [pol];
-  while (todo.length) { const id = todo.pop(); if (up.has(id)) continue; up.add(id); for (const p of X.preds[id]) todo.push(p); }
-  return {on: rules.filter(n => up.has(n.id)), off: rules.filter(n => !up.has(n.id))};
-}
 // One rule in the turn: its entries, its declared reads by what provides them, and the refs the record shows it read,
-// through a helper of its derivation or as a test of a table row that matched.
+// through a helper of its derivation, or as a test or the output of a table row that matched.
 function pathRule(X, t, n) {
   const entries = [].concat(...(n.refs || []).map(r => entriesFor(t.idx, r)));
   const read = new Set(), R = t.outline.review;
   for (const e of entries) for (const s of e.derivation || []) for (const r of [].concat(s.refs || [], s.rested_on || [])) read.add(baseOf(r) || r);
   const tables = R ? R.tables.filter(tb => tb.rule === n.name) : [];
-  for (const tb of tables) for (const r of tb.rows) if (r.chosen || r.result === 'matched') for (const x of r.tests || []) read.add(baseOf(x.read) || x.read);
+  for (const tb of tables) for (const r of tb.rows) if (r.chosen || r.result === 'matched') {
+    for (const x of r.tests || []) read.add(baseOf(x.read) || x.read);
+    const m = /^Input\((.+)\)$/.exec(r.output || ''); // a matched row whose output is one of its inputs
+    if (m) read.add(baseOf(m[1]) || m[1]);
+  }
   const answers = [], results = [], given = [];
   for (const ref of [...new Set((n.reads || []).map(r => r.ref))]) {
     const p = X.N[nodeOfRef(X.D, ref)];
@@ -2122,11 +2124,11 @@ function pathFeed(P) {
   if (P.given.length) parts.push(plural(P.given.length, 'state read'));
   return parts.join(' · ') || 'reads nothing';
 }
-function pathCard(X, t, P, sel, lin) {
+function pathCard(X, t, P, sel, lin, note) {
   const n = P.n;
-  return `<button class="pcard ${lin.has(n.id) ? 'lin' : ''} ${P.entries.length ? '' : 'none'}" data-pnode="${esc(n.id)}" aria-pressed="${sel === n.id}"${lin.has(n.id) ? ' title="on the lineage"' : ''}>
+  return `<button class="pcard ${n.policy ? 'pol' : ''} ${lin.has(n.id) ? 'lin' : ''} ${P.entries.length ? '' : 'none'}" data-pnode="${esc(n.id)}" aria-pressed="${sel === n.id}"${lin.has(n.id) ? ' title="on the lineage"' : ''}>
     <span class="pc-n">${glyphOf(n)} ${esc(n.name)}${n.policy ? ' <span class="kk">the policy</span>' : ''}</span><span class="pc-v">${pathHolds(P)}</span>
-    ${P.answers.length ? `<span class="psq">${P.answers.map(r => pathSquare(t, r, P.was(r))).join('')}</span>` : ''}<span class="pc-f">${esc(pathFeed(P))}</span></button>`;
+    ${P.answers.length ? `<span class="psq">${P.answers.map(r => pathSquare(t, r, P.was(r))).join('')}</span>` : ''}<span class="pc-f">${esc(pathFeed(P))}</span>${note ? `<span class="pc-b">${esc(note)}</span>` : ''}</button>`;
 }
 function pathAnswer(e, label) {
   const tops = topOf(e), c = label ? `<span class="cand">${esc(label)}</span>` : '';
@@ -2135,7 +2137,7 @@ function pathAnswer(e, label) {
   return `<div class="pans">${c}<b>${esc(k)}</b><span class="pbar"><i style="width:${Math.round(Math.max(0, Math.min(1, p)) * 100)}%"></i></span><span class="p">${esc(num(p))}</span>${then ? `<span class="then">then ${esc(then)}</span>` : ''}</div>`;
 }
 function pathAnswerRow(t, ref, was) {
-  const es = entriesFor(t.idx, ref), w = es.length && es[0].wording && es[0].wording.template;
+  const es = entriesFor(t.idx, ref), w0 = es.length && es[0].wording && es[0].wording.template, w = w0 && typeof w0 === 'object' && !Array.isArray(w0) ? (w0.question || w0.text || null) : typeof w0 === 'string' ? w0 : null;
   const label = e => (e.ref.length > ref.length && e.ref.startsWith(ref) ? e.ref.slice(ref.length) : '');
   const a = es.length ? es.map(e => pathAnswer(e, es.length > 1 ? label(e) : '')).join('') : '<span class="tv mk">no entry</span>';
   return `<div class="prow ${was ? '' : 'decl'}"><div class="pw">${w ? esc(w) : ''}<span class="mono">${esc(ref)}</span></div><div class="pa">${a}</div></div>`;
@@ -2152,43 +2154,62 @@ function pathDetail(X, t, P) {
   if (P.given.length) h += `<h3>State it declares</h3><p>${P.given.map(r => `<span class="mono">${esc(r)}</span>`).join(', ')}</p>`;
   return h + '</div>';
 }
-// A hub feeds more than half of the design's other nodes, and four at least: its lines say little, so the map
-// draws them only where they reach the selected rule.
-function pathHubs(X) {
-  const all = Object.keys(X.N).length;
-  return new Set(Object.keys(X.N).filter(id => X.succs[id].size >= 4 && X.succs[id].size > (all - 1) / 2));
-}
-// The whole design under the cards: every node a box at its layout column and row, a line per dependency, the
-// selected rule's reads lit, solid where the record shows the read and dashed where it is declared alone.
-function pathMap(X, t, P, lin) {
-  const D = X.D, W = 150, H = 20, CW = 178, RH = 26, sel = P ? P.n.id : null, hubs = pathHubs(X);
-  const cols = (D.layout && D.layout.columns) || [], x = id => 8 + X.col(id) * CW, y = id => 26 + X.row(id) * RH;
-  const pairs = new Map();
-  for (const e of D.edges || []) {
-    if (!e.dependency || !X.N[e.from] || !X.N[e.to]) continue;
-    const k = e.from + '\n' + e.to, was = e.to === sel && P.was(e.ref);
-    pairs.set(k, {from: e.from, to: e.to, read: was || (pairs.has(k) && pairs.get(k).read)});
-  }
-  const cls = l => (l.to === sel ? (l.read ? 'read' : 'decl') : l.from === sel ? 'out' : '');
-  const lines = [...pairs.values()].filter(l => l.to === sel || l.from === sel || !hubs.has(l.from)).map(l => Object.assign(l, {cls: cls(l)}));
-  const left = pairs.size - lines.length, rank = {'': 0, out: 1, decl: 2, read: 3};
-  lines.sort((a, b) => rank[a.cls] - rank[b.cls]);
-  const near = new Set(lines.filter(l => l.to === sel).map(l => l.from));
-  const path = l => { const x1 = x(l.from) + W, y1 = y(l.from) + H / 2, x2 = x(l.to), y2 = y(l.to) + H / 2, m = (x1 + x2) / 2; return `<path class="ml ${l.cls}" d="M${x1} ${y1} C${m} ${y1} ${m} ${y2} ${x2} ${y2}"/>`; };
-  const box = n => {
-    const rule = n.kind === 'rule', st = nodeMark(n, t), name = n.kind === 'state' ? 't:state' : rule ? shortOf(D, (n.refs || [])[0] || n.name) : n.name;
-    const c = [rule ? 'rule' : 'other', n.id === sel ? 'sel' : '', near.has(n.id) ? 'near' : '', lin.has(n.id) ? 'lin' : '', st === 'none' ? 'none' : ''].filter(Boolean).join(' ');
-    const tipText = `${n.name}${n.policy ? ' · the policy' : ''} · ${STATE_LABEL[st] || (st === 'none' ? 'no entry' : st)}${lin.has(n.id) ? ' · on the lineage' : ''}`;
-    return `<g class="mn ${c}"${rule ? ` data-pnode="${esc(n.id)}" tabindex="0" role="button"` : ''}><title>${esc(tipText)}</title><rect x="${x(n.id)}" y="${y(n.id)}" width="${W}" height="${H}" rx="4"/>
-      <text x="${x(n.id) + 7}" y="${y(n.id) + 14}">${esc(cut(name, fitChars(W - 26, 11)))}</text><circle cx="${x(n.id) + W - 9}" cy="${y(n.id) + H / 2}" r="3.5" fill="${DOT[st] || DOT.none}"/></g>`;
+// The lanes of a design: one per rule result the policy reads. A node is in the lane of the one such result its
+// dependencies first reach, in `shared` when they first reach several, in `policy` when they reach the policy
+// alone, and in `off` when they reach neither. A design with no policy node is one shared lane.
+function pathLanes(X) {
+  const pol = X.D.policy_node && X.N[X.D.policy_node] ? X.D.policy_node : null, lane = new Map(), memo = new Map();
+  const place = (a, b) => X.col(a) - X.col(b) || X.row(a) - X.row(b);
+  const heads = pol ? [...X.preds[pol]].filter(id => X.N[id].kind === 'rule').sort(place) : [], isHead = new Set(heads);
+  const first = id => {
+    if (memo.has(id)) return memo.get(id);
+    const out = new Set(); memo.set(id, out);
+    for (const n of X.succs[id]) { if (n === pol) out.add('policy'); else if (isHead.has(n)) out.add(n); else for (const h of first(n)) out.add(h); }
+    return out;
   };
-  const rows = Math.max(0, ...Object.keys(X.N).map(id => X.row(id))), ranks = Math.max(0, ...Object.keys(X.N).map(id => X.col(id)));
-  const VW = 16 + ranks * CW + W, VH = 26 + (rows + 1) * RH + 4;
-  const heads = cols.map((c, i) => `<text class="mh" x="${8 + i * CW}" y="14">round ${c.round} · ${esc(subHead(c, false))}</text>`).join('');
-  const hubNames = [...hubs].map(id => X.N[id].name);
-  const cap = `Every node of the design at its layout column and row: solid boxes are rules, dashed ones the state and the sources. A dot is what the node held in this turn, an inked box is on the lineage and a faded one wrote no entry. The selected rule's reads are blue, solid where the record shows the read and dashed where it is declared alone.${hubNames.length ? ` ${plural(left, 'line')} from ${hubNames.join(', ')} ${left === 1 ? 'is' : 'are'} left out: ${hubNames.length === 1 ? 'it feeds' : 'each feeds'} more than half of the design.` : ''}`;
-  return {html: `<h3>Where it sits in the whole design</h3><div class="pmap"><svg width="${VW}" height="${VH}" viewBox="0 0 ${VW} ${VH}" role="img" aria-label="${esc('The design ' + (D.name || '') + ' by layout column, the selected rule and its reads lit')}">${heads}${lines.map(path).join('')}${(D.nodes || []).map(box).join('')}</svg></div><p class="pmapcap">${esc(cap)}</p>`,
-    model: {hubs: [...hubs].sort(), left, lines: lines.map(l => [l.from, l.to, l.cls])}};
+  for (const id of Object.keys(X.N)) {
+    const f = [...first(id)].filter(h => h !== 'policy');
+    lane.set(id, !pol || X.N[id].kind === 'state' ? 'shared' : id === pol ? 'policy' : isHead.has(id) ? id : f.length === 1 ? f[0] : f.length ? 'shared' : first(id).size ? 'policy' : 'off');
+  }
+  const keys = ['shared', ...heads, 'policy', 'off'], of = Object.fromEntries(keys.map(k => [k, []]));
+  for (const id of Object.keys(X.N).sort(place)) of[lane.get(id)].push(id);
+  return {pol, heads, lane, keys: keys.filter(k => of[k].length), of};
+}
+const LANE_TEXT = {shared: 'shared by several', policy: 'the policy', off: 'no path to the policy'};
+// What the selection lights on the map: the nodes it reads, by whether the record shows the read; the nodes the
+// record shows those read, and so on back; and the nodes that read it.
+function pathLit(X, model, sel) {
+  const lit = {};
+  if (!sel) return lit;
+  const reads = id => { const P = model.get(id), out = new Map(); if (P) for (const e of X.D.edges || []) if (e.dependency && e.to === id && X.N[e.from]) out.set(e.from, out.get(e.from) || P.was(e.ref)); return out; };
+  for (const id of X.succs[sel]) lit[id] = 'out';
+  const todo = [];
+  for (const [id, was] of reads(sel)) { lit[id] = was ? 'read' : 'decl'; todo.push(id); }
+  while (todo.length) for (const [id, was] of reads(todo.pop())) if (was && id !== sel && !(lit[id] === 'read' || lit[id] === 'decl' || lit[id] === 'back')) { lit[id] = 'back'; todo.push(id); }
+  lit[sel] = 'sel';
+  return lit;
+}
+const pathName = (X, n) => (n.kind === 'state' ? 't:state' : n.kind === 'rule' ? shortOf(X.D, (n.refs || [])[0] || n.name) : n.name);
+// The whole design as a grid, a lane to a row and a round to a column, every node a chip in layout order.
+function pathMap(X, t, L, model, sel, lin) {
+  const lit = pathLit(X, model, sel), selLane = sel ? L.lane.get(sel) : null, rounds = X.ROUNDS;
+  const chip = id => {
+    const n = X.N[id], rule = n.kind === 'rule', st = nodeMark(n, t);
+    const c = ['mc', rule ? 'rule' : 'other', lit[id] || '', lin.has(id) ? 'lin' : '', st === 'none' ? 'none' : ''].filter(Boolean).join(' ');
+    const e = rule && (n.refs || []).length === 1 ? entryAt(t, n.refs[0]) : null;
+    const tipText = `${n.name}${n.policy ? ' · the policy' : ''} · ${e ? valueOf(e) : STATE_LABEL[st] || (st === 'none' ? 'no entry' : st)}${lin.has(id) ? ' · on the lineage' : ''}`;
+    const inner = `<i style="background:${DOT[st] || DOT.none}"></i><span>${esc(pathName(X, n))}</span>`;
+    return rule ? `<button class="${c}" data-pnode="${esc(id)}" title="${esc(tipText)}">${inner}</button>` : `<span class="${c}" title="${esc(tipText)}">${inner}</span>`;
+  };
+  const label = k => {
+    const head = X.N[k], ids = L.of[k], rules = ids.filter(id => X.N[id].kind === 'rule').length;
+    const count = `<span class="empty">${plural(rules, 'rule')}${ids.length - rules ? ', ' + plural(ids.length - rules, 'other') : ''}</span>`;
+    return `<div class="gl ${k === selLane ? 'on' : ''}">${head ? `<span><button class="ref rule" data-pnode="${esc(k)}">${esc(pathName(X, head))}</button></span><span>${pathHolds(model.get(k))}</span>` : `<b>${esc(LANE_TEXT[k])}</b>`}${count}</div>`;
+  };
+  const row = k => label(k) + rounds.map(r => `<div class="gc">${L.of[k].filter(id => X.N[id].round === r).map(chip).join('')}</div>`).join('');
+  const key = `<div class="pmapkey"><span class="mc sel"><span>selected</span></span><span class="mc read"><span>it read, recorded</span></span><span class="mc decl"><span>it declares, not recorded as read</span></span><span class="mc back"><span>read further back, recorded</span></span><span class="mc out"><span>reads it</span></span><span class="mc other"><span>state or source</span></span></div>`;
+  const cap = `Every node of the design, once: a row for each rule result the policy reads, holding the nodes that reach the policy through it alone, and a column for each round, in layout order. The dot is what the node held in this turn; a faded node wrote no entry and a bold one is on the lineage.`;
+  return {html: `<h3>Where it sits in the whole design</h3>${key}<div class="pmap"><div class="pgrid" style="grid-template-columns: minmax(150px, 210px) ${rounds.map(r => `minmax(130px, ${Math.max(1, ...L.keys.map(k => L.of[k].filter(id => X.N[id].round === r).length))}fr)`).join(' ')}"><div class="gh"></div>${rounds.map(r => `<div class="gh">round ${r}</div>`).join('')}${L.keys.map(row).join('')}</div></div><p class="pmapcap">${esc(cap)}</p>`, lit};
 }
 let LAST_PATH = null; // the last path drawn, for the smoke test
 function drawPathView() {
@@ -2197,23 +2218,31 @@ function drawPathView() {
   if (!s.turns.length) { host.innerHTML = '<p class="empty">This set holds no record.</p>'; return; }
   if (!t) { host.innerHTML = `<h2 class="vh">Pick a turn</h2><ul class="tpick">${s.order.map(i => `<li><button class="btn" data-turn="${i}">${esc(turnName(s.turns[i], i))}</button> ${esc(s.turns[i].sum.decision)}</li>`).join('')}</ul>`; return; }
   if (!t.design) { host.innerHTML = noDesign('Path'); return; }
-  const T = t.outline, X = ixOf(t.design.outline), {on, off} = pathRules(X), lin = lineageNodes(t);
-  const model = new Map([...on, ...off].map(n => [n.id, pathRule(X, t, n)]));
-  const sel = model.has(S.node) ? S.node : X.D.policy_node && model.has(X.D.policy_node) ? X.D.policy_node : on.length ? on[on.length - 1].id : null;
-  const cols = [...new Set(on.map(n => X.col(n.id)))].sort((a, b) => a - b).map(c => on.filter(n => X.col(n.id) === c).sort((a, b) => X.row(a.id) - X.row(b.id)));
+  const T = t.outline, X = ixOf(t.design.outline), L = pathLanes(X), lin = lineageNodes(t);
+  const rules = (X.D.nodes || []).filter(n => n.kind === 'rule'), on = rules.filter(n => L.lane.get(n.id) !== 'off');
+  const model = new Map(rules.map(n => [n.id, pathRule(X, t, n)]));
+  const sel = model.has(S.node) ? S.node : L.pol && model.has(L.pol) ? L.pol : rules.length ? rules[rules.length - 1].id : null;
+  const selLane = sel ? L.lane.get(sel) : null;
   const declared = new Set(), read = new Set();
   for (const n of on) { const P = model.get(n.id); P.answers.forEach(r => declared.add(r)); P.readAnswers.forEach(r => read.add(r)); }
   const calls = (T.rounds || []).reduce((k, r) => k + (r.calls || []).length, 0), d = T.decision;
+  const behindOf = k => L.of[k].filter(id => id !== k && X.N[id].kind === 'rule');
+  const top = [L.pol, ...L.heads].filter(Boolean);
+  const card = id => pathCard(X, t, model.get(id), sel, lin, id === L.pol ? '' : behindOf(id).length ? `${plural(behindOf(id).length, 'rule')} behind it alone` : '');
   let h = `<div class="turnv pathv"><h2 class="vh">${decIcon(t.sum.dkind)} ${esc(cut(whyText(t), 160) || t.sum.decision)}</h2>
     <p class="lede">${plural(on.length, 'rule')} can reach ${d ? tRef(null, d.ref) : 'the policy'} in this design. Each card is one rule and what it held in this turn; the squares are the answers it declares, folded into the rule that reads them. The record shows ${read.size} of ${plural(declared.size, 'declared answer')} read, over ${plural(calls, 'call')}.</p>
-    <div class="pkey"><span><span class="psq"><i class="read"></i></span> read: through a helper, or tested by a table row that matched; deeper when its top label is surer</span><span><span class="psq"><i class="decl"></i></span> declared, not recorded as read</span><span><span class="psq"><i class="mk"></i></span> no value in this turn</span></div>
-    <div class="pcols">${cols.map(c => `<div class="pcol"><span class="kk">round ${c[0].round}${c[0].wavefront ? ' · wavefront ' + c[0].wavefront : ''}</span>${c.map(n => pathCard(X, t, model.get(n.id), sel, lin)).join('')}</div>`).join('')}</div>`;
-  if (off.length) h += `<div class="poff"><span class="empty">${plural(off.length, 'rule')} with no path to the policy:</span>${off.map(n => `<button class="ref rule" data-pnode="${esc(n.id)}">${esc(n.name)}</button>`).join('')}</div>`;
-  const map = pathMap(X, t, sel ? model.get(sel) : null, lin);
+    <div class="pkey"><span><span class="psq"><i class="read"></i></span> read: through a helper, or by a table row that matched; deeper when its top label is surer</span><span><span class="psq"><i class="decl"></i></span> declared, not recorded as read</span><span><span class="psq"><i class="mk"></i></span> no value in this turn</span></div>`;
+  if (top.length) h += `<h3>${L.pol ? `The policy and the ${plural(L.heads.length, 'rule result')} it reads` : 'The rules'}</h3><div class="pcards">${top.map(card).join('')}</div>`;
+  // behind the selection's lane: its other rules, in the layout's columns
+  const behind = selLane && selLane !== 'policy' ? behindOf(selLane) : !L.pol ? rules.map(n => n.id) : [];
+  const cols = [...new Set(behind.map(id => X.col(id)))].sort((a, b) => a - b).map(c => behind.filter(id => X.col(id) === c));
+  if (cols.length) h += `<h3>${X.N[selLane] ? 'Behind ' + esc(pathName(X, X.N[selLane])) + ' alone' : selLane === 'shared' ? 'Shared by several of them' : 'With no path to the policy'} <span class="empty">· ${plural(behind.length, 'rule')}</span></h3>
+    <div class="pcols">${cols.map(c => `<div class="pcol"><span class="kk">round ${X.N[c[0]].round}${X.N[c[0]].wavefront ? ' · wavefront ' + X.N[c[0]].wavefront : ''}</span>${c.map(id => pathCard(X, t, model.get(id), sel, lin, '')).join('')}</div>`).join('')}</div>`;
+  const map = pathMap(X, t, L, model, sel, lin);
   h += map.html;
   if (sel) h += pathDetail(X, t, model.get(sel));
   host.innerHTML = h + '</div>';
-  LAST_PATH = {map: map.model, selected: sel, columns: cols.map(c => c.map(n => n.id)), off: off.map(n => n.id), read: [...read].sort(), declared: [...declared].sort(),
+  LAST_PATH = {selected: sel, lane: selLane, heads: L.heads, lanes: Object.fromEntries(L.keys.map(k => [k, L.of[k]])), behind: cols, lit: map.lit, read: [...read].sort(), declared: [...declared].sort(),
     rules: Object.fromEntries([...model].map(([id, P]) => [id, {answers: P.answers, read: P.readAnswers, results: P.results, given: P.given}]))};
 }
 // What the turn was given: each field of the state's entry, text in full.
@@ -3028,7 +3057,6 @@ $('copy').addEventListener('click', () => {
 });
 for (const v of VIEWS) $('tab-' + v).addEventListener('click', () => showView(v));
 $('views').addEventListener('click', viewsClick);
-$('views').addEventListener('keydown', ev => { const g = (ev.key === 'Enter' || ev.key === ' ') && ev.target && ev.target.closest ? ev.target.closest('g[data-pnode]') : null; if (g) { ev.preventDefault(); viewsClick(ev); } });
 $('views').addEventListener('pointerover', viewsHover);
 $('views').addEventListener('pointerleave', () => { clearTimeout(hoverT); $('hovercard').hidden = true; });
 $('views').addEventListener('change', ev => {

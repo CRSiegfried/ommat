@@ -1080,25 +1080,20 @@ def test_the_turn_view_says_what_took_place(tmp_path: Path, turns: dict[str, byt
 def test_the_path_view_folds_each_rule_s_answers_into_its_card(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
-    """Path draws one card per rule with a dependency path to the policy, in the layout's
-    columns and rows, the policy's selected until another is; a card's answers are its declared
-    reads a source provides, and the ones read are those a helper of its derivation read or a
-    matched table row tests; under the cards a map draws every node and dependency, the selected
-    rule's reads lit; a record no design pairs with draws no path."""
-    outline = design_outline(DESIGN.document)
-    place = outline["layout"]["nodes"]
+    """Path opens with a card for the policy and one for each rule result it reads, the policy's
+    selected until another rule is; a card's answers are its declared reads a source provides,
+    and the ones read are those a helper of its derivation read or a matched table row tests or
+    gives; a record no design pairs with draws no path."""
     shown = _run(
         page(turns, DESIGNS),
         tmp_path,
         """(() => {
           const out = {}, el = () => document.getElementById("vPath").innerHTML;
-          for (const p of ["decided.json", "undecided.json", "idia.json"]) {
+          for (const p of ["decided.json", "undecided.json", "idia.json", "f10.json"]) {
             S.turn = at(p); S.node = null; S.view = "path"; drawView();
-            const X = ixOf(cur().turns[at(p)].design.outline);
-            out[p] = {path: LAST_PATH, html: el(), text: strip(el()),
-              placed: LAST_PATH.columns.map((c) => c.map((id) => [X.col(id), X.row(id)]))}; }
+            out[p] = {path: LAST_PATH, html: el(), text: strip(el())}; }
           S.node = "rule:urgency"; S.turn = at("decided.json"); drawView();
-          out.picked = {selected: LAST_PATH.selected, text: strip(el())};
+          out.picked = {path: LAST_PATH, text: strip(el())};
           S.node = "source:ask"; drawView(); out.source = LAST_PATH.selected;
           S.turn = at("normal.json"); drawView(); out.unpaired = [LAST_PATH, strip(el())];
           S.turn = null; drawView(); out.none = strip(el());
@@ -1110,15 +1105,8 @@ def test_the_path_view_folds_each_rule_s_answers_into_its_card(
           return out; })()""",
     )
     decided, undecided = shown["decided.json"], shown["undecided.json"]
-    assert decided["path"]["columns"] == [["rule:urgency"], ["rule:act"]]
-    assert decided["placed"] == [
-        [[place[i]["col"], place[i]["row"]] for i in column]
-        for column in decided["path"]["columns"]
-    ]
-    for column in shown["idia.json"]["placed"]:
-        assert len({col for col, _ in column}) == 1
-        assert [row for _, row in column] == sorted(row for _, row in column)
     assert decided["path"]["selected"] == "rule:act"  # the policy, until a rule is picked
+    assert decided["path"]["heads"] == ["rule:urgency"]
     assert decided["path"]["rules"]["rule:act"] == {
         "answers": ["q:tone", "t:ticket"],
         "read": ["t:ticket"],  # row 1 matched, and tests it; no matched row tests q:tone
@@ -1127,17 +1115,17 @@ def test_the_path_view_folds_each_rule_s_answers_into_its_card(
     }
     assert decided["path"]["rules"]["rule:urgency"]["read"] == ["q:urgent"]  # through its helper
     assert undecided["path"]["rules"]["rule:act"]["read"] == []
+    assert "The policy and the 1 rule result it reads" in decided["text"]
     assert "The record shows 2 of 3 declared answers read, over 2 calls." in decided["text"]
     assert "1 of 2 answers read · 1 rule result" in decided["text"]
     assert "Answers it declares, not recorded as read · 1" in decided["text"]
     assert "Which tone is the mail written in?" in decided["text"]
     assert "Row 1 gave the value." in decided["text"]  # a table's rows, as Turn draws them
-    assert decided["html"].count('class="read"') == 3  # the key's square, q:urgent and t:ticket
+    assert decided["html"].count('<i class="read"') == 3  # the key's, q:urgent's and t:ticket's
     assert 'data-pnode="rule:urgency" aria-pressed="false"' in decided["html"]
     assert "0 of 2 answers read" in undecided["text"]
     assert 'class="mk" title="t:ticket: not asked' in undecided["html"]
-    assert shown["idia.json"]["path"]["off"] == []
-    assert shown["picked"]["selected"] == "rule:urgency"
+    assert shown["picked"]["path"]["selected"] == "rule:urgency"
     assert "Answers it read · 1" in shown["picked"]["text"]
     assert shown["source"] == "rule:act"  # a node that is not a rule selects nothing here
     assert shown["unpaired"][0] is None
@@ -1145,45 +1133,71 @@ def test_the_path_view_folds_each_rule_s_answers_into_its_card(
     assert shown["none"].startswith("Pick a turn")
     assert shown["hash"][1:] == ["path", "rule:urgency"]
     assert "view=path" in shown["hash"][0]
-    # the map under the cards: a line per dependency, the selected rule's reads as recorded
-    edges = {(e["from"], e["to"]) for e in outline["edges"] if e["dependency"]}
-    lines = decided["path"]["map"]["lines"]
-    assert {(a, b) for a, b, _ in lines} == edges
-    assert {(a, b): c for a, b, c in lines if c} == {
-        ("source:ask", "rule:act"): "decl",  # q:tone, which no matched row tests
-        ("rule:urgency", "rule:act"): "read",
-        ("source:desk", "rule:act"): "read",
-    }
-    assert ["source:desk", "rule:act", "decl"] in undecided["path"]["map"]["lines"]
-    assert decided["path"]["map"]["hubs"] == []
-    assert "Where it sits in the whole design" in decided["text"]
-    assert decided["html"].count('<g class="mn ') == len(outline["nodes"])
-    assert '<g class="mn rule sel lin" data-pnode="rule:act"' in decided["html"]
+    # a design whose policy reads six results: a card for each, and the rules behind one alone
+    idia = shown["idia.json"]
+    assert len(idia["path"]["heads"]) == 6
+    assert "The policy and the 6 rule results it reads" in idia["text"]
+    assert idia["html"].count('class="pcard ') == 7
 
 
 @needs_node
-def test_the_path_map_leaves_out_a_hub_s_lines_but_the_selected_rule_s(tmp_path: Path) -> None:
-    html = page(
-        {"decided.json": showcase.turn(DESIGN, *showcase.DECIDED).document}, [DESIGN.document]
-    )
-    data = _data(html)
-    design = next(d["outline"] for d in data["sets"][0]["docs"] if d["outline"]["kind"] == "design")
-    for to in ("source:desk", "state"):
-        design["edges"].append(
-            {"from": "source:ask", "to": to, "role": "read", "ref": "q:urgent", "dependency": True}
-        )
+def test_the_path_map_holds_every_node_once_in_its_lane(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    """The map has a lane for each rule result the policy reads, holding the nodes whose
+    dependencies first reach that result alone; a node that first reaches several is shared,
+    and one that reaches the policy alone is the policy's. The selection lights what it reads,
+    by whether the record shows the read, what the record shows those read, and what reads
+    it."""
     shown = _run(
-        _with_data(html, data),
+        page(turns, DESIGNS),
         tmp_path,
-        """(() => { S.turn = 0; S.node = null; S.view = "path"; drawView();
-          return [LAST_PATH.map, strip(document.getElementById("vPath").innerHTML)]; })()""",
+        """(() => {
+          const out = {}, el = () => document.getElementById("vPath").innerHTML;
+          const draw = (p, node) => { S.turn = at(p); S.node = node; S.view = "path"; drawView();
+            return {lanes: LAST_PATH.lanes, lane: LAST_PATH.lane, lit: LAST_PATH.lit,
+              behind: LAST_PATH.behind, html: el(), text: strip(el()),
+              nodes: cur().turns[at(p)].design.outline.nodes.map((n) => n.id)}; };
+          out.decided = draw("decided.json", null);
+          out.undecided = draw("undecided.json", null);
+          out.urgency = draw("decided.json", "rule:urgency");
+          out.idia = draw("idia.json", null);
+          out.f10 = draw("f10.json", "rule:act");
+          return out; })()""",
     )
-    assert shown[0]["hubs"] == ["source:ask"]  # it feeds four of the other four nodes
-    assert shown[0]["left"] == 3
-    assert [line for line in shown[0]["lines"] if line[0] == "source:ask"] == [
-        ["source:ask", "rule:act", "decl"]
-    ]
-    assert "3 lines from ask are left out: it feeds more than half of the design." in shown[1]
+    decided = shown["decided"]
+    assert decided["lanes"] == {
+        "shared": ["state"],
+        "rule:urgency": ["source:ask", "rule:urgency"],  # ask feeds the policy too, through q:tone
+        "policy": ["source:desk", "rule:act"],
+    }
+    for drawn in shown.values():
+        assert sorted(i for lane in drawn["lanes"].values() for i in lane) == sorted(drawn["nodes"])
+        assert drawn["html"].count('class="mc ') == len(drawn["nodes"]) + 6  # and the key's six
+    assert decided["lit"] == {
+        "rule:act": "sel",
+        "rule:urgency": "read",
+        "source:desk": "read",  # row 1 matched, and tests t:ticket
+        "source:ask": "decl",  # q:tone, which no matched row tests
+    }
+    assert shown["undecided"]["lit"]["source:desk"] == "decl"
+    assert shown["urgency"]["lit"] == {
+        "rule:urgency": "sel",
+        "source:ask": "read",
+        "source:desk": "out",
+        "rule:act": "out",
+    }
+    assert shown["urgency"]["lane"] == "rule:urgency"
+    assert shown["idia"]["lanes"]["shared"] == ["state", "source:details", "source:triage"]
+    assert shown["idia"]["lanes"]["rule:seen_at"] == ["source:timing", "rule:seen_at"]
+    assert shown["f10"]["lit"] == {
+        "rule:act": "sel",
+        "rule:route": "read",
+        "source:ask": "back",  # route's helper read it, the record shows
+    }
+    assert "Where it sits in the whole design" in decided["text"]
+    assert '<button class="mc rule sel lin" data-pnode="rule:act"' in decided["html"]
+    assert '<span class="mc other read"' in decided["html"]
 
 
 def test_the_page_is_the_same_bytes_for_the_same_documents(turns: dict[str, bytes]) -> None:
