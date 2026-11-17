@@ -94,6 +94,10 @@ danger = Question(
 
 To vary a design, `dataclasses.replace` its parts (`Design`, `Source`, `Rule`, `Question`) and `load` the result; load names anything the change left dangling, such as a read of a removed rule. Don't `copy.deepcopy` a design: it fails.
 
+## Authoring a design as TOML
+
+On `main`, not in a tagged release: `ommat.authoring.design_from(tomllib.load(f))` reads a TOML file of a design's declarations and decision tables as the `Design` you would write in Python, with the same hash; rule logic stays in Python. TOML is advised for a design's declarations and tables, Python is always accepted, and one design or slice is wholly one form. A file is trusted as source code, because the reader imports each rule's `fn`. Read [toml.md](toml.md) before you write or review one.
+
 ## Handing off to the next model
 
 When a turn hands on to a generative model, as when the design has done what it can and an agent finishes the request, render the record with `ommat.conversation`, and don't rebuild its history from the record's `t:` values. It gives the turn as an agent's workflow, minimal: each source call, your tools' reads and writes included, as a tool call with empty arguments and its answers (a question's top label and probability, a `t:` value whole, a marker as its kind and cause code), then `decide`, whose arguments are the board entries the policy reads when you pass the loaded design, and whose result is the decision or why the turn is undecided. `ommat.conversation`, outside the compatibility promise, words nothing; you word any instructions yourself, from `decision.estimate` and `escalation(record)`. `transcript(record)` is deprecated:
