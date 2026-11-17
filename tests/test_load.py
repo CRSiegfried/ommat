@@ -5,6 +5,7 @@ grid are in test_boundaries.py, and loading from a document in test_load_documen
 
 import copy
 import dataclasses
+import importlib.util
 import inspect
 import os
 import pickle
@@ -212,6 +213,24 @@ def test_a_function_whose_source_cannot_be_read_has_a_null_source() -> None:
         "len",
         None,
     )
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_functions_source_hash_ignores_its_files_line_endings(
+    newline: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A Windows checkout may write a design's module with CRLF; its design hash is the LF one's.
+    path = tmp_path / "eol_rules.py"
+    path.write_bytes(newline.join(["def size(r):", "    return 0", ""]).encode("utf-8"))
+    spec = importlib.util.spec_from_file_location("eol_rules", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "eol_rules", module)
+    spec.loader.exec_module(module)
+    design = with_rule(minimal(), "size", rule("size", outputs=t.integer(), function=module.size))
+    source = decode(load(design).document)["rules"]["size"]["source"]
+    assert source == sha256_ref(b"def size(r):\n    return 0\n")
 
 
 def looped(r: Any) -> int:
