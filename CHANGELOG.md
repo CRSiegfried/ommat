@@ -4,6 +4,11 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+
+- `decide_sync` and `replay_sync` take `runner=None`, an `asyncio.Runner` the caller owns. Each turn then runs by `runner.run` in a copy of the caller's context, not under `asyncio.run` on a fresh loop, so many turns on one thread share one loop and pay for none. A runner not exactly an `asyncio.Runner` is an `EntryRefusal`, raised before the coroutine is built; a closed runner raises its own `RuntimeError` and runs nothing.
+- With a runner, a task a binding leaves is cancelled, and a `to_thread` thread past its timeout waited for, when the runner closes, not when the turn ends.
+
 ### Fixed
 
 - The design and evaluation stores write on Windows. Every write raised there: `_create` called `os.fchmod`, absent before Python 3.13, and synced the directory through `os.open`, which Windows refuses. It now skips both on Windows, which has no POSIX modes and cannot open a directory to sync it.

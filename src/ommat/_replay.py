@@ -32,7 +32,7 @@ from typing import Any, cast
 
 from ommat._binding import OracleBinding
 from ommat._canonical import decode, encode
-from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings
+from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings, run_sync
 from ommat._design import LoadedDesign
 from ommat._fixture import Base, FixtureBinding, Keyed, RecordedCalls
 from ommat._ledger import _ITEM_DEPTH, Observer, Record, finished
@@ -154,17 +154,15 @@ def _cut(log: list[dict[str, Any]]) -> tuple[int, bool] | None:
 
 
 def replay_sync(
-    record: Record, loaded: LoadedDesign, *, observer: Observer | None = None
+    record: Record,
+    loaded: LoadedDesign,
+    *,
+    observer: Observer | None = None,
+    runner: asyncio.Runner | None = None,
 ) -> tuple[Record | None, list[Finding]]:
     """``replay`` run to completion; ``RuntimeError`` inside a running event loop, raised
-    before the coroutine is built."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        raise RuntimeError("replay_sync was called inside a running event loop; await replay")
-    return asyncio.run(replay(record, loaded, observer=observer))
+    before the coroutine is built. ``runner`` is as ``decide_sync``'s (§sync-runner)."""
+    return run_sync("replay", lambda: replay(record, loaded, observer=observer), runner)
 
 
 # ---------------------------------------------------------------------------------------------
