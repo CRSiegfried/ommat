@@ -905,9 +905,9 @@ def test_no_view_draws_nan_or_undefined(tmp_path: Path, turns: dict[str, bytes])
 def test_every_design_view_draws_without_nan_or_undefined(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
-    """Turn, Overview, Targets in both modes, Outcomes for every table, and Explore from every node
-    at every depth, in both directions with the details open, for each design alone and under
-    each turn; and a design with no policy node, targets, tables or requirements."""
+    """Turn, Path, Overview, Targets in both modes, Outcomes for every table, and Explore from
+    every node at every depth, in both directions with the details open, for each design alone
+    and under each turn; and a design with no policy node, targets, tables or requirements."""
     html = page(turns, {**DESIGNS, "full.json": load(full()).document})
     data = _data(html)
     bare = json.loads(json.dumps(data["sets"][0]["docs"][0]["outline"]))
@@ -922,7 +922,7 @@ def test_every_design_view_draws_without_nan_or_undefined(
         """(() => {
           let n = 0;
           const all = () => {
-            for (const v of ["turn", "overview", "targets", "outcomes"]) {
+            for (const v of ["turn", "path", "overview", "targets", "outcomes"]) {
               S.view = v; drawView(); n++; }
             S.tmode = "matrix"; S.view = "targets"; drawView(); S.tmode = null;
             const X = ixOf(curDesign()); if (!X) return;
@@ -1074,6 +1074,76 @@ def test_the_turn_view_says_what_took_place(tmp_path: Path, turns: dict[str, byt
     assert "Row 4 gave the value." in undecided
     assert 'class="ocard chosen"' in shown["decided.json outcomes"]
     assert "took row 1's output" in shown["decided.json outcomes"]
+
+
+@needs_node
+def test_the_path_view_folds_each_rule_s_answers_into_its_card(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    """Path draws one card per rule with a dependency path to the policy, in the layout's
+    columns and rows, the policy's selected until another is; a card's answers are its declared
+    reads a source provides, and the ones read are those a helper of its derivation read or a
+    matched table row tests; a record no design pairs with draws no path."""
+    outline = design_outline(DESIGN.document)
+    place = outline["layout"]["nodes"]
+    shown = _run(
+        page(turns, DESIGNS),
+        tmp_path,
+        """(() => {
+          const out = {}, el = () => document.getElementById("vPath").innerHTML;
+          for (const p of ["decided.json", "undecided.json", "idia.json"]) {
+            S.turn = at(p); S.node = null; S.view = "path"; drawView();
+            const X = ixOf(cur().turns[at(p)].design.outline);
+            out[p] = {path: LAST_PATH, html: el(), text: strip(el()),
+              placed: LAST_PATH.columns.map((c) => c.map((id) => [X.col(id), X.row(id)]))}; }
+          S.node = "rule:urgency"; S.turn = at("decided.json"); drawView();
+          out.picked = {selected: LAST_PATH.selected, text: strip(el())};
+          S.node = "source:ask"; drawView(); out.source = LAST_PATH.selected;
+          S.turn = at("normal.json"); drawView(); out.unpaired = [LAST_PATH, strip(el())];
+          S.turn = null; drawView(); out.none = strip(el());
+          globalThis.location = {hash: ""};
+          globalThis.history = {replaceState: (a, b, h) => { location.hash = h; }};
+          S.turn = at("decided.json"); S.node = "rule:urgency"; writeHash();
+          const hash = location.hash; S.view = null; S.node = null; readHash();
+          out.hash = [hash, S.view, S.node];
+          return out; })()""",
+    )
+    decided, undecided = shown["decided.json"], shown["undecided.json"]
+    assert decided["path"]["columns"] == [["rule:urgency"], ["rule:act"]]
+    assert decided["placed"] == [
+        [[place[i]["col"], place[i]["row"]] for i in column]
+        for column in decided["path"]["columns"]
+    ]
+    for column in shown["idia.json"]["placed"]:
+        assert len({col for col, _ in column}) == 1
+        assert [row for _, row in column] == sorted(row for _, row in column)
+    assert decided["path"]["selected"] == "rule:act"  # the policy, until a rule is picked
+    assert decided["path"]["rules"]["rule:act"] == {
+        "answers": ["q:tone", "t:ticket"],
+        "read": ["t:ticket"],  # row 1 matched, and tests it; no matched row tests q:tone
+        "results": ["d:urgency"],
+        "given": [],
+    }
+    assert decided["path"]["rules"]["rule:urgency"]["read"] == ["q:urgent"]  # through its helper
+    assert undecided["path"]["rules"]["rule:act"]["read"] == []
+    assert "The record shows 2 of 3 declared answers read, over 2 calls." in decided["text"]
+    assert "1 of 2 answers read · 1 rule result" in decided["text"]
+    assert "Answers it declares, not recorded as read · 1" in decided["text"]
+    assert "Which tone is the mail written in?" in decided["text"]
+    assert "Row 1 gave the value." in decided["text"]  # a table's rows, as Turn draws them
+    assert decided["html"].count('class="read"') == 3  # the key's square, q:urgent and t:ticket
+    assert 'data-pnode="rule:urgency" aria-pressed="false"' in decided["html"]
+    assert "0 of 2 answers read" in undecided["text"]
+    assert 'class="mk" title="t:ticket: not asked' in undecided["html"]
+    assert shown["idia.json"]["path"]["off"] == []
+    assert shown["picked"]["selected"] == "rule:urgency"
+    assert "Answers it read · 1" in shown["picked"]["text"]
+    assert shown["source"] == "rule:act"  # a node that is not a rule selects nothing here
+    assert shown["unpaired"][0] is None
+    assert shown["unpaired"][1].startswith("Path draws a design")
+    assert shown["none"].startswith("Pick a turn")
+    assert shown["hash"][1:] == ["path", "rule:urgency"]
+    assert "view=path" in shown["hash"][0]
 
 
 def test_the_page_is_the_same_bytes_for_the_same_documents(turns: dict[str, bytes]) -> None:

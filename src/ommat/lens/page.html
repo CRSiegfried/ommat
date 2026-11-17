@@ -364,6 +364,37 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 #hovercard .l { color: var(--ink2); }
 #hovercard .when { font: 12px var(--mono); color: var(--r-req); }
 .dv .turnv { max-width: 1100px; }
+.dv .pathv .pcols { display: flex; gap: 14px; overflow-x: auto; align-items: flex-start; padding: 2px 0 10px; }
+.dv .pathv .pcol { display: grid; gap: 6px; flex: 1 1 190px; min-width: 190px; max-width: 300px; align-content: start; }
+.dv .pathv .pcard { display: grid; gap: 3px; text-align: left; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; cursor: pointer; min-width: 0; }
+.dv .pathv .pcard:hover { background: var(--wash); }
+.dv .pathv .pcard[aria-pressed="true"] { border-color: var(--sel); box-shadow: inset 0 0 0 1px var(--sel); }
+.dv .pathv .pcard.lin { border-left: 4px solid var(--ink); }
+.dv .pathv .pcard.none { opacity: .6; }
+.dv .pathv .pc-n { font-size: 12.5px; overflow-wrap: anywhere; }
+.dv .pathv .pc-v { justify-self: start; max-width: 100%; }
+.dv .pathv .pc-f { font-size: 11.5px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.dv .pathv .psq { display: flex; flex-wrap: wrap; gap: 3px; }
+.dv .pathv .psq i { width: 10px; height: 10px; border-radius: 2px; display: block; }
+.dv .pathv .psq i.read { background: var(--r-read); }
+.dv .pathv .psq i.decl { border: 1px solid var(--muted); }
+.dv .pathv .psq i.mk { border: 1.5px dashed var(--critical); }
+.dv .pathv .pkey { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink2); margin: 0 0 6px; }
+.dv .pathv .pkey span { display: inline-flex; align-items: center; gap: 6px; }
+.dv .pathv .poff { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; }
+.dv .pathv .pdetail { border-top: 1px solid var(--border); margin-top: 8px; }
+.dv .pathv .prow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 260px); gap: 2px 16px; padding: 6px 0; border-top: 1px solid var(--grid); font-size: 12.5px; align-items: start; }
+.dv .pathv .prow.decl .pw { color: var(--ink2); }
+.dv .pathv .pw .mono { display: block; font-size: 11px; color: var(--ink2); }
+.dv .pathv .pa { display: grid; gap: 4px; font-variant-numeric: tabular-nums; }
+.dv .pathv .pans { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 1px 8px; align-items: center; }
+.dv .pathv .pans b, .dv .pathv .pans .then, .dv .pathv .pans .cand { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.dv .pathv .pans .then, .dv .pathv .pans .cand { color: var(--ink2); font-size: 11.5px; }
+.dv .pathv .pbar { height: 6px; background: var(--wash); border-radius: 3px; overflow: hidden; }
+.dv .pathv .pbar i { display: block; height: 100%; background: var(--r-read); }
+.dv .pathv .prow.decl .pbar i { background: var(--muted); }
+.dv .pathv .pans .p { text-align: right; color: var(--ink2); }
+@media (max-width: 700px) { .dv .pathv .prow { grid-template-columns: minmax(0, 1fr); } }
 .dv details.ttable .sep { color: var(--ink2); margin: 0 4px; }
 .dv details.ttable .tnote { margin: 8px 0 0; font-size: 12.5px; }
 .dv .turnv .given { border: 1px solid var(--border); border-left: 4px solid var(--ink); border-radius: 8px; padding: 10px 14px; margin: 0 0 16px; background: var(--surface); display: grid; gap: 8px; }
@@ -444,6 +475,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
   </header>
   <nav class="tabs" role="tablist" aria-label="Views">
     <button role="tab" id="tab-turn" data-view="turn">Turn</button>
+    <button role="tab" id="tab-path" data-view="path">Path</button>
     <button role="tab" id="tab-overview" data-view="overview">Overview</button>
     <button role="tab" id="tab-explore" data-view="explore">Explore</button>
     <button role="tab" id="tab-targets" data-view="targets">Targets</button>
@@ -454,6 +486,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
   <section class="panel" id="summary" aria-live="polite"></section>
   <div id="views" class="dv">
     <section class="panel" id="vTurn" hidden></section>
+    <section class="panel" id="vPath" hidden></section>
     <section class="panel" id="vOverview" hidden></section>
     <div id="vExplore" hidden>
       <nav class="sb" id="sb" aria-label="Rounds"></nav>
@@ -1817,7 +1850,7 @@ function textNodeOf(lines, D, isTurn) {
 // Each draws the design's outline and, in Explore, the selected turn over it. Every index they
 // read (steps to the policy, the source requirements, a target's links, a row's tests) is the
 // outline's; the page only looks them up and counts.
-const VIEWS = ['turn', 'overview', 'explore', 'targets', 'outcomes', 'graph'];
+const VIEWS = ['turn', 'path', 'overview', 'explore', 'targets', 'outcomes', 'graph'];
 const EX = {up: 1, down: 1, info: false, dir: 'v', mini: true, filter: '', rowOpen: new Set(), unfold: new Set(), toggled: new Set(), cardH: null};
 const IX = new WeakMap();
 function ixOf(D) {
@@ -2021,6 +2054,108 @@ function drawTurnView() {
     ['format', esc(T.record_format)], ['engine', esc(enc(T.engine))], ['settings', `<span class="mono">${esc(enc(T.settings))}</span>`],
     ['why', `<span class="mono">${esc(T.why || '')}</span>`], ['summary', `<span class="mono">${esc(T.summary || '')}</span>`]])}</details>`;
   host.innerHTML = h + '</div>';
+}
+/* path: the rules the decision can rest on, in the layout's columns, each one card that folds in the
+   answers it declares; the record's derivations and matched rows say which of them it read */
+// The rules with a dependency path to the policy node, the policy among them; every rule when the design names none.
+function pathRules(X) {
+  const rules = (X.D.nodes || []).filter(n => n.kind === 'rule'), pol = X.D.policy_node && X.N[X.D.policy_node] ? X.D.policy_node : null;
+  if (!pol) return {on: rules, off: []};
+  const up = new Set(), todo = [pol];
+  while (todo.length) { const id = todo.pop(); if (up.has(id)) continue; up.add(id); for (const p of X.preds[id]) todo.push(p); }
+  return {on: rules.filter(n => up.has(n.id)), off: rules.filter(n => !up.has(n.id))};
+}
+// One rule in the turn: its entries, its declared reads by what provides them, and the refs the record shows it read,
+// through a helper of its derivation or as a test of a table row that matched.
+function pathRule(X, t, n) {
+  const entries = [].concat(...(n.refs || []).map(r => entriesFor(t.idx, r)));
+  const read = new Set(), R = t.outline.review;
+  for (const e of entries) for (const s of e.derivation || []) for (const r of [].concat(s.refs || [], s.rested_on || [])) read.add(baseOf(r) || r);
+  const tables = R ? R.tables.filter(tb => tb.rule === n.name) : [];
+  for (const tb of tables) for (const r of tb.rows) if (r.chosen || r.result === 'matched') for (const x of r.tests || []) read.add(baseOf(x.read) || x.read);
+  const answers = [], results = [], given = [];
+  for (const ref of [...new Set((n.reads || []).map(r => r.ref))]) {
+    const p = X.N[nodeOfRef(X.D, ref)];
+    (p && p.kind === 'source' ? answers : p && p.kind === 'rule' ? results : given).push(ref);
+  }
+  const was = ref => read.has(ref) || read.has(baseOf(ref));
+  return {n, entries, tables, answers, results, given, was, readAnswers: answers.filter(was)};
+}
+const topOf = e => { const p = e && e.holds === 'value' && e.value && typeof e.value === 'object' && e.value.probabilities; if (!p) return null; const ks = Object.keys(p).sort((a, b) => p[b] - p[a]); return ks.length ? ks.map(k => [k, p[k]]) : null; };
+// An answer's square: filled when the record shows the rule read it, deeper the surer its top label; open when it is declared alone; dashed when the turn holds no value for it.
+function pathSquare(t, ref, was) {
+  const es = entriesFor(t.idx, ref), vals = es.filter(e => e.holds === 'value');
+  if (!vals.length) return `<i class="mk" title="${esc(ref + ': ' + (es.length ? valueOf(es[0]) : 'no entry'))}"></i>`;
+  const tops = vals.map(topOf).filter(Boolean).map(x => x[0][1]), sure = tops.length ? Math.max(...tops) : 1;
+  const says = es.length > 1 ? es.length + ' entries' : valueOf(es[0]);
+  return was ? `<i class="read" style="opacity:${(0.3 + 0.7 * Math.max(0, Math.min(1, sure))).toFixed(2)}" title="${esc(ref + ': ' + says)}"></i>` : `<i class="decl" title="${esc(ref + ': ' + says + ' (declared, not recorded as read)')}"></i>`;
+}
+function pathHolds(P) {
+  if (!P.entries.length) return '<span class="tv mk">no entry</span>';
+  if (P.entries.length === 1) return valueCell(P.entries[0]);
+  const v = P.entries.filter(e => e.holds === 'value').length;
+  return `<span class="tv">${P.entries.length} entries${v < P.entries.length ? `, ${v} determined` : ''}</span>`;
+}
+function pathFeed(P) {
+  const parts = [];
+  if (P.answers.length) parts.push(`${P.readAnswers.length} of ${plural(P.answers.length, 'answer')} read`);
+  if (P.results.length) parts.push(plural(P.results.length, 'rule result'));
+  if (P.given.length) parts.push(plural(P.given.length, 'state read'));
+  return parts.join(' · ') || 'reads nothing';
+}
+function pathCard(X, t, P, sel, lin) {
+  const n = P.n;
+  return `<button class="pcard ${lin.has(n.id) ? 'lin' : ''} ${P.entries.length ? '' : 'none'}" data-pnode="${esc(n.id)}" aria-pressed="${sel === n.id}"${lin.has(n.id) ? ' title="on the lineage"' : ''}>
+    <span class="pc-n">${glyphOf(n)} ${esc(n.name)}${n.policy ? ' <span class="kk">the policy</span>' : ''}</span><span class="pc-v">${pathHolds(P)}</span>
+    ${P.answers.length ? `<span class="psq">${P.answers.map(r => pathSquare(t, r, P.was(r))).join('')}</span>` : ''}<span class="pc-f">${esc(pathFeed(P))}</span></button>`;
+}
+function pathAnswer(e, label) {
+  const tops = topOf(e), c = label ? `<span class="cand">${esc(label)}</span>` : '';
+  if (!tops) return `<div class="pans">${c}<span>${valueCell(e)}</span></div>`;
+  const [k, p] = tops[0], then = tops.slice(1, 3).filter(x => x[1] > 0).map(x => `${x[0]} ${num(x[1])}`).join(', ');
+  return `<div class="pans">${c}<b>${esc(k)}</b><span class="pbar"><i style="width:${Math.round(Math.max(0, Math.min(1, p)) * 100)}%"></i></span><span class="p">${esc(num(p))}</span>${then ? `<span class="then">then ${esc(then)}</span>` : ''}</div>`;
+}
+function pathAnswerRow(t, ref, was) {
+  const es = entriesFor(t.idx, ref), w = es.length && es[0].wording && es[0].wording.template;
+  const label = e => (e.ref.length > ref.length && e.ref.startsWith(ref) ? e.ref.slice(ref.length) : '');
+  const a = es.length ? es.map(e => pathAnswer(e, es.length > 1 ? label(e) : '')).join('') : '<span class="tv mk">no entry</span>';
+  return `<div class="prow ${was ? '' : 'decl'}"><div class="pw">${w ? esc(w) : ''}<span class="mono">${esc(ref)}</span></div><div class="pa">${a}</div></div>`;
+}
+function pathDetail(X, t, P) {
+  const n = P.n, D = X.D, read = P.readAnswers, decl = P.answers.filter(r => !P.was(r));
+  let h = `<div class="pdetail"><h3>${glyphOf(n)} ${esc(n.name)} <span class="kk">${esc([n.form, 'round ' + n.round, stepsText(n)].filter(Boolean).join(' · '))}</span> <button class="btn" data-go="${esc(n.id)}">open in Explore</button></h3>`;
+  h += P.entries.length ? `<div class="reads">${P.entries.map(e => `<div><span class="mono">${esc(e.ref)}</span> ${valueFull(e)}</div>`).join('')}</div>` : '<p class="empty">The record holds no entry for this rule.</p>';
+  if ((n.params || []).length) h += `<p class="empty">Parameters it declares: ${n.params.map(x => `<span class="mono">${esc(x.param + paramValue(D, x.param))}</span>`).join(', ')}</p>`;
+  h += P.tables.map(tb => tableHTML(X, t, tb, true)).join('');
+  if (P.results.length) h += `<h3>Rule results it declares <span class="empty">· ${P.results.length}</span></h3><div class="reads">${P.results.map(r => { const id = nodeOfRef(D, r); return `<div><button class="ref rule" data-pnode="${esc(id)}">${esc(r)}</button> ${valueCell(entryAt(t, r))}${P.was(r) ? ' <span class="empty">· read</span>' : ''}</div>`; }).join('')}</div>`;
+  if (read.length) h += `<h3>Answers it read <span class="empty">· ${read.length}</span></h3>${read.map(r => pathAnswerRow(t, r, true)).join('')}`;
+  if (decl.length) h += `<h3>Answers it declares, not recorded as read <span class="empty">· ${decl.length}</span></h3>${decl.map(r => pathAnswerRow(t, r, false)).join('')}`;
+  if (P.given.length) h += `<h3>State it declares</h3><p>${P.given.map(r => `<span class="mono">${esc(r)}</span>`).join(', ')}</p>`;
+  return h + '</div>';
+}
+let LAST_PATH = null; // the last path drawn, for the smoke test
+function drawPathView() {
+  const host = $('vPath'), s = cur(), t = curTurn();
+  LAST_PATH = null;
+  if (!s.turns.length) { host.innerHTML = '<p class="empty">This set holds no record.</p>'; return; }
+  if (!t) { host.innerHTML = `<h2 class="vh">Pick a turn</h2><ul class="tpick">${s.order.map(i => `<li><button class="btn" data-turn="${i}">${esc(turnName(s.turns[i], i))}</button> ${esc(s.turns[i].sum.decision)}</li>`).join('')}</ul>`; return; }
+  if (!t.design) { host.innerHTML = noDesign('Path'); return; }
+  const T = t.outline, X = ixOf(t.design.outline), {on, off} = pathRules(X), lin = lineageNodes(t);
+  const model = new Map([...on, ...off].map(n => [n.id, pathRule(X, t, n)]));
+  const sel = model.has(S.node) ? S.node : X.D.policy_node && model.has(X.D.policy_node) ? X.D.policy_node : on.length ? on[on.length - 1].id : null;
+  const cols = [...new Set(on.map(n => X.col(n.id)))].sort((a, b) => a - b).map(c => on.filter(n => X.col(n.id) === c).sort((a, b) => X.row(a.id) - X.row(b.id)));
+  const declared = new Set(), read = new Set();
+  for (const n of on) { const P = model.get(n.id); P.answers.forEach(r => declared.add(r)); P.readAnswers.forEach(r => read.add(r)); }
+  const calls = (T.rounds || []).reduce((k, r) => k + (r.calls || []).length, 0), d = T.decision;
+  let h = `<div class="turnv pathv"><h2 class="vh">${decIcon(t.sum.dkind)} ${esc(cut(whyText(t), 160) || t.sum.decision)}</h2>
+    <p class="lede">${plural(on.length, 'rule')} can reach ${d ? tRef(null, d.ref) : 'the policy'} in this design. Each card is one rule and what it held in this turn; the squares are the answers it declares, folded into the rule that reads them. The record shows ${read.size} of ${plural(declared.size, 'declared answer')} read, over ${plural(calls, 'call')}.</p>
+    <div class="pkey"><span><span class="psq"><i class="read"></i></span> read: through a helper, or tested by a table row that matched; deeper when its top label is surer</span><span><span class="psq"><i class="decl"></i></span> declared, not recorded as read</span><span><span class="psq"><i class="mk"></i></span> no value in this turn</span></div>
+    <div class="pcols">${cols.map(c => `<div class="pcol"><span class="kk">round ${c[0].round}${c[0].wavefront ? ' · wavefront ' + c[0].wavefront : ''}</span>${c.map(n => pathCard(X, t, model.get(n.id), sel, lin)).join('')}</div>`).join('')}</div>`;
+  if (off.length) h += `<div class="poff"><span class="empty">${plural(off.length, 'rule')} with no path to the policy:</span>${off.map(n => `<button class="ref rule" data-pnode="${esc(n.id)}">${esc(n.name)}</button>`).join('')}</div>`;
+  if (sel) h += pathDetail(X, t, model.get(sel));
+  host.innerHTML = h + '</div>';
+  LAST_PATH = {selected: sel, columns: cols.map(c => c.map(n => n.id)), off: off.map(n => n.id), read: [...read].sort(), declared: [...declared].sort(),
+    rules: Object.fromEntries([...model].map(([id, P]) => [id, {answers: P.answers, read: P.readAnswers, results: P.results, given: P.given}]))};
 }
 // What the turn was given: each field of the state's entry, text in full.
 function givenHTML(T) {
@@ -2614,7 +2749,9 @@ function drawView() {
     el.setAttribute('aria-selected', String(S.view === v));
   }
   $('tab-turn').hidden = !cur().turns.length;
+  $('tab-path').hidden = !cur().turns.length;
   $('vTurn').hidden = S.view !== 'turn';
+  $('vPath').hidden = S.view !== 'path';
   $('vOverview').hidden = S.view !== 'overview';
   $('vExplore').hidden = S.view !== 'explore';
   $('vTargets').hidden = S.view !== 'targets';
@@ -2623,6 +2760,7 @@ function drawView() {
   $('summary').hidden = !(S.view === 'graph' || (S.view === 'explore' && curTurn()));
   placeTurnPanes();
   if (S.view === 'turn') drawTurnView();
+  else if (S.view === 'path') drawPathView();
   else if (S.view === 'overview') drawOverview();
   else if (S.view === 'explore') drawExploreView();
   else if (S.view === 'targets') drawTargets();
@@ -2638,10 +2776,11 @@ function go(id) {
 }
 function setEx(o) { Object.assign(EX, o); drawView(); writeHash(); }
 function viewsClick(ev) {
-  const t = ev.target && ev.target.closest ? ev.target.closest('[data-turn],[data-go],[data-view-go],[data-tmode],[data-exstep],[data-info],[data-rtoggle],[data-rowopen],[data-dir],[data-mini],[data-unfold],#exback,#exfwd') : null;
+  const t = ev.target && ev.target.closest ? ev.target.closest('[data-turn],[data-pnode],[data-go],[data-view-go],[data-tmode],[data-exstep],[data-info],[data-rtoggle],[data-rowopen],[data-dir],[data-mini],[data-unfold],#exback,#exfwd') : null;
   if (!t) return;
   const d = t.dataset || {};
   if (d.turn !== undefined) return selectTurn(Number(d.turn));
+  if (d.pnode) { S.node = d.pnode; drawView(); drawDetail(); return writeHash(); }
   if (d.viewGo) { ev.preventDefault(); return showView(d.viewGo); }
   if (d.go) { if (d.info) EX.info = true; return go(d.go); }
   if (t.id === 'exback') { try { history.back(); } catch (e) { /* none */ } return; }
