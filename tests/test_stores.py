@@ -2,6 +2,7 @@
 """The design store and the evaluation store: round trips, the files each writes, write-once
 under exclusive create, and every refusal in its order."""
 
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -236,6 +237,7 @@ def test_create_claims_a_name_once_and_leaves_no_temporary_file(tmp_path: Path) 
     assert files(tmp_path) == [Path("a", "b")]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows files have no POSIX mode bits")
 def test_each_store_writes_its_files_readable_to_all(tmp_path: Path) -> None:
     loaded = load(minimal())
     DesignStore(tmp_path / "designs").keep(loaded)

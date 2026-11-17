@@ -4,6 +4,11 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Fixed
+
+- The design and evaluation stores write on Windows. Every write raised there: `_create` called `os.fchmod`, absent before Python 3.13, and synced the directory through `os.open`, which Windows refuses. It now skips both on Windows, which has no POSIX modes and cannot open a directory to sync it.
+- The lens and the outline refuse a document nested deeper than 128 as too deep whatever its top-level type. A deep top-level array was refused as not a JSON object, and whether parsing caught the depth first depended on the C stack, so on Python 3.14 under Linux a 100,000-deep array took the wrong refusal.
+
 ## [0.4.0] - 2026-11-16
 
 ### Added

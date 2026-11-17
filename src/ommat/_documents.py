@@ -44,12 +44,13 @@ def read_document(document: object, what: str) -> dict[str, Any]:
         raise ValueError(f"{what} nests deeper than {MAX_DOCUMENT_DEPTH}") from None
     except ValueError as error:  # an integer over Python's digit limit, or a repeated key
         raise ValueError(f"{what} is not readable JSON: {error}") from None
+    # Depth first: whether the parse above reached the recursion limit depends on the C stack,
+    # so a deep document must be refused here whatever its top-level type.
+    if _depth(value) > MAX_DOCUMENT_DEPTH:
+        raise ValueError(f"{what} nests deeper than {MAX_DOCUMENT_DEPTH}")
     if not isinstance(value, dict):
         raise ValueError(f"{what} is not a JSON object")
-    held = cast("dict[str, Any]", value)
-    if _depth(held) > MAX_DOCUMENT_DEPTH:
-        raise ValueError(f"{what} nests deeper than {MAX_DOCUMENT_DEPTH}")
-    return held
+    return cast("dict[str, Any]", value)
 
 
 def kind_of(value: dict[str, Any]) -> Literal["record", "design"] | None:

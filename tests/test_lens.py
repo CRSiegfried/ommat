@@ -163,6 +163,7 @@ def test_page_refuses_what_is_not_a_record_or_design(
         (b'{"log": [], "x": "\xff"}', "not UTF-8"),
         (b'{"log": [], "x": 1e999}', "out of a JSON number's range"),
         (b'{"log": ' + b"[" * 130 + b"]" * 130 + b"}", "nests deeper than 128"),
+        (b"[" * 130 + b"]" * 130, "nests deeper than 128"),
         (b'{"log": [], "log": 3}', "the key 'log' is repeated"),
         ('{"log": []}'.encode("utf-16"), "not UTF-8"),
         (b'\xef\xbb\xbf{"log": []}', "not JSON"),
@@ -177,6 +178,7 @@ def test_page_refuses_what_is_not_a_record_or_design(
         "latin-1",
         "1e999",
         "129 deep",
+        "129 deep, no object",
         "repeated key",
         "utf-16",
         "bom",
@@ -321,7 +323,10 @@ def test_the_command_skips_a_bad_file_and_names_why(
 
 def test_the_command_reads_a_linked_file_once(tmp_path: Path) -> None:
     (tmp_path / "r.json").write_bytes(_record())
-    (tmp_path / "link.json").symlink_to(tmp_path / "r.json")
+    try:
+        (tmp_path / "link.json").symlink_to(tmp_path / "r.json")
+    except OSError:  # Windows makes a symlink only with Developer Mode or the privilege
+        pytest.skip("this account cannot make symlinks")
     out = tmp_path / "lens.html"
     assert main([str(tmp_path), "-o", str(out)]) == 0
     assert len(_paths(out.read_text(encoding="utf-8"), "turn")) == 1
@@ -440,6 +445,7 @@ def _run(html: str, tmp_path: Path, expression: str) -> Any:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     assert run.returncode == 0, run.stderr
