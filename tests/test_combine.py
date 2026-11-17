@@ -330,7 +330,7 @@ def test_a_given_port_takes_its_value_each_turn_from_the_ports_source(
     chosen: bool, outcome: str
 ) -> None:
     loaded = load(standalone(EMAIL, given=["d:email/chosen"]))
-    source = loaded._design.sources["ports"]
+    source = loaded._design.sources["ports"]  # pyright: ignore[reportPrivateUsage]
     assert (source.oracle, list(source.provides)) == ("ports", ["t:email/chosen"])
     bindings = {
         "default": fixed({"q:email/sure": SURE}),

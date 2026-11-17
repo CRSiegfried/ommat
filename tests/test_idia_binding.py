@@ -1145,7 +1145,11 @@ def test_sources_whose_needs_differ_go_as_requests_of_their_own() -> None:
 
 def test_a_packed_requests_failure_fails_every_source_it_holds() -> None:
     error = ProviderError("HTTP 500: busy", status_code=500, is_retryable=False)
-    binding, _ = built(lambda wire_request, deadline: error)
+
+    def fail(wire_request: Any, deadline: Any) -> ProviderError:
+        return error
+
+    binding, _ = built(fail)
     result = call(binding, source(), source("other", {"q:other/x": NOUL}))
     assert code(result, "q:triage/hazard") == "raised"
     assert code(result, "q:other/x") == "raised"

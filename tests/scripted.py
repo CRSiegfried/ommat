@@ -179,10 +179,10 @@ def apart(sources: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def bound_all(binding: object, sources: Mapping[str, Any]) -> dict[str, object]:
+def bound_all(binding: object, sources: Mapping[str, Any]) -> dict[str, OracleBinding]:
     """``binding`` under ``default`` and under every oracle a source names."""
     names = {s.oracle for s in sources.values() if s.oracle is not None}
-    return {"default": binding, **dict.fromkeys(names, binding)}
+    return cast("dict[str, OracleBinding]", {"default": binding, **dict.fromkeys(names, binding)})
 
 
 def turn(
