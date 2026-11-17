@@ -86,7 +86,7 @@ def twin_parts(version: str, move_at: float) -> Slice:
                     ),
                 },
                 needs=["t:state"],
-                oracle="jev",
+                oracle="classifier",
                 requirement=SourceRequirement("d:kind", ["move", "copy"]),
             ),
         },
@@ -789,7 +789,7 @@ def grounded_twin() -> Design:
                     "q:lamps/rule": Question("noul", Text("Is {street} lit?", street)),
                 },
                 needs=["t:state"],
-                oracle="jev",
+                oracle="classifier",
                 cost=3,
                 grounded="d:streets",
             ),
@@ -804,7 +804,7 @@ def grounded_twin() -> Design:
                     )
                 },
                 needs=["t:state"],
-                oracle="jev",
+                oracle="classifier",
             ),
         },
         rules={

@@ -19,7 +19,7 @@ type  = "string"
 reads = ["q:lamps/out"]
 
 [sources.lamps]
-oracle   = "jev"
+oracle   = "classifier"
 grounded = "d:streets"
 needs    = ["t:state"]
 cost     = 3
@@ -37,7 +37,7 @@ noul = "Is {street} lit?"
 slot = { street = "d:streets" }
 
 [sources.reader]
-oracle = "jev"
+oracle = "classifier"
 needs  = ["t:state"]
 
 [sources.reader.ask."q:reader/words"]

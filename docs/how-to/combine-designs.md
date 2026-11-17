@@ -115,7 +115,7 @@ moves their answers. Keep the shape each part was measured on instead:
   value is `{"request": current_turn}`. A rule over the state alone fires in round 0, so
   a source that needs it is still asked in round 1.
 - Give the part's questions `needs=["d:email/view"]` in place of `t:state`, under an oracle
-  of their own, such as `jev_request` beside the selector's `jev`.
+  of their own, such as `view_request` beside the selector's `selector`.
 - Bind that oracle to its own binding over the same model, naming the view as its state:
   `oracle_binding(provider, state="d:email/view")`, the selector's staying at
   `state="t:state"`. The binding sends the view's value unwrapped, so the model reads exactly
