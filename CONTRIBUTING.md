@@ -11,16 +11,26 @@ Thanks for your interest in ommat. The design and the spec are still young, so c
 
 ## Development
 
-The `idia` extra's development source is a checkout of idia beside this one, at `../idia`, so clone it first:
+The `idia` extra's source is idia's published tag, so `uv sync --all-extras` installs it from GitHub, with every other extra:
 
 ```sh
-git clone https://github.com/CRSiegfried/idia.git ../idia
 uv sync --all-extras
 uv run ruff check
 uv run ruff format --check
 uv run pyright
 uv run pytest
 ```
+
+To work against a checkout of idia beside this one, at `../idia`, install it over the tag and keep `uv run` from syncing it back:
+
+```sh
+git clone https://github.com/CRSiegfried/idia.git ../idia
+uv sync --all-extras
+uv pip install -e ../idia
+export UV_NO_SYNC=1
+```
+
+With `UV_NO_SYNC` set, `uv run` uses the environment as it stands; unset it, or run `uv sync --all-extras`, to return to the tag.
 
 CI runs the same checks on Python 3.11–3.14 on Linux, macOS and Windows. On pushes to main it also runs `scripts/check_subjects.py`, which checks that commit subjects describe library changes.
 

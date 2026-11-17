@@ -40,8 +40,9 @@ idia = ["idia>=0.2,<0.3"]
 pydantic-ai = ["pydantic-ai-slim>=2.49"]
 
 [tool.uv.sources]
-# Development only: idia from the sibling checkout. uv keeps this out of the built metadata.
-idia = { path = "../idia", editable = true }
+# idia from its published tag, so `uv add` and `uv pip install` of ommat from git resolve it.
+# uv keeps this out of the built metadata; CONTRIBUTING says how to develop against a checkout.
+idia = { git = "https://github.com/CRSiegfried/idia", tag = "v0.2.0" }
 
 [dependency-groups]
 dev = [

@@ -13,7 +13,7 @@ A release pushes its tag alone, with no GitHub release. A GitHub release starts 
 
 ## Release procedure
 
-1. In one commit, bump `version` in `pyproject.toml`, run `uv lock`, and move the `Unreleased` entries in `CHANGELOG.md` under the new version and date.
+1. In one commit, bump `version` in `pyproject.toml`, run `uv lock`, and move the `Unreleased` entries in `CHANGELOG.md` under the new version and date. `[tool.uv.sources]` names idia's tag, so push idia's tag first: `uv lock` resolves idia from it, and the lock committed here is the one `uv sync --locked` reads.
    In the same commit, re-pin the links in `skills/ommat/SKILL.md` and the install lines in `README.md` to the new tag, and set `TAG` in `tests/test_skill.py` to match; `tests/test_skill.py` fails on a link to any other tag. If the release moves the idia pin, re-pin the idia links and install lines in both files too.
 2. Optional dry run: run the **publish** workflow by hand (*Actions → publish → Run workflow*) and approve the `testpypi` environment. Check the page at <https://test.pypi.org/p/ommat>.
 3. Tag the commit `vX.Y.Z` and push the tag. Sign the tag (`git tag -s`) once a signing key is set up.

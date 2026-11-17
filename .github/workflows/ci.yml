@@ -2,9 +2,9 @@
 # subjects on pushes to main.
 # Actions are pinned to full commit SHAs; Dependabot keeps them current.
 #
-# The idia extra resolves through [tool.uv.sources] to the sibling checkout ../idia,
-# so each job that syncs checks this repository out at ommat/ and idia's public repository
-# at idia/, at its release tag v0.2.0. No job makes a live call.
+# The idia extra resolves through [tool.uv.sources] to idia's release tag v0.2.0 on GitHub,
+# which uv fetches at the sync. Each job checks this repository out at ommat/. No job makes a
+# live call.
 name: ci
 
 on:
@@ -32,12 +32,6 @@ jobs:
           path: ommat
           persist-credentials: false
           fetch-depth: 0  # the subjects check reads the commits a push adds
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CRSiegfried/idia
-          ref: v0.2.0
-          path: idia
-          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.11"
@@ -67,12 +61,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: ommat
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CRSiegfried/idia
-          ref: v0.2.0
-          path: idia
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:

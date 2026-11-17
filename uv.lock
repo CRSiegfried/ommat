@@ -230,7 +230,7 @@ wheels = [
 [[package]]
 name = "idia"
 version = "0.2.0"
-source = { editable = "../idia" }
+source = { git = "https://github.com/CRSiegfried/idia?tag=v0.2.0#2715d23cf5c6fbe89ab49a6052de4209919bfc87" }
 
 [package.optional-dependencies]
 cloudflare = [
@@ -239,29 +239,6 @@ cloudflare = [
 openai = [
     { name = "httpx2" },
     { name = "openai" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gliner2", extras = ["local"], marker = "extra == 'gliner'", specifier = ">=2.0.0" },
-    { name = "httpx2", marker = "extra == 'cloudflare'", specifier = ">=2.16" },
-    { name = "httpx2", marker = "extra == 'openai'", specifier = ">=2.16" },
-    { name = "httpx2", marker = "extra == 'system-one'", specifier = ">=2.16" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=3.35.1" },
-    { name = "protobuf", marker = "extra == 'gliner'", specifier = ">=4" },
-    { name = "sentencepiece", marker = "extra == 'gliner'", specifier = ">=0.2" },
-    { name = "torch", marker = "extra == 'gliner'", specifier = ">=2.1", index = "https://download.pytorch.org/whl/cpu" },
-]
-provides-extras = ["system-one", "openai", "cloudflare", "gliner"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx2", specifier = ">=2.16" },
-    { name = "openai", specifier = ">=3.35.1" },
-    { name = "pyright", specifier = ">=1.1.400" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-cov", specifier = ">=6" },
-    { name = "ruff", specifier = ">=0.14" },
 ]
 
 [[package]]
@@ -438,14 +415,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "idia", marker = "extra == 'idia'", editable = "../idia" },
+    { name = "idia", marker = "extra == 'idia'", git = "https://github.com/CRSiegfried/idia?tag=v0.2.0" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=2.49" },
 ]
 provides-extras = ["idia", "pydantic-ai"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "idia", extras = ["openai", "cloudflare"], editable = "../idia" },
+    { name = "idia", extras = ["openai", "cloudflare"], git = "https://github.com/CRSiegfried/idia?tag=v0.2.0" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov", specifier = ">=6" },
