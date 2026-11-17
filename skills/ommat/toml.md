@@ -1,6 +1,6 @@
 # Authoring a design as TOML
 
-Read this when you write, change or review a design, or a slice of one, as a `*.toml` file instead of Python. `ommat.authoring` is on `main`, not in a tagged release, and carries no stability promise before 1.0.
+Read this when you write, change or review a design, or a slice of one, as a `*.toml` file instead of Python. `ommat.authoring` ships in 0.4.0 and carries no stability promise before 1.0.
 
 A file holds a design's declarations: its state, sources, questions, labels, parameters, targets, decision tables, and the names of its rule functions. Rule logic stays in Python. The reader builds the `Design` you would have written, before `load` and outside the hash, so a TOML design and its Python twin load to one design hash.
 
@@ -74,4 +74,4 @@ The caller owns `version`, `values` and `types`, passed as arguments; never edit
 
 Write these in Python: rules generated from arguments, a source's `when`, `payload` and `feedback`, a design's `groups`, a `fetch` with a candidates mapping, a rule's `boundaries`, parameters built from a model dump, a question built per call, and a reference to a Python object for a wording or target.
 
-More: [the spec's section on the reader](https://github.com/CRSiegfried/ommat/blob/main/docs/spec/README.md#the-authoring-reader).
+More: [the spec's section on the reader](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#the-authoring-reader).
