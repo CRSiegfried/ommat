@@ -24,6 +24,7 @@ point, whatever entries each grounds, so a read whose answer changes a set is ju
 decision that change gives.
 """
 
+import asyncio
 import itertools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -76,9 +77,12 @@ def dead_questions(
     keys = {s.oracle for s in sources if s.oracle is not None}
     lists = [fills[r] for r in reads]
     ran: list[_Ran] = []
-    for at in itertools.product(*(range(len(points)) for points in lists)):  # grid order
-        point = {r: lists[k][i] for k, (r, i) in enumerate(zip(reads, at, strict=True))}
-        ran += _block(loaded, point, keys, fills, tuple(at))
+    # One event loop for every run: a loop per run costs a loopback socket pair on Windows,
+    # and a grid of thousands of runs exhausts the ephemeral ports while they wait to close.
+    with asyncio.Runner() as runner:
+        for at in itertools.product(*(range(len(points)) for points in lists)):  # grid order
+            point = {r: lists[k][i] for k, (r, i) in enumerate(zip(reads, at, strict=True))}
+            ran += _block(loaded, point, keys, fills, tuple(at), runner)
     asked = {declared_ref(g) for r in ran for g in r.entries}  # grounded by some assignment
     questions: dict[str, Any] = {}
     for ref in code_point_sorted(provided):
@@ -120,6 +124,7 @@ def _block(
     keys: set[str],
     fills: Mapping[str, list[Point]],
     at: tuple[int, ...],
+    runner: asyncio.Runner,
 ) -> list[_Ran]:
     """An assignment's runs: each grounded entry's points crossed, the last fastest."""
     firsts = {ref: fills[ref][0] for ref in loaded._grounded if ref in fills}
@@ -129,7 +134,7 @@ def _block(
         if set_ref in point:  # a t: set, fixed by the point
             sets[set_ref] = point[set_ref].live
     if any(loaded._grounded[ref] not in sets for ref in firsts):  # a d: set: run the probe
-        probe = _run(loaded, _At(point, firsts), keys)
+        probe = _run(loaded, _At(point, firsts), keys, runner)
         sets.update(probe[2])
     entries: dict[str, list[Point]] = {}
     for ref in firsts:
@@ -145,7 +150,7 @@ def _block(
         if probe is not None and not any(combo):
             done = probe
         else:
-            done = _run(loaded, given, keys)
+            done = _run(loaded, given, keys, runner)
             # A d: set the probe fixed holds for the whole assignment, or the lint cannot fill
             # the entries a run asks (§grounded-declarations).
             for set_ref, value in done[2].items():
@@ -161,7 +166,7 @@ def _block(
 
 
 def _run(
-    loaded: LoadedDesign, point: dict[str, Point], keys: set[str]
+    loaded: LoadedDesign, point: dict[str, Point], keys: set[str], runner: asyncio.Runner
 ) -> tuple[_Run, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """One turn at ``point``: the decision's canonical bytes, each
     candidate-valued question's value or marker as the run's record wrote its entry, each
@@ -179,7 +184,7 @@ def _run(
         return CallResult(values)
 
     bindings = {_DEFAULT: binding, **dict.fromkeys(keys, binding)}
-    decision = _decide._decided_sync(loaded, fresh(point[_STATE].live), bindings)
+    decision = _decide._decided_sync(loaded, fresh(point[_STATE].live), bindings, runner=runner)
     log = decision.record.log
     _refuse_broken(point, log)
     run = decision_bytes(log)

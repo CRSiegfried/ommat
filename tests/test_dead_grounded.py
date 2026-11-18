@@ -3,6 +3,7 @@ each grounded entry crossed after the other reads with its own marker last, a ``
 learned by a probe run that counts as the first point, the ``not-grounded`` status, and a
 report keyed by the declared ref whose points name each grounded entry."""
 
+import asyncio
 from typing import Any, cast
 
 import pytest
@@ -140,6 +141,23 @@ def test_an_always_empty_set_grounds_nothing_and_the_question_is_not_grounded() 
 def test_the_points_sum_each_assignments_block() -> None:
     report = dead_questions(load(design()), values={SET: [[], ["b"], ["a", "b"]]})
     assert report["points"] == PLAIN * (1 + ENTRY + ENTRY * ENTRY)
+
+
+def test_every_point_runs_on_one_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A loop per point exhausts Windows's ephemeral ports on a large grid: each loop opens a
+    # loopback socket pair whose ports wait minutes to close.
+    made: list[object] = []
+    real = asyncio.events.new_event_loop
+
+    def counted() -> asyncio.AbstractEventLoop:
+        loop = real()
+        made.append(loop)
+        return loop
+
+    monkeypatch.setattr(asyncio.events, "new_event_loop", counted)
+    report = dead_questions(load(design()), values={SET: [[], ["b"], ["a", "b"]]})
+    assert report["points"] > 1
+    assert len(made) == 1
 
 
 def test_an_entry_at_its_own_marker_point_is_shown_under_its_grounded_ref() -> None:
