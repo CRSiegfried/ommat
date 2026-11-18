@@ -7,6 +7,7 @@ whose members change under the same candidate values, a returned marker naming a
 the budget and the policy's own leaf, beneath a costly rule no leaf reaches."""
 
 import asyncio
+import contextvars
 import dataclasses
 import itertools
 import types
@@ -245,8 +246,19 @@ def designs() -> Iterator[LoadedDesign]:
 DESIGNS = list(designs())
 
 
+# One event loop for the module's reruns: a loop per rerun, over this many, uses up Windows's
+# ephemeral ports while each loop's socket pair waits to close.
+_LOOP = asyncio.Runner()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _close_loop() -> Iterator[None]:
+    yield
+    _LOOP.close()
+
+
 def _rerun(log: Any, loaded: LoadedDesign, answers: Any, **given: Any) -> Any:
-    return asyncio.run(rerun(log, loaded, answers, **given))
+    return _LOOP.run(rerun(log, loaded, answers, **given), context=contextvars.copy_context())
 
 
 class _Never(Reuse):
