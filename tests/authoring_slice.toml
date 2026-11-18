@@ -31,7 +31,7 @@ timeout = 10.0
 fetch   = { "t:folders" = "list<$folder>" }
 
 [sources.ask_move]
-oracle    = "jev"
+oracle    = "classifier"
 needs     = ["t:state"]
 only_when = { "d:kind" = ["move", "copy"] }
 

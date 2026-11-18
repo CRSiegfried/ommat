@@ -115,7 +115,7 @@ moves their answers. Keep the shape each part was measured on instead:
   value is `{"request": current_turn}`. A rule over the state alone fires in round 0, so
   a source that needs it is still asked in round 1.
 - Give the part's questions `needs=["d:email/view"]` in place of `t:state`, under an oracle
-  of their own, such as `jev_request` beside the selector's `jev`.
+  of their own, such as `view_request` beside the selector's `selector`.
 - Bind that oracle to its own binding over the same model, naming the view as its state:
   `oracle_binding(provider, state="d:email/view")`, the selector's staying at
   `state="t:state"`. The binding sends the view's value unwrapped, so the model reads exactly
@@ -151,10 +151,12 @@ The record holds the value as the source's tool result, so the turn replays.
 ## What combine refuses
 
 `combine` raises `InvalidCombination`, listing every failure, for parts whose states differ; an
-id or a parameter path two parts declare; a type, group or target two parts declare differently;
-a port some part provides; a port left unbound; and a bind key that is no port. A
-type, group or target two parts declare alike is kept once, so each part keeps what
-it reads. A parameter is never shared: give each part its own, as `email/bar` here, so tuning one
+id one part declares as a source and another as a rule; a parameter path two parts declare; a
+source, rule, type, group or target two parts declare differently under one id; a port some part
+provides; a port left unbound; and a bind key that is no port. A source, rule, type, group or
+target two parts declare alike is kept once, so each part keeps what it reads and still runs
+alone. A question several parts ask alike goes in a source of its own, declared alike in each
+part with the rules its needs come from, and is asked once. A parameter is never shared: give each part its own, as `email/bar` here, so tuning one
 part never moves another. It renames nothing, so give each part's ids and refs a prefix of its
 own, as `email/` here. Everything else, such as a read with no provider, is load's to refuse.
 

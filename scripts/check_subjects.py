@@ -39,12 +39,12 @@ PLANTED: tuple[str, ...] = (
     "Item 4 closed",
     "The items 3 and 4 land",
     "Orchestrator review fixes",
-    "Made on the owner's delegation",
+    "Made on a reviewer's delegation",
     "As the user's delegate asked",
     "The office reviewed it",
     "Charters for the new code",
     "Rulings applied",
-    "Ruled on by the owner",
+    "Ruled on by the reviewer",
     "As §some-slug says",
 )
 

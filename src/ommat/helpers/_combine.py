@@ -188,6 +188,20 @@ def _repeats(
             failures.add([key], f"{what} {_q(key)} is declared by {_listed(labels)}")
 
 
+def _kinds(labelled: Sequence[tuple[str, Part]], failures: _Failures) -> None:
+    """A failure for each id one part declares as a source and another as a rule: sources and
+    rules share one id namespace."""
+    held: dict[str, dict[str, list[str]]] = {}
+    for label, part in labelled:
+        for kind, ids in (("source", part.design.sources), ("rule", part.design.rules)):
+            for key in ids:
+                held.setdefault(key, {}).setdefault(kind, []).append(label)
+    for key, kinds in held.items():
+        if len(kinds) > 1:
+            labels = [label for label, _ in labelled if any(label in e for e in kinds.values())]
+            failures.add([key], f"the id {_q(key)} is declared by {_listed(labels)}")
+
+
 def _shared(
     labelled: Sequence[tuple[str, Part]],
     what: str,
@@ -275,6 +289,8 @@ def combine(
 ) -> Design:
     """One design holding every part's declarations, a rule for each port from ``bind`` and
     ``policy``, the top policy, as its policy; or ``InvalidCombination`` listing every failure.
+    A source, rule, type, target or group two parts declare alike under one id is kept once; one
+    they declare differently is refused, as is a parameter path two parts declare.
 
     ``bind`` maps each port to its provider: a ``Rule`` or ``Table`` providing the port, or a
     ``d:`` ref, a field path allowed, whose value the port takes through a pass-through table.
@@ -299,8 +315,10 @@ def combine(
     if len(states) > 1:
         shown = "; ".join(f"{label} declares {_q(p.design.state)}" for label, p in labelled)
         failures.add([], f"the parts' states differ: {shown}")
-    _repeats(labelled, "the id", lambda d: [*d.sources, *d.rules], failures)
+    _kinds(labelled, failures)
     _repeats(labelled, "the parameter path", lambda d: d.parameters, failures)
+    sources = _shared(labelled, "sources with the id", lambda d: d.sources, failures)
+    rules = _shared(labelled, "rules with the id", lambda d: d.rules, failures)
     types = _shared(labelled, "types named", lambda d: d.types, failures)
     groups = _shared(labelled, "groups with the id", lambda d: d.groups, failures)
     targets = _shared(labelled, "targets with the id", lambda d: d.targets, failures)
@@ -355,14 +373,13 @@ def combine(
     if failures:
         raise InvalidCombination(failures)
 
-    rules = _merged(designs, "rules")
     for ref, rule in added.items():
         rules[ids[ref]] = rule
     rules[cast(str, top)] = policy
     return Design(
         state=designs[0].state,
         policy=policy.provides,
-        sources=_merged(designs, "sources"),
+        sources=sources,
         rules=rules,
         parameters=_merged(designs, "parameters"),
         types=types,
