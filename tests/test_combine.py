@@ -3,7 +3,7 @@ bound to a rule or a ref, and refuses what load cannot see; ``standalone`` loads
 alone."""
 
 import dataclasses
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -388,10 +388,10 @@ def _extra(design: Design, **changes: Any) -> Design:
     return dataclasses.replace(design, **fields)
 
 
-def test_a_repeated_id_or_parameter_path_is_refused_even_when_alike() -> None:
+def test_a_parameter_path_two_parts_declare_is_refused_even_when_alike() -> None:
     selector = dataclasses.replace(
         SELECTOR,
-        sources={**SELECTOR.sources, "email/ask": SELECTOR.sources["router"]},
+        sources={**SELECTOR.sources, "email/ask": EMAIL.design.sources["email/ask"]},
         parameters={**SELECTOR.parameters, "shared/bar": Parameter(BAR, 0.5)},
     )
     email = Part(
@@ -401,8 +401,87 @@ def test_a_repeated_id_or_parameter_path_is_refused_even_when_alike() -> None:
         EMAIL.ports,
     )
     assert refused(Part(selector), email, CALENDAR) == [
-        'the id "email/ask" is declared by part 1 ("selector") and part 2 ("email")',
         'the parameter path "shared/bar" is declared by part 1 ("selector") and part 2 ("email")',
+    ]
+
+
+NOW = t.record(message=t.string)
+
+
+def _asks_now(part: Part, bar: float, **source: Any) -> Part:
+    """``part`` asking whether the message wants something now, in a source and on a request
+    every such part declares alike, and reading the answer against its own bar."""
+    name = cast(str, part.design.name)
+    ask = Source(
+        {"q:now": Question("noul", Text("Does the message ask for something now?"))},
+        needs=["d:now/request"],
+        **source,
+    )
+    request = Table("d:now/request", NOW, "F", ["t:state"], [["-", Input("t:state")]])
+    design = dataclasses.replace(
+        part.design,
+        sources={**part.design.sources, "now/ask": ask},
+        rules={
+            **part.design.rules,
+            "now/request": request,
+            f"{name}/now": Table(
+                f"d:{name}/now",
+                YES_NO,
+                "F",
+                [
+                    Helper(
+                        "pick_with_margin",
+                        "q:now",
+                        bar=f"{name}/now/bar",
+                        margin=f"{name}/now/margin",
+                    )
+                ],
+                [["-", Input("q:now")]],
+            ),
+        },
+        parameters={
+            **part.design.parameters,
+            f"{name}/now/bar": Parameter(BAR, bar),
+            f"{name}/now/margin": Parameter(BAR, 0.0),
+        },
+    )
+    return Part(design, part.ports)
+
+
+def test_a_source_and_a_rule_declared_alike_are_kept_once_and_asked_once() -> None:
+    email, calendar = _asks_now(EMAIL, 0.6), _asks_now(CALENDAR, 0.95)
+    design = combine(Part(SELECTOR), email, calendar, bind=BIND, policy=ACT)
+    assert set(design.sources) == {"router", "email/ask", "calendar/ask", "now/ask"}
+    assert design.rules["now/request"] == email.design.rules["now/request"]
+    loaded = load(design)
+    decision = decide_sync(
+        loaded,
+        {"message": "hello"},
+        {"default": model("email", **{"q:now": {"yes": 0.8, "no": 0.2}})},
+    )
+    calls = [item for item in decision.record.log if item["item"] == "call"]
+    assert sum(source == "now/ask" for call in calls for source in call["sources"]) == 1
+    entries = decision.record.entries
+    assert entries["d:email/now"]["value"] == "yes"
+    assert "marker" in entries["d:calendar/now"]
+    _, findings = replay_sync(decision.record, loaded)
+    assert findings == []
+
+
+def test_a_source_or_a_rule_declared_differently_is_refused() -> None:
+    email = _asks_now(EMAIL, 0.6)
+    calendar = _asks_now(CALENDAR, 0.95, oracle="other")
+    request = dataclasses.replace(cast(Table, calendar.design.rules["now/request"]), hit="U")
+    calendar = Part(
+        dataclasses.replace(
+            calendar.design, rules={**calendar.design.rules, "now/request": request}
+        ),
+        calendar.ports,
+    )
+    assert refused(Part(SELECTOR), email, calendar) == [
+        'part 2 ("email") and part 3 ("calendar") declare different sources with the id "now/ask"',
+        'part 2 ("email") and part 3 ("calendar") declare different rules with the id '
+        '"now/request"',
     ]
 
 

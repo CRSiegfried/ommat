@@ -151,10 +151,12 @@ The record holds the value as the source's tool result, so the turn replays.
 ## What combine refuses
 
 `combine` raises `InvalidCombination`, listing every failure, for parts whose states differ; an
-id or a parameter path two parts declare; a type, group or target two parts declare differently;
-a port some part provides; a port left unbound; and a bind key that is no port. A
-type, group or target two parts declare alike is kept once, so each part keeps what
-it reads. A parameter is never shared: give each part its own, as `email/bar` here, so tuning one
+id one part declares as a source and another as a rule; a parameter path two parts declare; a
+source, rule, type, group or target two parts declare differently under one id; a port some part
+provides; a port left unbound; and a bind key that is no port. A source, rule, type, group or
+target two parts declare alike is kept once, so each part keeps what it reads and still runs
+alone. A question several parts ask alike goes in a source of its own, declared alike in each
+part with the rules its needs come from, and is asked once. A parameter is never shared: give each part its own, as `email/bar` here, so tuning one
 part never moves another. It renames nothing, so give each part's ids and refs a prefix of its
 own, as `email/` here. Everything else, such as a read with no provider, is load's to refuse.
 

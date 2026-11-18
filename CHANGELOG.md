@@ -4,6 +4,10 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- `combine` keeps one copy of a source or rule two parts declare alike under one id, as it keeps a type, group or target, and refuses one they declare differently; an id one part declares as a source and another as a rule is still refused. Before, a repeated id was refused even when alike. A question several parts ask alike now goes in a source each part declares alike, so each part runs alone and the combined design asks it once.
+
 ## [0.4.0] - 2026-11-16
 
 ### Added
