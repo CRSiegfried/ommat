@@ -64,9 +64,12 @@ testpaths = ["tests"]
 pythonpath = ["docs/tutorials/write_a_design", "docs/tutorials/street_reports", "docs/tutorials/decide_with_idia", "docs/how-to/add_a_source", "docs/how-to/hand_off_a_turn", "docs/how-to/gate_a_source", "docs/how-to/read_a_record", "docs/how-to/combine_designs", "docs/how-to/lay_out_a_design"]
 addopts = ["--strict-markers", "--strict-config"]
 xfail_strict = true
+# A test still running after this many seconds dumps every thread's stack, so a hang in CI
+# shows where it is before the job's timeout ends it.
+faulthandler_timeout = 300
 filterwarnings = ["error"]
 markers = [
-    "slow: a test that takes about a minute, run in its own CI step without coverage",
+    "slow: a test that takes about a minute, run in its own CI job without coverage",
 ]
 
 [tool.coverage.run]

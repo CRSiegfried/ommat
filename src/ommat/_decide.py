@@ -23,6 +23,7 @@ the cut. What ``_turn`` takes is checked values, never a ``RunSettings``.
 
 import asyncio
 import contextlib
+import contextvars
 import functools
 import inspect
 import math
@@ -255,10 +256,19 @@ def decide_sync(
     *,
     codec: Codec | None = None,
     observer: Observer | None = None,
+    runner: asyncio.Runner | None = None,
 ) -> Decision:
     """``decide`` run to completion; ``RuntimeError`` inside a running event loop, raised
-    before the coroutine is built. It warns of a defect as ``decide`` does, at its caller."""
-    decision = _decided_sync(loaded, state, bindings, settings, codec=codec, observer=observer)
+    before the coroutine is built. It warns of a defect as ``decide`` does, at its caller.
+
+    Without ``runner`` the turn runs under ``asyncio.run``, on a fresh loop. With one, exactly
+    an ``asyncio.Runner``, it runs by ``runner.run`` in a copy of the caller's context, so
+    successive turns share the runner's loop and nothing else; the caller opens and closes the
+    runner, one per thread, and a task a binding leaves is not cancelled, nor the default
+    executor waited for, until the runner closes."""
+    decision = _decided_sync(
+        loaded, state, bindings, settings, codec=codec, observer=observer, runner=runner
+    )
     _warn_defects(decision.record, stacklevel=2)
     return decision
 
@@ -271,15 +281,40 @@ def _decided_sync(
     *,
     codec: Codec | None = None,
     observer: Observer | None = None,
+    runner: asyncio.Runner | None = None,
 ) -> Decision:
     """``decide_sync`` without its warning, for the lint's runs."""
+    return run_sync(
+        "decide",
+        lambda: _decided(loaded, state, bindings, settings, codec=codec, observer=observer),
+        runner,
+    )
+
+
+def run_sync(name: str, job: Callable[[], Any], runner: object) -> Any:
+    """The coroutine ``job`` builds, run to completion under ``asyncio.run``, or by ``runner``
+    in a copy of the caller's context (§sync-runner). Inside a running event loop
+    ``RuntimeError``, and for a runner not exactly an ``asyncio.Runner`` ``EntryRefusal``,
+    each raised before the coroutine is built."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         pass
     else:
-        raise RuntimeError("decide_sync was called inside a running event loop; await decide")
-    return asyncio.run(_decided(loaded, state, bindings, settings, codec=codec, observer=observer))
+        raise RuntimeError(f"{name}_sync was called inside a running event loop; await {name}")
+    if runner is None:
+        return asyncio.run(job())
+    if type(runner) is not asyncio.Runner:
+        raise EntryRefusal(
+            f"runner is a {type_name(runner)}, neither None nor exactly an asyncio.Runner"
+        )
+    coroutine = job()
+    try:
+        return runner.run(coroutine, context=contextvars.copy_context())
+    except BaseException:
+        if inspect.getcoroutinestate(coroutine) == inspect.CORO_CREATED:
+            coroutine.close()  # a closed runner refuses it unstarted: no "never awaited" warning
+        raise
 
 
 # ---------------------------------------------------------------------------------------------

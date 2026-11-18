@@ -101,6 +101,8 @@ replay findings: []
 
 `billing` is at 0.8, at or above the bar of 0.6 and 0.7 ahead of the next label, so the topic rule picks it and the policy decides `open_billing_ticket`. Had `billing` been under 0.6, or less than 0.2 ahead, the topic rule would have returned `Unsure`, the policy would have passed it on, and the turn would be undecided: `decision.estimate` would be that marker and `escalation(decision.record)` would say why. Here the caller opens the ticket. Replay reruns the turn from the record, under the same loaded design, with no model call, and finds no difference.
 
+Each `decide_sync` call builds and closes an event loop of its own. To decide many turns from sync code, open one `asyncio.Runner` and pass it to each call as `runner=`, or await `ommat.helpers.decide_many`; a loop per turn is slow, and on Windows thousands of them use up the ephemeral ports.
+
 **The name.** Ommat and Idia come from *ommatidia*, the thousands of small hexagonal eyes that make up a compound eye and combine into one picture: *ommat-* is the Greek stem for "eye", *-idia* "little ones". Many small, cheap questions add up to one full picture. Ommat is the engine that asks them; Idia puts them to the models.
 
 ```text

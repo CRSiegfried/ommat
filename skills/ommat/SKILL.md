@@ -38,6 +38,8 @@ decision.estimate, decision.record, decision.design_hash
 rerun, findings = replay_sync(decision.record, loaded)
 ```
 
+Each `decide_sync` or `replay_sync` call builds an event loop of its own. In a loop over many turns, open one `asyncio.Runner` and pass `runner=runner` to each call, or await `decide_many`; thousands of loops use up Windows's ephemeral ports.
+
 A full, runnable example with its output is the [README demo](https://github.com/CRSiegfried/ommat/blob/v0.4.0/README.md#a-first-decision). Build a design step by step with the tutorial [Write your first design](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/tutorials/write-a-design.md).
 
 ## Beyond the basics
@@ -80,8 +82,8 @@ From format 7, targets name, for a reader, the property a question asks about or
 from ommat import Question, Target, Text
 
 targets = {
-    "tg:danger": Target("Whether people are at risk where the report was made", values="yes or no"),
-    "tg:priority": Target("How soon a crew should go out"),
+    "tg:danger": Target("The risk to people where the report was made", values="yes or no"),
+    "tg:priority": Target("The urgency of sending a crew out"),
 }
 danger = Question(
     "noul",

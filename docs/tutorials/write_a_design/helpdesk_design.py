@@ -17,13 +17,12 @@ TOPICS = [
 
 TARGETS = {
     "tg:urgent": Target(
-        "Determine whether the customer needs an answer today: a deadline, a missed delivery or "
-        "a safety issue counts; impatience alone does not.",
+        "The customer's need for an answer today, not their impatience.",
         values="yes or no",
     ),
     "tg:topic": Target(
-        "Determine what the customer's message is mainly about; when it raises several things, "
-        "the one it most asks to have dealt with.",
+        "The subject the customer most asks to have dealt with, not every subject the "
+        "message mentions.",
         values="one of delivery, return, damaged or other",
     ),
 }
@@ -32,10 +31,21 @@ SOURCES = {
     "triage": Source(
         {
             "q:triage/urgent": Question(
-                "noul", Text("Does the customer need an answer today?"), target="tg:urgent"
+                "noul",
+                Text(
+                    "Does the customer need an answer today? A deadline, a missed delivery or a "
+                    "safety issue counts; impatience alone does not."
+                ),
+                target="tg:urgent",
             ),
             "q:triage/topic": Question(
-                "choice", Text("What is the customer's message about?"), TOPICS, target="tg:topic"
+                "choice",
+                Text(
+                    "What is the customer's message about? If it raises several things, answer "
+                    "for the one it most asks to have dealt with."
+                ),
+                TOPICS,
+                target="tg:topic",
             ),
         },
         needs=["t:state"],

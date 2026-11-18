@@ -318,7 +318,7 @@ def test_a_bindings_key_the_design_does_not_declare_is_refused() -> None:
 
 
 def test_a_base_cut_by_its_deadline_runs_past_the_cut_live() -> None:
-    base = go(binds=bindings(), settings=RunSettings(deadline=0.01), codec=Slow(0.05)).record
+    base = go(binds=bindings(), settings=RunSettings(deadline=0.1), codec=Slow(0.2)).record
     assert rounds(base)[-1]["deadline"] is True
     given = live(ask=returns(SPAM), look=returns({"t:size": 4}))
     out = scenario_sync(base, LOADED, [], given, rerun_design=LOADED)
