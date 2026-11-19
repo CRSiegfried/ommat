@@ -487,20 +487,32 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 #vGravity label { display: inline-flex; gap: 4px; align-items: center; color: var(--ink); cursor: pointer; }
 #vGravity input[type=range] { width: 80px; }
 #gvsearch { font: 12px var(--mono); background: var(--page); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 3px 7px; width: 160px; }
-#gvside { top: 96px; right: 8px; width: 300px; max-height: calc(100% - 200px); overflow: auto; padding: 10px 12px; display: grid; gap: 4px; align-content: start; }
+#gvright { position: absolute; z-index: 3; top: 96px; right: 8px; width: 300px; max-height: calc(100% - 200px); overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+#gvright > .gv-box { position: relative; }
+#gvside { padding: 8px 10px; display: grid; gap: 4px; align-content: start; }
+#gvstats { padding: 8px 10px; display: grid; gap: 4px; }
+#gvstats.folded { width: fit-content; padding: 4px 10px; }
 #gvside ul { margin: 0; padding: 0; list-style: none; }
 #gvside li { padding: 2px 0; cursor: pointer; overflow-wrap: anywhere; font: 12px var(--mono); }
 #gvside li:hover { color: var(--r-read); }
 #gvside .btn { justify-self: start; margin-top: 6px; }
-#gvov { top: 96px; left: 8px; width: 290px; padding: 8px 10px; display: grid; gap: 6px; }
+#gvov { top: 96px; left: 8px; width: 320px; padding: 8px 10px; display: grid; gap: 4px; }
 #gvlegend { left: 8px; bottom: 8px; padding: 6px 10px; max-width: calc(100% - 110px); color: var(--ink2); display: grid; gap: 3px; }
 #gvgz { position: absolute; z-index: 3; right: 8px; bottom: 8px; width: 76px; height: 76px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
 #gvtip, #gvctip { position: fixed; z-index: 11; pointer-events: none; max-width: min(360px, calc(100vw - 24px)); background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.14); padding: 7px 10px; font-size: 12px; line-height: 1.4; }
 .gv-t { font: 600 12.5px var(--mono); overflow-wrap: anywhere; }
 .gv-tx { margin: 3px 0; overflow-wrap: anywhere; }
 .gv-k { font-size: 10.5px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; margin-top: 6px; }
-.gv-stat { font: 11px var(--mono); color: var(--ink2); }
-.gv-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.gv-stat { font-size: 11.5px; color: var(--ink2); }
+.gv-note { font-size: 11.5px; color: var(--ink2); }
+.gv-sh { font-size: 10.5px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+.gv-dec { display: flex; gap: 6px; align-items: center; font-weight: 600; min-width: 0; }
+.gv-dect { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gv-link { font: inherit; font-size: 11.5px; font-weight: 400; color: var(--r-read); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; flex: none; }
+.gv-nowrap { flex-wrap: nowrap; gap: 6px; }
+.gv-hd { display: flex; gap: 6px; align-items: center; }
+.gv-hd .gv-k { flex: 1; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-row { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
 .gv-row input[type=range] { flex: 1; min-width: 0; }
 .gv-why { display: flex; gap: 6px; align-items: flex-start; font-weight: 600; overflow-wrap: anywhere; }
 .gv-key { display: flex; flex-wrap: wrap; gap: 3px 10px; color: var(--ink2); font-size: 11px; }
@@ -534,7 +546,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .folded > .gv-fb { display: none; }
 .gv-fb { display: grid; gap: 4px; margin-top: 6px; }
 .gv-box:not(.folded) > .gv-fh { margin-bottom: 0; }
-.hchip { display: inline-flex; gap: 5px; align-items: center; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; cursor: pointer; }
+.hchip { display: inline-flex; gap: 4px; align-items: center; font: inherit; font-size: 11px; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; cursor: pointer; }
 .hchip:hover, .hchip:focus-visible { border-color: var(--r-read); color: var(--r-read); }
 .hchip svg { flex: none; }
 .hchip .hc-check { display: none; }
@@ -558,6 +570,9 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
   #gvbar { left: 4px; right: 4px; top: 4px; padding: 4px 8px; gap: 4px 10px; }
   #gvprim { gap: 6px 8px; }
   #gvsearch { width: 110px; }
+  #gvright { display: contents; }
+  #gvside { position: absolute; }
+  #gvstats { display: none; }
   #gvov, #gvside { left: 8px; right: 8px; width: auto; top: auto; bottom: 44px; max-height: 42%; overflow: auto; }
   #vGravity[data-sel="1"] #gvov { display: none; }
   #vGravity:not([data-sel="1"]) #gvside { display: none; }
@@ -629,13 +644,13 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
           <span class="gv-grp"><b class="gv-gl">Show</b><label data-tip="Show or hide the question and tool-result bodies, the small rings and squares. Rule results and targets always stay." data-tipfor="gvq"><input type="checkbox" id="gvq" checked>questions and tool results</label><label data-tip="Keep only the questions and tool results that sit between more than one domain, the ones that bridge areas." data-tipfor="gvcross"><input type="checkbox" id="gvcross">cross-domain only</label><label data-tip="Draw the edges between rule results and targets. A selected body always shows its own edges." data-tipfor="gvhh"><input type="checkbox" id="gvhh" checked>rule and target edges</label></span>
           <span class="gv-grp" id="gvgturn" hidden><b class="gv-gl">Turn</b><label id="gvovl" hidden data-tip="Draw the selected turn's entries, lineage and rounds over the graph. Off shows the model alone; the turn stays selected." data-tipfor="gvovon"><input type="checkbox" id="gvovon" checked>turn overlay</label></span>
           <span class="gv-grp"><b class="gv-gl">View</b><label data-tip="Colour bodies by the first segment of their ref, their domain, instead of by kind." data-tipfor="gvkind"><input type="checkbox" id="gvkind">colour by domain</label><span class="gv-grp" id="gvpresets" hidden><button class="btn" data-gvact="front" data-tip="Look along the z axis.">front</button><button class="btn" data-gvact="top" data-tip="Look down along the y axis.">top</button><button class="btn" data-gvact="side" data-tip="Look along the x axis.">side</button><span class="gv-seg" id="gvdrag" role="group" aria-label="what a plain drag does in 3D" data-tip="What a plain drag does in 3D: orbit turns the view, move slides it. Shift-, space- or middle-drag always move."><button class="btn" data-gvact="drag-orbit" aria-pressed="true">orbit</button><button class="btn" data-gvact="drag-move" aria-pressed="false">move</button></span><button class="btn" data-gvact="home" data-tip="Return to the default 3D view (h).">home</button></span></span>
-          <details id="gvlayout"><summary data-tip="The layout's pulls, a fresh layout and the drawing options.">layout</summary><span class="gv-grp"><label data-tip="How strongly each question is pulled toward the bodies it touches." data-tipfor="gvqpull">question pull <input type="range" id="gvqpull" min="0" max="100" value="50" aria-label="question pull"></label><label data-tip="How strongly rule results and targets pull on each other." data-tipfor="gvhpull">heavy pull <input type="range" id="gvhpull" min="0" max="100" value="50" aria-label="pull between rule results and targets"></label><button class="btn" data-gvact="relayout" data-tip="Settle the layout again from its seeded start. Bodies you moved go back.">relayout</button><label data-tip="Draw discs flat, without sphere shading." data-tipfor="gvflat"><input type="checkbox" id="gvflat">flat</label><label data-tip="Draw a soft coloured blob under each domain's bodies." data-tipfor="gvhalo"><input type="checkbox" id="gvhalo">halos</label><label data-tip="Turn the 3D view slowly while nothing is touched." data-tipfor="gvspin"><input type="checkbox" id="gvspin">spin</label></span></details>
+          <details id="gvlayout"><summary data-tip="The layout's pulls, a fresh layout and the drawing options.">layout</summary><span class="gv-grp"><label data-tip="How strongly each question is pulled toward the bodies it touches." data-tipfor="gvqpull">question pull <input type="range" id="gvqpull" min="0" max="100" value="50" aria-label="question pull"></label><label data-tip="How strongly rule results and targets pull on each other." data-tipfor="gvhpull">heavy pull <input type="range" id="gvhpull" min="0" max="100" value="50" aria-label="pull between rule results and targets"></label><button class="btn" data-gvact="relayout" data-tip="Settle the layout again from its seeded start. Bodies you moved go back.">relayout</button><label data-tip="Draw discs flat, without sphere shading." data-tipfor="gvflat"><input type="checkbox" id="gvflat">flat</label><label data-tip="Draw a soft coloured blob under each domain's bodies." data-tipfor="gvhalo"><input type="checkbox" id="gvhalo">halos</label><label data-tip="Turn the 3D view slowly while nothing is touched." data-tipfor="gvspin"><input type="checkbox" id="gvspin">spin</label></span><span class="gv-grp" id="gvlturn" hidden><b class="gv-gl">Turn</b><label data-tip="Hide the bodies the turn had not reached by the round shown." data-tipfor="gvhide"><input type="checkbox" id="gvhide">hide what was not reached</label><label data-tip="Dim everything but the lineage, the entries the decision rests on." data-tipfor="gvlin"><input type="checkbox" id="gvlin">only the lineage</label></span></details>
           </div>
         </div>
         <canvas id="gvc" tabindex="0" role="application" aria-label="The design's refs as bodies. Keys: period and comma walk the bodies, Enter selects the one in focus, arrows pan or turn, f fits all, s fits the selection, 3 switches 3D, slash finds, a and d step the round, question mark lists every key. Mouse: drag a body to move it, drag empty space to pan or turn, the wheel zooms."></canvas>
-        <div class="gv-box" id="gvhelp" hidden role="dialog" aria-label="Gravity gestures and keys"><div class="gv-k">Mouse</div><p>Drag a body to move it. Drag empty space to pan (2D) or turn (3D); in 3D shift-, right-, middle- or space-drag slides the view instead. The wheel zooms. Click selects; click again steps to the next body beneath. Double-click empty space to fit.</p><div class="gv-k">Touch</div><p>Tap selects. Drag a body to move it; drag empty space to pan or turn. Two fingers pan and pinch to zoom.</p><div class="gv-k">Keys</div><p>The legend's kinds and the turn's state counts are filters: press one to dim every other body (a body must match both when both are pressed), press again to clear.</p><p><kbd>f</kbd> fit · <kbd>s</kbd> fit selection · <kbd>h</kbd> home · <kbd>3</kbd> 3D · <kbd>/</kbd> find · <kbd>a</kbd> <kbd>d</kbd> previous / next round · <kbd>+</kbd> <kbd>-</kbd> zoom · arrows turn or pan with the canvas focused (shift pans) · <kbd>?</kbd> this help</p><p class="muted"><kbd>Esc</kbd> clears one thing at a time: this help, the search, the selection, the state and kind filters, the round pinned, then backs out as on every tab.</p></div>
+        <div class="gv-box" id="gvhelp" hidden role="dialog" aria-label="Gravity gestures and keys"><div class="gv-k">Mouse</div><p>Drag a body to move it. Drag empty space to pan (2D) or turn (3D); in 3D shift-, right-, middle- or space-drag slides the view instead. The wheel zooms. Click selects; click again steps to the next body beneath. Double-click empty space to fit.</p><div class="gv-k">Touch</div><p>Tap selects. Drag a body to move it; drag empty space to pan or turn. Two fingers pan and pinch to zoom.</p><div class="gv-k">Reading a turn</div><p>A body keeps its kind fill; its ring is its entry: green held, amber short or <i>Unsure</i>, red <i>Unavailable</i>, grey <i>Unasked</i>, dashed absent. A target holds no entry: its ring is derived from the entries that estimate it, full when answered, split by the held to the open when mixed, double when unresolved, dashed when not evaluated. The lineage is lit, its main chain in blue with arrowheads toward the root, which is ringed in ink; a declared read is dashed and is not a record of what was read.</p><div class="gv-k">Keys</div><p>The legend's kinds and the turn's state counts are filters: press one to dim every other body (a body must match both when both are pressed), press again to clear.</p><p><kbd>f</kbd> fit · <kbd>s</kbd> fit selection · <kbd>h</kbd> home · <kbd>3</kbd> 3D · <kbd>/</kbd> find · <kbd>a</kbd> <kbd>d</kbd> previous / next round · <kbd>+</kbd> <kbd>-</kbd> zoom · arrows turn or pan with the canvas focused (shift pans) · <kbd>?</kbd> this help</p><p class="muted"><kbd>Esc</kbd> clears one thing at a time: this help, the search, the selection, the state, target and kind filters, the round pinned, then backs out as on every tab.</p></div>
         <div class="gv-box" id="gvov" hidden></div>
-        <div class="gv-box" id="gvside" aria-live="polite"></div>
+        <div id="gvright"><div class="gv-box" id="gvside" aria-live="polite"></div><div class="gv-box" id="gvstats" aria-live="polite" hidden></div></div>
         <div class="gv-box" id="gvlegend"></div>
         <div id="gvctip" role="tooltip" hidden></div>
         <div id="gvlive" class="gv-sr" role="status" aria-live="polite"></div>
@@ -3101,7 +3116,7 @@ function viewsHover(ev) {
 // (the edges that are not dependencies) are drawn from it. The layout is a function of that graph: a generator seeded from the
 // design's hash scatters the bodies, a fixed number of ticks settles them when the view first
 // draws, and every move after is eased by frame count. A drag reheats it live.
-const GV = {mode3: false, light: true, cross: false, hh: true, ov: true, drag: 'orbit', space: false, touch: false, help: false, fold: {}, kf: null, kind: null, st: null, whyOpen: false, stepFromHash: false, selRestore: false, byDomain: false, flat: false, halo: false, spin: false, qPull: .5, hPull: .5, find: '', sel: null, step: null, hide: false, lin: false};
+const GV = {mode3: false, light: true, cross: false, hh: true, ov: true, drag: 'orbit', space: false, touch: false, help: false, fold: {}, kf: null, kind: null, tg: null, st: null, whyOpen: false, stepFromHash: false, selRestore: false, byDomain: false, flat: false, halo: false, spin: false, qPull: .5, hPull: .5, find: '', sel: null, step: null, hide: false, lin: false};
 const GV_TICKS = 300, GV_FOC = 900, GV_EASE = 36, GV_TW = 30, GV_GZ = 76;
 const GV_KIND = {target: 'target', rule: 'rule result', question: 'question', tool: 'tool result', state: 'state'};
 const GVL = new WeakMap(); // a design outline -> its bodies, layout and camera
@@ -3340,7 +3355,7 @@ function gvFree(L) {
     return {l, t, r: l + b.width, b: t + b.height};
   };
   const bar = box('gvbar'); if (bar) R.y0 = Math.max(R.y0, bar.b + 8);
-  for (const id of ['gvov', 'gvside']) {
+  for (const id of ['gvov', 'gvside', 'gvstats']) {
     const b = box(id); if (!b) continue;
     if (b.t > L.H / 2) R.y1 = Math.min(R.y1, b.t - 8); else if ((b.l + b.r) / 2 < L.W / 2) R.x0 = Math.max(R.x0, b.r + 8); else R.x1 = Math.min(R.x1, b.l - 8);
   }
@@ -3462,11 +3477,12 @@ function gvOvA(L, n) {
 }
 function gvOvA0(L, n) {
   if (!L.ov) return 1;
-  if (n.kind === 'target') return (n.ts && n.ts !== 'untested' ? 1 : GV.hide ? .2 : .45) * (GV.st ? .12 : 1); // a target holds no entry; its ring is derived
+  if (n.kind === 'target') return (n.ts && n.ts !== 'untested' ? 1 : GV.hide ? .2 : .45) * (GV.st ? .12 : 1) * (GV.tg && n.ts !== GV.tg ? .12 : 1); // a target holds no entry; its ring is derived
   const s = n.os, r = gvReached(n);
   let a = r ? 1 : s === 'Unasked' || s === 'absent' ? .35 : s === 'later' ? .14 : .07;
   if (GV.lin && !L.ov.linN.has(n.id)) a *= .3;
   if (GV.st && s !== GV.st) a *= .12; // a state chosen in the key dims every other body
+  if (GV.tg) a *= .12; // a target state chosen dims every body that is not a target (the targets are handled above)
   return GV.hide && !r ? 0 : a;
 }
 function gvCtx(id) { const c = $(id); try { return c && c.getContext ? c.getContext('2d') : null; } catch (e) { return null; } }
@@ -3700,11 +3716,11 @@ function gvEntryHtml(L, n) {
   if (n.os === 'none') return `<div class="muted">no entry in this turn${root}</div>`;
   if (n.os === 'later') return `<div class="muted">entered in round ${e ? e.round : '?'}, after the round shown${root}</div>`;
   if (!e) return `<div>${markChip(n.os)} <span class="muted">${esc(STATE_LABEL[n.os] || n.os)}${root}</span></div>`;
-  return `<div>${markChip(n.os)} <span class="muted">round ${e.round} · ${esc(STATE_LABEL[n.os] || n.os)}${root}</span></div><div class="gv-tx">${esc(valueOf(e))}</div>`;
+  return `<div>${markChip(n.os)} <span class="muted">round ${e.round} · ${esc(STATE_LABEL[n.os] || n.os)}${root}</span></div><div class="gv-tx">${esc(cut(valueOf(e), 140))}</div>`;
 }
-function gvDescribe(L, n) {
+function gvDescribe(L, n, bare) {
   const nb = [...L.adj.get(n.id)].map(i => L.byId.get(i)), of = k => nb.filter(x => x.kind === k);
-  let h = `<div class="gv-t">${esc(n.id)}</div><div class="muted">${esc(GV_KIND[n.kind])} · ${esc(n.domain)}${n.shared ? ` · spans ${n.span} domains` : ''}${n.policy ? ' · the policy' : ''}</div>`;
+  let h = `${bare ? '' : `<div class="gv-t">${esc(n.id)}</div>`}<div class="muted">${esc(GV_KIND[n.kind])} · ${esc(n.domain)}${n.shared ? ` · spans ${n.span} domains` : ''}${n.policy ? ' · the policy' : ''}</div>`;
   if (n.kind === 'question' || n.kind === 'tool') {
     if (n.text) h += `<div class="gv-tx">${esc(n.text)}</div>`;
     if (n.labels && n.labels.length) h += `<div class="muted">${esc(n.qkind || 'labels')}: ${esc(n.labels.join(' · '))}</div>`;
@@ -3738,8 +3754,10 @@ function gvBodyOf(D, n) {
 const gvShowBtn = (D, n) => { const b = gvBodyOf(D, n); return b ? `<button class="btn" data-gvshow="${esc(b)}" title="select its body in the Gravity graph">show in Gravity</button>` : ''; };
 /* The toolbar's controls explain themselves (data-tip, in plain words) and dim when they change nothing right now: still
    focusable, so their tip can say why; a click does nothing and the setting is kept. */
-const GV_TOOLS = ['gvcross', 'gvkind', 'gvflat', 'gvhalo', 'gvspin', 'gvqpull', 'gvfitsel'];
+const GV_TOOLS = ['gvhide', 'gvlin', 'gvcross', 'gvkind', 'gvflat', 'gvhalo', 'gvspin', 'gvqpull', 'gvfitsel'];
 const GV_OFF_WHY = {
+  gvhide: L => !L.ov && 'No effect without a turn overlay. Select a turn and turn the overlay on to use it.',
+  gvlin: L => !L.ov && 'No effect without a turn overlay. Select a turn and turn the overlay on to use it.',
   gvcross: L => !GV.light && 'No effect while questions and tool results are hidden. Turn them on to use it.',
   gvkind: L => !!L.ov && 'No effect while the turn overlay is on: bodies keep their kind colour, so the state rings read clearly. Turn the overlay off to use it.',
   gvflat: L => !!L.ov && 'No effect while the turn overlay is on: bodies are drawn flat already. Turn the overlay off to use it.',
@@ -3789,12 +3807,15 @@ function gvCtHide() {
 const gvDimmed = el => !!el && el.getAttribute && el.getAttribute('aria-disabled') === 'true';
 // Panels fold: open at a width over 760px, folded under it, and the choice kept; a folded one shows its header line only.
 const gvNarrow = () => { try { return matchMedia('(max-width: 760px)').matches; } catch (e) { return innerWidth <= 760; } };
-const gvFoldOpen = k => { if (GV.fold[k] === undefined) GV.fold[k] = !gvNarrow(); return GV.fold[k]; };
-const GV_FOLD_BOX = {bar: 'gvbar', ov: 'gvov', side: 'gvside', leg: 'gvlegend'};
+// The stats window is open with nothing selected and folded to a one-line chip with a selection; a press is remembered for
+// each of the two states.
+const gvFoldKey = k => (k === 'stats' ? 'stats:' + (GV.sel ? 'sel' : 'nosel') : k);
+const gvFoldOpen = k => { const key = gvFoldKey(k); if (GV.fold[key] === undefined) GV.fold[key] = k === 'stats' ? !GV.sel && !gvNarrow() : !gvNarrow(); return GV.fold[key]; };
+const GV_FOLD_BOX = {bar: 'gvbar', ov: 'gvov', side: 'gvside', leg: 'gvlegend', stats: 'gvstats'};
 const gvFoldHtml = (k, title, body) => `<button class="gv-fh" data-gvfold="${k}" aria-expanded="${gvFoldOpen(k)}" title="${gvFoldOpen(k) ? 'fold' : 'unfold'} this panel"><span class="gv-chev" aria-hidden="true"></span><span>${title}</span></button><div class="gv-fb">${body}</div>`;
 const gvFoldClass = k => 'gv-box' + (gvFoldOpen(k) ? '' : ' folded');
 function gvFoldToggle(L, k, btn) {
-  GV.fold[k] = !gvFoldOpen(k);
+  GV.fold[gvFoldKey(k)] = !gvFoldOpen(k);
   $(GV_FOLD_BOX[k]).className = gvFoldClass(k);
   if (btn && btn.setAttribute) btn.setAttribute('aria-expanded', String(GV.fold[k]));
   gvMeasure(L); gvAsk(L);
@@ -3806,9 +3827,11 @@ function gvPanel(L) {
   gvTools(L);
   $('vGravity').dataset.sel = n ? '1' : ''; // narrow: one bottom sheet, the selection else the turn
   const had = !!(s.contains && document.activeElement && s.contains(document.activeElement));
+  s.hidden = !n && !!L.ov; // with a turn shown, the stats window takes the hint's place
+  gvStats(L);
   if (!n) { s.className = 'gv-box'; s.innerHTML = `<span class="muted">${GV.touch ? 'Tap a body.' : 'Hover or click a body.'} A question that touches several targets or rules is drawn larger and sits between them.</span>`; return; }
   const nb = [...L.adj.get(n.id)].map(i => L.byId.get(i));
-  let h = gvDescribe(L, n);
+  let h = gvDescribe(L, n, true); // the panel's header already names the body
   for (const k of ['target', 'rule', 'question', 'tool', 'state']) {
     const g = nb.filter(x => x.kind === k);
     if (g.length) h += `<details class="gv-nbl"${g.length <= 5 ? ' open' : ''}><summary>${esc(GV_KIND[k])}s (${g.length})</summary><ul>${g.map(x => `<li><button class="gv-nb" data-gvid="${esc(x.id)}"><i class="gv-sw" style="background:${gvCol(L, x)}"></i>${esc(x.label)}</button></li>`).join('')}</ul></details>`;
@@ -3885,45 +3908,60 @@ function gvRoundLine(L, step) {
   const es = (L.ov.t.idx.all || []).filter(e => (e.round || 0) === step), c = {};
   for (const e of es) { const st = dispState(e); if (!GV_HELD.includes(st)) c[st] = (c[st] || 0) + 1; }
   const rest = Object.keys(c).sort((p, q) => SEV[q] - SEV[p] || (p < q ? -1 : 1)).map(st => `, ${c[st]} ${STATE_LABEL[st] || st}`).join('');
-  return `round ${step}: +${es.length} ${es.length === 1 ? 'entry' : 'entries'}${rest}`;
+  return `+${es.length} ${es.length === 1 ? 'entry' : 'entries'}${rest}`;
 }
+// The key: what entered in the round shown, the state counts and the target counts, each a filter chip.
 function gvOvKey(L) {
   const ov = L.ov;
   if (!ov) return;
   const step = gvStepOf(L), c = {};
   for (const n of L.nodes) if (n.os) c[n.os] = (c[n.os] || 0) + 1;
-  $('gvroundl').textContent = `round ${step} of ${ov.maxR}`;
+  const rl = $('gvroundl'); if (rl) rl.textContent = `round ${step} of ${ov.maxR}`;
   const rd = $('gvroundd'); if (rd) rd.textContent = gvRoundLine(L, step);
   const r = $('gvround'); if (r) r.value = String(step);
+  const kv = $('gvkey'); if (!kv) return;
   const states = ['value', 'short', 'nobounds', 'det', 'Unsure', 'Unavailable', 'Unasked', 'absent'].filter(s => c[s]);
   const tcount = {};
   for (const n of L.nodes) if (n.ts) tcount[n.ts] = (tcount[n.ts] || 0) + 1;
-  const tchips = Object.keys(GV_TS).filter(k => tcount[k]).map(k => `<span title="derived from the entries that estimate the target: ${GV_TS_SHAPE[k]}">${gvTsSw(L, k)}${tcount[k]} ${plural2(tcount[k], 'target')} ${GV_TS_LABEL[k]}</span>`).join('');
-  // each count is a filter: pressed, it dims every body not in that state
   const sw = st => { const g = GV_RING[st], col = g ? T_(L)[g[0]] : st === 'det' ? T_(L).neutral : T_(L).edge; return `<i class="gv-sw" style="background:transparent;${g && g[1] || st === 'none' || st === 'later' ? `border:2px ${st === 'later' ? 'dotted' : g && g[1] ? 'dashed' : 'dotted'} ${col};box-sizing:border-box;` : `box-shadow:inset 0 0 0 2px ${col};`}"></i>`; };
   const chip = (s, inner) => `<button class="gv-chipb" data-gvst="${s}" aria-pressed="${GV.st === s}" title="${GV.st === s ? 'show every body again' : 'dim every body not in this state'}">${inner}</button>`;
-  const act = document.activeElement, had = act && act.dataset && act.dataset.gvst;
-  $('gvkey').innerHTML = states.map(s => chip(s, `${sw(s)}${c[s]} ${STATE_LABEL[s]}`)).join('') + tchips + (c.none ? chip('none', `${sw('none')}${c.none} no entry`) : '') + (c.later ? chip('later', `${sw('later')}${c.later} in a later round`) : '');
-  if (had) { const f = $('gvkey').querySelector && $('gvkey').querySelector(`[data-gvst="${had}"]`); if (f && f.focus) f.focus({preventScroll: true}); }
+  const tchip = k => `<button class="gv-chipb" data-gvtg="${k}" aria-pressed="${GV.tg === k}" title="${GV.tg === k ? 'show every body again' : 'dim every body but the targets that are ' + GV_TS_LABEL[k]}: ${GV_TS_SHAPE[k]}, derived from the entries that estimate the target">${gvTsSw(L, k)}${tcount[k]} ${GV_TS_LABEL[k]}</button>`;
+  const act = document.activeElement, hs = act && act.dataset && act.dataset.gvst, ht = act && act.dataset && act.dataset.gvtg;
+  kv.innerHTML = states.map(s => chip(s, `${sw(s)}${c[s]} ${STATE_LABEL[s]}`)).join('') + (c.none ? chip('none', `${sw('none')}${c.none} no entry`) : '') + (c.later ? chip('later', `${sw('later')}${c.later} in a later round`) : '');
+  const tk = $('gvtkey'); if (tk) tk.innerHTML = Object.keys(GV_TS).filter(k => tcount[k]).map(tchip).join('');
+  const back = (host, sel) => { const f = host && host.querySelector && host.querySelector(sel); if (f && f.focus) f.focus({preventScroll: true}); };
+  if (hs) back(kv, `[data-gvst="${hs}"]`);
+  if (ht) back(tk, `[data-gvtg="${ht}"]`);
+}
+// The stats' own body: Entries, Targets, and one line for the root and the declared reads.
+function gvStatsHtml(L) {
+  const ov = L.ov, declared = ov.hops.filter(h => h.declared).length;
+  const note = [ov.root ? `root <span class="mono">${esc(ov.root)}</span>` : '', declared ? `${plural(declared, 'declared read')}, dashed` : ''].filter(Boolean).join(' · ');
+  return `<div class="gv-sh">Entries</div><div class="gv-key" id="gvkey"></div><div class="gv-sh">Targets</div><div class="gv-key" id="gvtkey"></div>${note ? `<div class="gv-note">${note}</div>` : ''}`;
+}
+// The floating stats window, where the hint stood: its own box wide, the turn panel's body narrow.
+function gvStats(L) {
+  const box = $('gvstats');
+  if (!box) return;
+  if (!L.ov || gvNarrow()) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false; box.className = gvFoldClass('stats');
+  box.innerHTML = gvFoldHtml('stats', 'Turn stats', gvStatsHtml(L));
+  gvOvKey(L);
 }
 function gvOvPanel(L) {
   const box = $('gvov'), ov = L.ov;
   box.hidden = !ov;
-  if (!ov) { box.innerHTML = ''; return; }
-  const t = ov.t, declared = ov.hops.filter(h => h.declared).length;
-  const dec = gvDecision(t), full = whyText(t).replace(/ <- /g, ' ← ');
-  const body = `<div class="gv-row"><button class="btn" data-gvact="turn-prev" title="previous turn">‹</button><span class="gv-k" style="flex:1;margin:0">turn ${esc(turnName(t, cur().turns.indexOf(t)))}</span><button class="btn" data-gvact="turn-next" title="next turn">›</button></div>
-    ${t.outline.record_hash || t.outline.design_hash ? `<div class="gv-row">${hashChip(t.outline.record_hash, 'record', 'record')}${hashChip(t.outline.design_hash, 'design', 'design')}</div>` : ''}
-    <div class="gv-why">${decIcon(t.sum.dkind)} <span>${esc(dec)}</span></div>
-    ${full && full !== dec ? `<div><button class="btn" data-gvact="why" aria-expanded="${GV.whyOpen}">${GV.whyOpen ? 'hide the full text' : 'full text'}</button></div>` : ''}${GV.whyOpen ? `<div class="gv-tx">${whyHtml(full)}</div>` : ''}
-    <div class="gv-row"><button class="btn" data-gvact="play">${gvPlay ? 'pause' : 'play'}</button><button class="btn" data-gvact="prev-round" title="previous round  (a)">‹</button><input type="range" id="gvround" min="0" max="${ov.maxR}" value="${gvStepOf(L)}" aria-label="the round shown" title="the round shown  (a previous, d next)"><button class="btn" data-gvact="next-round" title="next round  (d)">›</button></div>
-    <div class="gv-stat"><span id="gvroundl" aria-live="polite"></span> · <span id="gvroundd"></span></div>
-    <div class="gv-row"><label><input type="checkbox" id="gvhide"${GV.hide ? ' checked' : ''}>hide what was not reached</label><label><input type="checkbox" id="gvlin"${GV.lin ? ' checked' : ''}>only the lineage</label></div>
-    <div class="muted">${ov.root ? `root <span class="mono">${esc(ov.root)}</span>, ringed in ink; ` : ''}the lineage is lit; a target's ring is derived from the entries that estimate it (full: answered; split by the held to the open: mixed; double: unresolved; dashed: not evaluated)${declared ? `; ${plural(declared, 'declared read')}, dashed: not a record of what was read` : ''}</div>
-    <div class="gv-key" id="gvkey"></div>`;
+  if (!ov) { box.innerHTML = ''; gvStats(L); return; }
+  const t = ov.t, dec = gvDecision(t), full = whyText(t).replace(/ <- /g, ' ← ');
+  const hd = `<div class="gv-lh"><button class="gv-fh" data-gvfold="ov" aria-expanded="${gvFoldOpen('ov')}" aria-label="turn panel" title="${gvFoldOpen('ov') ? 'fold' : 'unfold'} the turn panel"><span class="gv-chev" aria-hidden="true"></span></button><div class="gv-hd" style="flex:1;min-width:0"><button class="btn" data-gvact="turn-prev" title="previous turn">‹</button><span class="gv-k">turn ${esc(turnName(t, cur().turns.indexOf(t)))}</span><button class="btn" data-gvact="turn-next" title="next turn">›</button></div></div>
+    <div class="gv-dec">${decIcon(t.sum.dkind)}<span class="gv-dect" title="${esc(dec)}">${esc(dec)}</span>${full && full !== dec ? `<button class="gv-link" data-gvact="why" aria-expanded="${GV.whyOpen}">${GV.whyOpen ? 'hide' : 'full text'}</button>` : ''}</div>${GV.whyOpen ? `<div class="gv-note">${whyHtml(full)}</div>` : ''}`;
+  const body = `${t.outline.record_hash || t.outline.design_hash ? `<div class="gv-row gv-nowrap">${hashChip(t.outline.record_hash, 'record', 'record')}${hashChip(t.outline.design_hash, 'design', 'design')}</div>` : ''}
+    <div class="gv-row gv-nowrap"><button class="btn" data-gvact="play">${gvPlay ? 'pause' : 'play'}</button><button class="btn" data-gvact="prev-round" title="previous round  (a)">‹</button><input type="range" id="gvround" min="0" max="${ov.maxR}" value="${gvStepOf(L)}" aria-label="the round shown" title="the round shown  (a previous, d next)"><button class="btn" data-gvact="next-round" title="next round  (d)">›</button><span class="gv-stat" id="gvroundl" aria-live="polite"></span></div>
+    <div class="gv-stat" id="gvroundd"></div>${gvNarrow() ? gvStatsHtml(L) : ''}`;
   box.className = gvFoldClass('ov');
-  box.innerHTML = gvFoldHtml('ov', `Turn · ${esc(dec)}`, body);
+  box.innerHTML = hd + `<div class="gv-fb">${body}</div>`;
   gvOvKey(L);
+  gvStats(L);
 }
 // Search runs over every body, hidden by the filters or not: the id, the short label, the wording or statement and, under
 // a turn's overlay, the entry's value text. The hits come in a fixed order (exact, prefix, heavy, the rest) that Enter cycles.
@@ -3981,8 +4019,8 @@ function gvDrawView() {
   if (L.mode3 !== GV.mode3) gvMode(L, GV.mode3);
   if (GV.sel && !L.byId.has(GV.sel)) GV.sel = null;
   if (GV.kind && !L.nodes.some(n => n.kind === GV.kind)) GV.kind = null; // no body of that kind in this design
-  for (const [id, k] of [['gvq', 'light'], ['gvcross', 'cross'], ['gvhh', 'hh'], ['gvkind', 'byDomain'], ['gvovon', 'ov'], ['gvflat', 'flat'], ['gvhalo', 'halo'], ['gv3', 'mode3'], ['gvspin', 'spin']]) $(id).checked = !!GV[k];
-  gvOverlay(L, curTurn()); $('gvovl').hidden = !L.avail; $('gvgturn').hidden = !L.avail; gvFind(L);
+  for (const [id, k] of [['gvq', 'light'], ['gvcross', 'cross'], ['gvhh', 'hh'], ['gvkind', 'byDomain'], ['gvovon', 'ov'], ['gvflat', 'flat'], ['gvhalo', 'halo'], ['gv3', 'mode3'], ['gvspin', 'spin'], ['gvhide', 'hide'], ['gvlin', 'lin']]) $(id).checked = !!GV[k];
+  gvOverlay(L, curTurn()); $('gvovl').hidden = !L.avail; $('gvgturn').hidden = !L.avail; $('gvlturn').hidden = !L.avail; gvFind(L);
   $('gvbar').className = gvFoldClass('bar'); $('gvmoreb').setAttribute('aria-expanded', String(gvFoldOpen('bar')));
   gvPanel(L); gvLegend(L); gvOvPanel(L); gvMeasure(L); gvTools(L);
   // the first fit comes once the panels hold their content, so their boxes are measured as they will stand
@@ -4007,8 +4045,8 @@ function gvSet(k, v) {
   else if (k === 'ov') { if (!v && gvPlay) { clearTimeout(gvPlay); gvPlay = null; } gvOverlay(L, curTurn()); gvOvPanel(L); gvPanel(L); gvLegend(L); gvMeasure(L); writeHash(); }
   else if (k === 'byDomain') { gvLegend(L); gvPanel(L); }
   else if (k === 'spin') L.idle = 0;
-  if (k === 'step') { gvOverlay(L, curTurn()); gvOvKey(L); if (GV.find) gvFind(L); } else if (k === 'hide' || k === 'lin' || k === 'st') gvOvKey(L);
-  if (k === 'step' || k === 'hide' || k === 'lin' || k === 'byDomain' || k === 'light' || k === 'cross' || k === 'st' || k === 'kind') writeHash();
+  if (k === 'step') { gvOverlay(L, curTurn()); gvOvKey(L); if (GV.find) gvFind(L); } else if (k === 'hide' || k === 'lin' || k === 'st' || k === 'tg') gvOvKey(L);
+  if (k === 'step' || k === 'hide' || k === 'lin' || k === 'byDomain' || k === 'light' || k === 'cross' || k === 'st' || k === 'tg' || k === 'kind') writeHash();
   if (k === 'kind' || k === 'light') gvLegend(L);
   gvTools(L);
   gvDraw(L); gvSnapshot(L); gvKick();
@@ -4079,6 +4117,7 @@ function gvKey(ev) {
     if (GV.find || L.hits) { GV.find = ''; $('gvsearch').value = ''; gvFind(L); gvDraw(L); return true; }
     if (GV.sel) { gvSelect(L, null); return true; }
     if (GV.st) { gvSet('st', null); return true; }
+    if (GV.tg) { gvSet('tg', null); return true; }
     if (GV.kind) { gvSet('kind', null); return true; }
     if (L.ov && GV.step != null) { gvSet('step', null); return true; }
     return false;
@@ -4293,10 +4332,10 @@ function gvWheel(ev) {
     if (k === 'mode3') gvLegend(gvL);
   });
   $('vGravity').addEventListener('click', ev => {
-    const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvact],[data-gvid],[data-gvst],[data-gvkind],[data-gvfold]') : null;
+    const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvact],[data-gvid],[data-gvst],[data-gvtg],[data-gvkind],[data-gvfold]') : null;
     if (!el || !gvL) return;
     if (gvDimmed(el)) { gvCtShow(el, true); return; }
-    if (el.dataset.gvid) gvSelect(gvL, gvL.byId.get(el.dataset.gvid) || null); else if (el.dataset.gvfold) gvFoldToggle(gvL, el.dataset.gvfold, el); else if (el.dataset.gvkind) gvSet('kind', GV.kind === el.dataset.gvkind ? null : el.dataset.gvkind); else if (el.dataset.gvst) gvSet('st', GV.st === el.dataset.gvst ? null : el.dataset.gvst); else gvAct(el.dataset.gvact);
+    if (el.dataset.gvid) gvSelect(gvL, gvL.byId.get(el.dataset.gvid) || null); else if (el.dataset.gvfold) gvFoldToggle(gvL, el.dataset.gvfold, el); else if (el.dataset.gvkind) gvSet('kind', GV.kind === el.dataset.gvkind ? null : el.dataset.gvkind); else if (el.dataset.gvtg) gvSet('tg', GV.tg === el.dataset.gvtg ? null : el.dataset.gvtg); else if (el.dataset.gvst) gvSet('st', GV.st === el.dataset.gvst ? null : el.dataset.gvst); else gvAct(el.dataset.gvact);
   });
   $('gvside').addEventListener('pointerover', ev => {
     const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvid]') : null, L = gvL;
@@ -4403,6 +4442,7 @@ function writeHash(push) {
     if (GV.byDomain) h.set('gdom', '1');
     if (!GV.light) h.set('gq', '0');
     if (GV.st) h.set('gst', GV.st);
+    if (GV.tg) h.set('gt', GV.tg);
     if (GV.kind) h.set('gk', GV.kind);
     if (GV.cross) h.set('gx', '1');
     if (GV.drag !== 'orbit') h.set('gdrag', GV.drag);
@@ -4538,6 +4578,7 @@ function readHash() {
   { const v = Number(h.get('gr')); GV.step = h.has('gr') && isFinite(v) ? Math.max(0, Math.round(v)) : null; GV.stepFromHash = GV.step != null; }
   GV.hide = h.get('ghide') === '1'; GV.lin = h.get('glin') === '1'; GV.byDomain = h.get('gdom') === '1';
   GV.st = GV_STATES.includes(h.get('gst')) ? h.get('gst') : null;
+  GV.tg = GV_TS[h.get('gt')] ? h.get('gt') : null;
   GV.kind = GV_KINDS.includes(h.get('gk')) ? h.get('gk') : null;
   GV.light = h.get('gq') !== '0'; GV.cross = h.get('gx') === '1';
   GV.selRestore = !!GV.sel;

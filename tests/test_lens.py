@@ -1412,7 +1412,7 @@ def test_the_gravity_overlay_marks_by_dispState(tmp_path: Path, turns: dict[str,
               .map((r) => [r, stateFor(t.idx, r) || "none"]));
             out[p] = {marks: G.marks, want, rings: G.rings, lit: G.lit, hops: G.hops, root: G.root,
               rootOf: rootOf(t.outline).ref, rounds: G.rounds,
-              panel: ["gvov", "gvkey", "gvroundl"]
+              panel: ["gvov", "gvstats", "gvkey", "gvroundl"]
                 .map((id) => strip(el(id).innerHTML || el(id).textContent)).join(" ")};
             gvSet("step", 0); out[p].step0 = LAST_GRAVITY.marks; out[p].lit0 = LAST_GRAVITY.lit;
             gvSet("step", null);
@@ -1638,7 +1638,7 @@ def test_the_gravity_overlay_shades_targets_and_can_be_turned_off(
           const est = [...L.adj.get("tg:urgent")].map((i) => [i, L.byId.get(i).os]);
           out.est = est; out.ts = tg.ts; out.tstate = LAST_GRAVITY.tstate;
           out.tip = strip(gvDescribe(L, tg));
-          out.key = strip(document.getElementById("gvkey").innerHTML);
+          out.key = strip(document.getElementById("gvtkey").innerHTML);
           out.byRound = [];
           for (let r = 0; r <= L.ov.maxR; r++) { gvSet("step", r); out.byRound.push(tg.ts); }
           gvSet("step", null);
@@ -1673,7 +1673,7 @@ def test_the_gravity_overlay_shades_targets_and_can_be_turned_off(
     assert shown["ts"] == want
     assert shown["tstate"]["tg:urgent"] == shown["ts"]
     assert "derived" in shown["tip"]
-    assert "target" in shown["key"]
+    assert "mixed" in shown["key"]  # the target counts, in their own row
     assert shown["byRound"][0] == "untested"  # round 0 reaches no estimating entry
     assert shown["byRound"][-1] == shown["ts"]
     assert shown["offered"] is True
@@ -2452,7 +2452,7 @@ def test_the_gravity_turn_panel_is_compact_and_steps_rounds_turns_and_states(
           gvAct("prev-round"); out.prev = [GV.step, el("gvroundd").textContent];
           for (let i = 0; i < 5; i++) gvAct("prev-round"); out.floor = GV.step;
           for (let i = 0; i < 9; i++) gvAct("next-round"); out.ceil = GV.step;
-          gvAct("why"); out.open = [GV.whyOpen, box().includes("gv-tx")]; gvAct("why");
+          gvAct("why"); out.open = [GV.whyOpen, box().includes("gv-note")]; gvAct("why");
           const click = (d) => $("vGravity").listeners.click.forEach((f) => f({target:
             {closest: () => ({dataset: d})}}));
           const key = (k) => gvKey({key: k, target: document.body});
@@ -2468,12 +2468,12 @@ def test_the_gravity_turn_panel_is_compact_and_steps_rounds_turns_and_states(
           return out; })()""",  # noqa: E501
     )
     assert shown["dec"] == "route: calendar · by d:turn"
-    assert '{"' not in shown["head"].split("gv-why")[1].split("</div>")[0]
+    assert '{"' not in shown["head"].split("gv-dec")[1].split("</div>")[0]
     assert 'data-gvact="turn-prev"' in shown["head"]
     assert 'data-gvact="prev-round"' in shown["head"]
-    assert shown["roundLine"].startswith(f"round {shown['maxR']}: +")
+    assert shown["roundLine"].startswith("+")
     assert shown["prev"][0] == shown["maxR"] - 1
-    assert shown["prev"][1].startswith(f"round {shown['maxR'] - 1}: +")
+    assert shown["prev"][1].startswith("+")
     assert shown["floor"] == 0  # clamped
     assert shown["ceil"] == shown["maxR"]
     assert shown["open"] == [True, True]
@@ -2534,7 +2534,7 @@ def test_the_gravity_canvas_names_its_keys_and_the_panels_are_live_regions() -> 
     for word in ("period and comma", "Enter", "arrows", "slash", "a and d", "Mouse:"):
         assert word in canvas, word
     assert 'id="gvside" aria-live="polite"' in html
-    assert '<span id="gvroundl" aria-live="polite">' in html
+    assert 'id="gvroundl" aria-live="polite"' in html
     assert 'id="gvlive" class="gv-sr" role="status"' in html
     # the focus order: the toolbar, the canvas, then the panels
     order = [html.index(f'id="{i}"') for i in ("gvbar", "gvc", "gvov", "gvside", "gvlegend")]
@@ -3161,7 +3161,7 @@ def test_the_help_and_the_chips_are_keyboard_reachable() -> None:
     html = page([], [DESIGN.document])
     helpbox = html[html.index('id="gvhelp"') : html.index('id="gvov"')]
     assert "legend's kinds" in helpbox
-    assert "the state and kind filters" in helpbox
+    assert "the state, target and kind filters" in helpbox
     assert ".gv-chipb[aria-pressed=" in html
 
 
@@ -3182,3 +3182,160 @@ def test_a_body_must_match_both_the_kind_and_the_state_chip(tmp_path: Path) -> N
           GV.kind = null; GV.st = null; return out; })()""",  # noqa: E501
     )
     assert shown == pytest.approx([1, 0.12, 0.12, 0.0144, 1, 0.12, 1, 1, 0.12])
+
+
+# ---------- gravity: the calmer turn panel and the stats window ----------
+
+
+@needs_node
+def test_the_stats_window_takes_the_hint_s_place_and_folds_to_a_chip(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          const out = {}, el = (id) => document.getElementById(id);
+          const snap = () => ({stats: [el("gvstats").hidden, el("gvstats").className],
+            side: [el("gvside").hidden, strip(el("gvside").innerHTML).slice(0, 40)]});
+          S.view = "gravity"; S.turn = null; GV.sel = null; GV.fold = {}; GV.ov = true; drawView(); frames(10);
+          out.noTurn = snap();
+          S.turn = 0; drawView(); frames(10); const L = gvL;
+          out.turn = snap(); out.html = el("gvstats").innerHTML; out.entries = el("gvkey").innerHTML;
+          out.targets = el("gvtkey").innerHTML; out.left = el("gvov").innerHTML;
+          gvSelect(L, L.byId.get("d:act"));
+          out.selected = snap(); out.chip = strip(el("gvstats").innerHTML);
+          const btn = {setAttribute() {}};
+          gvFoldToggle(L, "stats", btn); out.opened = el("gvstats").className;
+          gvSelect(L, null); out.cleared = snap();
+          gvSet("ov", false); out.off = snap();
+          gvSet("ov", true);
+          globalThis.matchMedia = () => ({matches: true}); GV.fold = {}; drawView();
+          out.narrow = [el("gvstats").hidden, el("gvov").innerHTML.includes('id="gvkey"'),
+            el("gvov").innerHTML.includes('id="gvtkey"')];
+          delete globalThis.matchMedia;
+          return out; })()""",  # noqa: E501
+    )
+    assert shown["noTurn"]["stats"][0] is True  # no turn: no stats
+    assert shown["noTurn"]["side"][0] is False
+    assert shown["noTurn"]["side"][1].startswith("Hover or click a body")  # the idle hint stays
+    assert shown["turn"]["stats"] == [False, "gv-box"]  # open, in the hint's place
+    assert shown["turn"]["side"][0] is True
+    html = shown["html"]
+    for heading in ("Entries", "Targets", "Turn stats"):
+        assert heading in html
+    assert 'data-gvst="' in shown["entries"]
+    assert 'data-gvtg="' in shown["targets"]
+    assert "root <span" in html
+    assert 'id="gvkey"' not in shown["left"]  # the left panel holds no stats
+    assert shown["selected"]["stats"][1] == "gv-box folded"  # a chip beside the selection
+    assert shown["selected"]["side"][0] is False
+    assert "Turn stats" in shown["chip"]
+    assert shown["opened"] == "gv-box"  # it expands in place
+    assert shown["cleared"]["stats"] == [False, "gv-box"]  # back when the selection clears
+    assert shown["cleared"]["side"][0] is True
+    assert shown["off"]["stats"][0] is True  # overlay off: no stats
+    assert shown["off"]["side"][0] is False
+    assert shown["narrow"] == [True, True, True]  # a phone: the stats ride in the turn sheet
+
+
+@needs_node
+def test_the_left_turn_panel_is_calm_and_the_decision_is_said_once(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          S.view = "gravity"; S.turn = 0; GV.ov = true; GV.whyOpen = false; drawView(); frames(10);
+          const L = gvL, out = {}, el = (id) => document.getElementById(id);
+          out.html = el("gvov").innerHTML; out.dec = gvDecision(L.ov.t);
+          out.roundLine = el("gvroundd").textContent; out.label = el("gvroundl").textContent;
+          out.max = L.ov.maxR; out.layout = ["gvhide", "gvlin"].map((id) => GV_TOOLS.includes(id));
+          gvSet("ov", false); out.dimmed = ["gvhide", "gvlin"].map((id) => GV_OFF[id]);
+          return out; })()""",
+    )
+    html = shown["html"]
+    assert html.count(shown["dec"]) == 2  # the visible line and its tooltip, nothing else
+    assert 'class="gv-dect"' in html
+    assert "gvhide" not in html
+    assert "gvlin" not in html
+    assert "ringed in ink" not in html  # the explanation left the panel
+    assert "derived from the entries" not in html
+    assert html.count('class="hchip"') == 2
+    assert html.count('class="gv-row gv-nowrap"') == 2  # the chips on one row, the stepper on one
+    assert shown["roundLine"].startswith("+")
+    assert shown["label"] == f"round {shown['max']} of {shown['max']}"
+    assert shown["layout"] == [True, True]
+    assert all("No effect without a turn overlay" in why for why in shown["dimmed"])
+
+
+def test_hide_and_lineage_live_in_the_layout_options_and_the_help_explains_the_overlay() -> None:
+    html = page([], [DESIGN.document])
+    layout = html[html.index('<details id="gvlayout">') : html.index("</details>")]
+    assert 'id="gvlturn"' in layout
+    for control in ("gvhide", "gvlin"):
+        assert f'id="{control}"' in layout
+    assert layout.index("Turn</b>") < layout.index('id="gvhide"')
+    helpbox = html[html.index('id="gvhelp"') : html.index('id="gvov"')]
+    assert "Reading a turn" in helpbox
+    assert "ringed in ink" in helpbox
+    assert "not a record of what was read" in helpbox
+
+
+@needs_node
+def test_hide_and_lineage_round_trip_and_the_target_chips_filter(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          const out = {}, el = (id) => document.getElementById(id);
+          globalThis.location = {hash: ""}; globalThis.history = {replaceState: (x, y, h) =>
+            { location.hash = h; }};
+          S.view = "gravity"; S.turn = 0; GV.hide = false; GV.lin = false; GV.tg = null; GV.st = null;
+          GV.kind = null; GV.sel = null; GV.step = null; drawView(); frames(10);
+          const L = gvL;
+          gvSet("hide", true); gvSet("lin", true); out.hash = location.hash;
+          GV.hide = false; GV.lin = false; readHash(); render();
+          out.back = [GV.hide, GV.lin, el("gvhide").checked, el("gvlin").checked];
+          gvSet("hide", false); gvSet("lin", false);
+          // the target chips are filters
+          const tgt = L.nodes.filter((n) => n.kind === "target" && n.ts);
+          const states = [...new Set(tgt.map((n) => n.ts))]; out.states = states;
+          const ts = states[0], inT = tgt.find((n) => n.ts === ts), outT = tgt.find((n) => n.ts !== ts);
+          const rule = L.nodes.find((n) => n.kind === "rule");
+          const click = (d) => el("vGravity").listeners.click.forEach((f) => f({target:
+            {closest: () => ({dataset: d, getAttribute: () => null})}}));
+          click({gvtg: ts});
+          out.pressed = [GV.tg, el("gvtkey").innerHTML.includes('aria-pressed="true"')];
+          out.dim = [gvOvA(L, inT), outT ? gvOvA(L, outT) : null, gvOvA(L, rule)];
+          writeHash(); out.hashTg = location.hash;
+          click({gvtg: ts}); out.cleared = GV.tg; writeHash(); out.hash0 = location.hash;
+          // Esc: the state, then the target state, then the kind
+          gvSet("st", "Unsure"); gvSet("tg", ts); gvSet("kind", "rule");
+          const key = (k) => gvKey({key: k, target: document.body});
+          out.esc = [key("Escape"), GV.st, GV.tg, GV.kind]; out.esc2 = [key("Escape"), GV.tg, GV.kind];
+          out.esc3 = [key("Escape"), GV.kind];
+          location.hash = "#view=gravity&gt=" + ts; readHash(); out.read = GV.tg;
+          location.hash = "#view=gravity&gt=nonsense"; readHash(); out.bad = GV.tg;
+          return out; })()""",  # noqa: E501
+    )
+    for key in ("ghide=1", "glin=1"):
+        assert key in shown["hash"]
+    assert shown["back"] == [True, True, True, True]
+    ts = shown["states"][0]
+    assert shown["pressed"] == [ts, True]
+    assert shown["dim"][0] == 1
+    if shown["dim"][1] is not None:
+        assert shown["dim"][1] < 0.2  # another target state dims
+    assert shown["dim"][2] == pytest.approx(0.12)  # a body that is not a target
+    assert f"gt={ts}" in shown["hashTg"]
+    assert shown["cleared"] is None
+    assert "gt=" not in shown["hash0"]
+    assert shown["esc"] == [True, None, ts, "rule"]
+    assert shown["esc2"] == [True, None, "rule"]
+    assert shown["esc3"] == [True, None]
+    assert shown["read"] == ts
+    assert shown["bad"] is None
