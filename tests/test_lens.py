@@ -2220,38 +2220,71 @@ def test_a_gravity_label_never_covers_a_heavy_body_or_another_label(tmp_path: Pa
 
 
 @needs_node
-def test_the_overlay_draws_bodies_in_one_neutral_tint(
+def test_the_overlay_keeps_each_kind_s_fill_and_draws_flat_with_inset_rims(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
-    """With a turn's overlay on, every body is one tint and flat (no sprite), so the state's
-    rings are the only colour, and the legend says so; off, the type hues are back."""
+    """Under a turn's overlay a body keeps its kind's fill, flat (no sprite, no halo), with its
+    rim just inside the body so the state ring stands clear of it; colour by domain stays off;
+    the state is Graph's block with an inked left bar in both modes; the legend says so."""
     shown = _run(
         page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = 0; GV.ov = true; GV.mode3 = false; GV.flat = false;
-          GV.halo = true; drawView(); frames(100);
+          GV.halo = true; GV.byDomain = true; drawView(); frames(100);
           const L = gvL, out = {}, cv = document.getElementById("gvc").getContext("2d");
-          out.on = new Set(L.nodes.map((n) => gvCol(L, n))).size;
-          out.tint = L.T.tint; out.first = gvCol(L, L.nodes[0]);
-          L.tf = {x: L.tf.x, y: L.tf.y, k: 4}; cv.counts.drawImage = 0; gvDraw(L);
-          out.sprites = cv.counts.drawImage;
+          """
+        + _RECORDER
+        + """
+          const T = L.T;
+          out.kinds = Object.fromEntries(["target", "rule", "question", "tool", "state"]
+            .map((k) => [k, L.nodes.filter((n) => n.kind === k).every((n) => gvCol(L, n) === T.kind[k])]));
+          out.distinct = new Set(L.nodes.map((n) => gvCol(L, n))).size;
+          out.hues = T.kind;
+          L.tf = {x: L.tf.x, y: L.tf.y, k: 4}; cv.counts.drawImage = 0;
+          rec.ev.length = 0; gvDraw(L);
+          out.sprites = rec.ev.filter((e) => e.k === "drawImage").length;
+          const k = L.tf.k;
+          const arcs = (col, lw) => { const r = [];
+            rec.ev.forEach((e, i) => { if (e.k === "stroke" && e.ss === col && Math.abs(e.lw - lw) < 1e-9) {
+              for (let j = i - 1; j >= 0; j--) if (rec.ev[j].k === "arc") { r.push(rec.ev[j].a[2]); break; } } });
+            return r; };
+          const radius = (kind, d) => L.nodes.filter((n) => n.kind === kind && n.va > .5)
+            .map((n) => n.r * n.sc * n.va - d);
+          out.ruleRims = arcs(T.kind.rule, 2.2); out.ruleWant = radius("rule", 1.1);
+          out.qRims = arcs(T.kind.question, 1.8); out.qWant = radius("question", .9);
+          out.block = rec.ev.filter((e) => e.k === "rect" || e.k === "fillRect").length;
+          out.bar = rec.ev.filter((e) => e.k === "fillRect" && e.fs === T.fg).length;
+          out.diamond = rec.ev.filter((e) => e.k === "closePath" && e.fs === T.kind.state).length;
           out.legend = strip(document.getElementById("gvlegend").innerHTML);
-          gvSet("ov", false); out.off = new Set(L.nodes.map((n) => gvCol(L, n))).size;
+          out.legendHtml = document.getElementById("gvlegend").innerHTML;
+          out.reason = GV_OFF_WHY.gvkind(L);
+          gvSet("ov", false); GV.byDomain = true; gvLegend(L);
+          out.domainOff = new Set(L.nodes.map((n) => gvCol(L, n))).size;
           out.legendOff = strip(document.getElementById("gvlegend").innerHTML);
-          cv.counts.drawImage = 0; gvDraw(L); out.spritesOff = cv.counts.drawImage;
-          GV.halo = false;
-          return out; })()""",
+          rec.ev.length = 0; gvDraw(L); out.barOff = rec.ev.filter((e) => e.k === "fillRect" && e.fs === T.fg).length;
+          out.spritesOff = cv.counts.drawImage; GV.halo = false; GV.byDomain = false;
+          return out; })()""",  # noqa: E501
     )
-    assert shown["on"] == 1
-    assert shown["first"] == shown["tint"]
+    assert all(shown["kinds"].values())  # the kind hue, domain colouring or not
+    assert shown["distinct"] == 5
     assert shown["sprites"] == 0
-    assert "neutral tint" in shown["legend"]
-    assert "the state is the colour" in shown["legend"]
-    assert shown["off"] > 1
-    assert "neutral tint" not in shown["legendOff"]
-    assert "the kind of body" in shown["legendOff"]
-    assert shown["spritesOff"] > 0
+    assert shown["ruleRims"]
+    for got in shown["ruleRims"]:
+        assert any(abs(got - w) < 1e-9 for w in shown["ruleWant"])  # centred at r - 1.1
+    assert shown["qRims"]
+    for got in shown["qRims"]:
+        assert any(abs(got - w) < 1e-9 for w in shown["qWant"])  # at r - 0.9
+    assert shown["bar"] >= 1  # the state's inked left bar
+    assert shown["diamond"] == 0
+    assert "fill: the kind · ring: the state" in shown["legend"]
+    assert "neutral tint" not in shown["legend"]
+    assert (
+        "No effect while the turn overlay is on: bodies keep their kind colour" in shown["reason"]
+    )
+    assert shown["domainOff"] < shown["distinct"]  # off the overlay, domain colouring is back
+    assert "the first segment of the ref" in shown["legendOff"]
+    assert shown["barOff"] >= 1  # the block is the state's look off the overlay too
 
 
 # ---------- gravity: navigation (links to the other tabs, search, the turn panel) ----------
@@ -2676,11 +2709,11 @@ def test_the_gravity_legend_draws_a_glyph_per_kind_and_swatches_each_count(
           return out; })()""",
     )
     legend = shown["legend"]
-    for label in ("target", "rule result", "question", "tool result", "t:state"):
-        assert f"</svg>{label}</span>" in legend, label
-    assert "<polygon" in legend  # the state's diamond
+    for label in ("target", "rule result", "question", "tool result", "state"):
+        assert f"</svg>{label}</button>" in legend, label
+    assert "<polygon" not in legend  # the state is a block with an inked bar, not a diamond
+    assert "latent target" not in legend  # no body is drawn that way
     assert "<rect" in legend  # the tool result's square
-    assert "stroke-dasharray" in legend  # a dotted latent target and edge
     assert ("latent edge" in legend) == shown["latent"]
     assert legend.count("<svg") >= 5
     for gone in ("wheel zooms", "shift-", "drag to move", "tinted, ringed"):
@@ -3013,3 +3046,139 @@ def test_the_gravity_tips_show_on_hover_after_a_delay_and_at_once_on_focus(
     assert "No effect while the turn overlay is on" in shown["click"][3]
     assert 8 <= shown["edge"][0] <= 390 - 8
     assert shown["edge"][1] >= 8
+
+
+# ---------- gravity: kind chips ----------
+
+
+@needs_node
+def test_the_legend_kinds_are_filters_that_combine_with_the_state_chips(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    """Pressing a kind dims every other kind, with or without a turn; with a state chip pressed
+    too a body must match both; Esc clears the state, then the kind; each chip is a button with
+    aria-pressed and a tip; a hidden kind's chip is dimmed with its reason."""
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          const out = {}, el = (id) => document.getElementById(id);
+          const click = (d, ok) => el("vGravity").listeners.click.forEach((f) => f({target:
+            {closest: () => ({dataset: d, getAttribute: (k) => (k === "aria-disabled" ? ok : null)})}}));
+          const html = () => el("gvlegend").innerHTML;
+          S.view = "gravity"; S.turn = null; GV.kind = null; GV.st = null; GV.sel = null; GV.step = null;
+          GV.light = true; drawView(); frames(20);
+          const L = gvL, a = (id) => gvOvA(L, L.byId.get(id));
+          out.chips = (html().match(/data-gvkind="/g) || []).length;
+          out.pressed0 = (html().match(/aria-pressed="true"/g) || []).length;
+          out.tip = html().includes('data-tipfor="gvk-rule"') && html().includes("data-tip=\\"Dim every body");
+          // no turn: the kind alone
+          click({gvkind: "rule"});
+          out.noTurn = [GV.kind, a("d:act"), a("q:tone"), a("tg:urgent"), a("t:state")];
+          out.pressed = html().match(/data-gvkind="rule" aria-pressed="(\\w+)"/)[1];
+          out.otherPressed = html().match(/data-gvkind="question" aria-pressed="(\\w+)"/)[1];
+          out.hash = (globalThis.location = {hash: ""}, globalThis.history = {replaceState: (x, y, h) =>
+            { location.hash = h; }}, writeHash(), location.hash);
+          click({gvkind: "rule"}); out.cleared = [GV.kind, a("q:tone")]; writeHash(); out.hash0 = location.hash;
+          // a turn and a state chip: both must match
+          S.turn = 0; drawView(); frames(20);
+          const L2 = gvL, b = (id) => gvOvA(L2, L2.byId.get(id));
+          const st = ["Unsure", "Unavailable", "Unasked", "short", "value"].find((s) => L2.nodes.some((n) => n.os === s));
+          const rule = L2.nodes.find((n) => n.kind === "rule" && n.os === st);
+          const ruleOther = L2.nodes.find((n) => n.kind === "rule" && n.os !== st && n.os !== "later" && n.os !== "none");
+          const other = L2.nodes.find((n) => n.kind === "question" && n.os === st);
+          const neither = L2.nodes.find((n) => n.kind === "question" && n.os !== st);
+          out.st = st; gvSet("st", st); gvSet("kind", "rule");
+          out.both = [rule && b(rule.id), ruleOther && b(ruleOther.id), other && b(other.id), neither && b(neither.id)];
+          // Esc: the state first, then the kind
+          const key = (k) => gvKey({key: k, target: document.body});
+          out.esc = [key("Escape"), GV.st, GV.kind]; out.esc2 = [key("Escape"), GV.st, GV.kind];
+          out.esc3 = key("Escape");
+          // a question chip hidden by the Show filter is dimmed, says why, and ignores a click
+          gvSet("light", false);
+          out.hidden = [html().match(/data-gvkind="question"[^>]*aria-disabled="true"/) !== null, GV_OFF["gvk-question"]];
+          click({gvkind: "question"}, "true"); out.ignored = GV.kind;
+          gvSet("light", true);
+          // from a link
+          Object.assign(GV, {kind: null}); globalThis.location.hash = "#view=gravity&gk=tool"; readHash();
+          out.read = GV.kind; globalThis.location.hash = "#view=gravity&gk=nonsense"; readHash(); out.bad = GV.kind;
+          return out; })()""",  # noqa: E501
+    )
+    assert shown["chips"] == 5  # target, rule result, question, tool result and state
+    assert shown["pressed0"] == 0
+    assert shown["tip"] is True
+    n = shown["noTurn"]
+    assert n[0] == "rule"
+    assert n[1] == 1  # a rule result shows in full
+    assert n[2] == pytest.approx(0.12)  # a question is dimmed
+    assert n[3] == pytest.approx(0.12)
+    assert shown["pressed"] == "true"
+    assert shown["otherPressed"] == "false"
+    assert "gk=rule" in shown["hash"]
+    assert shown["cleared"] == [None, 1]  # pressed again, cleared
+    assert "gk" not in shown["hash0"]  # written only when set
+    inside, outside, other, neither = shown["both"]
+    assert inside == 1  # a rule result in the state
+    if outside is not None:
+        assert outside < 0.2
+    if other is not None:
+        assert other < 0.2
+    if neither is not None:
+        assert neither == pytest.approx(0.0144, abs=0.02)  # misses both
+    assert shown["esc"] == [True, None, "rule"]  # the state goes first
+    assert shown["esc2"] == [True, None, None]  # then the kind
+    assert shown["esc3"] is False  # nothing left: the page's own back-out
+    assert shown["hidden"][0] is True
+    assert "toolbar" in shown["hidden"][1]
+    assert shown["ignored"] is None
+    assert shown["read"] == "tool"
+    assert shown["bad"] is None
+
+
+@needs_node
+def test_a_kind_with_no_body_has_no_chip_and_a_stale_link_is_dropped(tmp_path: Path) -> None:
+    html = page([], [DESIGN.document])
+    data = _data(html)
+    outline = data["sets"][0]["docs"][0]["outline"]
+    for node in outline["nodes"]:
+        if node["kind"] == "source":
+            node["tool_results"] = []
+    shown = _run(
+        _with_data(html, data),
+        tmp_path,
+        """(() => {
+          globalThis.location = {hash: "#view=gravity&gk=tool"}; globalThis.history = {replaceState() {}};
+          readHash(); const asked = GV.kind; drawView(); frames(10);
+          return {asked, kept: GV.kind, legend: document.getElementById("gvlegend").innerHTML}; })()""",  # noqa: E501
+    )
+    assert shown["asked"] == "tool"
+    assert shown["kept"] is None  # no body of that kind in this design
+    assert 'data-gvkind="tool"' not in shown["legend"]
+    assert 'data-gvkind="rule"' in shown["legend"]
+
+
+def test_the_help_and_the_chips_are_keyboard_reachable() -> None:
+    html = page([], [DESIGN.document])
+    helpbox = html[html.index('id="gvhelp"') : html.index('id="gvov"')]
+    assert "legend's kinds" in helpbox
+    assert "the state and kind filters" in helpbox
+    assert ".gv-chipb[aria-pressed=" in html
+
+
+@needs_node
+def test_a_body_must_match_both_the_kind_and_the_state_chip(tmp_path: Path) -> None:
+    shown = _run(
+        page([], [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          const L = {ov: {linN: new Set()}}, body = (kind, os) => ({kind, os, id: kind + os});
+          Object.assign(GV, {kind: "rule", st: "Unsure", hide: false, lin: false});
+          const out = [gvOvA(L, body("rule", "Unsure")), gvOvA(L, body("rule", "value")),
+            gvOvA(L, body("question", "Unsure")), gvOvA(L, body("question", "value"))];
+          GV.st = null; out.push(gvOvA(L, body("rule", "value")), gvOvA(L, body("question", "value")));
+          GV.kind = null; out.push(gvOvA(L, body("question", "value")));
+          GV.kind = "rule"; const off = {ov: null};
+          out.push(gvOvA(off, body("rule", null)), gvOvA(off, body("question", null)));
+          GV.kind = null; GV.st = null; return out; })()""",  # noqa: E501
+    )
+    assert shown == pytest.approx([1, 0.12, 0.12, 0.0144, 1, 0.12, 1, 1, 0.12])

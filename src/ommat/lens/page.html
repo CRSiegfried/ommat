@@ -525,9 +525,12 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 #gvov { max-height: calc(100% - 200px); overflow: auto; }
 #gvmore { display: contents; }
 #gvbar.folded #gvmore { display: none; }
+#vGravity .gv-lh { display: flex; gap: 6px; align-items: center; }
+#vGravity .gv-lh > .gv-fh { width: auto; flex: none; }
+.gv-kchip { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
 #vGravity .gv-fh { display: flex; gap: 6px; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; }
 .gv-chev::before { content: '▾'; color: var(--ink2); }
-.folded > .gv-fh .gv-chev::before { content: '▸'; }
+.folded .gv-chev::before { content: '▸'; }
 .folded > .gv-fb { display: none; }
 .gv-fb { display: grid; gap: 4px; margin-top: 6px; }
 .gv-box:not(.folded) > .gv-fh { margin-bottom: 0; }
@@ -549,7 +552,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .gv-nb:hover, .gv-nb:focus-visible { color: var(--r-read); }
 #gvside details.gv-nbl > summary { cursor: pointer; font-size: 10.5px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; margin-top: 6px; }
 .gv-keyrow { display: inline-flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
-.gv-keyrow > span { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.gv-keyrow > span, .gv-keyrow > button { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
 .gv-gly { flex: none; vertical-align: middle; }
 @media (max-width: 760px) {
   #gvbar { left: 4px; right: 4px; top: 4px; padding: 4px 8px; gap: 4px 10px; }
@@ -630,7 +633,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
           </div>
         </div>
         <canvas id="gvc" tabindex="0" role="application" aria-label="The design's refs as bodies. Keys: period and comma walk the bodies, Enter selects the one in focus, arrows pan or turn, f fits all, s fits the selection, 3 switches 3D, slash finds, a and d step the round, question mark lists every key. Mouse: drag a body to move it, drag empty space to pan or turn, the wheel zooms."></canvas>
-        <div class="gv-box" id="gvhelp" hidden role="dialog" aria-label="Gravity gestures and keys"><div class="gv-k">Mouse</div><p>Drag a body to move it. Drag empty space to pan (2D) or turn (3D); in 3D shift-, right-, middle- or space-drag slides the view instead. The wheel zooms. Click selects; click again steps to the next body beneath. Double-click empty space to fit.</p><div class="gv-k">Touch</div><p>Tap selects. Drag a body to move it; drag empty space to pan or turn. Two fingers pan and pinch to zoom.</p><div class="gv-k">Keys</div><p><kbd>f</kbd> fit · <kbd>s</kbd> fit selection · <kbd>h</kbd> home · <kbd>3</kbd> 3D · <kbd>/</kbd> find · <kbd>a</kbd> <kbd>d</kbd> previous / next round · <kbd>+</kbd> <kbd>-</kbd> zoom · arrows turn or pan with the canvas focused (shift pans) · <kbd>?</kbd> this help</p><p class="muted"><kbd>Esc</kbd> clears one thing at a time: this help, the search, the selection, the round pinned, then backs out as on every tab.</p></div>
+        <div class="gv-box" id="gvhelp" hidden role="dialog" aria-label="Gravity gestures and keys"><div class="gv-k">Mouse</div><p>Drag a body to move it. Drag empty space to pan (2D) or turn (3D); in 3D shift-, right-, middle- or space-drag slides the view instead. The wheel zooms. Click selects; click again steps to the next body beneath. Double-click empty space to fit.</p><div class="gv-k">Touch</div><p>Tap selects. Drag a body to move it; drag empty space to pan or turn. Two fingers pan and pinch to zoom.</p><div class="gv-k">Keys</div><p>The legend's kinds and the turn's state counts are filters: press one to dim every other body (a body must match both when both are pressed), press again to clear.</p><p><kbd>f</kbd> fit · <kbd>s</kbd> fit selection · <kbd>h</kbd> home · <kbd>3</kbd> 3D · <kbd>/</kbd> find · <kbd>a</kbd> <kbd>d</kbd> previous / next round · <kbd>+</kbd> <kbd>-</kbd> zoom · arrows turn or pan with the canvas focused (shift pans) · <kbd>?</kbd> this help</p><p class="muted"><kbd>Esc</kbd> clears one thing at a time: this help, the search, the selection, the state and kind filters, the round pinned, then backs out as on every tab.</p></div>
         <div class="gv-box" id="gvov" hidden></div>
         <div class="gv-box" id="gvside" aria-live="polite"></div>
         <div class="gv-box" id="gvlegend"></div>
@@ -3098,7 +3101,7 @@ function viewsHover(ev) {
 // (the edges that are not dependencies) are drawn from it. The layout is a function of that graph: a generator seeded from the
 // design's hash scatters the bodies, a fixed number of ticks settles them when the view first
 // draws, and every move after is eased by frame count. A drag reheats it live.
-const GV = {mode3: false, light: true, cross: false, hh: true, ov: true, drag: 'orbit', space: false, touch: false, help: false, fold: {}, kf: null, st: null, whyOpen: false, stepFromHash: false, selRestore: false, byDomain: false, flat: false, halo: false, spin: false, qPull: .5, hPull: .5, find: '', sel: null, step: null, hide: false, lin: false};
+const GV = {mode3: false, light: true, cross: false, hh: true, ov: true, drag: 'orbit', space: false, touch: false, help: false, fold: {}, kf: null, kind: null, st: null, whyOpen: false, stepFromHash: false, selRestore: false, byDomain: false, flat: false, halo: false, spin: false, qPull: .5, hPull: .5, find: '', sel: null, step: null, hide: false, lin: false};
 const GV_TICKS = 300, GV_FOC = 900, GV_EASE = 36, GV_TW = 30, GV_GZ = 76;
 const GV_KIND = {target: 'target', rule: 'rule result', question: 'question', tool: 'tool result', state: 'state'};
 const GVL = new WeakMap(); // a design outline -> its bodies, layout and camera
@@ -3421,8 +3424,8 @@ function gvTheme(L) {
   L.T = T;
   const sig = [T.bg, T.fg, ...T.hue].join(); if (GV_SPR.sig !== sig) { GV_SPR.clear(); GV_SPR.sig = sig; }
 }
-// Under a turn's overlay every body is one neutral tint (its shape and size give its kind) so the state's rings are the only colour.
-const gvCol = (L, n) => (L.ov ? L.T.tint : !GV.byDomain || n.kind === 'state' ? L.T.kind[n.kind] : L.T.hue[L.domains.indexOf(n.domain) % L.T.hue.length]);
+// A body's fill is its kind's hue; colour by domain replaces it, but not under a turn's overlay, whose rings carry the state.
+const gvCol = (L, n) => (L.ov || !GV.byDomain || n.kind === 'state' ? L.T.kind[n.kind] : L.T.hue[L.domains.indexOf(n.domain) % L.T.hue.length]);
 const gvRgbC = new Map();
 function gvRgb(c) {
   let v = gvRgbC.get(c);
@@ -3451,7 +3454,13 @@ function gvSprite(L, c, q) {
 }
 const gvReached = n => !!n.os && !['none', 'later', 'Unasked', 'absent'].includes(n.os);
 const gvShown = n => !!n.os && n.os !== 'none' && n.os !== 'later'; // a lineage hop is lit once both its ends hold an entry by the round shown
-function gvOvA(L, n) { // how strongly a body shows under the turn
+// How strongly a body shows. The kind chosen in the legend dims every other kind, with or without a turn; under a turn the
+// state chosen in the key dims every other state too, and a body must match both to show in full.
+function gvOvA(L, n) {
+  const kd = GV.kind && n.kind !== GV.kind ? .12 : 1;
+  return kd * gvOvA0(L, n);
+}
+function gvOvA0(L, n) {
   if (!L.ov) return 1;
   if (n.kind === 'target') return (n.ts && n.ts !== 'untested' ? 1 : GV.hide ? .2 : .45) * (GV.st ? .12 : 1); // a target holds no entry; its ring is derived
   const s = n.os, r = gvReached(n);
@@ -3496,7 +3505,7 @@ function gvDraw(L) {
       const faded = (fset && !touch) || (hits && !(hits.has(a.id) && hits.has(b.id)));
       // a hub's fan thins out with its degree; a longer edge, which crosses between clusters, keeps a little more
       const thin = touch || on ? 1 : gvThin(a, b);
-      ctx.globalAlpha = (touch ? .95 : faded ? .04 : on ? (h.declared ? .4 : .9) : ov ? .05 : hv ? .4 : .3) * thin * Math.min(a.va, b.va) * (1 - .3 * fg) * (ov && !on ? Math.min(1, gvOvA(L, a) + gvOvA(L, b)) : 1);
+      ctx.globalAlpha = (touch ? .95 : faded ? .04 : on ? (h.declared ? .4 : .9) : ov ? .05 : hv ? .4 : .3) * thin * Math.min(a.va, b.va) * (1 - .3 * fg) * ((ov || GV.kind) && !on ? Math.min(1, gvOvA(L, a) + gvOvA(L, b)) : 1);
       ctx.strokeStyle = gvMix(L, touch ? T.hit : on ? (h.main ? T.main : T.branch) : T.edge, fg);
       ctx.lineWidth = (on ? (h.declared ? 1.2 : h.main ? 2.8 : 1.8) : hv ? 1.4 : .8) / Math.sqrt(k);
       ctx.setLineDash(on && h.declared ? [5 / k, 4 / k] : l.r === 'latent' ? [2 / k, 3 / k] : []); // a declared hop is dashed: not a record of what was read
@@ -3515,20 +3524,26 @@ function gvDraw(L) {
     const n = it.n, light = !gvHeavy(n), c = gvMix(L, gvCol(L, n), fg), oa = gvOvA(L, n);
     const al = (focus && fset && !fset.has(n.id)) || (hits && !hits.has(n.id)) ? .1 : 1;
     const a = al * (1 - .3 * fg) * n.va * oa, r = n.r * n.sc * n.va, x = n.px, y = n.py, tiny = r * k < (light ? 2.5 : 4);
+    const rb = n.kind === 'state' ? r * 1.35 : r; // the reach of the body: the rings sit outside it
     if (tiny) { ctx.globalAlpha = a * (n.kind === 'rule' ? .75 : .95); ctx.beginPath(); ctx.arc(x, y, Math.max(r, 1.2 / k), 0, 7); ctx.fillStyle = c; ctx.fill(); }
     else if (light) {
       if (n.shared) { ctx.globalAlpha = a * .28; ctx.fillStyle = gvMix(L, T.fg, fg); ctx.beginPath(); ctx.arc(x, y, r + 4 * n.sc * n.va, 0, 7); ctx.fill(); } // spans domains
+      // under a turn the rim sits just inside the body, so a clear gap of about 2px lies between it and the state ring
+      const inset = ov ? .9 : 0;
       ctx.globalAlpha = a; ctx.beginPath();
-      if (n.kind === 'tool') ctx.rect(x - r * .85, y - r * .85, r * 1.7, r * 1.7); else ctx.arc(x, y, r, 0, 7);
+      if (n.kind === 'tool') ctx.rect(x - (r * .85 - inset), y - (r * .85 - inset), 2 * (r * .85 - inset), 2 * (r * .85 - inset)); else ctx.arc(x, y, r - inset, 0, 7);
       ctx.fillStyle = T.bg; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 1.8; ctx.stroke();
     } else {
       // a target solid, a rule result opaque but mixed toward the page (lighter, ringed), the state a solid diamond; a body under 9px on screen is a flat fill
-      const fill = n.kind === 'rule' ? gvMix(L, gvCol(L, n), .42, true) : gvCol(L, n), cf = n.kind === 'rule' ? gvMix(L, fill, fg) : c;
+      const fill = n.kind === 'rule' ? gvMix(L, gvCol(L, n), ov ? .5 : .42, true) : gvCol(L, n), cf = n.kind === 'rule' ? gvMix(L, fill, fg) : c;
       ctx.globalAlpha = a * (n.kind === 'state' ? .9 : n.kind === 'target' ? .9 : 1);
       const sp = GV.flat || L.ov || n.kind === 'state' || r * k < 9 ? null : gvSprite(L, fill, gvFq(fg));
-      if (n.kind === 'state') { ctx.beginPath(); ctx.moveTo(x, y - r * 1.25); ctx.lineTo(x + r * 1.25, y); ctx.lineTo(x, y + r * 1.25); ctx.lineTo(x - r * 1.25, y); ctx.closePath(); ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = a; ctx.strokeStyle = gvMix(L, T.fg, fg); ctx.lineWidth = 2; ctx.stroke(); }
+      if (n.kind === 'state') { // Graph's cue for the state: a filled block with an inked bar on its left
+        const h = r * .95; ctx.beginPath(); ctx.rect(x - h, y - h, 2 * h, 2 * h); ctx.fillStyle = c; ctx.fill();
+        ctx.globalAlpha = a; ctx.fillStyle = gvMix(L, T.fg, fg); ctx.fillRect(x - h, y - h, Math.max(2.5, h * .42), 2 * h);
+      }
       else if (sp) ctx.drawImage(sp, x - r, y - r, 2 * r, 2 * r); else { ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = cf; ctx.fill(); }
-      if (n.kind === 'rule') { ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.strokeStyle = c; ctx.lineWidth = 2.5; ctx.stroke(); }
+      if (n.kind === 'rule') { ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(x, y, ov ? r - 1.1 : r, 0, 7); ctx.strokeStyle = c; ctx.lineWidth = ov ? 2.2 : 2.5; ctx.stroke(); }
     }
     const ring = ov && (n.kind === 'target' ? GV_TS[n.ts] : GV_RING[n.os]);
     if (ring) L.rings[n.id] = GV_TOK[ring[0]];
@@ -3537,15 +3552,15 @@ function gvDraw(L) {
     if (ring && n.kind === 'target' && n.ts !== 'untested') gvTsRing(ctx, T, n, x, y, r);
     else if (ring) {
       const rc = T[ring[0]];
-      ctx.beginPath(); ctx.arc(x, y, r + 3, 0, 7); ctx.strokeStyle = rc; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, rb + 3, 0, 7); ctx.strokeStyle = rc; ctx.lineWidth = 2;
       if (ring[1]) ctx.setLineDash([3 / k, 3 / k]);
       ctx.stroke(); ctx.setLineDash([]);
       if (ring[2] && r * k >= 5) { ctx.font = `bold ${Math.max(8, r * 1.3)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = rc; ctx.fillText(ring[2], x, y + .5); ctx.textBaseline = 'alphabetic'; }
     }
-    if (n.policy) { ctx.beginPath(); ctx.arc(x, y, r + 6, 0, 7); ctx.strokeStyle = gvMix(L, T.fg, fg); ctx.lineWidth = 2; ctx.stroke(); }
-    if (ov && ov.root === n.id) { ctx.beginPath(); ctx.arc(x, y, r + 9.5, 0, 7); ctx.strokeStyle = T.cause; ctx.lineWidth = 2.5; ctx.stroke(); }
-    if (L.kfocus === n.id) { ctx.beginPath(); ctx.arc(x, y, r + (ring || n.policy ? 17 : 7), 0, 7); ctx.strokeStyle = T.fg; ctx.lineWidth = 2; ctx.setLineDash([4 / k, 3 / k]); ctx.stroke(); ctx.setLineDash([]); } // the key-walk's focus
-    if (n === sel || (hits && hits.has(n.id))) { ctx.beginPath(); ctx.arc(x, y, r + (ring || n.policy ? 13 : 3), 0, 7); ctx.strokeStyle = T.hit; ctx.lineWidth = 2; ctx.stroke(); }
+    if (n.policy) { ctx.beginPath(); ctx.arc(x, y, rb + 6, 0, 7); ctx.strokeStyle = gvMix(L, T.fg, fg); ctx.lineWidth = 2; ctx.stroke(); }
+    if (ov && ov.root === n.id) { ctx.beginPath(); ctx.arc(x, y, rb + 9.5, 0, 7); ctx.strokeStyle = T.cause; ctx.lineWidth = 2.5; ctx.stroke(); }
+    if (L.kfocus === n.id) { ctx.beginPath(); ctx.arc(x, y, rb + (ring || n.policy ? 17 : 7), 0, 7); ctx.strokeStyle = T.fg; ctx.lineWidth = 2; ctx.setLineDash([4 / k, 3 / k]); ctx.stroke(); ctx.setLineDash([]); } // the key-walk's focus
+    if (n === sel || (hits && hits.has(n.id))) { ctx.beginPath(); ctx.arc(x, y, rb + (ring || n.policy ? 13 : 3), 0, 7); ctx.strokeStyle = T.hit; ctx.lineWidth = 2; ctx.stroke(); }
   }
   ctx.restore(); ctx.globalAlpha = 1;
   gvLabels(L, ctx, focus, fset);
@@ -3593,12 +3608,12 @@ function gvLabels(L, ctx, focus, fset) {
   const k = L.tf.k, hits = L.hits, C = [], B = [], top = L.free ? L.free.y0 - 4 : 0;
   for (const n of L.nodes) {
     if (n.va < .3) continue;
-    const rs = n.r * n.sc * n.va * k, fg = n === focus ? 0 : gvFog(L, n.vzv);
+    const rs = n.r * n.sc * n.va * k * (n.kind === 'state' ? 1.35 : 1), fg = n === focus ? 0 : gvFog(L, n.vzv);
     if (gvHeavy(n)) { const e = rs + gvExt(L, n, k), sx = L.tf.x + k * (L.W / 2 + n.px), sy = L.tf.y + k * (L.H / 2 + n.py); B.push([sx - e, sy - e, sx + e, sy + e]); }
     let tier = 3;
     if (n === focus) tier = 0; else if (fset && fset.has(n.id)) tier = 1; else if (hits && hits.has(n.id)) tier = 2;
     else if (fset || hits) continue;
-    else if (L.ov && gvOvA(L, n) < .3 && !(L.ov.root === n.id)) continue;
+    else if ((L.ov || GV.kind) && gvOvA(L, n) < .3 && !(L.ov && L.ov.root === n.id)) continue;
     else if (gvHeavy(n)) { if (!(rs >= 5 && (n.mass >= 8 / k || n.policy || n.kind === 'state'))) continue; }
     else if (!(k > 2.2 && rs >= 6)) continue; // light bodies only when zoomed well in
     if (tier === 3 && fg > .5) continue;
@@ -3726,7 +3741,7 @@ const gvShowBtn = (D, n) => { const b = gvBodyOf(D, n); return b ? `<button clas
 const GV_TOOLS = ['gvcross', 'gvkind', 'gvflat', 'gvhalo', 'gvspin', 'gvqpull', 'gvfitsel'];
 const GV_OFF_WHY = {
   gvcross: L => !GV.light && 'No effect while questions and tool results are hidden. Turn them on to use it.',
-  gvkind: L => !!L.ov && 'No effect while the turn overlay is on: every body is drawn in one neutral tint. Turn the overlay off to use it.',
+  gvkind: L => !!L.ov && 'No effect while the turn overlay is on: bodies keep their kind colour, so the state rings read clearly. Turn the overlay off to use it.',
   gvflat: L => !!L.ov && 'No effect while the turn overlay is on: bodies are drawn flat already. Turn the overlay off to use it.',
   gvhalo: L => !!L.ov && 'No effect while the turn overlay is on: halos are not drawn under it. Turn the overlay off to use it.',
   gvspin: L => !GV.mode3 && 'Only in 3D. Switch 3D on to use it.',
@@ -3816,27 +3831,35 @@ function gvGlyph(L, k, col) {
     rule: `<circle r="5.2" fill="${f}" fill-opacity=".45" stroke="${f}" stroke-width="2"/>`,
     question: `<circle r="3.4" fill="${bg}" stroke="${f}" stroke-width="1.8"/>`,
     tool: `<rect x="-3.6" y="-3.6" width="7.2" height="7.2" fill="${bg}" stroke="${f}" stroke-width="1.8"/>`,
-    state: `<polygon points="0,-7 7,0 0,7 -7,0" fill="${f}" stroke="${T.fg}" stroke-width="1.4"/>`,
+    state: `<rect x="-6" y="-6" width="12" height="12" fill="${f}"/><rect x="-6" y="-6" width="3.6" height="12" fill="${T.fg}"/>`,
     policy: `<circle r="4" fill="${f}" fill-opacity=".45" stroke="${f}" stroke-width="2"/><circle r="7" fill="none" stroke="${T.fg}" stroke-width="1.6"/>`,
-    latent: `<circle r="5.6" fill="none" stroke="${f}" stroke-width="1.6" stroke-dasharray="1.6 2.4"/>`,
     ledge: `<line x1="-7" y1="0" x2="7" y2="0" stroke="${T.edge}" stroke-width="1.6" stroke-dasharray="2 3"/>`,
   }[k];
   return `<svg class="gv-gly" width="16" height="16" viewBox="-8 -8 16 16" aria-hidden="true">${body}</svg>`;
 }
+const GV_KINDS = ['target', 'rule', 'question', 'tool', 'state'];
+const GV_KIND_TIP = {target: 'targets', rule: 'rule results', question: 'questions', tool: 'tool results', state: 't:state'};
 function gvLegend(L) {
   const ct = {};
   for (const n of L.nodes) ct[n.kind] = (ct[n.kind] || 0) + 1;
-  const T = L.T, neutral = !!L.ov || GV.byDomain, latent = L.links.some(l => l.r === 'latent');
+  const T = L.T, neutral = GV.byDomain && !L.ov, latent = L.links.some(l => l.r === 'latent');
   const c = k => (neutral ? T.tint : T.kind[k]);
-  const items = [['target', 'target', 'target'], ['rule', 'rule', 'rule result'], ['question', 'question', 'question'], ['tool', 'tool', 'tool result'], ['state', 'state', 't:state'],
-    ['policy', 'rule', 'policy'], ['latent', 'target', 'latent target'], ['ledge', null, 'latent edge']]
-    .filter(([g, kind]) => (g === 'policy' ? L.nodes.some(n => n.policy) : g === 'latent' || g === 'ledge' ? latent : ct[kind]));
-  const keyrow = `<span class="gv-keyrow">${items.map(([g, kind, text]) => `<span>${gvGlyph(L, g, c(kind || 'rule'))}${esc(text)}</span>`).join('')}</span>`;
+  const hid = k => (k === 'question' || k === 'tool') && !GV.light; // those bodies are hidden by the Show filter
+  // each kind is a chip that dims every other kind; the policy and the latent edge are only keys
+  const chips = GV_KINDS.filter(k => ct[k]).map(k => {
+    const why = hid(k) ? 'Hidden by "questions and tool results" in the toolbar. Turn that on to use this.' : '';
+    GV_OFF['gvk-' + k] = why;
+    return `<button class="gv-chipb gv-kchip${why ? ' gv-dim' : ''}" data-gvkind="${k}" aria-pressed="${GV.kind === k}"${why ? ' aria-disabled="true"' : ''} data-tipfor="gvk-${k}" data-tip="Dim every body that is not ${GV_KIND_TIP[k]}; press again to clear. With a turn's state chip chosen too, a body must match both.">${gvGlyph(L, k, c(k))}${esc(GV_KIND[k])}</button>`;
+  });
+  const keys = [L.nodes.some(n => n.policy) ? `<span>${gvGlyph(L, 'policy', c('rule'))}policy</span>` : '', latent ? `<span>${gvGlyph(L, 'ledge', c('rule'))}latent edge</span>` : ''];
+  const keyrow = `<span class="gv-keyrow">${chips.join('')}${keys.join('')}</span>`;
   const sw = (col, t) => `<span><i class="gv-sw" style="background:${col}"></i>${esc(t)}</span>`;
-  const row = L.ov ? `<span><i class="gv-sw" style="background:${T.tint}"></i>one neutral tint under the turn overlay: the kind is the shape and size, the state is the colour (turn the overlay off for ${GV.byDomain ? 'the domain hues' : 'the type hues'})</span>` : GV.byDomain ? L.domains.map((d, i) => sw(T.hue[i % T.hue.length], d)).join('') : '';
-  const body = `<div class="gv-stat">${plural(ct.target || 0, 'target')} · ${plural(ct.rule || 0, 'rule result')} · ${plural(ct.question || 0, 'question')} · ${plural(ct.tool || 0, 'tool result')}${ct.state ? ' · t:state' : ''} · ${plural(L.links.length, 'edge')}${L.ov ? ' · hue: off, the state is the only colour' : GV.byDomain ? ' · hue: the first segment of the ref' : ' · hue: the kind of body'}</div>${row ? `<div class="gv-row">${row}</div>` : ''}`;
-  const box = $('gvlegend'); box.className = gvFoldClass('leg');
-  box.innerHTML = gvFoldHtml('leg', keyrow, body);
+  const row = L.ov ? '<span>fill: the kind · ring: the state</span>' : GV.byDomain ? L.domains.map((d, i) => sw(T.hue[i % T.hue.length], d)).join('') : '';
+  const body = `<div class="gv-stat">${plural(ct.target || 0, 'target')} · ${plural(ct.rule || 0, 'rule result')} · ${plural(ct.question || 0, 'question')} · ${plural(ct.tool || 0, 'tool result')}${ct.state ? ' · t:state' : ''} · ${plural(L.links.length, 'edge')}${L.ov ? ' · fill: the kind · ring: the state' : GV.byDomain ? ' · hue: the first segment of the ref' : ' · hue: the kind of body'}</div>${row && !L.ov ? `<div class="gv-row">${row}</div>` : ''}`;
+  const box = $('gvlegend'), act = document.activeElement, had = act && act.dataset && act.dataset.gvkind;
+  box.className = gvFoldClass('leg');
+  box.innerHTML = `<div class="gv-lh"><button class="gv-fh" data-gvfold="leg" aria-expanded="${gvFoldOpen('leg')}" aria-label="legend details" title="${gvFoldOpen('leg') ? 'fold' : 'unfold'} the legend"><span class="gv-chev" aria-hidden="true"></span></button>${keyrow}</div><div class="gv-fb">${body}</div>`;
+  if (had) { const f = box.querySelector && box.querySelector(`[data-gvkind="${had}"]`); if (f && f.focus) f.focus({preventScroll: true}); }
 }
 const plural2 = (k, w) => (k === 1 ? w : w + 's');
 const GV_TS_SHAPE = {answered: 'a full ring', mixed: 'a ring split by the held to the open', unresolved: 'a double ring', untested: 'a dashed ring'};
@@ -3879,7 +3902,9 @@ function gvOvKey(L) {
   // each count is a filter: pressed, it dims every body not in that state
   const sw = st => { const g = GV_RING[st], col = g ? T_(L)[g[0]] : st === 'det' ? T_(L).neutral : T_(L).edge; return `<i class="gv-sw" style="background:transparent;${g && g[1] || st === 'none' || st === 'later' ? `border:2px ${st === 'later' ? 'dotted' : g && g[1] ? 'dashed' : 'dotted'} ${col};box-sizing:border-box;` : `box-shadow:inset 0 0 0 2px ${col};`}"></i>`; };
   const chip = (s, inner) => `<button class="gv-chipb" data-gvst="${s}" aria-pressed="${GV.st === s}" title="${GV.st === s ? 'show every body again' : 'dim every body not in this state'}">${inner}</button>`;
+  const act = document.activeElement, had = act && act.dataset && act.dataset.gvst;
   $('gvkey').innerHTML = states.map(s => chip(s, `${sw(s)}${c[s]} ${STATE_LABEL[s]}`)).join('') + tchips + (c.none ? chip('none', `${sw('none')}${c.none} no entry`) : '') + (c.later ? chip('later', `${sw('later')}${c.later} in a later round`) : '');
+  if (had) { const f = $('gvkey').querySelector && $('gvkey').querySelector(`[data-gvst="${had}"]`); if (f && f.focus) f.focus({preventScroll: true}); }
 }
 function gvOvPanel(L) {
   const box = $('gvov'), ov = L.ov;
@@ -3955,6 +3980,7 @@ function gvDrawView() {
   L.fk = fk;
   if (L.mode3 !== GV.mode3) gvMode(L, GV.mode3);
   if (GV.sel && !L.byId.has(GV.sel)) GV.sel = null;
+  if (GV.kind && !L.nodes.some(n => n.kind === GV.kind)) GV.kind = null; // no body of that kind in this design
   for (const [id, k] of [['gvq', 'light'], ['gvcross', 'cross'], ['gvhh', 'hh'], ['gvkind', 'byDomain'], ['gvovon', 'ov'], ['gvflat', 'flat'], ['gvhalo', 'halo'], ['gv3', 'mode3'], ['gvspin', 'spin']]) $(id).checked = !!GV[k];
   gvOverlay(L, curTurn()); $('gvovl').hidden = !L.avail; $('gvgturn').hidden = !L.avail; gvFind(L);
   $('gvbar').className = gvFoldClass('bar'); $('gvmoreb').setAttribute('aria-expanded', String(gvFoldOpen('bar')));
@@ -3982,7 +4008,8 @@ function gvSet(k, v) {
   else if (k === 'byDomain') { gvLegend(L); gvPanel(L); }
   else if (k === 'spin') L.idle = 0;
   if (k === 'step') { gvOverlay(L, curTurn()); gvOvKey(L); if (GV.find) gvFind(L); } else if (k === 'hide' || k === 'lin' || k === 'st') gvOvKey(L);
-  if (k === 'step' || k === 'hide' || k === 'lin' || k === 'byDomain' || k === 'light' || k === 'cross' || k === 'st') writeHash();
+  if (k === 'step' || k === 'hide' || k === 'lin' || k === 'byDomain' || k === 'light' || k === 'cross' || k === 'st' || k === 'kind') writeHash();
+  if (k === 'kind' || k === 'light') gvLegend(L);
   gvTools(L);
   gvDraw(L); gvSnapshot(L); gvKick();
 }
@@ -4052,6 +4079,7 @@ function gvKey(ev) {
     if (GV.find || L.hits) { GV.find = ''; $('gvsearch').value = ''; gvFind(L); gvDraw(L); return true; }
     if (GV.sel) { gvSelect(L, null); return true; }
     if (GV.st) { gvSet('st', null); return true; }
+    if (GV.kind) { gvSet('kind', null); return true; }
     if (L.ov && GV.step != null) { gvSet('step', null); return true; }
     return false;
   }
@@ -4094,7 +4122,7 @@ function gvCands(L, ev) {
   const [x, y] = gvPos(L, ev), k = L.tf.k, C = [], touch = ev.pointerType === 'touch'; // a fingertip is about 16px wide
   for (const n of L.act) {
     if (n.va <= .3 || gvOvA(L, n) === 0) continue;
-    const rs = n.r * n.sc * n.va, hr = (touch ? rs * k + 16 : Math.max(rs * k + 3, gvHeavy(n) ? 4 : 6)) / k, d = Math.hypot(n.px - x, n.py - y);
+    const rs = n.r * n.sc * n.va * (n.kind === 'state' ? 1.35 : 1), hr = (touch ? rs * k + 16 : Math.max(rs * k + 3, gvHeavy(n) ? 4 : 6)) / k, d = Math.hypot(n.px - x, n.py - y);
     if (d <= hr) C.push({n, s: L.view3 ? n.vzv : d - rs - (gvHeavy(n) ? 3 : 0)});
   }
   return C.sort((a, b) => a.s - b.s).map(c => c.n);
@@ -4265,10 +4293,10 @@ function gvWheel(ev) {
     if (k === 'mode3') gvLegend(gvL);
   });
   $('vGravity').addEventListener('click', ev => {
-    const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvact],[data-gvid],[data-gvst],[data-gvfold]') : null;
+    const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvact],[data-gvid],[data-gvst],[data-gvkind],[data-gvfold]') : null;
     if (!el || !gvL) return;
     if (gvDimmed(el)) { gvCtShow(el, true); return; }
-    if (el.dataset.gvid) gvSelect(gvL, gvL.byId.get(el.dataset.gvid) || null); else if (el.dataset.gvfold) gvFoldToggle(gvL, el.dataset.gvfold, el); else if (el.dataset.gvst) gvSet('st', GV.st === el.dataset.gvst ? null : el.dataset.gvst); else gvAct(el.dataset.gvact);
+    if (el.dataset.gvid) gvSelect(gvL, gvL.byId.get(el.dataset.gvid) || null); else if (el.dataset.gvfold) gvFoldToggle(gvL, el.dataset.gvfold, el); else if (el.dataset.gvkind) gvSet('kind', GV.kind === el.dataset.gvkind ? null : el.dataset.gvkind); else if (el.dataset.gvst) gvSet('st', GV.st === el.dataset.gvst ? null : el.dataset.gvst); else gvAct(el.dataset.gvact);
   });
   $('gvside').addEventListener('pointerover', ev => {
     const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvid]') : null, L = gvL;
@@ -4277,12 +4305,14 @@ function gvWheel(ev) {
     if (n !== L.hov) { L.hov = n; gvAsk(L); }
   });
   { // the toolbar's tips: after a short delay on hover, at once on keyboard focus; Esc, blur and leaving dismiss
-    const bar = $('gvbar'), host = ev => { const t = ev.target; return t && t.closest ? t.closest('[data-tip]') : null; };
+    const host = ev => { const t = ev.target; return t && t.closest ? t.closest('[data-tip]') : null; };
+    for (const bar of [$('gvbar'), $('gvlegend')]) {
     bar.addEventListener('pointerover', ev => { const h = host(ev); if (h && h !== gvCtHost) gvCtShow(h, false); });
     bar.addEventListener('pointerout', ev => { const h = host(ev); if (h && h === gvCtHost) gvCtHide(); });
     bar.addEventListener('focusin', ev => { const h = host(ev); if (h) gvCtShow(h, true); });
     bar.addEventListener('focusout', () => gvCtHide());
     bar.addEventListener('keydown', ev => { if (ev.key === 'Escape') gvCtHide(); });
+    }
   }
   $('gvsearch').addEventListener('keydown', ev => { // Enter steps through the hits, Shift+Enter back
     const L = gvL;
@@ -4373,6 +4403,7 @@ function writeHash(push) {
     if (GV.byDomain) h.set('gdom', '1');
     if (!GV.light) h.set('gq', '0');
     if (GV.st) h.set('gst', GV.st);
+    if (GV.kind) h.set('gk', GV.kind);
     if (GV.cross) h.set('gx', '1');
     if (GV.drag !== 'orbit') h.set('gdrag', GV.drag);
     const next = '#' + h.toString();
@@ -4507,6 +4538,7 @@ function readHash() {
   { const v = Number(h.get('gr')); GV.step = h.has('gr') && isFinite(v) ? Math.max(0, Math.round(v)) : null; GV.stepFromHash = GV.step != null; }
   GV.hide = h.get('ghide') === '1'; GV.lin = h.get('glin') === '1'; GV.byDomain = h.get('gdom') === '1';
   GV.st = GV_STATES.includes(h.get('gst')) ? h.get('gst') : null;
+  GV.kind = GV_KINDS.includes(h.get('gk')) ? h.get('gk') : null;
   GV.light = h.get('gq') !== '0'; GV.cross = h.get('gx') === '1';
   GV.selRestore = !!GV.sel;
   GV.drag = h.get('gdrag') === 'move' ? 'move' : 'orbit';
