@@ -2758,3 +2758,110 @@ def test_the_step_on_float_buffers_is_the_step_on_objects(tmp_path: Path) -> Non
     for key, (diff, count) in shown.items():
         assert count > 0
         assert diff == 0, key
+
+
+# ---------- hash chips (the record's and the design's ID, copied whole) ----------
+
+
+@needs_node
+def test_a_hash_chip_copies_the_full_hash_and_says_so(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          const out = {}, el = (id) => document.getElementById(id);
+          S.view = "gravity"; S.turn = 0; drawView(); frames(20);
+          const T = curTurn().outline; out.rec = T.record_hash; out.des = T.design_hash;
+          out.panel = el("gvov").innerHTML;
+          out.chip = hashChip(T.record_hash, "record", "record");
+          out.none = [hashChip("", "x"), hashChip(null, "x"), hashChip(7, "x"), hashChip(undefined, "x")];
+          const timers = []; globalThis.setTimeout = (f) => { timers.push(f); return timers.length; };
+          globalThis.clearTimeout = () => {};
+          const state = { dataset: {copy: T.record_hash, what: "record", state: ""}, _s: {textContent: ""},
+            querySelector() { return this._s; } };
+          // 1: the clipboard takes it
+          const sent = []; globalThis.navigator = {clipboard: {writeText: (t) => { sent.push(t);
+            return {then: (ok) => ok()}; }}};
+          copyHash(state);
+          out.clip = {sent, state: state.dataset.state, label: state._s.textContent,
+            live: el("copylive").textContent, timers: timers.length};
+          timers[0](); out.reset = [state.dataset.state, state._s.textContent];
+          // 2: the clipboard refuses, the textarea works
+          timers.length = 0; const copied = [];
+          globalThis.navigator = {clipboard: {writeText: () => ({then: (ok, no) => no()})}};
+          document.execCommand = (c) => { copied.push(c); return true; };
+          const ta = []; const ce = document.createElement;
+          document.createElement = (t) => { const e = ce(t); if (t === "textarea") ta.push(e); return e; };
+          document.body = document.body || {appendChild() {}}; document.body.appendChild = () => {};
+          copyHash(state);
+          out.fallback = {copied, state: state.dataset.state, area: ta.length ? ta[0].value : null,
+            live: el("copylive").textContent};
+          // 3: nothing works: the full hash is left to select
+          timers.length = 0; delete globalThis.navigator; document.execCommand = () => false;
+          copyHash(state);
+          out.failed = {state: state.dataset.state, label: state._s.textContent,
+            live: el("copylive").textContent};
+          return out; })()""",  # noqa: E501
+    )
+    rec, des = shown["rec"], shown["des"]
+    assert isinstance(rec, str)
+    assert len(rec) >= 64
+    assert f'data-copy="{rec}"' in shown["chip"]
+    assert f"click to copy the full hash&#10;{rec}" in shown["chip"]
+    assert 'class="hc-check"' in shown["chip"]
+    assert "<button" in shown["chip"]
+    assert shown["panel"].count('class="hchip"') == 2
+    assert f'data-copy="{rec}"' in shown["panel"]
+    assert f'data-copy="{des}"' in shown["panel"]
+    assert shown["none"] == ["", "", "", ""]
+    assert shown["clip"]["sent"] == [rec]  # the full hash, not its 12 characters
+    assert shown["clip"]["state"] == "copied"
+    assert shown["clip"]["label"] == "copied"
+    assert shown["clip"]["live"] == "record hash copied"
+    assert shown["clip"]["timers"] == 1
+    assert shown["reset"] == ["", ""]
+    assert shown["fallback"]["copied"] == ["copy"]
+    assert shown["fallback"]["area"] == rec
+    assert shown["fallback"]["state"] == "copied"
+    assert shown["failed"]["state"] == "failed"
+    assert shown["failed"]["label"] == "select to copy"
+    assert "selected" in shown["failed"]["live"]
+
+
+@needs_node
+def test_the_summary_chips_and_a_record_without_a_hash(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    data = _data(html)
+    for doc in data["sets"][0]["docs"]:
+        if "record_hash" in doc["outline"]:
+            doc["outline"].pop("record_hash")
+            doc["outline"].pop("design_hash", None)
+    shown = _run(
+        _with_data(html, data),
+        tmp_path,
+        """(() => {
+          S.view = "gravity"; S.turn = 0; drawView(); frames(20);
+          return {panel: document.getElementById("gvov").innerHTML}; })()""",
+    )
+    assert 'class="hchip"' not in shown["panel"]
+    shown = _run(
+        html,
+        tmp_path,
+        """(() => { S.view = "explore"; S.turn = 0; drawSummary();
+          return document.getElementById("summary").innerHTML; })()""",
+    )
+    assert shown.count('class="hchip"') >= 2  # record and design, as on the Turn tab
+    assert "record <span" in shown or "record " in shown
+
+
+def test_the_hash_chip_is_styled_as_a_chip_with_hover_and_focus() -> None:
+    html = page([], [DESIGN.document])
+    assert ".hchip { display: inline-flex" in html
+    assert "cursor: pointer" in html[html.index(".hchip {") : html.index(".hchip:hover")]
+    assert ".hchip:hover, .hchip:focus-visible" in html
+    assert '.hchip[data-state="copied"]' in html
+    assert 'id="copylive"' in html

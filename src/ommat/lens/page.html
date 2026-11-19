@@ -531,6 +531,16 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .folded > .gv-fb { display: none; }
 .gv-fb { display: grid; gap: 4px; margin-top: 6px; }
 .gv-box:not(.folded) > .gv-fh { margin-bottom: 0; }
+.hchip { display: inline-flex; gap: 5px; align-items: center; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; cursor: pointer; }
+.hchip:hover, .hchip:focus-visible { border-color: var(--r-read); color: var(--r-read); }
+.hchip svg { flex: none; }
+.hchip .hc-check { display: none; }
+.hchip[data-state="copied"] { border-color: var(--good); color: var(--good); }
+.hchip[data-state="copied"] .hc-copy { display: none; }
+.hchip[data-state="copied"] .hc-check { display: inline; }
+.hchip[data-state="failed"] { border-color: var(--critical); }
+.hc-s { font-size: 11px; }
+.hc-full { user-select: all; word-break: break-all; font-size: 11px; }
 .gv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .gv-nb { font: 12px var(--mono); color: inherit; background: none; border: 0; padding: 2px 0; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .gv-nb:hover, .gv-nb:focus-visible { color: var(--r-read); }
@@ -653,6 +663,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 <div id="tip" hidden></div>
 <div id="gvtip" hidden></div>
 <div id="hovercard" hidden></div>
+<div id="copylive" class="gv-sr" role="status" aria-live="polite"></div>
 <div id="drop" hidden>Drop outline JSON to draw it</div>
 <script>
 'use strict';
@@ -712,6 +723,36 @@ function turnOrder(turns) {
   return dated.concat(idx.filter(i => turnStart(turns[i]) === null));
 }
 const shortOf = (D, ref) => (D && D.short && typeof D.short[ref] === 'string' && D.short[ref]) || ref;
+// A hash as a chip: a real button that copies the FULL hash on click, with a copy icon that turns to a check for a moment.
+// It renders nothing for a hash that is not a non-empty string.
+const HC_ICON = '<svg class="hc-copy" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 3.5v-.3A1.7 1.7 0 0 0 8.8 1.5H3.7A1.7 1.7 0 0 0 2 3.2v5.1a1.7 1.7 0 0 0 1.7 1.7h.3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><svg class="hc-check" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+function hashChip(h, label, what) {
+  if (typeof h !== 'string' || !h) return '';
+  return `<button type="button" class="hchip" data-copy="${esc(h)}" data-what="${esc(what || 'hash')}" title="click to copy the full hash&#10;${esc(h)}">${label ? esc(label) + ' ' : ''}<span class="mono">${esc(hex12(h))}</span>${HC_ICON}<span class="hc-s"></span></button>`;
+}
+// Copy to the clipboard where the page may, else through a hidden textarea; else the full hash is shown selected, to copy by hand.
+function copyHash(btn) {
+  const text = btn.dataset.copy, what = btn.dataset.what || 'hash';
+  const set = (state, label, live) => {
+    btn.dataset.state = state; const st = btn.querySelector && btn.querySelector('.hc-s'); if (st) st.textContent = label;
+    const lv = $('copylive'); if (lv) lv.textContent = live;
+    if (btn._t) clearTimeout(btn._t);
+    btn._t = setTimeout(() => { btn.dataset.state = ''; if (st) st.textContent = ''; btn._t = null; }, state === 'failed' ? 6000 : 1500);
+  };
+  const ok = () => set('copied', 'copied', what + ' hash copied');
+  const fail = () => {
+    let done = false;
+    try { const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); done = !!(document.execCommand && document.execCommand('copy')); if (ta.remove) ta.remove(); } catch (e) { done = false; }
+    if (done) return ok();
+    set('failed', 'select to copy', 'could not copy: the full ' + what + ' hash is selected');
+    try { const sel = document.createElement('span'); sel.className = 'hc-full mono'; sel.tabIndex = 0; sel.textContent = text; if (btn.parentNode && btn.parentNode.insertBefore) btn.parentNode.insertBefore(sel, btn.nextSibling); if (window.getSelection && document.createRange) { const rg = document.createRange(); rg.selectNodeContents(sel); const g = getSelection(); g.removeAllRanges(); g.addRange(rg); } } catch (e) { /* no selection API */ }
+  };
+  try {
+    const c = navigator.clipboard;
+    if (c && c.writeText) { c.writeText(text).then(ok, fail); return; }
+  } catch (e) { /* refused: the fallback follows */ }
+  fail();
+}
 const hex12 = h => { const m = typeof h === 'string' && /[0-9a-f]{12}/i.exec(h.replace(/^[a-z0-9_-]+:/i, '')); return m ? m[0] : '?'; };
 
 // The lineage is a tree: each item after the first was found from its `from`. Its first branch,
@@ -1605,8 +1646,8 @@ function drawSummary() {
     const pair = t.pairBy === 'hash' ? 'paired, hash matches' : t.pairBy === 'name' ? 'paired by name, hash differs' : 'no design paired';
     h += '<div class="meta">' + [
       `<span title="${esc(T.status_reason || '')}">${esc(T.status)}</span>`,
-      `<span title="${esc(T.record_hash || '')}">record <span class="mono">${esc(hex12(T.record_hash))}</span></span>`,
-      `<span title="${esc(T.design_hash || '')}">design ${esc(T.design_name || (dz && dz.name) || '?')} <span class="mono">${esc(hex12(T.design_hash))}</span></span>`,
+      hashChip(T.record_hash, 'record', 'record') || `<span title="${esc(T.record_hash || '')}">record <span class="mono">${esc(hex12(T.record_hash))}</span></span>`,
+      hashChip(T.design_hash, 'design ' + (T.design_name || (dz && dz.name) || '?'), 'design') || `<span title="${esc(T.design_hash || '')}">design ${esc(T.design_name || (dz && dz.name) || '?')} <span class="mono">${esc(hex12(T.design_hash))}</span></span>`,
       dz ? fpHtml(dz) : '',
       `<span>${t.sum.rounds} round${t.sum.rounds === 1 ? '' : 's'}</span>`,
       `<span>${esc(pair)}${t.design && !T.paired ? '; outlined without its design' : ''}</span>`,
@@ -1620,7 +1661,7 @@ function drawSummary() {
     h += `<div class="why"><span>design ${esc(D.name || '(unnamed)')}</span></div>`;
     h += '<div class="meta">' + [
       `<span>format ${esc(D.format)}</span>`,
-      `<span title="${esc(D.hash || '')}">hash <span class="mono">${esc(hex12(D.hash))}</span></span>`, fpHtml(D),
+      hashChip(D.hash, 'hash', 'design') || `<span title="${esc(D.hash || '')}">hash <span class="mono">${esc(hex12(D.hash))}</span></span>`, fpHtml(D),
       `<span>policy <span class="mono">${esc(D.policy || D.policy_node || '?')}</span></span>`,
       `<span>${(D.nodes || []).length} nodes in ${new Set((D.nodes || []).map(n => n.round)).size} rounds</span>`,
       `<span>${(D.edges || []).filter(e => e.dependency).length} dependencies, ${(D.edges || []).filter(e => !e.dependency).length} uses of t:state</span>`,
@@ -3792,6 +3833,7 @@ function gvOvPanel(L) {
   const t = ov.t, declared = ov.hops.filter(h => h.declared).length;
   const dec = gvDecision(t), full = whyText(t).replace(/ <- /g, ' ← ');
   const body = `<div class="gv-row"><button class="btn" data-gvact="turn-prev" title="previous turn">‹</button><span class="gv-k" style="flex:1;margin:0">turn ${esc(turnName(t, cur().turns.indexOf(t)))}</span><button class="btn" data-gvact="turn-next" title="next turn">›</button></div>
+    ${t.outline.record_hash || t.outline.design_hash ? `<div class="gv-row">${hashChip(t.outline.record_hash, 'record', 'record')}${hashChip(t.outline.design_hash, 'design', 'design')}</div>` : ''}
     <div class="gv-why">${decIcon(t.sum.dkind)} <span>${esc(dec)}</span></div>
     ${full && full !== dec ? `<div><button class="btn" data-gvact="why" aria-expanded="${GV.whyOpen}">${GV.whyOpen ? 'hide the full text' : 'full text'}</button></div>` : ''}${GV.whyOpen ? `<div class="gv-tx">${whyHtml(full)}</div>` : ''}
     <div class="gv-row"><button class="btn" data-gvact="play">${gvPlay ? 'pause' : 'play'}</button><button class="btn" data-gvact="prev-round" title="previous round  (a)">‹</button><input type="range" id="gvround" min="0" max="${ov.maxR}" value="${gvStepOf(L)}" aria-label="the round shown" title="the round shown  (a previous, d next)"><button class="btn" data-gvact="next-round" title="next round  (d)">›</button></div>
@@ -4348,6 +4390,7 @@ $('detail').addEventListener('click', ev => {
 document.addEventListener('pointerover', tipAt);
 document.addEventListener('pointermove', ev => { if (!TIP.hidden) moveTip(ev); });
 document.addEventListener('pointerleave', () => { TIP.hidden = true; });
+document.addEventListener('click', ev => { const b = ev.target && ev.target.closest ? ev.target.closest('[data-copy]') : null; if (b) { ev.preventDefault(); copyHash(b); } });
 document.addEventListener('keydown', ev => {
   const tag = (ev.target && ev.target.tagName) || '';
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) { if (ev.key === 'Escape' && ev.target.blur) ev.target.blur(); return; }
