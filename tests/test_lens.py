@@ -1954,7 +1954,7 @@ def test_the_gravity_toolbar_is_grouped_and_every_control_names_its_key() -> Non
     for control in ("gvqpull", "gvhpull", "relayout", "gvflat", "gvhalo", "gvspin"):
         assert control not in before
     assert 'id="gvfitsel" data-gvact="fitsel"' in bar
-    assert "disabled>fit selection" in bar  # nothing selected yet
+    assert 'aria-disabled="true">fit selection' in bar  # nothing selected yet
     for title in ("(f)", "(s)", "(h)", "(3)", "(/)", "(?)"):
         assert title in bar, title
     assert 'data-gvact="drag-orbit"' in bar
@@ -2865,3 +2865,151 @@ def test_the_hash_chip_is_styled_as_a_chip_with_hover_and_focus() -> None:
     assert ".hchip:hover, .hchip:focus-visible" in html
     assert '.hchip[data-state="copied"]' in html
     assert 'id="copylive"' in html
+
+
+# ---------- gravity: the toolbar explains itself and dims what does nothing ----------
+
+_TOOLS = ("gvcross", "gvkind", "gvflat", "gvhalo", "gvspin", "gvqpull", "gvfitsel")
+
+
+def test_every_gravity_toolbar_control_has_a_tip_and_no_native_title() -> None:
+    html = page([], [DESIGN.document])
+    bar = html[html.index('id="gvbar"') : html.index('<canvas id="gvc"')]
+    assert "title=" not in bar  # one mechanism: the popup, not the native tooltip as well
+    for control in (
+        "gv3", "gvfit", "gvfitsel", "gvsearch", "gvhelpb", "gvmoreb", "gvq", "gvcross", "gvhh",
+        "gvovon", "gvkind", "gvqpull", "gvhpull", "gvflat", "gvhalo", "gvspin",
+    ):  # fmt: skip
+        mark = f'id="{control}"'
+        start = bar.index(mark)
+        tag_start = bar.rindex("<", 0, start)
+        near = bar[max(0, tag_start - 330) : bar.index(">", start) + 1]
+        assert "data-tip=" in near, control
+    assert 'id="gvctip" role="tooltip"' in html
+    for word in ("halo", "flat", "spin", "relayout"):
+        assert word in bar
+
+
+@needs_node
+def test_the_gravity_controls_dim_exactly_when_they_change_nothing(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    """The effect matrix, control by condition: colour by domain, flat and halos have no effect
+    under the turn overlay, spin only in 3D, cross-domain and question pull only while the
+    questions are shown, fit selection only with a selection; all un-dim, and none lose their
+    setting, when the condition changes."""
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          const tools = ["gvcross", "gvkind", "gvflat", "gvhalo", "gvspin", "gvqpull", "gvfitsel"];
+          const dim = () => Object.fromEntries(tools.filter((id) =>
+            document.getElementById(id).getAttribute("aria-disabled") === "true").map((id) => [id, GV_OFF[id]]));
+          const reset = () => Object.assign(GV, {mode3: false, light: true, cross: false, ov: true,
+            sel: null, flat: false, halo: false, spin: false, byDomain: false});
+          const out = {}, set = (name, turn, f) => { reset(); S.view = "gravity"; S.turn = turn; if (f) f();
+            drawView(); frames(20); out[name] = Object.keys(dim()); };
+          set("noTurn2d", null);
+          set("turnOv2d", 0);
+          set("turnOff2d", 0, () => { GV.ov = false; });
+          set("noTurn3d", null, () => { GV.mode3 = true; });
+          set("turnOv3d", 0, () => { GV.mode3 = true; });
+          set("hidden", null, () => { GV.light = false; });
+          set("selected", null, () => { GV.sel = "d:act"; });
+          // un-dims, and the settings are kept while dimmed
+          reset(); GV.halo = GV.flat = GV.byDomain = true; GV.spin = true; GV.cross = true;
+          S.view = "gravity"; S.turn = 0; drawView(); frames(20);
+          out.keptDimmed = [GV.halo, GV.flat, GV.byDomain, GV.spin];
+          out.dimOn = Object.keys(dim());
+          gvSet("ov", false); out.undimOff = Object.keys(dim());
+          out.keptAfter = [GV.halo, GV.flat, GV.byDomain, GV.spin];
+          gvSet("ov", true); out.redim = Object.keys(dim());
+          gvSet("mode3", true); out.threeD = Object.keys(dim());
+          S.turn = null; drawView(); out.cleared = Object.keys(dim());
+          out.reasons = {kind: GV_OFF_WHY.gvkind({ov: {}}), spin: (GV.mode3 = false, GV_OFF_WHY.gvspin({}))};
+          GV.mode3 = false; GV.halo = GV.flat = GV.byDomain = GV.spin = GV.cross = false;
+          return out; })()""",  # noqa: E501
+    )
+    assert shown["noTurn2d"] == ["gvspin", "gvfitsel"]
+    assert shown["turnOv2d"] == ["gvkind", "gvflat", "gvhalo", "gvspin", "gvfitsel"]
+    assert shown["turnOff2d"] == ["gvspin", "gvfitsel"]
+    assert shown["noTurn3d"] == ["gvfitsel"]
+    assert shown["turnOv3d"] == ["gvkind", "gvflat", "gvhalo", "gvfitsel"]
+    assert shown["hidden"] == ["gvcross", "gvspin", "gvqpull", "gvfitsel"]
+    assert shown["selected"] == ["gvspin"]
+    assert shown["keptDimmed"] == [True, True, True, True]
+    assert shown["dimOn"] == ["gvkind", "gvflat", "gvhalo", "gvspin", "gvfitsel"]
+    assert shown["undimOff"] == ["gvspin", "gvfitsel"]
+    assert shown["keptAfter"] == [True, True, True, True]
+    assert shown["redim"] == shown["dimOn"]
+    assert shown["threeD"] == ["gvkind", "gvflat", "gvhalo", "gvfitsel"]
+    assert shown["cleared"] == ["gvfitsel"]  # in 3D, no turn: only the selection is missing
+    assert "turn overlay" in shown["reasons"]["kind"]
+    assert "Only in 3D" in shown["reasons"]["spin"]
+
+
+@needs_node
+def test_the_gravity_tips_show_on_hover_after_a_delay_and_at_once_on_focus(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    shown = _run(
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        tmp_path,
+        """(() => {
+          S.view = "gravity"; S.turn = 0; GV.ov = true; GV.mode3 = false; drawView(); frames(10);
+          const out = {}, el = (id) => document.getElementById(id), bar = el("gvbar"), tip = el("gvctip");
+          const timers = []; globalThis.setTimeout = (f, ms) => { timers.push([f, ms]); return timers.length; };
+          globalThis.clearTimeout = () => {};
+          tip.hidden = true;
+          const host = (id, text) => ({id: "", dataset: {tip: text, tipfor: id}, getBoundingClientRect:
+            () => ({left: 1100, top: 100, bottom: 130, width: 80, height: 30}),
+            closest() { return this; }});
+          const flat = host("gvflat", "Draw discs flat, without sphere shading.");
+          fire(bar, "pointerover", {target: flat});
+          out.hoverBefore = [tip.hidden, timers[0][1], tip.textContent];
+          timers[0][0](); out.hoverAfter = [tip.hidden, tip.style.left, tip.style.top];
+          fire(bar, "pointerout", {target: flat}); out.out = [tip.hidden, el("gvflat").getAttribute("aria-describedby")];
+          timers.length = 0;
+          fire(bar, "focusin", {target: flat}); out.focus = [tip.hidden, timers.length,
+            el("gvflat").getAttribute("aria-describedby"), tip.textContent];
+          fire(bar, "keydown", {key: "Escape"}); out.esc = tip.hidden;
+          fire(bar, "focusin", {target: host("gvspin", "Turn the 3D view slowly while nothing is touched.")});
+          out.spin = tip.textContent; fire(bar, "focusout", {}); out.blur = tip.hidden;
+          GV.mode3 = true; gvSet("mode3", true); fire(bar, "focusin", {target: host("gvspin", "Turn the 3D view slowly.")});
+          out.spin3d = tip.textContent; fire(bar, "focusout", {});
+          // a click on a dimmed checkbox does nothing visible and says why
+          GV.halo = false; const box = {id: "gvhalo", type: "checkbox", checked: true,
+            getAttribute: (k) => el("gvhalo").getAttribute(k),
+            parentNode: {dataset: {tip: "Draw a soft coloured blob under each domain's bodies.",
+              tipfor: "gvhalo"}, getBoundingClientRect: () => ({left: 10, top: 10, bottom: 30})}};
+          el("vGravity").listeners.input.forEach((f) => f({target: box}));
+          out.click = [GV.halo, box.checked, tip.hidden, tip.textContent];
+          fire(bar, "focusout", {});
+          // narrow: the tip is kept inside the view
+          globalThis.innerWidth = 390; globalThis.innerHeight = 700;
+          const edge = host("gvq", "A long enough sentence to wrap in a narrow popover on a phone screen.");
+          edge.getBoundingClientRect = () => ({left: 380, top: 690, bottom: 720, width: 40, height: 30});
+          fire(bar, "focusin", {target: edge});
+          out.edge = [parseFloat(tip.style.left), parseFloat(tip.style.top)];
+          return out; })()""",  # noqa: E501
+    )
+    assert shown["hoverBefore"][0] is True
+    assert shown["hoverBefore"][1] == 300  # the short delay
+    assert "without sphere shading" in shown["hoverBefore"][2]
+    assert "No effect while the turn overlay is on" in shown["hoverBefore"][2]  # and why
+    assert shown["hoverAfter"][0] is False
+    assert shown["out"][0] is True
+    assert shown["out"][1] is None
+    assert shown["focus"][0] is False  # a keyboard focus shows it at once
+    assert shown["focus"][1] == 0
+    assert shown["focus"][2] == "gvctip"  # described for a screen reader
+    assert shown["esc"] is True
+    assert "Only in 3D" in shown["spin"]
+    assert shown["blur"] is True
+    assert "Only in 3D" not in shown["spin3d"]
+    assert shown["click"][0] is False  # the setting was not toggled
+    assert shown["click"][1] is False  # and the box shows it
+    assert shown["click"][2] is False
+    assert "No effect while the turn overlay is on" in shown["click"][3]
+    assert 8 <= shown["edge"][0] <= 390 - 8
+    assert shown["edge"][1] >= 8

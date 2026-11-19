@@ -495,7 +495,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 #gvov { top: 96px; left: 8px; width: 290px; padding: 8px 10px; display: grid; gap: 6px; }
 #gvlegend { left: 8px; bottom: 8px; padding: 6px 10px; max-width: calc(100% - 110px); color: var(--ink2); display: grid; gap: 3px; }
 #gvgz { position: absolute; z-index: 3; right: 8px; bottom: 8px; width: 76px; height: 76px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
-#gvtip { position: fixed; z-index: 11; pointer-events: none; max-width: min(360px, calc(100vw - 24px)); background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.14); padding: 7px 10px; font-size: 12px; line-height: 1.4; }
+#gvtip, #gvctip { position: fixed; z-index: 11; pointer-events: none; max-width: min(360px, calc(100vw - 24px)); background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.14); padding: 7px 10px; font-size: 12px; line-height: 1.4; }
 .gv-t { font: 600 12.5px var(--mono); overflow-wrap: anywhere; }
 .gv-tx { margin: 3px 0; overflow-wrap: anywhere; }
 .gv-k { font-size: 10.5px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; margin-top: 6px; }
@@ -541,6 +541,9 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .hchip[data-state="failed"] { border-color: var(--critical); }
 .hc-s { font-size: 11px; }
 .hc-full { user-select: all; word-break: break-all; font-size: 11px; }
+.gv-dim { opacity: .45; }
+#vGravity .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+#gvctip { max-width: min(320px, calc(100vw - 16px)); }
 .gv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .gv-nb { font: 12px var(--mono); color: inherit; background: none; border: 0; padding: 2px 0; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .gv-nb:hover, .gv-nb:focus-visible { color: var(--r-read); }
@@ -618,12 +621,12 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
       <div id="gvmsg" hidden></div>
       <div id="gvui">
         <div class="gv-box" id="gvbar">
-          <span class="gv-grp" id="gvprim"><label title="3D  (3)"><input type="checkbox" id="gv3">3D</label><button class="btn" data-gvact="fit" title="frame every body  (f)">fit</button><button class="btn" id="gvfitsel" data-gvact="fitsel" title="frame the selection and its neighbours  (s)" disabled>fit selection</button><input type="search" id="gvsearch" list="gvhits" placeholder="find a ref" aria-label="find a ref" title="find a ref, its short name, its wording or, under a turn, its value  (/); Enter next, Shift+Enter previous"><datalist id="gvhits"></datalist><span class="gv-stat" id="gvstat"></span><button class="btn" id="gvhelpb" data-gvact="help" title="gestures and keys  (?)" aria-expanded="false" aria-controls="gvhelp">?</button><button class="btn" id="gvmoreb" data-gvfold="bar" aria-expanded="true" aria-controls="gvmore" title="show or hide the other controls">options</button></span>
+          <span class="gv-grp" id="gvprim"><label data-tip="Lay the graph out in 3D and drag to turn it (3)." data-tipfor="gv3"><input type="checkbox" id="gv3">3D</label><button class="btn" data-gvact="fit" id="gvfit" data-tip="Frame every body in the free part of the view (f).">fit</button><button class="btn" id="gvfitsel" data-gvact="fitsel" data-tip="Frame the selected body and its neighbours (s)." aria-disabled="true">fit selection</button><input type="search" id="gvsearch" list="gvhits" placeholder="find a ref" aria-label="find a ref" data-tip="Find a body by its ref, short name, wording or, under a turn, its value (/). Enter steps to the next match, Shift+Enter to the previous."><datalist id="gvhits"></datalist><span class="gv-stat" id="gvstat"></span><button class="btn" id="gvhelpb" data-gvact="help" data-tip="Gestures and keys (?)." aria-expanded="false" aria-controls="gvhelp">?</button><button class="btn" id="gvmoreb" data-gvfold="bar" aria-expanded="true" aria-controls="gvmore" data-tip="Show or hide the other controls.">options</button></span>
           <div id="gvmore">
-          <span class="gv-grp"><b class="gv-gl">Show</b><label title="questions and tool results"><input type="checkbox" id="gvq" checked>questions and tool results</label><label title="only those whose heavy neighbours lie in more than one domain"><input type="checkbox" id="gvcross">cross-domain only</label><label title="edges between rule results and targets; a selection always shows its own"><input type="checkbox" id="gvhh" checked>rule and target edges</label></span>
-          <span class="gv-grp" id="gvgturn" hidden><b class="gv-gl">Turn</b><label id="gvovl" hidden title="the selected turn's entries, lineage and rounds over the graph; off shows the model alone"><input type="checkbox" id="gvovon" checked>turn overlay</label></span>
-          <span class="gv-grp"><b class="gv-gl">View</b><label title="hue by the first segment of the ref instead of by kind"><input type="checkbox" id="gvkind">colour by domain</label><span class="gv-grp" id="gvpresets" hidden><button class="btn" data-gvact="front" title="look along z">front</button><button class="btn" data-gvact="top" title="look along y">top</button><button class="btn" data-gvact="side" title="look along x">side</button><span class="gv-seg" id="gvdrag" role="group" aria-label="what a plain drag does in 3D" title="a plain drag: orbit turns the view, move slides it (shift-, space- or middle-drag always move)"><button class="btn" data-gvact="drag-orbit" aria-pressed="true">orbit</button><button class="btn" data-gvact="drag-move" aria-pressed="false">move</button></span><button class="btn" data-gvact="home" title="the default 3D view  (h)">home</button></span></span>
-          <details id="gvlayout"><summary title="the physics' pulls, relayout and the drawing options">layout</summary><span class="gv-grp">question pull <input type="range" id="gvqpull" min="0" max="100" value="50" aria-label="question pull"> heavy pull <input type="range" id="gvhpull" min="0" max="100" value="50" aria-label="pull between rule results and targets"><button class="btn" data-gvact="relayout" title="settle again from the seeded start">relayout</button><label title="flat discs, no sphere shading"><input type="checkbox" id="gvflat">flat</label><label title="a soft blob under each domain"><input type="checkbox" id="gvhalo">halos</label><label title="turn slowly when idle in 3D"><input type="checkbox" id="gvspin">spin</label></span></details>
+          <span class="gv-grp"><b class="gv-gl">Show</b><label data-tip="Show or hide the question and tool-result bodies, the small rings and squares. Rule results and targets always stay." data-tipfor="gvq"><input type="checkbox" id="gvq" checked>questions and tool results</label><label data-tip="Keep only the questions and tool results that sit between more than one domain, the ones that bridge areas." data-tipfor="gvcross"><input type="checkbox" id="gvcross">cross-domain only</label><label data-tip="Draw the edges between rule results and targets. A selected body always shows its own edges." data-tipfor="gvhh"><input type="checkbox" id="gvhh" checked>rule and target edges</label></span>
+          <span class="gv-grp" id="gvgturn" hidden><b class="gv-gl">Turn</b><label id="gvovl" hidden data-tip="Draw the selected turn's entries, lineage and rounds over the graph. Off shows the model alone; the turn stays selected." data-tipfor="gvovon"><input type="checkbox" id="gvovon" checked>turn overlay</label></span>
+          <span class="gv-grp"><b class="gv-gl">View</b><label data-tip="Colour bodies by the first segment of their ref, their domain, instead of by kind." data-tipfor="gvkind"><input type="checkbox" id="gvkind">colour by domain</label><span class="gv-grp" id="gvpresets" hidden><button class="btn" data-gvact="front" data-tip="Look along the z axis.">front</button><button class="btn" data-gvact="top" data-tip="Look down along the y axis.">top</button><button class="btn" data-gvact="side" data-tip="Look along the x axis.">side</button><span class="gv-seg" id="gvdrag" role="group" aria-label="what a plain drag does in 3D" data-tip="What a plain drag does in 3D: orbit turns the view, move slides it. Shift-, space- or middle-drag always move."><button class="btn" data-gvact="drag-orbit" aria-pressed="true">orbit</button><button class="btn" data-gvact="drag-move" aria-pressed="false">move</button></span><button class="btn" data-gvact="home" data-tip="Return to the default 3D view (h).">home</button></span></span>
+          <details id="gvlayout"><summary data-tip="The layout's pulls, a fresh layout and the drawing options.">layout</summary><span class="gv-grp"><label data-tip="How strongly each question is pulled toward the bodies it touches." data-tipfor="gvqpull">question pull <input type="range" id="gvqpull" min="0" max="100" value="50" aria-label="question pull"></label><label data-tip="How strongly rule results and targets pull on each other." data-tipfor="gvhpull">heavy pull <input type="range" id="gvhpull" min="0" max="100" value="50" aria-label="pull between rule results and targets"></label><button class="btn" data-gvact="relayout" data-tip="Settle the layout again from its seeded start. Bodies you moved go back.">relayout</button><label data-tip="Draw discs flat, without sphere shading." data-tipfor="gvflat"><input type="checkbox" id="gvflat">flat</label><label data-tip="Draw a soft coloured blob under each domain's bodies." data-tipfor="gvhalo"><input type="checkbox" id="gvhalo">halos</label><label data-tip="Turn the 3D view slowly while nothing is touched." data-tipfor="gvspin"><input type="checkbox" id="gvspin">spin</label></span></details>
           </div>
         </div>
         <canvas id="gvc" tabindex="0" role="application" aria-label="The design's refs as bodies. Keys: period and comma walk the bodies, Enter selects the one in focus, arrows pan or turn, f fits all, s fits the selection, 3 switches 3D, slash finds, a and d step the round, question mark lists every key. Mouse: drag a body to move it, drag empty space to pan or turn, the wheel zooms."></canvas>
@@ -631,6 +634,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
         <div class="gv-box" id="gvov" hidden></div>
         <div class="gv-box" id="gvside" aria-live="polite"></div>
         <div class="gv-box" id="gvlegend"></div>
+        <div id="gvctip" role="tooltip" hidden></div>
         <div id="gvlive" class="gv-sr" role="status" aria-live="polite"></div>
         <canvas id="gvgz" width="76" height="76" hidden aria-label="axis gizmo: click an axis end to look along it"></canvas>
       </div>
@@ -3717,6 +3721,57 @@ function gvBodyOf(D, n) {
   return q ? q.ref : null;
 }
 const gvShowBtn = (D, n) => { const b = gvBodyOf(D, n); return b ? `<button class="btn" data-gvshow="${esc(b)}" title="select its body in the Gravity graph">show in Gravity</button>` : ''; };
+/* The toolbar's controls explain themselves (data-tip, in plain words) and dim when they change nothing right now: still
+   focusable, so their tip can say why; a click does nothing and the setting is kept. */
+const GV_TOOLS = ['gvcross', 'gvkind', 'gvflat', 'gvhalo', 'gvspin', 'gvqpull', 'gvfitsel'];
+const GV_OFF_WHY = {
+  gvcross: L => !GV.light && 'No effect while questions and tool results are hidden. Turn them on to use it.',
+  gvkind: L => !!L.ov && 'No effect while the turn overlay is on: every body is drawn in one neutral tint. Turn the overlay off to use it.',
+  gvflat: L => !!L.ov && 'No effect while the turn overlay is on: bodies are drawn flat already. Turn the overlay off to use it.',
+  gvhalo: L => !!L.ov && 'No effect while the turn overlay is on: halos are not drawn under it. Turn the overlay off to use it.',
+  gvspin: L => !GV.mode3 && 'Only in 3D. Switch 3D on to use it.',
+  gvqpull: L => !GV.light && 'No effect while questions and tool results are hidden. Turn them on to use it.',
+  gvfitsel: L => !L.byId.get(GV.sel) && 'Select a body first.',
+};
+const GV_OFF = {};
+function gvTools(L) {
+  for (const id of GV_TOOLS) {
+    const el = $(id), why = GV_OFF_WHY[id](L) || '';
+    GV_OFF[id] = why;
+    if (!el) continue;
+    el.setAttribute('aria-disabled', why ? 'true' : 'false');
+    const w = el.tagName === 'LABEL' || !el.parentNode || el.parentNode.tagName !== 'LABEL' ? el : el.parentNode;
+    if (w.classList) w.classList.toggle('gv-dim', !!why);
+  }
+  if (gvCtHost) gvCtShow(gvCtHost, true); // the words follow a change under the pointer
+}
+let gvCtT = 0, gvCtHost = null, gvCtCtl = null;
+function gvCtText(host) { const id = (host.dataset && host.dataset.tipfor) || host.id, why = GV_OFF[id] || ''; return ((host.dataset && host.dataset.tip) || '') + (why ? ' ' + why : ''); }
+function gvCtShow(host, now) {
+  const tp = $('gvctip');
+  if (!tp || !host) return;
+  gvCtHide();
+  gvCtHost = host; tp.textContent = gvCtText(host);
+  const id = (host.dataset && host.dataset.tipfor) || host.id, ctl = (id && $(id)) || host;
+  if (ctl.setAttribute) { ctl.setAttribute('aria-describedby', 'gvctip'); gvCtCtl = ctl; }
+  const go = () => {
+    tp.hidden = false;
+    const w = tp.offsetWidth || 300, h = tp.offsetHeight || 40, r = host.getBoundingClientRect ? host.getBoundingClientRect() : {left: 0, top: 0, bottom: 0};
+    const vw = innerWidth || 1200, vh = innerHeight || 800;
+    tp.style.left = Math.max(8, Math.min(r.left || 0, vw - w - 8)) + 'px';
+    const below = (r.bottom || 0) + 6;
+    tp.style.top = Math.max(8, below + h > vh - 8 ? (r.top || 0) - h - 6 : below) + 'px';
+  };
+  if (now) go(); else gvCtT = setTimeout(go, 300); // a short delay on hover; a focus shows at once
+}
+function gvCtHide() {
+  const tp = $('gvctip');
+  if (gvCtT) { clearTimeout(gvCtT); gvCtT = 0; }
+  if (tp) tp.hidden = true;
+  if (gvCtCtl && gvCtCtl.removeAttribute) gvCtCtl.removeAttribute('aria-describedby');
+  gvCtCtl = null; gvCtHost = null;
+}
+const gvDimmed = el => !!el && el.getAttribute && el.getAttribute('aria-disabled') === 'true';
 // Panels fold: open at a width over 760px, folded under it, and the choice kept; a folded one shows its header line only.
 const gvNarrow = () => { try { return matchMedia('(max-width: 760px)').matches; } catch (e) { return innerWidth <= 760; } };
 const gvFoldOpen = k => { if (GV.fold[k] === undefined) GV.fold[k] = !gvNarrow(); return GV.fold[k]; };
@@ -3732,8 +3787,8 @@ function gvFoldToggle(L, k, btn) {
 // The free rectangle is measured when a panel's content or fold changes, not every frame.
 function gvMeasure(L) { L.free = gvFree(L); }
 function gvPanel(L) {
-  const s = $('gvside'), n = L.byId.get(GV.sel), fs = $('gvfitsel');
-  if (fs) fs.disabled = !n;
+  const s = $('gvside'), n = L.byId.get(GV.sel);
+  gvTools(L);
   $('vGravity').dataset.sel = n ? '1' : ''; // narrow: one bottom sheet, the selection else the turn
   const had = !!(s.contains && document.activeElement && s.contains(document.activeElement));
   if (!n) { s.className = 'gv-box'; s.innerHTML = `<span class="muted">${GV.touch ? 'Tap a body.' : 'Hover or click a body.'} A question that touches several targets or rules is drawn larger and sits between them.</span>`; return; }
@@ -3903,7 +3958,7 @@ function gvDrawView() {
   for (const [id, k] of [['gvq', 'light'], ['gvcross', 'cross'], ['gvhh', 'hh'], ['gvkind', 'byDomain'], ['gvovon', 'ov'], ['gvflat', 'flat'], ['gvhalo', 'halo'], ['gv3', 'mode3'], ['gvspin', 'spin']]) $(id).checked = !!GV[k];
   gvOverlay(L, curTurn()); $('gvovl').hidden = !L.avail; $('gvgturn').hidden = !L.avail; gvFind(L);
   $('gvbar').className = gvFoldClass('bar'); $('gvmoreb').setAttribute('aria-expanded', String(gvFoldOpen('bar')));
-  gvPanel(L); gvLegend(L); gvOvPanel(L); gvMeasure(L);
+  gvPanel(L); gvLegend(L); gvOvPanel(L); gvMeasure(L); gvTools(L);
   // the first fit comes once the panels hold their content, so their boxes are measured as they will stand
   if (!L.fitted) { L.fitted = true; gvCamApply(L, gvFitGoal(L, L.act, L.view3 ? {yaw: .6, pitch: -.35} : {})); }
   if (GV.selRestore) { GV.selRestore = false; if (GV.sel) gvFitSel(L); } // a selection restored from the link is framed once, once the panels stand
@@ -3928,6 +3983,7 @@ function gvSet(k, v) {
   else if (k === 'spin') L.idle = 0;
   if (k === 'step') { gvOverlay(L, curTurn()); gvOvKey(L); if (GV.find) gvFind(L); } else if (k === 'hide' || k === 'lin' || k === 'st') gvOvKey(L);
   if (k === 'step' || k === 'hide' || k === 'lin' || k === 'byDomain' || k === 'light' || k === 'cross' || k === 'st') writeHash();
+  gvTools(L);
   gvDraw(L); gvSnapshot(L); gvKick();
 }
 function gvSelect(L, n) {
@@ -3991,6 +4047,7 @@ function gvKey(ev) {
   // Esc clears one layer a press: the help, the search, the selection, the round pinned by the stepper; with none left it
   // falls through to the page's own back-out (the node, then the turn), as on every tab.
   if (k === 'Escape') {
+    if (gvCtHost) { gvCtHide(); return true; } // a tip shown goes first
     if (GV.help) { gvHelp(false); return true; }
     if (GV.find || L.hits) { GV.find = ''; $('gvsearch').value = ''; gvFind(L); gvDraw(L); return true; }
     if (GV.sel) { gvSelect(L, null); return true; }
@@ -4197,6 +4254,10 @@ function gvWheel(ev) {
   $('vGravity').addEventListener('input', ev => {
     const el = ev.target, k = el && GV_INPUT[el.id];
     if (!k) return;
+    if (gvDimmed(el)) { // no effect now: the setting stays as it was, and the tip says why
+      if (el.type === 'checkbox') el.checked = !!GV[k]; else if (el.type === 'range') el.value = String(Math.round(GV[k] * 100));
+      gvCtShow(el.parentNode && el.parentNode.dataset && el.parentNode.dataset.tip ? el.parentNode : el, true); return;
+    }
     if ((k === 'qPull' || k === 'hPull') && gvL && typeof requestAnimationFrame === 'function') { // live: the frame loop settles it, not 200 ticks per event
       const L = gvL; GV[k] = Number(el.value) / 100; gvPairs(L); L.live = true; L.target = 0; L.alpha = Math.max(L.alpha, .35); gvKick(); return;
     }
@@ -4206,6 +4267,7 @@ function gvWheel(ev) {
   $('vGravity').addEventListener('click', ev => {
     const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvact],[data-gvid],[data-gvst],[data-gvfold]') : null;
     if (!el || !gvL) return;
+    if (gvDimmed(el)) { gvCtShow(el, true); return; }
     if (el.dataset.gvid) gvSelect(gvL, gvL.byId.get(el.dataset.gvid) || null); else if (el.dataset.gvfold) gvFoldToggle(gvL, el.dataset.gvfold, el); else if (el.dataset.gvst) gvSet('st', GV.st === el.dataset.gvst ? null : el.dataset.gvst); else gvAct(el.dataset.gvact);
   });
   $('gvside').addEventListener('pointerover', ev => {
@@ -4214,6 +4276,14 @@ function gvWheel(ev) {
     const n = el ? L.byId.get(el.dataset.gvid) || null : null;
     if (n !== L.hov) { L.hov = n; gvAsk(L); }
   });
+  { // the toolbar's tips: after a short delay on hover, at once on keyboard focus; Esc, blur and leaving dismiss
+    const bar = $('gvbar'), host = ev => { const t = ev.target; return t && t.closest ? t.closest('[data-tip]') : null; };
+    bar.addEventListener('pointerover', ev => { const h = host(ev); if (h && h !== gvCtHost) gvCtShow(h, false); });
+    bar.addEventListener('pointerout', ev => { const h = host(ev); if (h && h === gvCtHost) gvCtHide(); });
+    bar.addEventListener('focusin', ev => { const h = host(ev); if (h) gvCtShow(h, true); });
+    bar.addEventListener('focusout', () => gvCtHide());
+    bar.addEventListener('keydown', ev => { if (ev.key === 'Escape') gvCtHide(); });
+  }
   $('gvsearch').addEventListener('keydown', ev => { // Enter steps through the hits, Shift+Enter back
     const L = gvL;
     if (ev.key !== 'Enter' || !L) return;
