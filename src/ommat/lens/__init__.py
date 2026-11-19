@@ -14,7 +14,9 @@ read, helper, need, slot or source requirement by its role; a turn over that gra
 washed by what it holds and marked by its nearest bound, the lineage from the decision to its
 root as a tree, the round costs, and a headline that says what was decided, or what the
 undecided turn rests on and how far its root fell short; a panel of every bound by entry; a
-table of the turns, sorted and filtered, with a tally; and the text form beside them. A record
+table of the turns, sorted and filtered, with a tally; the design as bodies on a seeded force
+layout, 2D or 3D, computed in the page from the outline's edges and targets, with the turn's
+states ringed over it; and the text form beside them. A record
 pairs with the design whose bytes' SHA-256 its ``design`` item holds, else with a design of the
 same name, with a notice, else it is drawn alone, its entries by round. ``python -m ommat.lens
 PATH`` writes the page for a record or design file or a folder.

@@ -247,6 +247,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .dv details { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
 .dv details > summary { list-style: none; cursor: pointer; padding: 10px 14px; display: grid; gap: 4px; }
 .dv details > summary::-webkit-details-marker { display: none; }
+.dv details.tfocus { outline: 2px solid var(--r-read); }
 .dv details[open] > summary { border-bottom: 1px solid var(--grid); }
 .dv details .body { padding: 10px 14px 14px; display: grid; gap: 10px; }
 .dv .flow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -473,6 +474,82 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
 .dv .vn .nmx .v { font: 10.5px var(--mono); color: var(--ink2); overflow: hidden; text-overflow: ellipsis; }
 .dv .ovturn { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 0 0 14px; }
 @media (max-width: 900px) { #vExplore, #vExplore.withturns { grid-template-columns: 1fr; height: auto; } .dv .sb { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--border); } .dv .vwrap { height: 60vh; } }
+/* gravity: the refs as bodies on a canvas; a domain's hue avoids the state colours, which mark entries as rings */
+:root { --gv-d0: #2a78d6; --gv-d1: #7048c8; --gv-d2: #0f8b9c; --gv-d3: #c2459b; --gv-d4: #5b6b82; --gv-d5: #8a5a2b; --gv-d6: #2f3fa0; --gv-edge: #8c8a84; --gv-tint: #6f6d68; --gv-main: #1a5fd0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gv-d0: #5b9cf0; --gv-d1: #a487f0; --gv-d2: #3bb8c8; --gv-d3: #e07bc0; --gv-d4: #9aa6b8; --gv-d5: #c08a55; --gv-d6: #7f8cf0; --gv-edge: #b4b2aa; --gv-tint: #a09e97; --gv-main: #6aa6ff; } }
+:root[data-theme="dark"] { --gv-d0: #5b9cf0; --gv-d1: #a487f0; --gv-d2: #3bb8c8; --gv-d3: #e07bc0; --gv-d4: #9aa6b8; --gv-d5: #c08a55; --gv-d6: #7f8cf0; --gv-edge: #b4b2aa; --gv-tint: #a09e97; --gv-main: #6aa6ff; }
+#vGravity { position: relative; height: max(560px, calc(100vh - 150px)); border: 1px solid var(--border); border-radius: 8px; background: var(--page); overflow: hidden; }
+#gvc { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#gvc:focus-visible { outline-offset: -2px; }
+#vGravity .gv-box { position: absolute; z-index: 3; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.08); font-size: 12px; }
+#gvbar { top: 8px; left: 8px; right: 8px; padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+#vGravity .gv-grp { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--ink2); }
+#vGravity label { display: inline-flex; gap: 4px; align-items: center; color: var(--ink); cursor: pointer; }
+#vGravity input[type=range] { width: 80px; }
+#gvsearch { font: 12px var(--mono); background: var(--page); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 3px 7px; width: 160px; }
+#gvside { top: 96px; right: 8px; width: 300px; max-height: calc(100% - 200px); overflow: auto; padding: 10px 12px; display: grid; gap: 4px; align-content: start; }
+#gvside ul { margin: 0; padding: 0; list-style: none; }
+#gvside li { padding: 2px 0; cursor: pointer; overflow-wrap: anywhere; font: 12px var(--mono); }
+#gvside li:hover { color: var(--r-read); }
+#gvside .btn { justify-self: start; margin-top: 6px; }
+#gvov { top: 96px; left: 8px; width: 290px; padding: 8px 10px; display: grid; gap: 6px; }
+#gvlegend { left: 8px; bottom: 8px; padding: 6px 10px; max-width: calc(100% - 110px); color: var(--ink2); display: grid; gap: 3px; }
+#gvgz { position: absolute; z-index: 3; right: 8px; bottom: 8px; width: 76px; height: 76px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+#gvtip { position: fixed; z-index: 11; pointer-events: none; max-width: min(360px, calc(100vw - 24px)); background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.14); padding: 7px 10px; font-size: 12px; line-height: 1.4; }
+.gv-t { font: 600 12.5px var(--mono); overflow-wrap: anywhere; }
+.gv-tx { margin: 3px 0; overflow-wrap: anywhere; }
+.gv-k { font-size: 10.5px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; margin-top: 6px; }
+.gv-stat { font: 11px var(--mono); color: var(--ink2); }
+.gv-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.gv-row input[type=range] { flex: 1; min-width: 0; }
+.gv-why { display: flex; gap: 6px; align-items: flex-start; font-weight: 600; overflow-wrap: anywhere; }
+.gv-key { display: flex; flex-wrap: wrap; gap: 3px 10px; color: var(--ink2); font-size: 11px; }
+.gv-chipb { font: inherit; color: inherit; background: none; border: 1px solid transparent; border-radius: 6px; padding: 1px 3px; cursor: pointer; }
+.gv-chipb:hover { border-color: var(--border); }
+.gv-chipb[aria-pressed="true"] { border-color: var(--ink); background: var(--wash); }
+.gv-sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+#vGravity .gv-gl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink2); font-weight: 600; }
+.gv-seg { display: inline-flex; }
+.gv-seg button { border-radius: 0; margin: 0 0 0 -1px; }
+.gv-seg button:first-child { border-radius: 6px 0 0 6px; margin: 0; }
+.gv-seg button:last-child { border-radius: 0 6px 6px 0; }
+.gv-seg button[aria-pressed="true"] { background: var(--ink); color: var(--page); }
+#gvlayout { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+#gvlayout > summary { display: inline; cursor: pointer; color: var(--ink2); list-style: none; padding: 2px 4px; }
+#gvlayout > summary::before { content: '▸ '; }
+#gvlayout[open] > summary::before { content: '▾ '; }
+#gvlayout[open] > .gv-grp { margin-left: 8px; }
+#gvhelp { top: 8px; right: 8px; z-index: 5; width: min(380px, calc(100% - 16px)); padding: 10px 12px; line-height: 1.45; top: 56px; }
+#gvhelp p { margin: 2px 0 6px; }
+#gvmsg { padding: 14px 16px; }
+#gvov { max-height: calc(100% - 200px); overflow: auto; }
+#gvmore { display: contents; }
+#gvbar.folded #gvmore { display: none; }
+#vGravity .gv-fh { display: flex; gap: 6px; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; }
+.gv-chev::before { content: '▾'; color: var(--ink2); }
+.folded > .gv-fh .gv-chev::before { content: '▸'; }
+.folded > .gv-fb { display: none; }
+.gv-fb { display: grid; gap: 4px; margin-top: 6px; }
+.gv-box:not(.folded) > .gv-fh { margin-bottom: 0; }
+.gv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.gv-nb { font: 12px var(--mono); color: inherit; background: none; border: 0; padding: 2px 0; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.gv-nb:hover, .gv-nb:focus-visible { color: var(--r-read); }
+#gvside details.gv-nbl > summary { cursor: pointer; font-size: 10.5px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; margin-top: 6px; }
+.gv-keyrow { display: inline-flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+.gv-keyrow > span { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.gv-gly { flex: none; vertical-align: middle; }
+@media (max-width: 760px) {
+  #gvbar { left: 4px; right: 4px; top: 4px; padding: 4px 8px; gap: 4px 10px; }
+  #gvprim { gap: 6px 8px; }
+  #gvsearch { width: 110px; }
+  #gvov, #gvside { left: 8px; right: 8px; width: auto; top: auto; bottom: 44px; max-height: 42%; overflow: auto; }
+  #vGravity[data-sel="1"] #gvov { display: none; }
+  #vGravity:not([data-sel="1"]) #gvside { display: none; }
+  #gvlegend { left: 8px; right: 8px; bottom: 8px; max-width: none; overflow-x: auto; }
+  #gvlegend .gv-keyrow { flex-wrap: nowrap; }
+  #gvgz { display: none; }
+  #gvhelp { top: 8px; }
+}
 </style>
 </head>
 <body>
@@ -495,7 +572,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
         <button id="copy" title="Copy a link to this view">copy link</button>
         <button id="theme" title="Theme: follows the system until you pick">theme: auto</button>
       </div>
-      <div class="keys"><kbd>←</kbd> <kbd>→</kbd> turns · <kbd>Esc</kbd> back out · <kbd>Tab</kbd> nodes · Explore: <kbd>n</kbd> <kbd>p</kbd> <kbd>[</kbd> <kbd>]</kbd> <kbd>i</kbd> <kbd>o</kbd> <kbd>m</kbd> <kbd>/</kbd></div>
+      <div class="keys" id="keys"><kbd>←</kbd> <kbd>→</kbd> turns · <kbd>Esc</kbd> back out · <kbd>Tab</kbd> nodes · Explore: <kbd>n</kbd> <kbd>p</kbd> <kbd>[</kbd> <kbd>]</kbd> <kbd>i</kbd> <kbd>o</kbd> <kbd>m</kbd> <kbd>/</kbd></div>
     </div>
   </header>
   <nav class="tabs" role="tablist" aria-label="Views">
@@ -506,6 +583,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
     <button role="tab" id="tab-targets" data-view="targets">Targets</button>
     <button role="tab" id="tab-outcomes" data-view="outcomes">Outcomes</button>
     <button role="tab" id="tab-graph" data-view="graph">Graph</button>
+    <button role="tab" id="tab-gravity" data-view="gravity">Gravity</button>
   </nav>
   <div id="notice" class="notice" hidden></div>
   <section class="panel" id="summary" aria-live="polite"></section>
@@ -526,6 +604,27 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
     </div>
     <section class="panel" id="vTargets" hidden></section>
     <section class="panel" id="vOutcomes" hidden></section>
+    <section id="vGravity" hidden aria-label="Gravity">
+      <div id="gvmsg" hidden></div>
+      <div id="gvui">
+        <div class="gv-box" id="gvbar">
+          <span class="gv-grp" id="gvprim"><label title="3D  (3)"><input type="checkbox" id="gv3">3D</label><button class="btn" data-gvact="fit" title="frame every body  (f)">fit</button><button class="btn" id="gvfitsel" data-gvact="fitsel" title="frame the selection and its neighbours  (s)" disabled>fit selection</button><input type="search" id="gvsearch" list="gvhits" placeholder="find a ref" aria-label="find a ref" title="find a ref, its short name, its wording or, under a turn, its value  (/); Enter next, Shift+Enter previous"><datalist id="gvhits"></datalist><span class="gv-stat" id="gvstat"></span><button class="btn" id="gvhelpb" data-gvact="help" title="gestures and keys  (?)" aria-expanded="false" aria-controls="gvhelp">?</button><button class="btn" id="gvmoreb" data-gvfold="bar" aria-expanded="true" aria-controls="gvmore" title="show or hide the other controls">options</button></span>
+          <div id="gvmore">
+          <span class="gv-grp"><b class="gv-gl">Show</b><label title="questions and tool results"><input type="checkbox" id="gvq" checked>questions and tool results</label><label title="only those whose heavy neighbours lie in more than one domain"><input type="checkbox" id="gvcross">cross-domain only</label><label title="edges between rule results and targets; a selection always shows its own"><input type="checkbox" id="gvhh" checked>rule and target edges</label></span>
+          <span class="gv-grp" id="gvgturn" hidden><b class="gv-gl">Turn</b><label id="gvovl" hidden title="the selected turn's entries, lineage and rounds over the graph; off shows the model alone"><input type="checkbox" id="gvovon" checked>turn overlay</label></span>
+          <span class="gv-grp"><b class="gv-gl">View</b><label title="hue by the first segment of the ref instead of by kind"><input type="checkbox" id="gvkind">colour by domain</label><span class="gv-grp" id="gvpresets" hidden><button class="btn" data-gvact="front" title="look along z">front</button><button class="btn" data-gvact="top" title="look along y">top</button><button class="btn" data-gvact="side" title="look along x">side</button><span class="gv-seg" id="gvdrag" role="group" aria-label="what a plain drag does in 3D" title="a plain drag: orbit turns the view, move slides it (shift-, space- or middle-drag always move)"><button class="btn" data-gvact="drag-orbit" aria-pressed="true">orbit</button><button class="btn" data-gvact="drag-move" aria-pressed="false">move</button></span><button class="btn" data-gvact="home" title="the default 3D view  (h)">home</button></span></span>
+          <details id="gvlayout"><summary title="the physics' pulls, relayout and the drawing options">layout</summary><span class="gv-grp">question pull <input type="range" id="gvqpull" min="0" max="100" value="50" aria-label="question pull"> heavy pull <input type="range" id="gvhpull" min="0" max="100" value="50" aria-label="pull between rule results and targets"><button class="btn" data-gvact="relayout" title="settle again from the seeded start">relayout</button><label title="flat discs, no sphere shading"><input type="checkbox" id="gvflat">flat</label><label title="a soft blob under each domain"><input type="checkbox" id="gvhalo">halos</label><label title="turn slowly when idle in 3D"><input type="checkbox" id="gvspin">spin</label></span></details>
+          </div>
+        </div>
+        <canvas id="gvc" tabindex="0" role="application" aria-label="The design's refs as bodies. Keys: period and comma walk the bodies, Enter selects the one in focus, arrows pan or turn, f fits all, s fits the selection, 3 switches 3D, slash finds, a and d step the round, question mark lists every key. Mouse: drag a body to move it, drag empty space to pan or turn, the wheel zooms."></canvas>
+        <div class="gv-box" id="gvhelp" hidden role="dialog" aria-label="Gravity gestures and keys"><div class="gv-k">Mouse</div><p>Drag a body to move it. Drag empty space to pan (2D) or turn (3D); in 3D shift-, right-, middle- or space-drag slides the view instead. The wheel zooms. Click selects; click again steps to the next body beneath. Double-click empty space to fit.</p><div class="gv-k">Touch</div><p>Tap selects. Drag a body to move it; drag empty space to pan or turn. Two fingers pan and pinch to zoom.</p><div class="gv-k">Keys</div><p><kbd>f</kbd> fit · <kbd>s</kbd> fit selection · <kbd>h</kbd> home · <kbd>3</kbd> 3D · <kbd>/</kbd> find · <kbd>a</kbd> <kbd>d</kbd> previous / next round · <kbd>+</kbd> <kbd>-</kbd> zoom · arrows turn or pan with the canvas focused (shift pans) · <kbd>?</kbd> this help</p><p class="muted"><kbd>Esc</kbd> clears one thing at a time: this help, the search, the selection, the round pinned, then backs out as on every tab.</p></div>
+        <div class="gv-box" id="gvov" hidden></div>
+        <div class="gv-box" id="gvside" aria-live="polite"></div>
+        <div class="gv-box" id="gvlegend"></div>
+        <div id="gvlive" class="gv-sr" role="status" aria-live="polite"></div>
+        <canvas id="gvgz" width="76" height="76" hidden aria-label="axis gizmo: click an axis end to look along it"></canvas>
+      </div>
+    </section>
   </div>
   <div id="vGraph">
   <section class="panel">
@@ -552,6 +651,7 @@ nav.tabs button:disabled { opacity: .45; cursor: default; }
   </div>
 </div>
 <div id="tip" hidden></div>
+<div id="gvtip" hidden></div>
 <div id="hovercard" hidden></div>
 <div id="drop" hidden>Drop outline JSON to draw it</div>
 <script>
@@ -727,7 +827,7 @@ function briefFull(e) {
 }
 
 /* ---------- state ---------- */
-const S = {set: 0, design: 0, turn: null, node: null, stateEdges: false, declaredHops: true, sort: null, dir: 1, undecidedOnly: false, view: null, tmode: null, table: null};
+const S = {set: 0, design: 0, turn: null, node: null, tgt: null, stateEdges: false, declaredHops: true, sort: null, dir: 1, undecidedOnly: false, view: null, tmode: null, table: null};
 const sets = (DATA.sets || []).map(prepareSet);
 let theme = 'auto';
 try { theme = localStorage.getItem('ommat-lens-theme') || 'auto'; } catch (e) { /* storage blocked */ }
@@ -1760,7 +1860,7 @@ function drawDetail(host = $('detail'), nodeId = S.node) {
     host.innerHTML = h; return;
   }
   const doc = t || cur().designs[S.design];
-  let h = `${doc && doc.text ? (inGraph ? inTextChip() : '') : ''}<h2>${n.policy ? 'rule · the policy' : esc(n.kind)}</h2><h3>${esc(n.id)}</h3><div class="sub">round ${n.round} · wavefront ${n.wavefront} · fan-in ${n.fan_in} · fan-out ${n.fan_out}${n.predecessors.length ? ' · predecessors ' + esc(n.predecessors.join(', ')) : ''}</div>`;
+  let h = `${doc && doc.text ? (inGraph ? inTextChip() : '') : ''}<h2>${n.policy ? 'rule · the policy' : esc(n.kind)}</h2><h3>${esc(n.id)}${host === $('exdetail') ? ' ' + gvShowBtn(D, n) : ''}</h3><div class="sub">round ${n.round} · wavefront ${n.wavefront} · fan-in ${n.fan_in} · fan-out ${n.fan_out}${n.predecessors.length ? ' · predecessors ' + esc(n.predecessors.join(', ')) : ''}</div>`;
   h += dl([['type', n.type ? n.type.text : null], ['refs', (n.refs || []).join(', ')], ['oracle', n.oracle], ['needs', (n.needs || []).join(', ')],
     ['requirement', n.requirement ? `${n.requirement.ref} in ${enc(n.requirement.values)}` : null], ['cost', n.cost], ['timeout', n.timeout],
     ['feedback', n.feedback ? 'yes' : null], ['grounded', n.grounded], ['payload', n.payload], ['when', n.when ? `${n.when.module}.${n.when.qualname} v${n.when.version}` : null],
@@ -1875,7 +1975,7 @@ function textNodeOf(lines, D, isTurn) {
 // Each draws the design's outline and, in Explore, the selected turn over it. Every index they
 // read (steps to the policy, the source requirements, a target's links, a row's tests) is the
 // outline's; the page only looks them up and counts.
-const VIEWS = ['turn', 'path', 'overview', 'explore', 'targets', 'outcomes', 'graph'];
+const VIEWS = ['turn', 'path', 'overview', 'explore', 'targets', 'outcomes', 'graph', 'gravity'];
 const EX = {up: 1, down: 1, info: false, dir: 'v', mini: true, filter: '', rowOpen: new Set(), unfold: new Set(), toggled: new Set(), cardH: null};
 const IX = new WeakMap();
 function ixOf(D) {
@@ -2144,7 +2244,7 @@ function pathAnswerRow(t, ref, was) {
 }
 function pathDetail(X, t, P) {
   const n = P.n, D = X.D, read = P.readAnswers, decl = P.answers.filter(r => !P.was(r));
-  let h = `<div class="pdetail"><h3>${glyphOf(n)} ${esc(n.name)} <span class="kk">${esc([n.form, 'round ' + n.round, stepsText(n)].filter(Boolean).join(' · '))}</span> <button class="btn" data-go="${esc(n.id)}">open in Explore</button></h3>`;
+  let h = `<div class="pdetail"><h3>${glyphOf(n)} ${esc(n.name)} <span class="kk">${esc([n.form, 'round ' + n.round, stepsText(n)].filter(Boolean).join(' · '))}</span> <button class="btn" data-go="${esc(n.id)}">open in Explore</button> ${gvShowBtn(D, n)}</h3>`;
   h += P.entries.length ? `<div class="reads">${P.entries.map(e => `<div><span class="mono">${esc(e.ref)}</span> ${valueFull(e)}</div>`).join('')}</div>` : '<p class="empty">The record holds no entry for this rule.</p>';
   if ((n.params || []).length) h += `<p class="empty">Parameters it declares: ${n.params.map(x => `<span class="mono">${esc(x.param + paramValue(D, x.param))}</span>`).join(', ')}</p>`;
   h += P.tables.map(tb => tableHTML(X, t, tb, true)).join('');
@@ -2411,6 +2511,11 @@ function turnTargetHTML(X, tg) {
 }
 const ROLES = ['asks', 'reflective', 'formative', 'unknown'];
 function drawTargets() {
+  drawTargetsBody();
+  const f = $('vTargets').querySelector ? $('vTargets').querySelector('details.tfocus') : null; // the target Gravity linked to
+  if (f && f.scrollIntoView) f.scrollIntoView({block: 'center'});
+}
+function drawTargetsBody() {
   const host = $('vTargets'), D = curDesign(), X = ixOf(D);
   if (!X) { host.innerHTML = noDesign('Targets'); return; }
   const targets = (D.targets || []).slice().sort((a, b) => (a.path ? a.path.length : 1e9) - (b.path ? b.path.length : 1e9) || (a.id < b.id ? -1 : 1));
@@ -2426,7 +2531,7 @@ function drawTargets() {
     for (const q of qs) counts[q.role] = (counts[q.role] || 0) + 1;
     const est = t.estimated_by || [], rd = t.readers || [];
     const steps = t.path ? t.path.length - 1 : null;
-    h += `<details><summary><div class="trow"><span class="tid">${esc(t.id)}</span> ${ROLES.filter(r => counts[r]).map(r => `<span class="chip ${r}">${r} ${counts[r]}</span>`).join(' ')}
+    h += `<details${S.tgt === t.id ? ' open class="tfocus"' : ''}><summary><div class="trow"><span class="tid">${esc(t.id)}</span> ${ROLES.filter(r => counts[r]).map(r => `<span class="chip ${r}">${r} ${counts[r]}</span>`).join(' ')}
       <span class="chip">${plural(est.length, 'estimating rule')}</span>
       ${steps != null ? `<span class="mono empty" style="font-size:12px">${plural(steps, 'step')} to the policy</span>` : ''}
       ${est.length ? '' : '<span class="warnline">no rule estimates it</span>'}<span class="stmt">${esc(t.statement || '')}${t.values_text ? ` · <i>${esc(t.values_text)}</i>` : ''}</span></div></summary>
@@ -2845,6 +2950,7 @@ function drawView() {
   $('vTargets').hidden = S.view !== 'targets';
   $('vOutcomes').hidden = S.view !== 'outcomes';
   $('vGraph').hidden = S.view !== 'graph';
+  $('vGravity').hidden = S.view !== 'gravity';
   $('summary').hidden = !(S.view === 'graph' || (S.view === 'explore' && curTurn()));
   placeTurnPanes();
   if (S.view === 'turn') drawTurnView();
@@ -2853,6 +2959,7 @@ function drawView() {
   else if (S.view === 'explore') drawExploreView();
   else if (S.view === 'targets') drawTargets();
   else if (S.view === 'outcomes') drawOutcomes();
+  else if (S.view === 'gravity') gvDrawView();
 }
 // A move of the focus in Explore is a history step, so back and forward walk the slices.
 function go(id) {
@@ -2864,11 +2971,15 @@ function go(id) {
 }
 function setEx(o) { Object.assign(EX, o); drawView(); writeHash(); }
 function viewsClick(ev) {
-  const t = ev.target && ev.target.closest ? ev.target.closest('[data-turn],[data-pnode],[data-go],[data-view-go],[data-tmode],[data-exstep],[data-info],[data-rtoggle],[data-rowopen],[data-dir],[data-mini],[data-unfold],#exback,#exfwd') : null;
+  const t = ev.target && ev.target.closest ? ev.target.closest('[data-turn],[data-pnode],[data-gvpath],[data-gvtgt],[data-gvshow],[data-go],[data-view-go],[data-tmode],[data-exstep],[data-info],[data-rtoggle],[data-rowopen],[data-dir],[data-mini],[data-unfold],#exback,#exfwd') : null;
   if (!t) return;
   const d = t.dataset || {};
   if (d.turn !== undefined) return selectTurn(Number(d.turn));
   if (d.pnode) { S.node = d.pnode; drawView(); drawDetail(); return writeHash(); }
+  // Gravity's links to the other tabs, and back: each is a history step, so back returns to the graph as it stood
+  if (d.gvpath) { S.node = d.gvpath; S.view = 'path'; headKeys(); drawView(); drawDetail(); return writeHash(true); }
+  if (d.gvtgt) { S.tgt = d.gvtgt; S.tmode = null; S.view = 'targets'; headKeys(); drawView(); return writeHash(true); }
+  if (d.gvshow) { GV.sel = d.gvshow; GV.selRestore = true; S.view = 'gravity'; headKeys(); drawView(); return writeHash(true); }
   if (d.viewGo) { ev.preventDefault(); return showView(d.viewGo); }
   if (d.go) { if (d.info) EX.info = true; return go(d.go); }
   if (t.id === 'exback') { try { history.back(); } catch (e) { /* none */ } return; }
@@ -2934,9 +3045,1152 @@ function viewsHover(ev) {
   }, 250);
 }
 
+/* ---------- gravity: the design's refs as bodies in a force layout ---------- */
+// Gravity draws each rule's estimate, each target, and each question and tool result a source
+// provides as a body, and only edges the outline holds: a dependency edge runs from its ref's
+// base to the estimate of the rule it reaches, or to each ref of the source it reaches; a
+// target's questions by their role; the rules that estimate it. The state (t:state) is a body too, and its uses
+// (the edges that are not dependencies) are drawn from it. The layout is a function of that graph: a generator seeded from the
+// design's hash scatters the bodies, a fixed number of ticks settles them when the view first
+// draws, and every move after is eased by frame count. A drag reheats it live.
+const GV = {mode3: false, light: true, cross: false, hh: true, ov: true, drag: 'orbit', space: false, touch: false, help: false, fold: {}, kf: null, st: null, whyOpen: false, stepFromHash: false, selRestore: false, byDomain: false, flat: false, halo: false, spin: false, qPull: .5, hPull: .5, find: '', sel: null, step: null, hide: false, lin: false};
+const GV_TICKS = 300, GV_FOC = 900, GV_EASE = 36, GV_TW = 30, GV_GZ = 76;
+const GV_KIND = {target: 'target', rule: 'rule result', question: 'question', tool: 'tool result', state: 'state'};
+const GVL = new WeakMap(); // a design outline -> its bodies, layout and camera
+let gvL = null, gvRaf = 0, gvPlay = null, gvMQ = false;
+let LAST_GRAVITY = null; // the last gravity view drawn, for the smoke test
+const gvClamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const gvSmooth = u => u * u * (3 - 2 * u);
+const gvRM = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+const gvAnim = () => typeof requestAnimationFrame === 'function' && !gvRM();
+function gvKick() { if (!gvRaf && typeof requestAnimationFrame === 'function') gvRaf = requestAnimationFrame(gvFrame); }
+// mulberry32 over an FNV-1a hash of the seed text
+function gvRng(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return () => { h = (h + 0x6D2B79F5) | 0; let t = Math.imul(h ^ (h >>> 15), 1 | h); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+// A body's domain sets its hue alone. The outline has no domain member: this takes the first
+// path segment of the ref (calendar/day is calendar), a display heuristic kept to this function.
+function gvDomain(id) { const s = String(id).replace(/^[a-z]+:/, '').split('/'); return s.length > 1 ? s[0] : 'top level'; }
+const gvDec = n => (n.refs || [])[0] || n.id; // a rule's estimate; a format-9 policy provides none and is its node
+const gvHeavy = n => n.kind === 'target' || n.kind === 'rule' || n.kind === 'state';
+const gvWording = q => { const w = q.wording && q.wording.template; return w == null ? null : cut(typeof w === 'string' ? w : enc(w), 400); };
+
+/* the bodies and edges, from the outline alone */
+// A body: what the panels say of it, then its mass, place and motion.
+function gvBody(id, label, o) {
+  return {id, kind: o.kind, label: String(label), domain: o.kind === 'state' ? 'state' : gvDomain(id), node: o.node || null, policy: !!o.policy, form: o.form || null, steps: o.steps ?? null,
+    fields: o.fields || null, fanIn: o.fanIn || 0, fanOut: o.fanOut || 0, qkind: o.qkind || null, labels: o.labels || null, text: o.text || null, statement: o.statement ?? null,
+    values: o.values ?? null, nq: o.nq || 0, deg: 0, nDec: 0, span: 1, mass: 1, r: 3, shared: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
+    fx: null, fy: null, fz: null, va: 1, want: true, px: 0, py: 0, sc: 1, vzv: 0, os: null, ts: null, tc: null, qn: 1, qp: 1, hhd: 1, cs: -3, cr: 4, cr2: 16};
+}
+function gvGraph(D) {
+  const byId = new Map(), edges = [], seen = new Set(), N = {};
+  const add = (id, o) => { if (typeof id === 'string' && !byId.has(id)) byId.set(id, gvBody(id, o.label || shortOf(D, id), o)); };
+  for (const n of D.nodes || []) {
+    N[n.id] = n;
+    if (n.kind === 'rule') add(gvDec(n), {kind: 'rule', node: n.id, label: (n.refs || [])[0] ? shortOf(D, n.refs[0]) : n.name, policy: !!n.policy, form: n.form, steps: n.steps_to_policy, fanIn: n.fan_in || 0, fanOut: n.fan_out || 0});
+    else if (n.kind === 'source') {
+      for (const q of n.questions || []) add(q.ref, {kind: 'question', node: n.id, qkind: q.kind, labels: (q.labels || []).map(l => l.name).filter(x => typeof x === 'string').slice(0, 8), text: gvWording(q)});
+      for (const r of n.tool_results || []) add(r.ref, {kind: 'tool', node: n.id});
+    }
+  }
+  for (const n of D.nodes || []) if (n.kind === 'state') add('t:state', {kind: 'state', node: n.id, label: 't:state', text: n.type && n.type.text, fields: ((n.type && n.type.fields) || []).map(f => f.name)});
+  for (const t of D.targets || []) add(t.id, {kind: 'target', label: String(t.id).replace(/^tg:/, ''), statement: t.statement, values: t.values_text, nq: (t.questions || []).length});
+  const edge = (s, t, r, role) => {
+    const k = s + '\0' + t + '\0' + r;
+    if (s === t || !byId.has(s) || !byId.has(t) || seen.has(k)) return;
+    seen.add(k); edges.push({s, t, r, role});
+  };
+  for (const e of D.edges || []) {
+    const to = N[e.to], from = baseOf(e.ref);
+    if (!to || !from) continue; // a use of the state (not a dependency) runs from the state body
+    for (const r of to.kind === 'rule' ? [gvDec(to)] : to.refs || []) edge(from, r, e.role);
+  }
+  for (const t of D.targets || []) {
+    for (const q of t.questions || []) edge(q.ref, t.id, q.role === 'asks' ? 'asks' : 'latent', q.role);
+    for (const id of t.estimated_by || []) if (N[id]) edge(gvDec(N[id]), t.id, 'estimates');
+  }
+  const nodes = [...byId.values()], adj = new Map(nodes.map(n => [n.id, new Set()]));
+  const links = edges.map(e => { adj.get(e.s).add(e.t); adj.get(e.t).add(e.s); return {a: byId.get(e.s), b: byId.get(e.t), r: e.r}; });
+  // mass: targets and rule results are heavy; a question weighs more for each rule it feeds and each further domain it spans
+  for (const n of nodes) {
+    const nb = [...adj.get(n.id)].map(i => byId.get(i)), hv = nb.filter(x => gvHeavy(x) && x.kind !== 'state'); // the state spans no domain
+    n.deg = nb.length; n.nDec = nb.filter(x => x.kind === 'rule').length;
+    n.span = new Set([n.domain, ...hv.map(x => x.domain)]).size;
+    n.mass = n.kind === 'target' ? 8 + 2.2 * n.nq + n.deg * .6 : n.kind === 'rule' ? 4 * (1 + n.fanOut) + (n.policy ? 12 : 0) : n.kind === 'state' ? 8 + .6 * n.deg : 1.2 + 1.4 * n.nDec + 2.5 * (n.span - 1);
+    n.r = gvHeavy(n) ? Math.sqrt(n.mass) * 2.1 : Math.max(3, Math.sqrt(n.mass) * 2);
+    n.shared = !gvHeavy(n) && n.span > 1; // a bridge: its heavy neighbours lie in more than one domain
+  }
+  const count = d => nodes.filter(n => n.domain === d).length;
+  const domains = [...new Set(nodes.filter(n => n.kind !== 'state').map(n => n.domain))].sort((p, q) => count(q) - count(p) || (p < q ? -1 : 1));
+  return {D, nodes, links, edges, byId, adj, domains, act: nodes.slice(), qh: [], hh: [], qs: .5, hs: .5, mode3: false, view3: false,
+    seed: String(D.hash || D.name || ''), rng: null, cam: {yaw: 0, pitch: 0, tx: 0, ty: 0, tz: 0}, tf: {x: 0, y: 0, k: 1}, W: 0, H: 0, dpr: 1,
+    force: new Set(), hitList: [], hitAt: -1, fitted: false, tw: null, ease: null, live: false, alpha: 0, target: 0, vyaw: 0, vpitch: 0, idle: 0, drag: null, rot: null, pan: null, pinch: null,
+    tps: new Map(), moved: false, hov: null, hits: null, ov: null, ovT: null, T: null, drawn: [], rings: {}, lit: [], lc: null};
+}
+
+/* the physics: mass-scaled repulsion, two bounded springs, collision and a weak centring pull; 2D locks z at 0 */
+function gvPairs(L) {
+  L.qh = []; L.hh = []; L.qs = GV.qPull; L.hs = GV.hPull;
+  for (const n of L.nodes) { n.qn = 0; n.qp = 0; n.hhd = 0; }
+  for (const l of L.links) {
+    const a = l.a, b = l.b, w = l.r === 'latent' ? .5 : 1;
+    if (gvHeavy(a) && gvHeavy(b)) { L.hh.push({a, b}); a.hhd++; b.hhd++; continue; }
+    if (!a.want || !b.want) continue; // a hidden body pulls nothing
+    const q = gvHeavy(a) ? b : a, h = q === a ? b : a;
+    L.qh.push({q, h, w}); q.qp++; h.qn++;
+  }
+  for (const n of L.nodes) {
+    n.qn = Math.max(1, n.qn); n.qp = Math.max(1, n.qp); n.hhd = Math.max(1, n.hhd);
+    n.cs = gvHeavy(n) ? -3 * n.mass : -3; n.cr = n.r + 1.5; n.cr2 = n.cr * n.cr;
+  }
+}
+// The hot loops read and write Float64Array scratch buffers, but visit the same pairs in the same order with the same
+// arithmetic as plain objects would, so positions are bit for bit the same.
+function gvScratch(L, n) {
+  let W = L.scratch;
+  if (!W || W.n !== n) W = L.scratch = {n, X: new Float64Array(n), Y: new Float64Array(n), Z: new Float64Array(n), C: new Float64Array(n), R: new Float64Array(n), VX: new Float64Array(n), VY: new Float64Array(n), VZ: new Float64Array(n)};
+  return W;
+}
+function gvStep(L, a) {
+  const N = L.act, n = N.length, n3 = L.mode3, D2 = 300 * 300, rnd = () => (L.rng() - .5) * 1e-3;
+  const {X, Y, Z, C, R, VX, VY, VZ} = gvScratch(L, n);
+  for (let i = 0; i < n; i++) { const b = N[i]; X[i] = b.x; Y[i] = b.y; Z[i] = n3 ? b.z : 0; C[i] = b.cs; VX[i] = b.vx; VY[i] = b.vy; VZ[i] = b.vz; }
+  for (let i = 0; i < n; i++) { // repulsion within 300, scaled by mass
+    const px = X[i], py = Y[i], pz = Z[i], pc = C[i]; let ax = VX[i], ay = VY[i], az = VZ[i];
+    for (let j = i + 1; j < n; j++) {
+      let dx = X[j] - px, dy = Y[j] - py, dz = n3 ? Z[j] - pz : 0, l = dx * dx + dy * dy + dz * dz;
+      if (l >= D2) continue;
+      if (l === 0) { dx = rnd(); dy = rnd(); l = dx * dx + dy * dy; }
+      if (l < 1) l = Math.sqrt(l);
+      const wp = C[j] * a / l, wq = pc * a / l;
+      ax += dx * wp; ay += dy * wp; az += dz * wp; VX[j] -= dx * wq; VY[j] -= dy * wq; VZ[j] -= dz * wq; }
+    VX[i] = ax; VY[i] = ay; VZ[i] = az; }
+  for (let i = 0; i < n; i++) { const b = N[i]; b.vx = VX[i]; b.vy = VY[i]; b.vz = VZ[i]; R[i] = b.cr; }
+  // a question sits in a tight orbit at the centroid of what it touches; each heavy body feels the mean pull of its questions
+  for (const p of L.qh) { const Q = p.q, Hv = p.h; const dx = Hv.x - Q.x, dy = Hv.y - Q.y, dz = n3 ? Hv.z - Q.z : 0, d = Math.hypot(dx, dy, dz) || 1;
+    const e = gvClamp(d - (Q.r + Hv.r + 6), -120, 120) * p.w, ux = dx / d, uy = dy / d, uz = dz / d, c = a * .6 * e / Q.qp;
+    Q.vx += ux * c; Q.vy += uy * c; Q.vz += uz * c;
+    const k = a * L.qs * 2 * e / Hv.qn; Hv.vx -= ux * k; Hv.vy -= uy * k; Hv.vz -= uz * k; }
+  // heavy to heavy: a spring of fixed rest length; the heavier moves less
+  for (const p of L.hh) { const A = p.a, B = p.b; const dx = B.x - A.x, dy = B.y - A.y, dz = n3 ? B.z - A.z : 0, d = Math.hypot(dx, dy, dz) || 1;
+    const e = gvClamp(d - (A.r + B.r + 36), -150, 150), k = a * L.hs * 2 * e / Math.min(A.hhd, B.hhd), ux = dx / d, uy = dy / d, uz = dz / d, s = A.mass + B.mass;
+    A.vx += ux * k * B.mass / s; A.vy += uy * k * B.mass / s; A.vz += uz * k * B.mass / s; B.vx -= ux * k * A.mass / s; B.vy -= uy * k * A.mass / s; B.vz -= uz * k * A.mass / s; }
+  // collide: X, Y, Z hold each body's position plus its velocity, to rule a far pair out cheaply (with a margin far above
+  // the rounding); a pair that might touch is then tested and moved exactly as ever
+  for (let i = 0; i < n; i++) { const b = N[i]; X[i] = b.x + b.vx; Y[i] = b.y + b.vy; Z[i] = n3 ? b.z + b.vz : 0; }
+  for (let it = 0; it < 2; it++) for (let i = 0; i < n; i++) { const p = N[i], pr = R[i]; let px = X[i], py = Y[i], pz = Z[i];
+    for (let j = i + 1; j < n; j++) { const rr = pr + R[j], ex = px - X[j], ey = py - Y[j], ez = pz - Z[j];
+      if (ex * ex + ey * ey + ez * ez >= rr * rr + 1e-6) continue;
+      const q = N[j];
+      let dx = p.x + p.vx - q.x - q.vx, dy = p.y + p.vy - q.y - q.vy, dz = n3 ? p.z + p.vz - q.z - q.vz : 0, l = dx * dx + dy * dy + dz * dz;
+      if (l >= rr * rr) continue;
+      if (l === 0) { dx = rnd(); dy = rnd(); l = dx * dx + dy * dy; }
+      const d = Math.sqrt(l), f = (rr - d) / d * .9, mp = q.cr2 / (p.cr2 + q.cr2);
+      p.vx += dx * f * mp; p.vy += dy * f * mp; p.vz += dz * f * mp; q.vx -= dx * f * (1 - mp); q.vy -= dy * f * (1 - mp); q.vz -= dz * f * (1 - mp);
+      px = X[i] = p.x + p.vx; py = Y[i] = p.y + p.vy; X[j] = q.x + q.vx; Y[j] = q.y + q.vy; if (n3) { pz = Z[i] = p.z + p.vz; Z[j] = q.z + q.vz; } } }
+  for (const n of N) { // a weak centring spring, in z too, so 3D stays compact without being squashed
+    n.vx -= n.x * .02 * a; n.vy -= n.y * .02 * a; if (n3) n.vz -= n.z * .02 * a;
+    if (n.fx != null) { n.x = n.fx; n.vx = 0; } else { n.vx *= .6; n.x += n.vx; }
+    if (n.fy != null) { n.y = n.fy; n.vy = 0; } else { n.vy *= .6; n.y += n.vy; }
+    if (!n3) { n.z = 0; n.vz = 0; } else if (n.fz != null) { n.z = n.fz; n.vz = 0; } else { n.vz *= .6; n.z += n.vz; } }
+}
+// In 3D, when the thinnest axis's spread is under a tenth of the widest, push bodies out along it.
+function gvZGuard(L) {
+  const A = L.act, m = [0, 0, 0], v = [0, 0, 0], ax = ['x', 'y', 'z'];
+  if (A.length < 3) return;
+  for (const n of A) for (let i = 0; i < 3; i++) m[i] += n[ax[i]] / A.length;
+  for (const n of A) for (let i = 0; i < 3; i++) v[i] += (n[ax[i]] - m[i]) ** 2 / A.length;
+  const big = Math.max(...v), ai = v.indexOf(Math.min(...v));
+  if (v[ai] >= .1 * big) return;
+  const sd = Math.sqrt(v[ai]), g = .05 * Math.sqrt(big);
+  for (const n of A) n['v' + ax[ai]] += g * (gvClamp((n[ax[ai]] - m[ai]) / (sd + .02 * Math.sqrt(big)), -2, 2) + (L.rng() - .5) * .3);
+}
+function gvSettle(L, ticks, a) { for (let i = 0; i < ticks; i++) { gvStep(L, a); a *= .98; if (L.mode3 && i % 100 === 99) gvZGuard(L); } }
+const gvVisible = n => gvHeavy(n) || (GV.light && (!GV.cross || n.shared));
+function gvWant(L) { const now = !gvAnim(); for (const n of L.nodes) { n.want = gvVisible(n) || L.force.has(n.id); // a found body is shown despite the filters while it is the selection
+ if (now) n.va = n.want ? 1 : 0; } L.act = L.nodes.filter(n => n.want); }
+// The layout from scratch: the seeded scatter, settled; in 3D, seeded depths settled again.
+function gvLayout(L) {
+  L.rng = gvRng(L.seed); L.mode3 = false; gvWant(L); gvPairs(L);
+  for (const n of L.nodes) { n.x = (L.rng() - .5) * 500; n.y = (L.rng() - .5) * 500; n.z = 0; n.vx = n.vy = n.vz = 0; }
+  gvSettle(L, GV_TICKS, .7);
+  if (GV.mode3) { L.mode3 = true; gvDepths(L); gvSettle(L, GV_TICKS, .9); }
+}
+function gvDepths(L) { const r = gvRng(L.seed + '|3d'); for (const n of L.nodes) { n.z = (r() - .5) * 300; n.vz = 0; } }
+// Settle from where the bodies are, then ease them there by frame count; the camera frames where they come to rest.
+function gvMove(L, ticks, a, prep, goal, done) {
+  const from = L.nodes.map(n => [n.x, n.y, n.z]);
+  if (L.ease) L.ease = null;
+  if (prep) prep();
+  if (ticks) gvSettle(L, ticks, a);
+  const g = goal ? goal() : null;
+  if (gvAnim() && L.W) { L.ease = {f: 0, from, to: L.nodes.map(n => [n.x, n.y, n.z])}; L.nodes.forEach((n, i) => { [n.x, n.y, n.z] = from[i]; }); }
+  if (g) gvCamTo(L, g, {dur: GV_TW, force: true, lock: !!done, done}); else if (done) done();
+  gvKick();
+}
+function gvMode(L, three) {
+  if (L.mode3 === three) return;
+  L.mode3 = three; gvPairs(L);
+  if (three) { L.view3 = true; L.cam.yaw = 0; L.cam.pitch = 0; gvMove(L, GV_TICKS, .9, () => gvDepths(L), () => gvFitGoal(L, L.act, {yaw: .6, pitch: -.35})); }
+  else gvMove(L, GV_TICKS, .9, null, () => gvFitGoal(L, L.act, {yaw: 0, pitch: 0, flat: true}), () => { if (!L.mode3) L.view3 = false; });
+}
+function gvFilters(L) { // a body coming back enters beside the centroid of its heavy neighbours; a gentle reheat, no scatter
+  const was = L.nodes.map(n => n.want); gvWant(L);
+  const r = gvRng(L.seed + '|' + L.act.length);
+  L.nodes.forEach((n, i) => {
+    if (!n.want || was[i]) return;
+    const hs = [...L.adj.get(n.id)].map(id => L.byId.get(id)).filter(gvHeavy);
+    if (!hs.length) return;
+    const c = [0, 0, 0]; for (const h of hs) { c[0] += h.x / hs.length; c[1] += h.y / hs.length; c[2] += h.z / hs.length; }
+    const ang = r() * 6.283, d = n.r * 2 + 8;
+    n.x = c[0] + Math.cos(ang) * d; n.y = c[1] + Math.sin(ang) * d; n.z = L.mode3 ? c[2] + (r() - .5) * d : 0; n.vx = n.vy = n.vz = 0;
+  });
+  gvPairs(L); gvMove(L, 150, .3);
+}
+
+/* the camera: yaw and pitch orbit the point (tx, ty, tz), which lands on projected (0, 0); tf is the screen half */
+function gvProject(L, c = L.cam, flat = false) {
+  const f3 = L.view3 && !flat, cY = Math.cos(c.yaw), sY = Math.sin(c.yaw), cP = Math.cos(c.pitch), sP = Math.sin(c.pitch);
+  for (const n of L.nodes) { const x = n.x - c.tx, y = n.y - c.ty;
+    if (!f3) { n.px = x; n.py = y; n.sc = 1; n.vzv = 0; continue; }
+    const z = n.z - c.tz, vx = x * cY + z * sY, z1 = -x * sY + z * cY, vy = y * cP - z1 * sP, vz = y * sP + z1 * cP, s = GV_FOC / Math.max(GV_FOC + vz, 50);
+    n.px = vx * s; n.py = vy * s; n.sc = s; n.vzv = vz; }
+}
+function gvRot(e, c) { const cY = Math.cos(c.yaw), sY = Math.sin(c.yaw), cP = Math.cos(c.pitch), sP = Math.sin(c.pitch), z1 = -e[0] * sY + e[2] * cY;
+  return [e[0] * cY + e[2] * sY, e[1] * cP - z1 * sP, e[1] * sP + z1 * cP]; }
+function gvPj(L, x, y, z) { const c = L.cam, p = gvRot([x - c.tx, y - c.ty, z - c.tz], c), s = GV_FOC / Math.max(GV_FOC + p[2], 50); return [p[0] * s, p[1] * s]; }
+function gvUnRel(L, px, py, vz, s) { const c = L.cam, cY = Math.cos(c.yaw), sY = Math.sin(c.yaw), cP = Math.cos(c.pitch), sP = Math.sin(c.pitch);
+  const vx = px / s, vy = py / s, y = vy * cP + vz * sP, z1 = -vy * sP + vz * cP; return [vx * cY - z1 * sY, y, vx * sY + z1 * cY]; }
+function gvCamNow(L) { const c = L.cam, t = L.tf; return {yaw: c.yaw, pitch: c.pitch, tx: c.tx, ty: c.ty, tz: c.tz, k: t.k, sx: t.x + t.k * L.W / 2, sy: t.y + t.k * L.H / 2}; }
+function gvCamApply(L, c) { if (!c) return; Object.assign(L.cam, {yaw: c.yaw, pitch: c.pitch, tx: c.tx, ty: c.ty, tz: c.tz}); L.tf = {x: c.sx - c.k * L.W / 2, y: c.sy - c.k * L.H / 2, k: c.k}; }
+function gvCamTo(L, g, o = {}) {
+  if (!g || (L.tw && L.tw.lock && !o.force)) return;
+  const f = gvCamNow(L), to = Object.assign({}, f, g), P = 2 * Math.PI;
+  to.k = gvClamp(to.k, .15, 8); to.yaw = f.yaw + ((to.yaw - f.yaw + Math.PI) % P + P) % P - Math.PI; // the shortest way round
+  L.vyaw = L.vpitch = 0;
+  if (!o.dur || !gvAnim()) { L.tw = null; gvCamApply(L, to); if (o.done) o.done(); return; }
+  L.tw = {f, to, n: 0, dur: o.dur, done: o.done, follow: o.follow, lock: o.lock}; gvKick();
+}
+function gvTween(L) {
+  const tw = L.tw, u = gvSmooth(Math.min(1, ++tw.n / tw.dur)), c = {};
+  if (tw.follow) { tw.to.tx = tw.follow.x; tw.to.ty = tw.follow.y; tw.to.tz = L.view3 ? tw.follow.z : 0; }
+  for (const k in tw.f) c[k] = tw.f[k] + (tw.to[k] - tw.f[k]) * u;
+  gvCamApply(L, c);
+  if (tw.n >= tw.dur) { L.tw = null; if (tw.done) tw.done(); }
+}
+// The free rectangle of the canvas, in its pixels: what the toolbar, the turn and selection panels, the legend and the
+// gizmo leave, measured from the boxes as they stand. A panel docked at a side narrows it from that side, one docked at the
+// bottom (narrow widths) shortens it; when too little is left the canvas under the toolbar is used.
+function gvFree(L) {
+  const R = {x0: 8, y0: 8, x1: L.W - 8, y1: L.H - 8}, cr = gvRect(), box = id => {
+    const el = $(id), b = el && !el.hidden && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    if (!b || !(b.width > 0 && b.height > 0)) return null;
+    const l = (b.left || 0) - cr.left, t = (b.top || 0) - cr.top;
+    return {l, t, r: l + b.width, b: t + b.height};
+  };
+  const bar = box('gvbar'); if (bar) R.y0 = Math.max(R.y0, bar.b + 8);
+  for (const id of ['gvov', 'gvside']) {
+    const b = box(id); if (!b) continue;
+    if (b.t > L.H / 2) R.y1 = Math.min(R.y1, b.t - 8); else if ((b.l + b.r) / 2 < L.W / 2) R.x0 = Math.max(R.x0, b.r + 8); else R.x1 = Math.min(R.x1, b.l - 8);
+  }
+  for (const id of ['gvlegend', 'gvgz']) { const b = box(id); if (b && b.t > L.H / 2) R.y1 = Math.min(R.y1, b.t - 8); }
+  if (R.x1 - R.x0 < 200 || R.y1 - R.y0 < 140) return {x0: 8, y0: bar ? bar.b + 8 : 8, x1: L.W - 8, y1: L.H - 8};
+  return R;
+}
+// Frame a set of bodies: the orbit point goes to their centroid, the zoom fits their projected box beside the panels.
+function gvFitGoal(L, set, o = {}) {
+  if (!set.length || !L.W) return null;
+  const g = {tx: 0, ty: 0, tz: 0, yaw: o.yaw ?? L.cam.yaw, pitch: o.pitch ?? L.cam.pitch};
+  for (const n of set) { g.tx += n.x / set.length; g.ty += n.y / set.length; g.tz += n.z / set.length; }
+  if (o.flat || !L.view3) g.tz = 0;
+  gvProject(L, g, o.flat);
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (const n of set) { const r = n.r * n.sc; x0 = Math.min(x0, n.px - r); x1 = Math.max(x1, n.px + r); y0 = Math.min(y0, n.py - r); y1 = Math.max(y1, n.py + r); }
+  const F = gvFree(L), pad = 16;
+  g.k = gvClamp(Math.min((F.x1 - F.x0 - 2 * pad) / Math.max(1, x1 - x0), (F.y1 - F.y0 - 2 * pad) / Math.max(1, y1 - y0)), .2, o.maxK || 3);
+  g.sx = (F.x0 + F.x1) / 2 - g.k * (x0 + x1) / 2; g.sy = (F.y0 + F.y1) / 2 - g.k * (y0 + y1) / 2;
+  gvProject(L); return g;
+}
+const gvFit = L => gvCamTo(L, gvFitGoal(L, L.act), {dur: GV_TW});
+function gvFitSel(L) {
+  const s = L.byId.get(GV.sel);
+  if (!s || !s.want) return gvFit(L);
+  gvCamTo(L, gvFitGoal(L, [s, ...[...L.adj.get(s.id)].map(i => L.byId.get(i)).filter(n => n.want)], {maxK: 2.5}), {dur: GV_TW});
+}
+const gvHome = L => gvCamTo(L, gvFitGoal(L, L.act, {yaw: .6, pitch: -.35}), {dur: GV_TW, force: true});
+function gvFlyTo(L, n) { if (!n.want) return; L.idle = 0; gvCamTo(L, {tx: n.x, ty: n.y, tz: L.view3 ? n.z : 0, k: Math.max(L.tf.k, .9), sx: (gvFree(L).x0 + gvFree(L).x1) / 2, sy: (gvFree(L).y0 + gvFree(L).y1) / 2}, {dur: GV_TW, follow: n}); }
+function gvZoomBy(L, f) { // 3D: about the orbit point's screen spot; 2D: the canvas centre
+  const t = L.tf, k = gvClamp(t.k * f, .15, 8), cx = L.view3 ? t.x + t.k * L.W / 2 : L.W / 2, cy = L.view3 ? t.y + t.k * L.H / 2 : L.H / 2;
+  if (!(L.tw && L.tw.lock)) L.tw = null;
+  L.tf = {x: cx - (cx - t.x) * k / t.k, y: cy - (cy - t.y) * k / t.k, k};
+}
+// The yaw and pitch that put a world axis end square on to the viewer; +-y keeps the current yaw.
+const gvAxisView = (L, e) => (e[0] === 0 && e[2] === 0 ? {yaw: L.cam.yaw, pitch: -e[1] * Math.PI / 2} : {yaw: Math.atan2(e[0], -e[2]), pitch: 0});
+const GV_PRESET = {front: [0, 0, -1], top: [0, -1, 0], side: [1, 0, 0]};
+
+/* the frame loop: everything that moves after the first settle, counted in frames */
+function gvFrame() {
+  gvRaf = 0;
+  const L = gvL;
+  if (!L || S.view !== 'gravity') return;
+  let more = false;
+  if (L.live) { L.alpha += (L.target - L.alpha) * .02; gvStep(L, L.alpha); if (L.alpha < .001 && L.target === 0) L.live = false; else more = true; }
+  if (L.ease) {
+    const u = gvSmooth(Math.min(1, ++L.ease.f / GV_EASE)), E = L.ease;
+    L.nodes.forEach((n, i) => { const a = E.from[i], b = E.to[i]; n.x = a[0] + (b[0] - a[0]) * u; n.y = a[1] + (b[1] - a[1]) * u; n.z = a[2] + (b[2] - a[2]) * u; });
+    if (E.f >= GV_EASE) L.ease = null; else more = true;
+  }
+  if (L.tw) { gvTween(L); more = true; }
+  if ((L.vyaw || L.vpitch) && !L.rot) { // inertia, x0.92 a frame
+    L.cam.yaw += L.vyaw; L.cam.pitch = gvClamp(L.cam.pitch + L.vpitch, -1.5, 1.5); L.vyaw *= .92; L.vpitch *= .92;
+    if (Math.abs(L.vyaw) + Math.abs(L.vpitch) < 3e-4) L.vyaw = L.vpitch = 0; L.idle = 0; more = true;
+  } else if (L.view3 && GV.spin && !L.rot && !L.drag && !L.tw) { if (++L.idle > 180) L.cam.yaw += .004; more = true; } // spin resumes after 180 idle frames
+  for (const n of L.nodes) { const g = n.want ? 1 : 0; if (n.va !== g) { n.va = g > n.va ? Math.min(1, n.va + .07) : Math.max(0, n.va - .07); more = true; } }
+  gvDraw(L);
+  if (more) gvKick();
+}
+
+/* drawing */
+const GV_TOK = {bg: '--page', fg: '--ink', ink2: '--ink2', edge: '--gv-edge', tint: '--gv-tint', main: '--gv-main', sel: '--sel', hit: '--r-read', good: '--good', warn: '--ring-warning', bad: '--critical', neutral: '--neutral', cause: '--cause', branch: '--branch'};
+const GV_LIGHT = {bg: '#f9f9f7', fg: '#0b0b0b', ink2: '#52514e', edge: '#8c8a84', tint: '#6f6d68', main: '#1a5fd0', sel: '#0b0b0b', hit: '#2a78d6', good: '#0ca30c', warn: '#b77a00', bad: '#d03b3b', neutral: '#898781', cause: '#0b0b0b', branch: '#52514e'};
+const GV_HUES = ['#2a78d6', '#7048c8', '#0f8b9c', '#c2459b', '#5b6b82', '#8a5a2b', '#2f3fa0'];
+// An entry's ring, by the page's own mark: the colour token, dashed or not, and the glyph.
+const GV_RING = {value: ['good', 0, '✓'], nobounds: ['neutral'], short: ['warn', 0, '!'], Unsure: ['warn', 0, '?'], Unavailable: ['bad', 0, '✕'], Unasked: ['neutral', 1, '–'], absent: ['ink2', 1]};
+// A target's ring, from the entries that estimate it: it holds none of its own.
+const GV_TS = {answered: ['good'], mixed: ['warn'], unresolved: ['bad'], untested: ['neutral', 1]};
+const GV_TS_LABEL = {answered: 'answered', mixed: 'mixed', unresolved: 'unresolved', untested: 'not evaluated'};
+const GV_STATES = ['value', 'short', 'nobounds', 'det', 'Unsure', 'Unavailable', 'Unasked', 'absent', 'none', 'later'];
+const GV_HELD = ['value', 'short', 'nobounds', 'det'], GV_OPEN = ['Unsure', 'Unavailable', 'Unasked'];
+function gvTheme(L) {
+  let cs = null;
+  try { cs = getComputedStyle(document.documentElement); } catch (e) { /* no styles (the test stub) */ }
+  const g = (v, d) => { const x = cs && cs.getPropertyValue(v); return (x && x.trim()) || d; };
+  const T = {};
+  for (const k in GV_TOK) T[k] = g(GV_TOK[k], GV_LIGHT[k]);
+  T.hue = GV_HUES.map((h, i) => g('--gv-d' + i, h));
+  T.kind = {target: T.hue[0], rule: T.hue[1], question: T.hue[2], tool: T.hue[4], state: T.hue[5]};
+  T.ax = [T.hue[3], T.hue[2], T.hue[0]]; // the gizmo's x, y, z
+  L.T = T;
+  const sig = [T.bg, T.fg, ...T.hue].join(); if (GV_SPR.sig !== sig) { GV_SPR.clear(); GV_SPR.sig = sig; }
+}
+// Under a turn's overlay every body is one neutral tint (its shape and size give its kind) so the state's rings are the only colour.
+const gvCol = (L, n) => (L.ov ? L.T.tint : !GV.byDomain || n.kind === 'state' ? L.T.kind[n.kind] : L.T.hue[L.domains.indexOf(n.domain) % L.T.hue.length]);
+const gvRgbC = new Map();
+function gvRgb(c) {
+  let v = gvRgbC.get(c);
+  if (v) return v;
+  const r = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c), m = /^#([0-9a-f]{6}|[0-9a-f]{3})\b/i.exec(c);
+  let h = m ? m[1] : '888888'; if (h.length === 3) h = [...h].map(x => x + x).join('');
+  v = r ? [+r[1], +r[2], +r[3]] : [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16));
+  gvRgbC.set(c, v); return v;
+}
+// fog: blend toward the background by depth, so far bodies fade in light and dark alike
+const gvMix = (L, c, f, force) => { if (f < .01 && !force) return c; const a = gvRgb(c), b = gvRgb(L.T.bg); return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * f)).join()})`; };
+const gvFog = (L, d) => (L.view3 ? gvClamp((d + 250) / 1100, 0, 1) * .65 : 0);
+const GV_SPR = new Map(); // one sprite per colour and fog step, for every design; cleared when the theme's tokens change
+const GV_SS = 96, gvFq = f => Math.min(5, Math.round(f / .13));
+// A shaded sphere, one cached sprite per colour and fog step.
+function gvSprite(L, c, q) {
+  const key = c + '|' + q; let s = GV_SPR.get(key);
+  if (s) return s;
+  const lit = (a, t) => a.map(x => Math.round(t > 0 ? x + (255 - x) * t : x * (1 + t))), b = gvRgb(q ? gvMix(L, c, q * .13) : c), f = a => `rgb(${a})`, h = GV_SS / 2;
+  s = document.createElement('canvas'); s.width = s.height = GV_SS;
+  const g = s.getContext && s.getContext('2d');
+  if (!g) return null;
+  const gr = g.createRadialGradient(h * .68, h * .6, GV_SS * .03, h, h, h);
+  gr.addColorStop(0, f(lit(b, .55))); gr.addColorStop(.4, f(b)); gr.addColorStop(.85, f(lit(b, -.14))); gr.addColorStop(1, f(lit(b, -.32)));
+  g.fillStyle = gr; g.beginPath(); g.arc(h, h, h - .5, 0, 7); g.fill(); GV_SPR.set(key, s); return s;
+}
+const gvReached = n => !!n.os && !['none', 'later', 'Unasked', 'absent'].includes(n.os);
+const gvShown = n => !!n.os && n.os !== 'none' && n.os !== 'later'; // a lineage hop is lit once both its ends hold an entry by the round shown
+function gvOvA(L, n) { // how strongly a body shows under the turn
+  if (!L.ov) return 1;
+  if (n.kind === 'target') return (n.ts && n.ts !== 'untested' ? 1 : GV.hide ? .2 : .45) * (GV.st ? .12 : 1); // a target holds no entry; its ring is derived
+  const s = n.os, r = gvReached(n);
+  let a = r ? 1 : s === 'Unasked' || s === 'absent' ? .35 : s === 'later' ? .14 : .07;
+  if (GV.lin && !L.ov.linN.has(n.id)) a *= .3;
+  if (GV.st && s !== GV.st) a *= .12; // a state chosen in the key dims every other body
+  return GV.hide && !r ? 0 : a;
+}
+function gvCtx(id) { const c = $(id); try { return c && c.getContext ? c.getContext('2d') : null; } catch (e) { return null; } }
+// An edge's alpha factor: a hub's fan thins with its busier end's degree; a longer edge, between clusters, keeps a little more.
+const gvThin = (a, b) => gvClamp(2.4 / Math.sqrt(Math.max(a.deg, b.deg, 1)), .22, 1) * (1 + gvClamp((Math.hypot(a.px - b.px, a.py - b.py) - 120) / 500, 0, .45));
+function gvDraw(L) {
+  const ctx = gvCtx('gvc'), T = L.T;
+  if (!ctx || !L.W || !T) return;
+  const W = L.W, H = L.H, tf = L.tf, k = tf.k, ov = L.ov;
+  gvProject(L);
+  ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0); ctx.globalAlpha = 1; ctx.fillStyle = T.bg; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.translate(tf.x, tf.y); ctx.scale(k, k); ctx.translate(W / 2, H / 2);
+  if (GV.halo && !L.ov) gvHalos(L, ctx);
+  if (L.view3) gvGround(L, ctx);
+  const sel = L.byId.get(GV.sel) || null, focus = L.hov || sel, hits = L.hits;
+  const fset = focus ? new Set([focus.id, ...L.adj.get(focus.id)]) : null;
+  const items = [];
+  L.drawn = []; L.rings = {}; L.lit = [];
+  for (const l of L.links) {
+    const a = l.a, b = l.b;
+    if (a.va < .02 || b.va < .02) continue;
+    const hv = gvHeavy(a) && gvHeavy(b), touch = !!focus && (a === focus || b === focus);
+    if (hv && !GV.hh && !touch) continue; // edges between heavy bodies on hover, selection or when asked for
+    const lh = ov ? ov.byEdge.get(a.id + '|' + b.id) : null, lit = !!lh && gvShown(a) && gvShown(b);
+    items.push({l, hv, touch, d: (a.vzv + b.vzv) / 2, rank: lit ? (lh.main ? 3 : 2) : 0, top: L.view3 && (touch || (lit && lh.main))});
+  }
+  for (const n of L.nodes) if (n.va >= .02 && gvOvA(L, n) > 0) items.push({n, d: n.vzv, top: L.view3 && n === focus});
+  // 3D: far to near, the focus and its edges last; 2D: edges, then light bodies, then heavy
+  if (L.view3) items.sort((p, q) => (p.top - q.top) || (q.d - p.d));
+  else items.sort((p, q) => (!!p.n - !!q.n) || (p.n && q.n ? gvHeavy(p.n) - gvHeavy(q.n) : (p.rank || 0) - (q.rank || 0))); // edges: unlit, then lit branches, the main chain last
+  ctx.lineCap = 'round';
+  for (const it of items) {
+    const fg = it.top ? 0 : gvFog(L, it.d);
+    if (it.l) {
+      const {l, hv, touch} = it, a = l.a, b = l.b, h = ov ? ov.byEdge.get(a.id + '|' + b.id) : null, on = !!h && gvShown(a) && gvShown(b);
+      const faded = (fset && !touch) || (hits && !(hits.has(a.id) && hits.has(b.id)));
+      // a hub's fan thins out with its degree; a longer edge, which crosses between clusters, keeps a little more
+      const thin = touch || on ? 1 : gvThin(a, b);
+      ctx.globalAlpha = (touch ? .95 : faded ? .04 : on ? (h.declared ? .4 : .9) : ov ? .05 : hv ? .4 : .3) * thin * Math.min(a.va, b.va) * (1 - .3 * fg) * (ov && !on ? Math.min(1, gvOvA(L, a) + gvOvA(L, b)) : 1);
+      ctx.strokeStyle = gvMix(L, touch ? T.hit : on ? (h.main ? T.main : T.branch) : T.edge, fg);
+      ctx.lineWidth = (on ? (h.declared ? 1.2 : h.main ? 2.8 : 1.8) : hv ? 1.4 : .8) / Math.sqrt(k);
+      ctx.setLineDash(on && h.declared ? [5 / k, 4 / k] : l.r === 'latent' ? [2 / k, 3 / k] : []); // a declared hop is dashed: not a record of what was read
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke(); ctx.setLineDash([]);
+      if (on) { // a mid-edge arrowhead toward the root: a hop runs from what was read to what read it
+        const mx = (a.px + b.px) / 2, my = (a.py + b.py) / 2, ang = Math.atan2(b.py - a.py, b.px - a.px), sz = (h.main ? 8 : 6) / Math.sqrt(k);
+        ctx.fillStyle = ctx.strokeStyle; ctx.beginPath();
+        ctx.moveTo(mx + Math.cos(ang) * sz, my + Math.sin(ang) * sz);
+        ctx.lineTo(mx + Math.cos(ang + 2.5) * sz, my + Math.sin(ang + 2.5) * sz);
+        ctx.lineTo(mx + Math.cos(ang - 2.5) * sz, my + Math.sin(ang - 2.5) * sz); ctx.closePath(); ctx.fill();
+      }
+      L.drawn.push(a.id + '|' + b.id + '|' + l.r);
+      if (on) L.lit.push([a.id, b.id, h.via, h.main, h.declared]);
+      continue;
+    }
+    const n = it.n, light = !gvHeavy(n), c = gvMix(L, gvCol(L, n), fg), oa = gvOvA(L, n);
+    const al = (focus && fset && !fset.has(n.id)) || (hits && !hits.has(n.id)) ? .1 : 1;
+    const a = al * (1 - .3 * fg) * n.va * oa, r = n.r * n.sc * n.va, x = n.px, y = n.py, tiny = r * k < (light ? 2.5 : 4);
+    if (tiny) { ctx.globalAlpha = a * (n.kind === 'rule' ? .75 : .95); ctx.beginPath(); ctx.arc(x, y, Math.max(r, 1.2 / k), 0, 7); ctx.fillStyle = c; ctx.fill(); }
+    else if (light) {
+      if (n.shared) { ctx.globalAlpha = a * .28; ctx.fillStyle = gvMix(L, T.fg, fg); ctx.beginPath(); ctx.arc(x, y, r + 4 * n.sc * n.va, 0, 7); ctx.fill(); } // spans domains
+      ctx.globalAlpha = a; ctx.beginPath();
+      if (n.kind === 'tool') ctx.rect(x - r * .85, y - r * .85, r * 1.7, r * 1.7); else ctx.arc(x, y, r, 0, 7);
+      ctx.fillStyle = T.bg; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 1.8; ctx.stroke();
+    } else {
+      // a target solid, a rule result opaque but mixed toward the page (lighter, ringed), the state a solid diamond; a body under 9px on screen is a flat fill
+      const fill = n.kind === 'rule' ? gvMix(L, gvCol(L, n), .42, true) : gvCol(L, n), cf = n.kind === 'rule' ? gvMix(L, fill, fg) : c;
+      ctx.globalAlpha = a * (n.kind === 'state' ? .9 : n.kind === 'target' ? .9 : 1);
+      const sp = GV.flat || L.ov || n.kind === 'state' || r * k < 9 ? null : gvSprite(L, fill, gvFq(fg));
+      if (n.kind === 'state') { ctx.beginPath(); ctx.moveTo(x, y - r * 1.25); ctx.lineTo(x + r * 1.25, y); ctx.lineTo(x, y + r * 1.25); ctx.lineTo(x - r * 1.25, y); ctx.closePath(); ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = a; ctx.strokeStyle = gvMix(L, T.fg, fg); ctx.lineWidth = 2; ctx.stroke(); }
+      else if (sp) ctx.drawImage(sp, x - r, y - r, 2 * r, 2 * r); else { ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = cf; ctx.fill(); }
+      if (n.kind === 'rule') { ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.strokeStyle = c; ctx.lineWidth = 2.5; ctx.stroke(); }
+    }
+    const ring = ov && (n.kind === 'target' ? GV_TS[n.ts] : GV_RING[n.os]);
+    if (ring) L.rings[n.id] = GV_TOK[ring[0]];
+    if (tiny) continue;
+    ctx.globalAlpha = n.va * Math.max(oa, ov ? .5 : 0);
+    if (ring && n.kind === 'target' && n.ts !== 'untested') gvTsRing(ctx, T, n, x, y, r);
+    else if (ring) {
+      const rc = T[ring[0]];
+      ctx.beginPath(); ctx.arc(x, y, r + 3, 0, 7); ctx.strokeStyle = rc; ctx.lineWidth = 2;
+      if (ring[1]) ctx.setLineDash([3 / k, 3 / k]);
+      ctx.stroke(); ctx.setLineDash([]);
+      if (ring[2] && r * k >= 5) { ctx.font = `bold ${Math.max(8, r * 1.3)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = rc; ctx.fillText(ring[2], x, y + .5); ctx.textBaseline = 'alphabetic'; }
+    }
+    if (n.policy) { ctx.beginPath(); ctx.arc(x, y, r + 6, 0, 7); ctx.strokeStyle = gvMix(L, T.fg, fg); ctx.lineWidth = 2; ctx.stroke(); }
+    if (ov && ov.root === n.id) { ctx.beginPath(); ctx.arc(x, y, r + 9.5, 0, 7); ctx.strokeStyle = T.cause; ctx.lineWidth = 2.5; ctx.stroke(); }
+    if (L.kfocus === n.id) { ctx.beginPath(); ctx.arc(x, y, r + (ring || n.policy ? 17 : 7), 0, 7); ctx.strokeStyle = T.fg; ctx.lineWidth = 2; ctx.setLineDash([4 / k, 3 / k]); ctx.stroke(); ctx.setLineDash([]); } // the key-walk's focus
+    if (n === sel || (hits && hits.has(n.id))) { ctx.beginPath(); ctx.arc(x, y, r + (ring || n.policy ? 13 : 3), 0, 7); ctx.strokeStyle = T.hit; ctx.lineWidth = 2; ctx.stroke(); }
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+  gvLabels(L, ctx, focus, fset);
+  gvGizmo(L);
+}
+// A target's ring as a donut by the entries that estimate it: answered is one full ring, unresolved a double ring,
+// mixed two arcs split by the held to the open (held first, clockwise from the top); not evaluated stays dashed.
+function gvTsRing(ctx, T, n, x, y, r) {
+  const c = n.tc || {held: 0, open: 0}, tot = Math.max(1, c.held + c.open), R = r + 3, TAU = Math.PI * 2, top = -Math.PI / 2;
+  const arc = (a0, a1, col, w, rr) => { ctx.beginPath(); ctx.arc(x, y, rr, a0, a1); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); };
+  if (n.ts === 'answered') arc(0, TAU, T.good, 2.6, R);
+  else if (n.ts === 'unresolved') { arc(0, TAU, T.bad, 2.2, R); arc(0, TAU, T.bad, 2.2, R + 3.6); }
+  else { const f = c.held / tot; arc(top, top + TAU * f, T.good, 3, R); arc(top + TAU * f, top + TAU, T.warn, 3, R); }
+}
+function gvHalos(L, ctx) { // a soft blob at the centroid of each domain's shown bodies
+  const g = new Map();
+  for (const n of L.nodes) if (n.want && n.va > .3 && n.kind !== 'state') { if (!g.has(n.domain)) g.set(n.domain, []); g.get(n.domain).push(n); }
+  for (const [d, B] of g) {
+    if (B.length < 2) continue;
+    let cx = 0, cy = 0; for (const n of B) { cx += n.px / B.length; cy += n.py / B.length; }
+    const ds = B.map(n => Math.hypot(n.px - cx, n.py - cy)).sort((p, q) => p - q), R = Math.max(36, ds[Math.floor(.8 * (ds.length - 1))] * 1.15 + 30);
+    const c = gvRgb(L.T.hue[L.domains.indexOf(d) % L.T.hue.length]), gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    gr.addColorStop(0, `rgba(${c},.13)`); gr.addColorStop(.6, `rgba(${c},.06)`); gr.addColorStop(1, `rgba(${c},0)`);
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.fill();
+  }
+}
+function gvGround(L, ctx) { // 3D: two rings and a cross on the plane just under the lowest shown body
+  const V = L.nodes.filter(n => n.want && n.va > .3);
+  if (!V.length) return;
+  let y = -1e9, sx = 0, sz = 0, R = 0;
+  for (const n of V) { y = Math.max(y, n.y + n.r); sx += n.x / V.length; sz += n.z / V.length; }
+  for (const n of V) R = Math.max(R, Math.hypot(n.x - sx, n.z - sz));
+  y += 30; R = R * 1.1 + 40;
+  ctx.strokeStyle = L.T.edge; ctx.globalAlpha = .2; ctx.lineWidth = .8 / Math.sqrt(L.tf.k); ctx.beginPath();
+  for (const f of [1, .5]) for (let i = 0; i <= 48; i++) { const a = i / 48 * Math.PI * 2, p = gvPj(L, sx + Math.cos(a) * R * f, y, sz + Math.sin(a) * R * f); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); }
+  for (const [dx, dz] of [[1, 0], [0, 1]]) { const a = gvPj(L, sx - dx * R, y, sz - dz * R), b = gvPj(L, sx + dx * R, y, sz + dz * R); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+  ctx.stroke(); ctx.globalAlpha = 1;
+}
+// Labels: screen space, ranked by focus, its neighbours, search hits, then mass (less when fogged). The screen boxes of
+// the heavy bodies, with their rings, are taken first; a label goes above its body, else below, else right, else left,
+// clear of the ring, else is dropped.
+const GV_FONT = '11px system-ui, sans-serif';
+const gvExt = (L, n, k) => Math.min(16, (L.ov && L.ov.root === n.id ? 9.5 : n.policy ? 6 : L.ov && (n.kind === 'target' ? n.ts : GV_RING[n.os]) ? 3 : 0) * k); // the ring's reach past the body, on screen
+function gvLabels(L, ctx, focus, fset) {
+  const k = L.tf.k, hits = L.hits, C = [], B = [], top = L.free ? L.free.y0 - 4 : 0;
+  for (const n of L.nodes) {
+    if (n.va < .3) continue;
+    const rs = n.r * n.sc * n.va * k, fg = n === focus ? 0 : gvFog(L, n.vzv);
+    if (gvHeavy(n)) { const e = rs + gvExt(L, n, k), sx = L.tf.x + k * (L.W / 2 + n.px), sy = L.tf.y + k * (L.H / 2 + n.py); B.push([sx - e, sy - e, sx + e, sy + e]); }
+    let tier = 3;
+    if (n === focus) tier = 0; else if (fset && fset.has(n.id)) tier = 1; else if (hits && hits.has(n.id)) tier = 2;
+    else if (fset || hits) continue;
+    else if (L.ov && gvOvA(L, n) < .3 && !(L.ov.root === n.id)) continue;
+    else if (gvHeavy(n)) { if (!(rs >= 5 && (n.mass >= 8 / k || n.policy || n.kind === 'state'))) continue; }
+    else if (!(k > 2.2 && rs >= 6)) continue; // light bodies only when zoomed well in
+    if (tier === 3 && fg > .5) continue;
+    C.push({n, tier, rs, fg, s: tier * 1e6 - n.mass * (1 - 1.4 * fg)});
+  }
+  C.sort((p, q) => p.s - q.s);
+  ctx.font = GV_FONT; ctx.textAlign = 'center'; ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = L.T.bg; ctx.fillStyle = L.T.fg;
+  L.labels = [];
+  for (const c of C) {
+    const n = c.n, t = n.label, w = ctx.measureText(t).width + 4, sx = L.tf.x + k * (L.W / 2 + n.px), sy = L.tf.y + k * (L.H / 2 + n.py);
+    if (sx < -w || sx > L.W + w || sy < -20 || sy > L.H + 20) continue;
+    const off = c.rs + gvExt(L, n, k) + 4;
+    // [centre x, baseline y]: above, below, right, left
+    for (const [cx, by] of [[sx, sy - off], [sx, sy + off + 9], [sx + off + w / 2, sy + 4], [sx - off - w / 2, sy + 4]]) {
+      const x0 = cx - w / 2, y0 = by - 11, x1 = x0 + w, y1 = by + 3;
+      if (y0 < top) continue; // not under the toolbar
+      if (B.some(b => x0 < b[2] && x1 > b[0] && y0 < b[3] && y1 > b[1])) continue;
+      B.push([x0, y0, x1, y1]); L.labels.push(n.id); ctx.globalAlpha = Math.max(.15, 1 - 1.1 * c.fg) * n.va;
+      ctx.strokeText(t, cx, by); ctx.fillText(t, cx, by); break;
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+// The axis gizmo (3D): the world axes turned by the camera, far ends first; an end, clicked, looks along it.
+const GV_ENDS = [];
+for (let a = 0; a < 3; a++) for (const s of [1, -1]) { const e = [0, 0, 0]; e[a] = s; GV_ENDS.push({a, s, e}); }
+const gvEnds = L => GV_ENDS.map(d => { const v = gvRot(d.e, L.cam); return Object.assign({}, d, {x: GV_GZ / 2 + v[0] * 24, y: GV_GZ / 2 + v[1] * 24, z: v[2]}); }).sort((p, q) => q.z - p.z);
+function gvGizmo(L) {
+  const el = $('gvgz'), g = gvCtx('gvgz');
+  el.hidden = !L.view3; $('gvpresets').hidden = !L.view3;
+  for (const b of document.querySelectorAll ? document.querySelectorAll('#gvdrag button') : []) b.setAttribute('aria-pressed', String(b.dataset.gvact === 'drag-' + GV.drag));
+  if (!g || !L.view3) return;
+  if (el.width !== Math.round(GV_GZ * L.dpr)) el.width = el.height = Math.round(GV_GZ * L.dpr);
+  g.setTransform(L.dpr, 0, 0, L.dpr, 0, 0); g.clearRect(0, 0, GV_GZ, GV_GZ); g.lineCap = 'round'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = 'bold 10px system-ui, sans-serif';
+  for (const d of gvEnds(L)) {
+    g.globalAlpha = .55 + .45 * (1 - (d.z + 1) / 2); g.strokeStyle = g.fillStyle = L.T.ax[d.a];
+    if (d.s > 0) { g.lineWidth = 2; g.beginPath(); g.moveTo(GV_GZ / 2, GV_GZ / 2); g.lineTo(d.x, d.y); g.stroke(); g.beginPath(); g.arc(d.x, d.y, 7, 0, 7); g.fill(); g.fillStyle = L.T.bg; g.fillText('XYZ'[d.a], d.x, d.y + .5); }
+    else { g.lineWidth = 1.4; g.beginPath(); g.arc(d.x, d.y, 3.5, 0, 7); g.stroke(); }
+  }
+  g.globalAlpha = 1;
+}
+
+/* the turn over it: the selected turn's entries by the page's marks, up to a round; the lineage lit */
+function gvOverlay(L, t) {
+  const T = t && t.design && t.design.outline === L.D ? t.outline : null;
+  L.avail = !!T; // a turn of this design is selected; the overlay may be off while it stays so
+  if (!T || !GV.ov) { L.ov = null; if (!T) L.ovT = null; for (const n of L.nodes) { n.os = null; n.ts = null; n.tc = null; } return; }
+  if (L.ovT !== t || !L.ov) {
+    const turnChanged = L.ovT !== t; GV.stepFromHash = false;
+    L.ovT = t;
+    const path = lineage(T), main = new Set(mainChain(path).slice(1)), root = rootOf(T), byEdge = new Map();
+    const hops = path.filter(h => h.from).map(h => ({s: baseOf(h.ref) || h.ref, t: baseOf(h.from) || h.from, via: h.via, main: main.has(h), declared: h.via === 'declared'}));
+    for (const h of hops) { const k = h.s + '|' + h.t, o = byEdge.get(k); if (!o || (h.main && !o.main)) byEdge.set(k, h); }
+    L.ov = {t, hops, byEdge, linN: new Set(path.map(h => baseOf(h.ref) || h.ref)), root: root ? baseOf(root.ref) || root.ref : null,
+      maxR: Math.max(0, ...(T.rounds || []).map(r => r.round || 0))};
+    if (turnChanged && GV.step != null && GV.step > L.ov.maxR) GV.step = null; // another turn keeps the round shown when it has it, else shows its last
+  }
+  const step = gvStepOf(L);
+  for (const n of L.nodes) {
+    if (n.kind === 'target') { n.os = null; continue; }
+    const st = stateFor(t.idx, n.id), es = entriesFor(t.idx, n.id);
+    n.os = !st ? 'none' : es.length && Math.min(...es.map(e => e.round || 0)) > step ? 'later' : st;
+  }
+  // a target's state is derived from the bodies that estimate it (its questions, the rules that estimate it) by the round shown
+  for (const n of L.nodes) {
+    if (n.kind !== 'target') continue;
+    const nb = [...L.adj.get(n.id)].map(i => L.byId.get(i)).filter(x => x.kind !== 'state');
+    const held = nb.filter(x => GV_HELD.includes(x.os)).length, open = nb.filter(x => GV_OPEN.includes(x.os)).length;
+    n.tc = {held, open, of: nb.length};
+    n.ts = !held && !open ? 'untested' : !held ? 'unresolved' : open ? 'mixed' : 'answered';
+  }
+}
+const gvStepOf = L => (!L.ov ? 0 : GV.step == null ? L.ov.maxR : gvClamp(Math.round(GV.step), 0, L.ov.maxR));
+
+/* panels */
+function gvEntryHtml(L, n) {
+  const ov = L.ov;
+  if (!ov) return '';
+  if (n.kind === 'target') {
+    const c = n.tc || {held: 0, open: 0, of: 0};
+    return `<div><b>${esc(GV_TS_LABEL[n.ts] || '')}</b> <span class="muted">(derived: a target holds no entry; ${c.held} of ${plural(c.of, 'estimating body')} hold a value, ${c.open} are unsure, unavailable or unasked)</span></div>`;
+  }
+  const e = entryAt(ov.t, n.id), root = ov.root === n.id ? ' · the lineage\'s root' : '';
+  if (n.os === 'none') return `<div class="muted">no entry in this turn${root}</div>`;
+  if (n.os === 'later') return `<div class="muted">entered in round ${e ? e.round : '?'}, after the round shown${root}</div>`;
+  if (!e) return `<div>${markChip(n.os)} <span class="muted">${esc(STATE_LABEL[n.os] || n.os)}${root}</span></div>`;
+  return `<div>${markChip(n.os)} <span class="muted">round ${e.round} · ${esc(STATE_LABEL[n.os] || n.os)}${root}</span></div><div class="gv-tx">${esc(valueOf(e))}</div>`;
+}
+function gvDescribe(L, n) {
+  const nb = [...L.adj.get(n.id)].map(i => L.byId.get(i)), of = k => nb.filter(x => x.kind === k);
+  let h = `<div class="gv-t">${esc(n.id)}</div><div class="muted">${esc(GV_KIND[n.kind])} · ${esc(n.domain)}${n.shared ? ` · spans ${n.span} domains` : ''}${n.policy ? ' · the policy' : ''}</div>`;
+  if (n.kind === 'question' || n.kind === 'tool') {
+    if (n.text) h += `<div class="gv-tx">${esc(n.text)}</div>`;
+    if (n.labels && n.labels.length) h += `<div class="muted">${esc(n.qkind || 'labels')}: ${esc(n.labels.join(' · '))}</div>`;
+    h += `<div class="muted">${n.kind === 'question' ? `asks about ${esc(of('target').map(x => x.label).slice(0, 4).join(', ') || 'no target')} · ` : ''}feeds ${plural(n.nDec, 'rule')}</div>`;
+  } else if (n.kind === 'target') {
+    const v = typeof n.values === 'string' ? n.values : n.values == null ? '' : enc(n.values);
+    h += `<div class="gv-tx">${esc(cut(n.statement || '', 300))}</div><div class="muted">values: ${esc(cut(v, 160))}</div><div class="muted">${plural(n.nq, 'question')} · estimated by ${plural(of('rule').length, 'rule')}</div>`;
+  } else if (n.kind === 'state') {
+    h += `<div class="gv-tx">${esc(n.text || 'the state')}</div><div class="muted">${n.fields && n.fields.length ? 'fields: ' + esc(n.fields.join(', ')) + ' · ' : ''}read by ${n.deg} ${n.deg === 1 ? 'body' : 'bodies'}</div>`;
+  } else {
+    const st = stepsText({kind: 'rule', policy: n.policy, steps_to_policy: n.steps});
+    h += `<div class="muted">${esc(n.form || 'rule')}${st ? ' · ' + esc(st) : ''} · fan-in ${n.fanIn} · fan-out ${n.fanOut}</div>`;
+  }
+  return h + gvEntryHtml(L, n);
+}
+// The rule a body opens in Path: a rule's own; a question's or tool result's, the first rule that reads it.
+function gvPathNode(L, n) {
+  if (n.kind === 'rule') return n.node;
+  if (n.kind !== 'question' && n.kind !== 'tool') return null;
+  const rs = [...L.adj.get(n.id)].map(i => L.byId.get(i)).filter(x => x.kind === 'rule' && x.node).map(x => x.node).sort();
+  return rs[0] || null;
+}
+// The body a design node is drawn as, from the outline alone: a rule's estimate, a source's first question or tool result, the state.
+function gvBodyOf(D, n) {
+  if (!n) return null;
+  if (n.kind === 'rule') return gvDec(n);
+  if (n.kind === 'state') return 't:state';
+  const q = (n.questions || [])[0] || (n.tool_results || [])[0];
+  return q ? q.ref : null;
+}
+const gvShowBtn = (D, n) => { const b = gvBodyOf(D, n); return b ? `<button class="btn" data-gvshow="${esc(b)}" title="select its body in the Gravity graph">show in Gravity</button>` : ''; };
+// Panels fold: open at a width over 760px, folded under it, and the choice kept; a folded one shows its header line only.
+const gvNarrow = () => { try { return matchMedia('(max-width: 760px)').matches; } catch (e) { return innerWidth <= 760; } };
+const gvFoldOpen = k => { if (GV.fold[k] === undefined) GV.fold[k] = !gvNarrow(); return GV.fold[k]; };
+const GV_FOLD_BOX = {bar: 'gvbar', ov: 'gvov', side: 'gvside', leg: 'gvlegend'};
+const gvFoldHtml = (k, title, body) => `<button class="gv-fh" data-gvfold="${k}" aria-expanded="${gvFoldOpen(k)}" title="${gvFoldOpen(k) ? 'fold' : 'unfold'} this panel"><span class="gv-chev" aria-hidden="true"></span><span>${title}</span></button><div class="gv-fb">${body}</div>`;
+const gvFoldClass = k => 'gv-box' + (gvFoldOpen(k) ? '' : ' folded');
+function gvFoldToggle(L, k, btn) {
+  GV.fold[k] = !gvFoldOpen(k);
+  $(GV_FOLD_BOX[k]).className = gvFoldClass(k);
+  if (btn && btn.setAttribute) btn.setAttribute('aria-expanded', String(GV.fold[k]));
+  gvMeasure(L); gvAsk(L);
+}
+// The free rectangle is measured when a panel's content or fold changes, not every frame.
+function gvMeasure(L) { L.free = gvFree(L); }
+function gvPanel(L) {
+  const s = $('gvside'), n = L.byId.get(GV.sel), fs = $('gvfitsel');
+  if (fs) fs.disabled = !n;
+  $('vGravity').dataset.sel = n ? '1' : ''; // narrow: one bottom sheet, the selection else the turn
+  const had = !!(s.contains && document.activeElement && s.contains(document.activeElement));
+  if (!n) { s.className = 'gv-box'; s.innerHTML = `<span class="muted">${GV.touch ? 'Tap a body.' : 'Hover or click a body.'} A question that touches several targets or rules is drawn larger and sits between them.</span>`; return; }
+  const nb = [...L.adj.get(n.id)].map(i => L.byId.get(i));
+  let h = gvDescribe(L, n);
+  for (const k of ['target', 'rule', 'question', 'tool', 'state']) {
+    const g = nb.filter(x => x.kind === k);
+    if (g.length) h += `<details class="gv-nbl"${g.length <= 5 ? ' open' : ''}><summary>${esc(GV_KIND[k])}s (${g.length})</summary><ul>${g.map(x => `<li><button class="gv-nb" data-gvid="${esc(x.id)}"><i class="gv-sw" style="background:${gvCol(L, x)}"></i>${esc(x.label)}</button></li>`).join('')}</ul></details>`;
+  }
+  const acts = [], pn = gvPathNode(L, n);
+  if (n.node) acts.push(`<button class="btn" data-go="${esc(n.node)}" title="its node's slice in Explore">${esc(n.node)} in Explore</button>`);
+  if (pn && cur().turns.length) acts.push(`<button class="btn" data-gvpath="${esc(pn)}" title="the rule's card in Path${pn !== n.node ? ' (the first rule that reads it)' : ''}">in Path${pn !== n.node ? ': ' + esc(pn) : ''}</button>`);
+  if (n.kind === 'target') acts.push(`<button class="btn" data-gvtgt="${esc(n.id)}" title="this target in the Targets tab">in Targets</button>`);
+  if (acts.length) h += `<div class="gv-row" style="margin-top:6px">${acts.join('')}</div>`;
+  s.className = gvFoldClass('side');
+  s.innerHTML = gvFoldHtml('side', `<b class="mono">${esc(n.id)}</b> <span class="muted">${esc(GV_KIND[n.kind])}</span>`, h);
+  if (had) { const f = s.querySelector && s.querySelector('.gv-fh'); if (f && f.focus) f.focus({preventScroll: true}); } // the panel was rebuilt under the focus: it goes to the header
+}
+// A mini glyph per kind, drawn as the canvas draws it: a target solid, a rule result a lighter disc, ringed, a question a small
+// ring, a tool result a square, the state a diamond, the policy a rule result with an outer ring, a latent target dotted.
+function gvGlyph(L, k, col) {
+  const T = L.T, f = col, bg = T.bg;
+  const body = {
+    target: `<circle r="6" fill="${f}" fill-opacity=".9"/>`,
+    rule: `<circle r="5.2" fill="${f}" fill-opacity=".45" stroke="${f}" stroke-width="2"/>`,
+    question: `<circle r="3.4" fill="${bg}" stroke="${f}" stroke-width="1.8"/>`,
+    tool: `<rect x="-3.6" y="-3.6" width="7.2" height="7.2" fill="${bg}" stroke="${f}" stroke-width="1.8"/>`,
+    state: `<polygon points="0,-7 7,0 0,7 -7,0" fill="${f}" stroke="${T.fg}" stroke-width="1.4"/>`,
+    policy: `<circle r="4" fill="${f}" fill-opacity=".45" stroke="${f}" stroke-width="2"/><circle r="7" fill="none" stroke="${T.fg}" stroke-width="1.6"/>`,
+    latent: `<circle r="5.6" fill="none" stroke="${f}" stroke-width="1.6" stroke-dasharray="1.6 2.4"/>`,
+    ledge: `<line x1="-7" y1="0" x2="7" y2="0" stroke="${T.edge}" stroke-width="1.6" stroke-dasharray="2 3"/>`,
+  }[k];
+  return `<svg class="gv-gly" width="16" height="16" viewBox="-8 -8 16 16" aria-hidden="true">${body}</svg>`;
+}
+function gvLegend(L) {
+  const ct = {};
+  for (const n of L.nodes) ct[n.kind] = (ct[n.kind] || 0) + 1;
+  const T = L.T, neutral = !!L.ov || GV.byDomain, latent = L.links.some(l => l.r === 'latent');
+  const c = k => (neutral ? T.tint : T.kind[k]);
+  const items = [['target', 'target', 'target'], ['rule', 'rule', 'rule result'], ['question', 'question', 'question'], ['tool', 'tool', 'tool result'], ['state', 'state', 't:state'],
+    ['policy', 'rule', 'policy'], ['latent', 'target', 'latent target'], ['ledge', null, 'latent edge']]
+    .filter(([g, kind]) => (g === 'policy' ? L.nodes.some(n => n.policy) : g === 'latent' || g === 'ledge' ? latent : ct[kind]));
+  const keyrow = `<span class="gv-keyrow">${items.map(([g, kind, text]) => `<span>${gvGlyph(L, g, c(kind || 'rule'))}${esc(text)}</span>`).join('')}</span>`;
+  const sw = (col, t) => `<span><i class="gv-sw" style="background:${col}"></i>${esc(t)}</span>`;
+  const row = L.ov ? `<span><i class="gv-sw" style="background:${T.tint}"></i>one neutral tint under the turn overlay: the kind is the shape and size, the state is the colour (turn the overlay off for ${GV.byDomain ? 'the domain hues' : 'the type hues'})</span>` : GV.byDomain ? L.domains.map((d, i) => sw(T.hue[i % T.hue.length], d)).join('') : '';
+  const body = `<div class="gv-stat">${plural(ct.target || 0, 'target')} · ${plural(ct.rule || 0, 'rule result')} · ${plural(ct.question || 0, 'question')} · ${plural(ct.tool || 0, 'tool result')}${ct.state ? ' · t:state' : ''} · ${plural(L.links.length, 'edge')}${L.ov ? ' · hue: off, the state is the only colour' : GV.byDomain ? ' · hue: the first segment of the ref' : ' · hue: the kind of body'}</div>${row ? `<div class="gv-row">${row}</div>` : ''}`;
+  const box = $('gvlegend'); box.className = gvFoldClass('leg');
+  box.innerHTML = gvFoldHtml('leg', keyrow, body);
+}
+const plural2 = (k, w) => (k === 1 ? w : w + 's');
+const GV_TS_SHAPE = {answered: 'a full ring', mixed: 'a ring split by the held to the open', unresolved: 'a double ring', untested: 'a dashed ring'};
+const T_ = L => L.T;
+const gvTsSw = (L, k) => {
+  const T = L.T, c = T[GV_TS[k][0]];
+  const st = k === 'mixed' ? `background:conic-gradient(${T.good} 0 50%, ${T.warn} 0);` : k === 'unresolved' ? `background:transparent;box-shadow:inset 0 0 0 2px ${T.bad}, 0 0 0 2px ${T.bg}, 0 0 0 4px ${T.bad};margin-right:7px;`
+    : k === 'untested' ? `background:transparent;border:2px dotted ${c};box-sizing:border-box;` : `background:transparent;box-shadow:inset 0 0 0 2px ${c};`;
+  return `<i class="gv-sw" style="${st}"></i>`;
+};
+// What the turn's decision says, compactly: a record's fields that are not null, else the value, then the deciding ref.
+function gvDecision(t) {
+  const d = t.outline.decision, f = x => (typeof x === 'string' ? x : enc(x));
+  if (d && d.holds === 'value') {
+    const v = d.value, kv = v && typeof v === 'object' && !Array.isArray(v) ? Object.entries(v).filter(e => e[1] != null) : null;
+    const body = kv && kv.length ? kv.map(e => `${e[0]}: ${cut(f(e[1]), 40)}`).join(' · ') : cut(f(v), 120);
+    return `${cut(body, 140)}${d.ref ? ' · by ' + d.ref : ''}`;
+  }
+  return cut(whyText(t).replace(/ <- /g, ' ← '), 160) || t.sum.decision;
+}
+// The round shown, in one line: what entered in it, and the states other than a value.
+function gvRoundLine(L, step) {
+  const es = (L.ov.t.idx.all || []).filter(e => (e.round || 0) === step), c = {};
+  for (const e of es) { const st = dispState(e); if (!GV_HELD.includes(st)) c[st] = (c[st] || 0) + 1; }
+  const rest = Object.keys(c).sort((p, q) => SEV[q] - SEV[p] || (p < q ? -1 : 1)).map(st => `, ${c[st]} ${STATE_LABEL[st] || st}`).join('');
+  return `round ${step}: +${es.length} ${es.length === 1 ? 'entry' : 'entries'}${rest}`;
+}
+function gvOvKey(L) {
+  const ov = L.ov;
+  if (!ov) return;
+  const step = gvStepOf(L), c = {};
+  for (const n of L.nodes) if (n.os) c[n.os] = (c[n.os] || 0) + 1;
+  $('gvroundl').textContent = `round ${step} of ${ov.maxR}`;
+  const rd = $('gvroundd'); if (rd) rd.textContent = gvRoundLine(L, step);
+  const r = $('gvround'); if (r) r.value = String(step);
+  const states = ['value', 'short', 'nobounds', 'det', 'Unsure', 'Unavailable', 'Unasked', 'absent'].filter(s => c[s]);
+  const tcount = {};
+  for (const n of L.nodes) if (n.ts) tcount[n.ts] = (tcount[n.ts] || 0) + 1;
+  const tchips = Object.keys(GV_TS).filter(k => tcount[k]).map(k => `<span title="derived from the entries that estimate the target: ${GV_TS_SHAPE[k]}">${gvTsSw(L, k)}${tcount[k]} ${plural2(tcount[k], 'target')} ${GV_TS_LABEL[k]}</span>`).join('');
+  // each count is a filter: pressed, it dims every body not in that state
+  const sw = st => { const g = GV_RING[st], col = g ? T_(L)[g[0]] : st === 'det' ? T_(L).neutral : T_(L).edge; return `<i class="gv-sw" style="background:transparent;${g && g[1] || st === 'none' || st === 'later' ? `border:2px ${st === 'later' ? 'dotted' : g && g[1] ? 'dashed' : 'dotted'} ${col};box-sizing:border-box;` : `box-shadow:inset 0 0 0 2px ${col};`}"></i>`; };
+  const chip = (s, inner) => `<button class="gv-chipb" data-gvst="${s}" aria-pressed="${GV.st === s}" title="${GV.st === s ? 'show every body again' : 'dim every body not in this state'}">${inner}</button>`;
+  $('gvkey').innerHTML = states.map(s => chip(s, `${sw(s)}${c[s]} ${STATE_LABEL[s]}`)).join('') + tchips + (c.none ? chip('none', `${sw('none')}${c.none} no entry`) : '') + (c.later ? chip('later', `${sw('later')}${c.later} in a later round`) : '');
+}
+function gvOvPanel(L) {
+  const box = $('gvov'), ov = L.ov;
+  box.hidden = !ov;
+  if (!ov) { box.innerHTML = ''; return; }
+  const t = ov.t, declared = ov.hops.filter(h => h.declared).length;
+  const dec = gvDecision(t), full = whyText(t).replace(/ <- /g, ' ← ');
+  const body = `<div class="gv-row"><button class="btn" data-gvact="turn-prev" title="previous turn">‹</button><span class="gv-k" style="flex:1;margin:0">turn ${esc(turnName(t, cur().turns.indexOf(t)))}</span><button class="btn" data-gvact="turn-next" title="next turn">›</button></div>
+    <div class="gv-why">${decIcon(t.sum.dkind)} <span>${esc(dec)}</span></div>
+    ${full && full !== dec ? `<div><button class="btn" data-gvact="why" aria-expanded="${GV.whyOpen}">${GV.whyOpen ? 'hide the full text' : 'full text'}</button></div>` : ''}${GV.whyOpen ? `<div class="gv-tx">${whyHtml(full)}</div>` : ''}
+    <div class="gv-row"><button class="btn" data-gvact="play">${gvPlay ? 'pause' : 'play'}</button><button class="btn" data-gvact="prev-round" title="previous round  (a)">‹</button><input type="range" id="gvround" min="0" max="${ov.maxR}" value="${gvStepOf(L)}" aria-label="the round shown" title="the round shown  (a previous, d next)"><button class="btn" data-gvact="next-round" title="next round  (d)">›</button></div>
+    <div class="gv-stat"><span id="gvroundl" aria-live="polite"></span> · <span id="gvroundd"></span></div>
+    <div class="gv-row"><label><input type="checkbox" id="gvhide"${GV.hide ? ' checked' : ''}>hide what was not reached</label><label><input type="checkbox" id="gvlin"${GV.lin ? ' checked' : ''}>only the lineage</label></div>
+    <div class="muted">${ov.root ? `root <span class="mono">${esc(ov.root)}</span>, ringed in ink; ` : ''}the lineage is lit; a target's ring is derived from the entries that estimate it (full: answered; split by the held to the open: mixed; double: unresolved; dashed: not evaluated)${declared ? `; ${plural(declared, 'declared read')}, dashed: not a record of what was read` : ''}</div>
+    <div class="gv-key" id="gvkey"></div>`;
+  box.className = gvFoldClass('ov');
+  box.innerHTML = gvFoldHtml('ov', `Turn · ${esc(dec)}`, body);
+  gvOvKey(L);
+}
+// Search runs over every body, hidden by the filters or not: the id, the short label, the wording or statement and, under
+// a turn's overlay, the entry's value text. The hits come in a fixed order (exact, prefix, heavy, the rest) that Enter cycles.
+function gvFind(L) {
+  const q = String(GV.find || '').trim().toLowerCase();
+  if (!q) { L.hits = null; L.hitList = []; L.hitAt = -1; gvFindUi(L); return; }
+  const score = n => { const id = n.id.toLowerCase(), lb = n.label.toLowerCase(); return id === q || lb === q ? 0 : id.startsWith(q) || lb.startsWith(q) ? 1 : gvHeavy(n) ? 2 : 3; };
+  const val = n => { if (!L.ov || n.kind === 'target' || !n.os || n.os === 'none' || n.os === 'later') return ''; const e = entryAt(L.ov.t, n.id); return e ? String(valueOf(e)).toLowerCase() : ''; };
+  const list = L.nodes.filter(n => n.id.toLowerCase().includes(q) || n.label.toLowerCase().includes(q) || String(n.statement || n.text || '').toLowerCase().includes(q) || val(n).includes(q));
+  list.sort((p, q2) => score(p) - score(q2));
+  L.hitList = list; L.hits = new Set(list.map(n => n.id)); L.hitAt = list.findIndex(n => n.id === GV.sel);
+  gvFindUi(L);
+}
+function gvFindUi(L) {
+  const N = L.hitList.length, hid = L.hitList.filter(n => !n.want).length;
+  $('gvstat').textContent = !L.hits ? '' : !N ? '0 found' : `${L.hitAt >= 0 ? L.hitAt + 1 + ' / ' + N : N + ' found'}${hid ? ` · ${hid} hidden by filters` : ''}${L.force.has(GV.sel) ? ' · shown despite the filters' : ''}`;
+  const dl = $('gvhits'); if (dl) dl.innerHTML = L.hitList.slice(0, 8).map(n => `<option value="${esc(n.id)}"${n.label !== n.id ? ` label="${esc(n.label)}"` : ''}>`).join('');
+}
+// Enter steps forward through the hits and Shift+Enter back, wrapping; each is selected and framed, a hidden one shown first.
+function gvFindStep(L, d) {
+  if (!L.hitList.length) return;
+  const i = L.hitAt < 0 ? (d > 0 ? 0 : L.hitList.length - 1) : (L.hitAt + d + L.hitList.length) % L.hitList.length;
+  gvSelect(L, L.hitList[i]);
+}
+function gvSnapshot(L) {
+  LAST_GRAVITY = {design: L.D.name || null, mode3: L.mode3, edges: L.edges.map(e => [e.s, e.t, e.r]), drawn: L.drawn.slice(),
+    pos: Object.fromEntries(L.nodes.map((n, i) => [n.id, L.ease ? L.ease.to[i] : [n.x, n.y, n.z]])),
+    marks: L.ov ? Object.fromEntries(L.nodes.filter(n => n.os).map(n => [n.id, n.os])) : null,
+    tstate: L.ov ? Object.fromEntries(L.nodes.filter(n => n.ts).map(n => [n.id, n.ts])) : null, ov: !!L.ov, rings: Object.assign({}, L.rings), lit: L.lit.slice(),
+    hops: L.ov ? L.ov.hops.map(h => Object.assign({}, h, {edge: L.edges.some(e => e.s === h.s && e.t === h.t)})) : [], root: L.ov ? L.ov.root : null,
+    step: gvStepOf(L), rounds: L.ov ? L.ov.maxR : null, sel: GV.sel};
+}
+function gvSize(L) {
+  const cv = $('gvc');
+  L.dpr = typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  L.W = cv.clientWidth || 800; L.H = cv.clientHeight || 560;
+  const w = Math.round(L.W * L.dpr), h = Math.round(L.H * L.dpr);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+}
+function gvDrawView() {
+  const D = curDesign();
+  if (!D || !(D.nodes || []).length) {
+    gvL = null; LAST_GRAVITY = null; $('gvui').hidden = true;
+    $('gvmsg').hidden = false; $('gvmsg').innerHTML = noDesign('Gravity');
+    return;
+  }
+  $('gvui').hidden = false; $('gvmsg').hidden = true;
+  let L = GVL.get(D);
+  if (!L) { L = gvGraph(D); GVL.set(D, L); gvLayout(L); L.view3 = L.mode3; }
+  gvL = L;
+  gvTheme(L); gvSize(L);
+  const fk = GV.light + '|' + GV.cross;
+  if (L.fk !== undefined && L.fk !== fk) { gvFilters(L); }
+  L.fk = fk;
+  if (L.mode3 !== GV.mode3) gvMode(L, GV.mode3);
+  if (GV.sel && !L.byId.has(GV.sel)) GV.sel = null;
+  for (const [id, k] of [['gvq', 'light'], ['gvcross', 'cross'], ['gvhh', 'hh'], ['gvkind', 'byDomain'], ['gvovon', 'ov'], ['gvflat', 'flat'], ['gvhalo', 'halo'], ['gv3', 'mode3'], ['gvspin', 'spin']]) $(id).checked = !!GV[k];
+  gvOverlay(L, curTurn()); $('gvovl').hidden = !L.avail; $('gvgturn').hidden = !L.avail; gvFind(L);
+  $('gvbar').className = gvFoldClass('bar'); $('gvmoreb').setAttribute('aria-expanded', String(gvFoldOpen('bar')));
+  gvPanel(L); gvLegend(L); gvOvPanel(L); gvMeasure(L);
+  // the first fit comes once the panels hold their content, so their boxes are measured as they will stand
+  if (!L.fitted) { L.fitted = true; gvCamApply(L, gvFitGoal(L, L.act, L.view3 ? {yaw: .6, pitch: -.35} : {})); }
+  if (GV.selRestore) { GV.selRestore = false; if (GV.sel) gvFitSel(L); } // a selection restored from the link is framed once, once the panels stand
+  gvDraw(L); gvSnapshot(L);
+  if (!gvMQ) {
+    gvMQ = true;
+    try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (gvL && S.view === 'gravity') { gvTheme(gvL); gvLegend(gvL); gvDraw(gvL); } }); } catch (e) { /* no media queries */ }
+  }
+  gvKick();
+}
+// A control's change: the bar's and the turn panel's inputs, and the tests, come through here.
+function gvSet(k, v) {
+  GV[k] = v;
+  const L = gvL;
+  if (!L) return;
+  if (k === 'light' || k === 'cross') { gvFilters(L); gvFind(L); }
+  else if (k === 'mode3') { gvMode(L, !!v); writeHash(); }
+  else if (k === 'qPull' || k === 'hPull') { gvPairs(L); gvMove(L, 200, .5); }
+  else if (k === 'find') { gvFind(L); }
+  else if (k === 'ov') { if (!v && gvPlay) { clearTimeout(gvPlay); gvPlay = null; } gvOverlay(L, curTurn()); gvOvPanel(L); gvPanel(L); gvLegend(L); gvMeasure(L); writeHash(); }
+  else if (k === 'byDomain') { gvLegend(L); gvPanel(L); }
+  else if (k === 'spin') L.idle = 0;
+  if (k === 'step') { gvOverlay(L, curTurn()); gvOvKey(L); if (GV.find) gvFind(L); } else if (k === 'hide' || k === 'lin' || k === 'st') gvOvKey(L);
+  if (k === 'step' || k === 'hide' || k === 'lin' || k === 'byDomain' || k === 'light' || k === 'cross' || k === 'st') writeHash();
+  gvDraw(L); gvSnapshot(L); gvKick();
+}
+function gvSelect(L, n) {
+  // a body shown despite the filters stays so only while it is the selection; a hidden one chosen is shown
+  if (L.force.size && !(n && L.force.has(n.id))) { L.force.clear(); gvFilters(L); }
+  if (n && !n.want) { L.force.add(n.id); gvFilters(L); }
+  GV.sel = n ? n.id : null; L.hov = null; $('gvtip').hidden = true;
+  gvFind(L); gvPanel(L); gvMeasure(L); gvDraw(L); gvSnapshot(L);
+  if (n) gvFlyTo(L, n);
+  writeHash();
+}
+function gvAct(a) {
+  const L = gvL;
+  if (!L) return;
+  if (a === 'fit') gvFit(L);
+  else if (a === 'fitsel') gvFitSel(L);
+  else if (a === 'home') { L.idle = 0; gvHome(L); }
+  else if (GV_PRESET[a]) { L.idle = 0; gvCamTo(L, a === 'top' ? Object.assign(gvAxisView(L, GV_PRESET[a]), {yaw: 0}) : gvAxisView(L, GV_PRESET[a]), {dur: GV_TW, force: true}); }
+  else if (a === 'drag-orbit' || a === 'drag-move') { GV.drag = a === 'drag-move' ? 'move' : 'orbit'; writeHash(); }
+  else if (a === 'help') gvHelp(!GV.help);
+  else if (a === 'prev-round' || a === 'next-round') { if (L.ov) gvSet('step', gvClamp(gvStepOf(L) + (a === 'next-round' ? 1 : -1), 0, L.ov.maxR)); }
+  else if (a === 'turn-prev' || a === 'turn-next') { step(a === 'turn-next' ? 1 : -1); return; }
+  else if (a === 'why') { GV.whyOpen = !GV.whyOpen; gvOvPanel(L); }
+  else if (a === 'relayout') gvMove(L, 0, 0, () => gvLayout(L), () => gvFitGoal(L, L.act));
+  else if (a === 'play' && L.ov) {
+    if (gvPlay) { clearTimeout(gvPlay); gvPlay = null; } else {
+      const tick = () => { const s = gvStepOf(L) + 1; if (!gvL || gvL !== L || S.view !== 'gravity' || s > L.ov.maxR) { gvPlay = null; } else { gvSet('step', s); gvPlay = setTimeout(tick, gvRM() ? 300 : 900); } gvOvPlayLabel(); };
+      gvSet('step', 0); gvPlay = setTimeout(tick, gvRM() ? 300 : 900);
+    }
+    gvOvPlayLabel();
+  }
+  gvDraw(L); gvSnapshot(L); gvKick();
+}
+function gvOvPlayLabel() { const b = document.querySelector ? document.querySelector('#gvov [data-gvact="play"]') : null; if (b) b.textContent = gvPlay ? 'pause' : 'play'; }
+function gvHelp(on) { GV.help = !!on; const h = $('gvhelp'), b = $('gvhelpb'); if (h) h.hidden = !on; if (b && b.setAttribute) b.setAttribute('aria-expanded', String(!!on)); }
+// Keys walk the bodies without a mouse: . the next and , the previous, in a fixed order (heavy bodies first, by mass then id);
+// Enter selects the one in focus (else the one under the pointer); the focus has its own ring and is announced.
+function gvWalk(L) { return L.nodes.filter(n => n.want && n.va > .3).sort((a, b) => gvHeavy(b) - gvHeavy(a) || b.mass - a.mass || (a.id < b.id ? -1 : 1)); }
+function gvAnnounce(t) { const e = $('gvlive'); if (e) e.textContent = t; }
+function gvFocusStep(L, d) {
+  const w = gvWalk(L);
+  if (!w.length) return;
+  const i = w.findIndex(n => n.id === L.kfocus), n = w[i < 0 ? (d > 0 ? 0 : w.length - 1) : (i + d + w.length) % w.length];
+  L.kfocus = n.id; L.hov = null;
+  gvProject(L);
+  const F = L.free || {x0: 0, y0: 0, x1: L.W, y1: L.H}, sx = L.tf.x + L.tf.k * (L.W / 2 + n.px), sy = L.tf.y + L.tf.k * (L.H / 2 + n.py);
+  if (sx < F.x0 || sx > F.x1 || sy < F.y0 || sy > F.y1) gvFlyTo(L, n); // out of view: the camera goes to it
+  gvAnnounce(`${n.id}, ${GV_KIND[n.kind]}, ${(w.indexOf(n) + 1)} of ${w.length}`);
+}
+function gvKeyUp(ev) { if (ev && ev.key === ' ') GV.space = false; }
+// Keys, while Gravity is the open view. The arrows turn or pan only with the canvas focused, so
+// elsewhere they step turns as on every tab; Esc clears the selection and search first.
+function gvKey(ev) {
+  const L = gvL, k = String(ev.key || '');
+  if (!L) return false;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test((ev.target && ev.target.tagName) || '')) return false;
+  if (k === ' ') { // held while dragging in 3D: move instead of turn; only on the canvas or the page, so a focused button keeps its space
+    if (ev.target && ev.target !== $('gvc') && ev.target !== document.body) return false;
+    GV.space = true; if (ev.preventDefault) ev.preventDefault(); return true;
+  }
+  // Esc clears one layer a press: the help, the search, the selection, the round pinned by the stepper; with none left it
+  // falls through to the page's own back-out (the node, then the turn), as on every tab.
+  if (k === 'Escape') {
+    if (GV.help) { gvHelp(false); return true; }
+    if (GV.find || L.hits) { GV.find = ''; $('gvsearch').value = ''; gvFind(L); gvDraw(L); return true; }
+    if (GV.sel) { gvSelect(L, null); return true; }
+    if (GV.st) { gvSet('st', null); return true; }
+    if (L.ov && GV.step != null) { gvSet('step', null); return true; }
+    return false;
+  }
+  if (k === '?') { gvHelp(!GV.help); return true; }
+  if ((k === '.' || k === ',') && (!ev.target || ev.target === $('gvc') || ev.target === document.body)) { gvFocusStep(L, k === '.' ? 1 : -1); if (ev.preventDefault) ev.preventDefault(); gvDraw(L); return true; }
+  if (k === 'Enter' && ev.target === $('gvc')) { const n = L.byId.get(L.kfocus) || L.hov; if (!n) return false; if (ev.preventDefault) ev.preventDefault(); gvSelect(L, n); return true; }
+  if (k.startsWith('Arrow')) {
+    if (ev.target !== $('gvc')) return false;
+    if (ev.preventDefault) ev.preventDefault();
+    const dx = (k === 'ArrowRight') - (k === 'ArrowLeft'), dy = (k === 'ArrowDown') - (k === 'ArrowUp');
+    L.tw = null; L.idle = 0;
+    if (L.view3 && !ev.shiftKey) { L.cam.yaw += dx * .1; L.cam.pitch = gvClamp(L.cam.pitch + dy * .1, -1.5, 1.5); }
+    else if (L.view3) { const u = gvUnRel(L, dx * 60 / L.tf.k, dy * 60 / L.tf.k, 0, 1); L.cam.tx += u[0]; L.cam.ty += u[1]; L.cam.tz += u[2]; }
+    else L.tf = {x: L.tf.x - dx * 60, y: L.tf.y - dy * 60, k: L.tf.k};
+    gvDraw(L); return true;
+  }
+  const c = k.toLowerCase();
+  if (c === '+' || c === '=') gvZoomBy(L, 1.25);
+  else if (c === '-' || c === '_') gvZoomBy(L, .8);
+  else if (c === 'f') gvFit(L);
+  else if (c === 's') gvFitSel(L);
+  else if (c === 'h') { if (L.view3) gvHome(L); else gvFit(L); }
+  else if (c === '3') { gvSet('mode3', !GV.mode3); $('gv3').checked = GV.mode3; gvLegend(L); }
+  else if (c === '/') { const f = $('gvsearch'); if (f.focus) f.focus(); }
+  else if ((c === 'a' || c === 'd') && L.ov) gvSet('step', gvClamp(gvStepOf(L) + (c === 'd' ? 1 : -1), 0, L.ov.maxR)); // previous / next round, no wrap
+  else return false;
+  if (ev.preventDefault) ev.preventDefault();
+  gvDraw(L); gvKick(); return true;
+}
+
+/* pointer gestures, no library. Wheel: 2D zooms under the cursor, 3D about the orbit point's
+   screen spot. Empty space drags pan in 2D and turn in 3D (right-, middle-, shift- or space-drag moves the view; the drag mode makes that a plain drag); a body
+   drags in the view plane and reheats the layout; two fingers pinch and pan. A move over 4 px
+   is a drag, not a click. */
+const gvEv = ev => (ev.touches && ev.touches[0]) || (ev.changedTouches && ev.changedTouches[0]) || ev;
+function gvRect() { const r = $('gvc').getBoundingClientRect ? $('gvc').getBoundingClientRect() : null; return {left: (r && r.left) || 0, top: (r && r.top) || 0}; }
+function gvPos(L, ev) { const p = gvEv(ev), r = gvRect(); return [(p.clientX - r.left - L.tf.x) / L.tf.k - L.W / 2, (p.clientY - r.top - L.tf.y) / L.tf.k - L.H / 2]; }
+// The bodies under the pointer: 3D nearest the camera first; 2D nearest the rim, heavy bodies favoured.
+function gvCands(L, ev) {
+  const [x, y] = gvPos(L, ev), k = L.tf.k, C = [], touch = ev.pointerType === 'touch'; // a fingertip is about 16px wide
+  for (const n of L.act) {
+    if (n.va <= .3 || gvOvA(L, n) === 0) continue;
+    const rs = n.r * n.sc * n.va, hr = (touch ? rs * k + 16 : Math.max(rs * k + 3, gvHeavy(n) ? 4 : 6)) / k, d = Math.hypot(n.px - x, n.py - y);
+    if (d <= hr) C.push({n, s: L.view3 ? n.vzv : d - rs - (gvHeavy(n) ? 3 : 0)});
+  }
+  return C.sort((a, b) => a.s - b.s).map(c => c.n);
+}
+// What the last pointer was decides the hint's words and the slop of a pick.
+function gvPointerKind(L, ev) { const t = ev.pointerType === 'touch'; if (t !== GV.touch) { GV.touch = t; if (!GV.sel) gvPanel(L); } }
+const gvPick = (L, ev) => gvCands(L, ev)[0] || null;
+const gvLive = L => gvL === L && S.view === 'gravity';
+// A pointer handler asks for a frame (the loop draws it) instead of drawing at once; without frames it draws.
+const gvAsk = L => { if (typeof requestAnimationFrame === 'function') gvKick(); else gvDraw(L); };
+// The hover card: id, kind, domain, the turn's mark and value, one line of text; its footer says what a click does.
+function gvTipHtml(L, n, beneath) {
+  const t = GV.touch ? 'tap' : 'click';
+  let h = `<div class="gv-t">${esc(n.id)}</div><div class="muted">${esc(GV_KIND[n.kind])} · ${esc(n.domain)}${n.policy ? ' · the policy' : ''}</div>`;
+  if (L.ov) {
+    if (n.kind === 'target') h += `<div>${esc(GV_TS_LABEL[n.ts] || '')} <span class="muted">(derived)</span></div>`;
+    else if (n.os === 'none') h += '<div class="muted">no entry in this turn</div>';
+    else if (n.os === 'later') h += '<div class="muted">entered in a later round</div>';
+    else if (n.os) { const e = entryAt(L.ov.t, n.id); h += `<div>${markChip(n.os)} <span class="muted">${esc(STATE_LABEL[n.os] || n.os)}</span>${e ? ' ' + esc(cut(valueOf(e), 60)) : ''}</div>`; }
+  }
+  const line = n.text || n.statement || (n.kind === 'rule' ? n.form : '') || '';
+  if (line) h += `<div class="gv-tx">${esc(cut(String(line), 100))}</div>`;
+  return h + `<div class="muted">${beneath > 0 ? `+${beneath} beneath, ${t} again` : `${t} to select`}</div>`;
+}
+function gvTipAt(L, n, ev) {
+  const tp = $('gvtip');
+  if (!n) { tp.hidden = true; L.tipN = null; return; }
+  const key = n.id + '|' + (L.ov ? n.os || n.ts : '') + '|' + GV.touch, beneath = gvCands(L, ev).length - 1;
+  if (tp.hidden || L.tipN !== key + '|' + beneath) { tp.innerHTML = gvTipHtml(L, n, beneath); tp.hidden = false; L.tipN = key + '|' + beneath; } // rebuilt only when the body under the pointer changes
+  const w = tp.offsetWidth || 300, h = tp.offsetHeight || 100;
+  tp.style.left = Math.max(8, Math.min(ev.clientX + 14, innerWidth - w - 8)) + 'px'; tp.style.top = Math.max(8, Math.min(ev.clientY + 14, innerHeight - h - 8)) + 'px';
+}
+function gvMoveEv(ev) {
+  const L = gvL;
+  if (!L || !gvLive(L)) return;
+  gvPointerKind(L, ev);
+  const cv = $('gvc');
+  if (L.tps.has(ev.pointerId)) L.tps.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
+  if (L.pinch) {
+    const [a, b] = [...L.tps.values()]; if (!b) return;
+    const P = L.pinch, d = Math.hypot(a.x - b.x, a.y - b.y), cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, k = gvClamp(P.tf.k * d / P.d, .15, 8);
+    L.moved = true;
+    if (L.view3) { const sx = P.tf.x + P.tf.k * L.W / 2, sy = P.tf.y + P.tf.k * L.H / 2; L.tf = {x: sx - k * L.W / 2, y: sy - k * L.H / 2, k}; // zoom about the orbit point; two fingers move it
+      const u = gvUnRel(L, -(cx - P.cx) / k, -(cy - P.cy) / k, 0, 1); L.cam.tx = P.cam.tx + u[0]; L.cam.ty = P.cam.ty + u[1]; L.cam.tz = P.cam.tz + u[2]; }
+    else { const r = gvRect(), x0 = P.cx - r.left, y0 = P.cy - r.top; L.tf = {x: cx - r.left - (x0 - P.tf.x) * k / P.tf.k, y: cy - r.top - (y0 - P.tf.y) * k / P.tf.k, k}; }
+    return gvAsk(L);
+  }
+  if (L.drag) {
+    if (ev.pointerId !== L.drag.id) return;
+    if (Math.hypot(ev.clientX - L.drag.sx, ev.clientY - L.drag.sy) > 4) L.moved = true;
+    const [px, py] = gvPos(L, ev), n = L.drag.n;
+    if (L.view3) { const u = gvUnRel(L, px, py, n.vzv, n.sc); n.fx = u[0] + L.cam.tx; n.fy = u[1] + L.cam.ty; n.fz = u[2] + L.cam.tz; } else { n.fx = px + L.cam.tx; n.fy = py + L.cam.ty; }
+    return gvKick();
+  }
+  if (L.pan) {
+    if (ev.pointerId !== L.pan.id) return;
+    if (Math.hypot(ev.clientX - L.pan.sx, ev.clientY - L.pan.sy) > 4) L.moved = true;
+    L.tf = {x: L.tf.x + ev.clientX - L.pan.x, y: L.tf.y + ev.clientY - L.pan.y, k: L.tf.k}; L.pan.x = ev.clientX; L.pan.y = ev.clientY;
+    return gvAsk(L);
+  }
+  if (L.rot) {
+    if (ev.pointerId !== L.rot.id) return; // other fingers do not steer the turn
+    const dx = ev.clientX - L.rot.x, dy = ev.clientY - L.rot.y;
+    if (!dx && !dy) return;
+    L.moved = L.moved || Math.hypot(ev.clientX - L.rot.sx, ev.clientY - L.rot.sy) > 4; L.rot.x = ev.clientX; L.rot.y = ev.clientY; L.idle = 0;
+    if (L.rot.pan) { const u = gvUnRel(L, -dx / L.tf.k, -dy / L.tf.k, 0, 1); L.cam.tx += u[0]; L.cam.ty += u[1]; L.cam.tz += u[2]; } // the content follows the pointer
+    else { const a = dx * .006, b = dy * .006; L.cam.yaw += a; L.cam.pitch = gvClamp(L.cam.pitch + b, -1.5, 1.5); L.vyaw = gvClamp(.5 * L.vyaw + .5 * a, -.15, .15); L.vpitch = gvClamp(.5 * L.vpitch + .5 * b, -.15, .15); }
+    return gvAsk(L);
+  }
+  const n = gvPick(L, ev);
+  if (n !== L.hov) { L.hov = n; gvAsk(L); }
+  cv.style.cursor = n ? 'pointer' : 'grab';
+  gvTipAt(L, n, ev);
+}
+function gvDown(ev) {
+  const L = gvL;
+  if (!L || !gvLive(L)) return;
+  const cv = $('gvc'), cap = () => { try { if (cv.setPointerCapture) cv.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ } };
+  if (cv.focus) try { cv.focus({preventScroll: true}); } catch (e) { /* no focus */ }
+  if (!(L.tw && L.tw.lock)) L.tw = null;
+  L.vyaw = L.vpitch = 0; L.idle = 0; L.moved = false; L.kfocus = null; gvPointerKind(L, ev);
+  if (ev.pointerType === 'touch') {
+    L.tps.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
+    if (L.tps.size > 1) {
+      L.rot = L.pan = null; if (L.drag) gvEndDrag(L);
+      const [a, b] = [...L.tps.values()];
+      L.pinch = {d: Math.hypot(a.x - b.x, a.y - b.y) || 1, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, tf: Object.assign({}, L.tf), cam: {tx: L.cam.tx, ty: L.cam.ty, tz: L.cam.tz}};
+      return;
+    }
+  }
+  // Move (truck): the camera and its orbit point slide together in the view plane. Shift, space, the middle or right button ask for it over a body too; the toolbar's drag mode makes it a plain drag over empty space.
+  const mod = L.view3 && (ev.button === 1 || ev.button === 2 || ev.shiftKey || GV.space), n = mod ? null : gvPick(L, ev);
+  if (L.view3 && ev.button === 1 && ev.preventDefault) ev.preventDefault(); // no autoscroll
+  if (n && ev.button === 0 && !ev.ctrlKey) { // a body drag: pin it under the pointer and reheat
+    if (L.ease) { L.nodes.forEach((m, i) => { [m.x, m.y, m.z] = L.ease.to[i]; }); L.ease = null; }
+    L.drag = {n, id: ev.pointerId, sx: ev.clientX, sy: ev.clientY}; L.hov = n; $('gvtip').hidden = true;
+    n.fx = n.x; n.fy = n.y; n.fz = n.z; L.live = true; L.target = .25; L.alpha = Math.max(L.alpha, .25); cap(); return gvKick();
+  }
+  if (!L.view3) { if (ev.button === 0 && !ev.ctrlKey) { L.pan = {x: ev.clientX, y: ev.clientY, sx: ev.clientX, sy: ev.clientY, id: ev.pointerId}; cap(); cv.style.cursor = 'grabbing'; } return; }
+  if (!mod && ev.button !== 0) return;
+  const pan = mod || GV.drag === 'move';
+  L.rot = {x: ev.clientX, y: ev.clientY, sx: ev.clientX, sy: ev.clientY, id: ev.pointerId, pan}; cap(); cv.style.cursor = pan ? 'move' : 'grabbing';
+}
+function gvEndDrag(L) { const n = L.drag.n; L.target = 0; n.fx = n.fy = n.fz = null; L.drag = null; L.hov = null; $('gvtip').hidden = true; gvKick(); }
+function gvUp(ev) {
+  const L = gvL;
+  if (!L) return;
+  L.tps.delete(ev.pointerId); if (L.tps.size < 2) L.pinch = null;
+  if (L.drag && ev.pointerId === L.drag.id) return gvEndDrag(L);
+  if (L.pan && ev.pointerId === L.pan.id) { L.pan = null; $('gvc').style.cursor = 'grab'; return; }
+  if (L.rot && ev.pointerId !== L.rot.id) return;
+  if (L.rot && (L.rot.pan || gvRM())) L.vyaw = L.vpitch = 0;
+  if (L.rot) gvKick();
+  L.rot = null; $('gvc').style.cursor = 'grab';
+}
+// A click selects the nearest body; a repeat click within 4 px steps to the next one behind.
+function gvClick(ev) {
+  const L = gvL;
+  if (!L || !gvLive(L)) return;
+  if (L.moved) { L.moved = false; return; }
+  let C = gvCands(L, ev), n = C[0] || null;
+  const lc = L.lc;
+  if (lc && lc.n && Math.hypot(ev.clientX - lc.x, ev.clientY - lc.y) <= 4) { const M = lc.C.filter(m => m.want); if (M.length > 1 && M.includes(lc.n)) { C = M; n = M[(M.indexOf(lc.n) + 1) % M.length]; } }
+  L.lc = {x: ev.clientX, y: ev.clientY, C, n};
+  gvSelect(L, n);
+}
+function gvWheel(ev) {
+  const L = gvL;
+  if (!L || !gvLive(L)) return;
+  if (ev.preventDefault) ev.preventDefault();
+  if (!(L.tw && L.tw.lock)) L.tw = null;
+  L.vyaw = L.vpitch = 0; L.idle = 0;
+  const d = -ev.deltaY * (ev.deltaMode === 1 ? .05 : ev.deltaMode ? 1 : .002) * (ev.ctrlKey ? 10 : 1);
+  if (L.view3) gvZoomBy(L, Math.exp(d * .75));
+  else { const t = L.tf, k = gvClamp(t.k * Math.pow(2, d), .15, 8), r = gvRect(), px = ev.clientX - r.left, py = ev.clientY - r.top; L.tf = {x: px - (px - t.x) * k / t.k, y: py - (py - t.y) * k / t.k, k}; }
+  gvAsk(L);
+}
+{
+  const cv = $('gvc');
+  cv.addEventListener('pointermove', gvMoveEv);
+  cv.addEventListener('pointerdown', gvDown);
+  cv.addEventListener('pointerup', gvUp);
+  cv.addEventListener('pointercancel', gvUp);
+  cv.addEventListener('click', gvClick);
+  cv.addEventListener('wheel', gvWheel, {passive: false});
+  document.addEventListener('keyup', gvKeyUp); addEventListener('blur', () => { GV.space = false; });
+  cv.addEventListener('contextmenu', ev => { if (ev.preventDefault) ev.preventDefault(); });
+  cv.addEventListener('pointerleave', () => { const L = gvL; $('gvtip').hidden = true; if (L && L.hov) { L.hov = null; gvAsk(L); } });
+  cv.addEventListener('dblclick', ev => { const L = gvL; if (L && gvLive(L) && !gvPick(L, ev)) gvFit(L); gvKick(); });
+  $('gvgz').addEventListener('click', ev => {
+    const L = gvL; if (!L) return;
+    const r = $('gvgz').getBoundingClientRect(), x = ev.clientX - (r.left || 0), y = ev.clientY - (r.top || 0);
+    const d = gvEnds(L).reverse().find(e => Math.hypot(e.x - x, e.y - y) <= (e.s > 0 ? 10 : 7));
+    if (d) { L.idle = 0; gvCamTo(L, gvAxisView(L, d.e), {dur: GV_TW, force: true}); }
+  });
+  const GV_INPUT = {gvq: 'light', gvcross: 'cross', gvhh: 'hh', gvkind: 'byDomain', gvovon: 'ov', gvflat: 'flat', gvhalo: 'halo', gv3: 'mode3', gvspin: 'spin', gvqpull: 'qPull', gvhpull: 'hPull', gvsearch: 'find', gvround: 'step', gvhide: 'hide', gvlin: 'lin'};
+  $('vGravity').addEventListener('input', ev => {
+    const el = ev.target, k = el && GV_INPUT[el.id];
+    if (!k) return;
+    if ((k === 'qPull' || k === 'hPull') && gvL && typeof requestAnimationFrame === 'function') { // live: the frame loop settles it, not 200 ticks per event
+      const L = gvL; GV[k] = Number(el.value) / 100; gvPairs(L); L.live = true; L.target = 0; L.alpha = Math.max(L.alpha, .35); gvKick(); return;
+    }
+    gvSet(k, el.type === 'checkbox' ? !!el.checked : k === 'qPull' || k === 'hPull' ? Number(el.value) / 100 : k === 'step' ? Number(el.value) : el.value);
+    if (k === 'mode3') gvLegend(gvL);
+  });
+  $('vGravity').addEventListener('click', ev => {
+    const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvact],[data-gvid],[data-gvst],[data-gvfold]') : null;
+    if (!el || !gvL) return;
+    if (el.dataset.gvid) gvSelect(gvL, gvL.byId.get(el.dataset.gvid) || null); else if (el.dataset.gvfold) gvFoldToggle(gvL, el.dataset.gvfold, el); else if (el.dataset.gvst) gvSet('st', GV.st === el.dataset.gvst ? null : el.dataset.gvst); else gvAct(el.dataset.gvact);
+  });
+  $('gvside').addEventListener('pointerover', ev => {
+    const el = ev.target && ev.target.closest ? ev.target.closest('[data-gvid]') : null, L = gvL;
+    if (!L) return;
+    const n = el ? L.byId.get(el.dataset.gvid) || null : null;
+    if (n !== L.hov) { L.hov = n; gvAsk(L); }
+  });
+  $('gvsearch').addEventListener('keydown', ev => { // Enter steps through the hits, Shift+Enter back
+    const L = gvL;
+    if (ev.key !== 'Enter' || !L) return;
+    if (ev.preventDefault) ev.preventDefault();
+    gvFindStep(L, ev.shiftKey ? -1 : 1);
+  });
+}
+
 /* ---------- selection and render ---------- */
+// The header's key strip: the keys every tab shares, then those of the open view.
+const KEYS_ALL = '<kbd>←</kbd> <kbd>→</kbd> turns · <kbd>Esc</kbd> back out · <kbd>Tab</kbd> nodes';
+const KEYS_VIEW = {
+  explore: ' · Explore: <kbd>n</kbd> <kbd>p</kbd> <kbd>[</kbd> <kbd>]</kbd> <kbd>i</kbd> <kbd>o</kbd> <kbd>m</kbd> <kbd>/</kbd>',
+  gravity: ' · Gravity: <kbd>f</kbd> <kbd>s</kbd> <kbd>h</kbd> <kbd>3</kbd> <kbd>/</kbd> <kbd>a</kbd> <kbd>d</kbd> rounds · <kbd>?</kbd> help',
+};
+function headKeys() { const k = $('keys'); if (k) k.innerHTML = KEYS_ALL + (KEYS_VIEW[S.view] || ''); }
 function render() {
   const s = cur(), t = curTurn(), D = curDesign();
+  headKeys();
   $('setPick').hidden = $('setPickLabel').hidden = sets.length < 2;
   $('title').textContent = s.name ? `ommat lens · ${s.name}` : 'ommat lens';
   const skipped = [];
@@ -2987,6 +4241,7 @@ function writeHash(push) {
     if (sets.length > 1 || cur().name) h.set('set', cur().name || String(S.set));
     if (S.turn !== null) h.set('turn', String(S.turn));
     if (S.node) h.set('node', S.node);
+    if (S.tgt) h.set('tgt', S.tgt);
     if (S.stateEdges) h.set('state', '1');
     if (S.undecidedOnly) h.set('und', '1');
     if (S.sort) h.set('sort', (S.dir < 0 ? '-' : '') + S.sort);
@@ -2997,6 +4252,17 @@ function writeHash(push) {
     if (EX.info) h.set('info', '1');
     if (S.table) h.set('table', S.table);
     if (S.tmode) h.set('tmode', S.tmode);
+    if (GV.mode3) h.set('g3', '1');
+    if (GV.sel) h.set('gsel', GV.sel);
+    if (!GV.ov) h.set('gov', '0');
+    if (GV.step != null) h.set('gr', String(GV.step));
+    if (GV.hide) h.set('ghide', '1');
+    if (GV.lin) h.set('glin', '1');
+    if (GV.byDomain) h.set('gdom', '1');
+    if (!GV.light) h.set('gq', '0');
+    if (GV.st) h.set('gst', GV.st);
+    if (GV.cross) h.set('gx', '1');
+    if (GV.drag !== 'orbit') h.set('gdrag', GV.drag);
     const next = '#' + h.toString();
     if (location.hash !== next) { if (push) history.pushState(null, '', next); else history.replaceState(null, '', next); }
   } catch (e) { /* no location or history (file sandbox, test stub) */ }
@@ -3046,6 +4312,7 @@ $('theme').addEventListener('click', () => {
   theme = {auto: 'light', light: 'dark', dark: 'auto'}[theme] || 'auto';
   try { localStorage.setItem('ommat-lens-theme', theme); } catch (e) { /* storage blocked */ }
   applyTheme(); writeHash();
+  if (S.view === 'gravity' && gvL) { gvTheme(gvL); gvLegend(gvL); gvPanel(gvL); gvDraw(gvL); }
 });
 $('copy').addEventListener('click', () => {
   writeHash();
@@ -3086,6 +4353,7 @@ document.addEventListener('keydown', ev => {
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) { if (ev.key === 'Escape' && ev.target.blur) ev.target.blur(); return; }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   if (S.view === 'explore' && exploreKey(ev)) return;
+  if (S.view === 'gravity' && gvKey(ev)) return;
   if (ev.key === 'ArrowRight' || ev.key === 'j') { ev.preventDefault(); step(1); }
   else if (ev.key === 'ArrowLeft' || ev.key === 'k') { ev.preventDefault(); step(-1); }
   else if (ev.key === 'Escape') { if (!$('gloss').hidden) { $('gloss').hidden = true; $('glossBtn').setAttribute('aria-expanded', 'false'); } else if (S.node) S.node = null; else S.turn = null; render(); }
@@ -3102,7 +4370,7 @@ addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(r
 function defaultView() { return cur().turns.length ? 'turn' : cur().designs.length ? 'overview' : 'graph'; }
 // A hash such as #view=explore&node=rule:act&up=2&turn=2&theme=dark&sort=-nearest&und=1 opens that view.
 function readHash() {
-  Object.assign(S, {view: null, turn: null, node: null, stateEdges: false, declaredHops: true, undecidedOnly: false, sort: null, dir: 1});
+  Object.assign(S, {tgt: null, view: null, turn: null, node: null, stateEdges: false, declaredHops: true, undecidedOnly: false, sort: null, dir: 1});
   try {
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.has('set')) { const i = sets.findIndex(s => s.name === h.get('set')); S.set = i >= 0 ? i : Math.min(+h.get('set') || 0, sets.length - 1); }
@@ -3119,6 +4387,16 @@ function readHash() {
   EX.info = h.get('info') === '1';
   S.table = h.get('table') || null;
   S.tmode = h.get('tmode') === 'matrix' ? 'matrix' : null;
+  S.tgt = h.get('tgt') || null;
+  GV.mode3 = h.get('g3') === '1';
+  GV.sel = h.get('gsel') || null;
+  GV.ov = h.get('gov') !== '0';
+  { const v = Number(h.get('gr')); GV.step = h.has('gr') && isFinite(v) ? Math.max(0, Math.round(v)) : null; GV.stepFromHash = GV.step != null; }
+  GV.hide = h.get('ghide') === '1'; GV.lin = h.get('glin') === '1'; GV.byDomain = h.get('gdom') === '1';
+  GV.st = GV_STATES.includes(h.get('gst')) ? h.get('gst') : null;
+  GV.light = h.get('gq') !== '0'; GV.cross = h.get('gx') === '1';
+  GV.selRestore = !!GV.sel;
+  GV.drag = h.get('gdrag') === 'move' ? 'move' : 'orbit';
   } catch (e) { /* no usable hash */ }
   if (!S.view) S.view = defaultView();
 }
