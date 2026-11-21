@@ -9,6 +9,24 @@ const data = /<script id="lens-data" type="application\/json">([\s\S]*?)<\/scrip
 const code = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
 const problems = [];
 const BAD = /NaN|undefined|\[object/;
+// A recording 2D context: every call is counted by name, and a call given NaN, an infinity or
+// undefined, or a property set to one, is a problem.
+const badArg = v => v === undefined || (typeof v === 'number' && !isFinite(v)) || (typeof v === 'string' && BAD.test(v));
+function context2d() {
+  const counts = {};
+  const own = {
+    counts, measureText: t => ({width: String(t).length * 6}),
+    createRadialGradient: (...a) => { if (a.some(badArg)) problems.push('canvas createRadialGradient'); return {addColorStop() {}}; },
+    createLinearGradient: () => ({addColorStop() {}}),
+  };
+  return new Proxy(own, {
+    get: (o, k) => (k in o ? o[k] : typeof k !== 'string' ? undefined : (...a) => {
+      counts[k] = (counts[k] || 0) + 1;
+      if (a.some(x => badArg(x) || (Array.isArray(x) && x.some(badArg)))) problems.push(`canvas ${k}(${a.map(String).join(', ')})`);
+    }),
+    set: (o, k, v) => { if (badArg(v)) problems.push(`canvas ${String(k)}=${v}`); o[k] = v; return true; },
+  });
+}
 class El {
   constructor(tag) {
     this.tagName = String(tag).toUpperCase(); this.children = []; this.attrs = {}; this._text = '';
@@ -51,7 +69,9 @@ class El {
   querySelectorAll() { return []; }
   querySelector() { return null; }
   getBoundingClientRect() { return {width: 100, height: 40}; }
-  focus() {} scrollIntoView() {} select() {} remove() {}
+  focus() { document.activeElement = this; } blur() {} scrollIntoView() {} select() {} remove() {}
+  getContext() { return this._ctx || (this._ctx = context2d()); }
+  setPointerCapture() {} releasePointerCapture() {}
   get clientWidth() { return 1120; }
   get offsetTop() { return 0; }
   set value(v) { this._v = v; }
@@ -64,7 +84,8 @@ const document = {
   createElement: t => new El(t), createElementNS: (ns, t) => new El(t),
   createTextNode: t => ({textContent: String(t)}),
   createDocumentFragment: () => Object.assign(new El('frag'), {isFrag: true}),
-  querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {},
+  querySelector: () => null, querySelectorAll: () => [], listeners: {},
+  addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
 };
 // The elements under `el` (itself included) that carry class `cls`, depth first.
 function byClass(el, cls) {
@@ -84,10 +105,20 @@ function tips(el) {
   })(el);
   return out;
 }
+// Animation frames wait in a queue until the expression runs them: frames(n) runs up to n.
+const queued = [];
+function frames(n) { let k = 0; while (queued.length && k++ < n) queued.shift()(k * 16.7); return queued.length; }
+// An event of `type` dispatched to `el`'s own listeners (`document`'s too), with the fields a handler reads.
+function fire(el, type, ev) {
+  const e = Object.assign({target: el, clientX: 0, clientY: 0, pointerId: 1, pointerType: 'mouse', button: 0,
+    deltaY: 0, deltaMode: 0, preventDefault() {}, stopPropagation() {}}, ev);
+  (el.listeners[type] || []).forEach(f => f(e));
+}
 const ctx = {
   document, console, setTimeout, clearTimeout, URLSearchParams, problems, byClass, strip, tips,
   localStorage: {getItem: () => null, setItem: () => {}}, innerWidth: 1200, innerHeight: 800,
-  addEventListener: () => {},
+  requestAnimationFrame: f => queued.push(f), frames, fire,
+  listeners: {}, addEventListener(t, f) { (ctx.listeners[t] = ctx.listeners[t] || []).push(f); }, // the window's own
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx);
