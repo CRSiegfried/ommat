@@ -5,6 +5,7 @@ cancellation at every point they can land, ``decide_sync``, ``unhashed``, and go
 with the record hash and the design hash checked in, against a scripted fixture binding."""
 
 import asyncio
+import contextvars
 import dataclasses
 import enum
 import functools
@@ -1419,6 +1420,88 @@ def test_decide_sync_inside_a_running_loop_raises_before_doing_anything() -> Non
     assert codec.calls == []
 
 
+# ---------------------------------------------------------------------------------------------
+# decide_sync on a caller's runner (§sync-runner)
+
+_TURN_VAR: contextvars.ContextVar[int] = contextvars.ContextVar("turn_var", default=0)
+
+
+def test_a_turn_on_a_runner_is_the_turn_under_asyncio_run_and_leaves_the_runner_open() -> None:
+    fresh = go().record
+    with asyncio.Runner() as runner:
+        first = go(runner=runner).record
+        second = go(runner=runner).record
+        assert asyncio.all_tasks(runner.get_loop()) == set()
+        assert go(runner=runner).estimate == "archive"  # still open: decide_sync never closes it
+    assert first.record_hash == second.record_hash == fresh.record_hash
+
+
+def test_each_turn_on_a_runner_runs_in_its_own_copy_of_the_context() -> None:
+    seen: list[int] = []
+
+    def codec(state: object) -> object:
+        seen.append(_TURN_VAR.get())
+        _TURN_VAR.set(_TURN_VAR.get() + 1)
+        return state
+
+    with asyncio.Runner() as runner:
+        go(codec=codec, runner=runner)
+        go(codec=codec, runner=runner)
+    assert seen == [0, 0]
+    assert _TURN_VAR.get() == 0
+
+
+def test_decide_sync_refuses_a_runner_not_exactly_an_asyncio_runner_before_anything_runs() -> None:
+    class Sub(asyncio.Runner):  # pyright: ignore[reportGeneralTypeIssues]
+        pass
+
+    with Sub() as sub:
+        for runner in (object(), sub):
+            seen, codec = Seen(), Counting()
+            with pytest.raises(EntryRefusal, match=r"exactly an asyncio\.Runner"):
+                go(codec=codec, observer=seen, runner=runner)
+            assert seen.items == []
+            assert codec.calls == []
+
+
+def test_a_runner_whose_loop_was_closed_raises_and_leaks_no_coroutine() -> None:
+    seen = Seen()
+    # A loop_factory keeps the runner from installing its loop as the thread's current loop.
+    runner = asyncio.Runner(loop_factory=asyncio.new_event_loop)
+    runner.get_loop().close()  # closed behind the runner's back; closing the runner would raise
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(RuntimeError, match="closed"):
+            go(observer=seen, runner=runner)
+        gc.collect()  # an unawaited coroutine would warn here
+    assert seen.items == []
+
+
+def test_a_closed_runner_raises_its_own_error_and_leaks_no_coroutine() -> None:
+    with asyncio.Runner() as runner:
+        pass
+    seen = Seen()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(RuntimeError, match="closed"):
+            go(observer=seen, runner=runner)
+        gc.collect()  # an unawaited coroutine would warn here
+    assert seen.items == []
+
+
+def test_decide_sync_with_a_runner_inside_a_running_loop_raises_before_doing_anything() -> None:
+    seen, codec = Seen(), Counting()
+
+    async def main(runner: asyncio.Runner) -> None:
+        with pytest.raises(RuntimeError, match="running event loop"):
+            decide_sync(LOADED, STATE, bindings(), codec=codec, observer=seen, runner=runner)
+
+    with asyncio.Runner() as outer, asyncio.Runner() as runner:
+        outer.run(main(runner))
+    assert seen.items == []
+    assert codec.calls == []
+
+
 def test_decide_sync_returns_a_decision_whose_record_ends_with_interpret_s_last_item() -> None:
     decision = decide_sync(LOADED, STATE, bindings())
     assert type(decision) is Decision
@@ -1733,7 +1816,7 @@ def sync_observer(index: int, item: Any) -> None:
 class PartialCall:
     """A sync callable whose ``__call__`` is no plain function: a partial, never bound."""
 
-    __call__ = functools.partial(sync_observer)
+    __call__ = staticmethod(functools.partial(sync_observer))  # 3.14 binds a bare partial
 
 
 def _deep(depth: int) -> Any:

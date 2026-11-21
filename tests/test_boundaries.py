@@ -405,7 +405,9 @@ def test_a_boundary_type_refusal_names_the_type_as_written(
 
 
 def test_the_specs_function_rule_example_loads() -> None:
-    spec = (Path(__file__).parent.parent / "docs" / "spec" / "README.md").read_text()
+    spec = (Path(__file__).parent.parent / "docs" / "spec" / "README.md").read_text(
+        encoding="utf-8"
+    )
     after = spec.split("**A function rule's boundaries.**", 1)[1]
     block = after.split("```python\n", 1)[1].split("```", 1)[0]
 

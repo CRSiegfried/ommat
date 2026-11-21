@@ -7,6 +7,7 @@ format 3's rules to its own hash and refused at replay, the design refused at lo
 import asyncio
 import copy
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -148,7 +149,11 @@ def test_a_binding_receives_the_batchs_timeout_as_its_seconds() -> None:
 def test_a_binding_receives_the_time_left_to_the_deadline_when_that_is_smaller() -> None:
     (seconds,) = seen_seconds(RunSettings(timeout=60, deadline=3.0))
     assert type(seconds) is float
-    assert 2.0 < seconds < 3.0
+    assert 2.0 < seconds <= 3.0
+    # Some time has passed since the deadline started, unless the clock is too coarse to see it:
+    # Windows' monotonic clock before Python 3.13 ticks every 15.6 ms.
+    if time.get_clock_info("monotonic").resolution < 1e-3:
+        assert seconds < 3.0
 
 
 def test_a_binding_without_the_seconds_keyword_is_raised_on_every_ref() -> None:

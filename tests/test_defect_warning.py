@@ -103,6 +103,10 @@ def test_the_warning_names_the_line_that_called_decide_or_decide_sync() -> None:
         asyncio.run(caller())
     assert caught[0].filename == __file__
 
+    with asyncio.Runner() as runner, pytest.warns(DefectWarning) as caught:
+        decide_sync(LOADED, BAD_DATE, bindings(), runner=runner)
+    assert caught[0].filename == __file__
+
 
 def test_a_turn_ended_by_the_observers_exception_warns_nothing() -> None:
     def observer(index: int, item: dict[str, Any]) -> None:

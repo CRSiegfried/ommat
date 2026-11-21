@@ -4,10 +4,22 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+
+- `decide_sync` and `replay_sync` take `runner=None`, an `asyncio.Runner` the caller owns. Each turn then runs by `runner.run` in a copy of the caller's context, not under `asyncio.run` on a fresh loop, so many turns on one thread share one loop and pay for none. A runner not exactly an `asyncio.Runner` is an `EntryRefusal`, raised before the coroutine is built; a closed runner raises its own `RuntimeError` and runs nothing.
+- With a runner, a task a binding leaves is cancelled, and a `to_thread` thread past its timeout waited for, when the runner closes, not when the turn ends.
+
 ### Changed
 
 - The lens has two views, Gravity and Turn, where it had eight. Gravity, the design as bodies on a force layout in 3D, or 2D with `g3=0`, opens for any set with a design; Turn, what a record shows in plain words, opens for a record no design pairs with. Gravity's panel carries what the other views said: with a turn, the verdict, play over the rounds with each round's sources, and entry and target chips that filter; for a selection, its neighbours as reads, read by and bears on, a table's rows with the output beside the row number as the turn ran them or as declared, a rule's parameters and bounds, a question's or tool result's wording and whole answer as a distribution, a target's statement, questions and estimators, and for the policy what it decides between; with a table and no turn, a `fired, of N loaded turns` column, a count over the turns paired by hash; with nothing selected, the design summary. Turn's All turns table has a tally of the loaded turns, decided by value and undecided by marker ref, whose counts filter it, and a turn that no design pairs with lists its entries by round. The Path, Overview, Explore, Targets, Outcomes and Graph views, the bounds panel and the header's lines are removed, as are the turn-overlay and lineage-only checkboxes and the hash keys `state`, `und`, `sort`, `up`, `down`, `dir`, `info`, `table`, `tmode`, `tgt`, `gdrag`, `ghide`, `gdom`, `gx` and `gov`, which are ignored; an old `node=` link selects that node's body. A held `null` reads `none`, not `no value`.
 - `combine` keeps one copy of a source or rule two parts declare alike under one id, as it keeps a type, group or target, and refuses one they declare differently; an id one part declares as a source and another as a rule is still refused. Before, a repeated id was refused even when alike. A question several parts ask alike now goes in a source each part declares alike, so each part runs alone and the combined design asks it once.
+
+### Fixed
+
+- The design and evaluation stores write on Windows. Every write raised there: `_create` called `os.fchmod`, absent before Python 3.13, and synced the directory through `os.open`, which Windows refuses. It now skips both on Windows, which has no POSIX modes and cannot open a directory to sync it.
+- The lens and the outline refuse a document nested deeper than 128 as too deep whatever its top-level type. A deep top-level array was refused as not a JSON object, and whether parsing caught the depth first depended on the C stack, so on Python 3.14 under Linux a 100,000-deep array took the wrong refusal.
+- `dead_questions` runs every point on one event loop. It opened a loop per run, and on Windows each loop opens a loopback socket pair whose ports wait about two minutes to close, so some 16,000 runs exhausted the ephemeral ports and the lint stalled.
+- A git install of ommat on Windows is byte for byte the one on macOS or Linux. Git's Windows default, `core.autocrlf=true`, wrote every installed file with CRLF; `.gitattributes` now keeps text LF in every checkout. A rule's source hash never depended on line endings, so no design hash changes.
 
 ## [0.4.0] - 2026-11-16
 

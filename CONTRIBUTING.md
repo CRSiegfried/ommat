@@ -18,8 +18,11 @@ uv sync --all-extras
 uv run ruff check
 uv run ruff format --check
 uv run pyright
-uv run pytest
+uv run pytest --cov -m "not slow"
+uv run pytest -m slow
 ```
+
+These are CI's steps in CI's order. CI runs them on Linux, macOS and Windows; a change that touches event loops, sockets, file paths or line endings needs the Windows legs green before it is ready for review.
 
 To work against a checkout of idia beside this one, at `../idia`, install it over the tag and keep `uv run` from syncing it back:
 

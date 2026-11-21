@@ -218,7 +218,8 @@ queues requests from concurrent calls behind them, so a call costs about the num
 questions times the time of one request, and a request's time can grow faster than the text's
 length: for one small named-entity model on a CPU, 0.14 s at 536 tokens and 18 s at 7,800. A
 call past its timeout is `Failed` with `timed-out`, but a thread started by `asyncio.to_thread`
-runs on, and `decide_sync` waits for it before it returns.
+runs on, and `decide_sync` waits for it before it returns; given a `runner`, it returns without
+waiting, the thread runs on into the next turn on that runner, and the runner's close waits for it.
 
 ## A source that changes state
 
@@ -348,13 +349,21 @@ async def provider(leaf: Any) -> Dispatcher:
     return Dispatcher(leaf)
 ```
 
-It loads on one event loop, `asyncio.run(provider(leaf))`, and each `decide_sync` then runs on
-a loop of its own. idia's [dispatch
+It loads on one event loop, `asyncio.run(provider(leaf))`, and each `decide_sync` without a
+`runner` then runs on a loop of its own. idia's [dispatch
 spec](https://github.com/CRSiegfried/idia/blob/main/docs/spec/dispatch.md) holds that one
 `Dispatcher` serves successive `asyncio.run` calls, and its providers spec that a client a leaf
 creates follows the running loop. A leaf given a client of your own refuses a call on any other
 loop: let the leaf create its client, or load and decide on one loop with `decide`. Close the
 dispatcher when you are done, as the driver does, to release the leaf.
+
+To load and decide on one loop from sync code, pass `decide_sync` a `runner`: build the
+`asyncio.Runner` once, `runner.run(provider(leaf))`, decide with `decide_sync(..., runner=runner)`,
+and close the dispatcher with `runner.run(dispatcher.aclose())` before the runner closes, at the
+end of its `with asyncio.Runner()` block or by `runner.close()`. The
+leaf's client then serves every turn, one you gave it included. To decide from several threads,
+give each its own runner and its own dispatcher: a dispatcher shared across loops makes a fresh
+client at each change of loop and holds its concurrency limit within one loop only.
 
 ### Put what an oracle cannot answer in a source of its own
 
@@ -516,6 +525,8 @@ from `_predict` comes at the call's end, when ommat has already timed out the wh
 its `timed-out` marker is never read.
 `decide_sync` and `check` wait for such a thread to end: on Python 3.11 for as long as it
 runs, on 3.12 and later for up to 300 seconds, and the process waits for it again at exit.
+`decide_sync` given a `runner` does not wait: the thread holds the lock into the next turn on
+that runner, and the runner's close waits for it, as `decide_sync` otherwise does.
 
 ### Refuse what the model cannot answer
 

@@ -44,12 +44,15 @@ def _create(path: Path, data: bytes) -> bool:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-            os.fchmod(f.fileno(), 0o644)  # mkstemp's 0600 would shut a shared store
+            if os.name != "nt":  # Windows has no POSIX modes; mkstemp's file is readable there
+                os.fchmod(f.fileno(), 0o644)  # mkstemp's 0600 would shut a shared store
         os.link(tmp, path)  # fails on a held name, where open(path, "xb") would too
     except FileExistsError:
         return False
     finally:
         os.unlink(tmp)
+    if os.name == "nt":  # Windows cannot open a directory to sync it
+        return True
     dir_fd = os.open(path.parent, os.O_RDONLY)
     try:
         os.fsync(dir_fd)  # the name survives a crash, so a write-once entry is never lost

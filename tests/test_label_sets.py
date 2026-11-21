@@ -624,8 +624,8 @@ def test_the_dead_lint_writes_no_invalid_answer_for_a_candidate_valued_question(
     seen: list[Any] = []
     real = dead._run
 
-    def spy(loaded: Any, point: Any, keys: Any) -> Any:
-        out = real(loaded, point, keys)
+    def spy(loaded: Any, point: Any, keys: Any, runner: Any) -> Any:
+        out = real(loaded, point, keys, runner)
         seen.append(out[1])
         return out
 

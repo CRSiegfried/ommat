@@ -792,6 +792,26 @@ def test_a_recorded_round_bound_of_0_is_refused_at_the_read_or_with_no_findings(
     assert seen.items == []
 
 
+def test_replays_on_one_runner_equal_replays_under_asyncio_run_and_leave_no_task() -> None:
+    records = [go().record, golden_undecided()]
+    fresh = [replay_sync(r, LOADED) for r in records]
+    with asyncio.Runner() as runner:
+        for record, (want, want_found) in zip(records, fresh, strict=True):
+            rerun, found = replay_sync(record, LOADED, runner=runner)
+            assert found == want_found
+            assert rerun is not None
+            assert want is not None
+            assert rerun.record_hash == want.record_hash
+            assert asyncio.all_tasks(runner.get_loop()) == set()
+
+
+def test_replay_sync_refuses_a_runner_not_exactly_an_asyncio_runner() -> None:
+    seen = Seen()
+    with pytest.raises(EntryRefusal, match=r"exactly an asyncio\.Runner"):
+        replay_sync(go().record, LOADED, observer=seen, runner=object())  # type: ignore[arg-type]
+    assert seen.items == []
+
+
 def test_replay_sync_inside_a_running_loop_raises_before_doing_anything() -> None:
     seen = Seen()
 
