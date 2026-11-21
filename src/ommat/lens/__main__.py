@@ -15,10 +15,9 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m ommat.lens",
         description=(
             "Write an HTML page drawing an ommat design and its records from their outlines: "
-            "an overview, a slice around any node, the targets and the tables' rows, a turn's "
-            "path through its rules, and the "
-            "dependency graph by round with each turn's entries, lineage and bounds over it, "
-            "and the turns as a table. The page holds the records' values, user text included: "
+            "Gravity, the design as bodies with a turn's entries, lineage and rounds over it and "
+            "a panel saying what the design and the turn say of each body, and Turn, a record "
+            "in plain words. The page holds the records' values, user text included: "
             "keep it as you keep them."
         ),
     )
