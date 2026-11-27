@@ -26,7 +26,7 @@ from ommat._markers import (
     Unsure,
 )
 
-# The cause set, its 25 codes.
+# The cause set, its 24 codes.
 CAUSE_SET = {
     "need-unavailable",
     "need-undetermined",
@@ -45,7 +45,6 @@ CAUSE_SET = {
     "label-collision",
     "label-overflow",
     "conflict",
-    "settled",
     "over-budget",
     "invalid-return",
     "design-changed",
@@ -58,7 +57,12 @@ CAUSE_SET = {
 
 def test_the_cause_set_is_exactly_the_decisions() -> None:
     assert {c.value for c in CauseCode} == CAUSE_SET
-    assert len(CauseCode) == 25
+    assert len(CauseCode) == 24
+
+
+def test_settled_is_no_cause_code() -> None:
+    with pytest.raises(ValueError, match="not in the closed cause set"):
+        Cause("settled")
 
 
 @pytest.mark.parametrize(

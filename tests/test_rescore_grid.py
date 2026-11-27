@@ -49,6 +49,7 @@ from ommat.helpers import mass
 pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")
 
 YES_NO = 'label{"no", "yes"}'
+ACT = ["d:act"]
 _R = RefusalReason
 Point = dict[str, Any]
 
@@ -97,7 +98,6 @@ def gated(bar: float, margin: float = 0.0, stated: float = 0.5) -> LoadedDesign:
                 "g/margin": Parameter(t.number(0, 1), margin),
                 "g/stated": Parameter(t.number(0, 1), stated),
             },
-            policy="d:act",
         )
     )
 
@@ -115,11 +115,35 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     return count
 
 
+def decided(loaded: LoadedDesign) -> list[str]:
+    """Every declared ``d:`` ref an ungrounded rule of ``loaded`` provides, in code-point order:
+    the grid's rows are compared over every entry it can name."""
+    rules = loaded._design.rules  # pyright: ignore[reportPrivateUsage]
+    providers = loaded._providers  # pyright: ignore[reportPrivateUsage]
+    return sorted(
+        ref
+        for ref, rid in providers.items()
+        if ref.startswith("d:") and rid in rules and rules[rid].grounded is None
+    )
+
+
+def at(row: dict[str, Any], ref: str = "d:act") -> Any:
+    """A row's entry at ``ref``, or its ``not-determined``."""
+    entries = row["entries"]
+    return entries if isinstance(entries, str) else entries[ref]
+
+
 def plain(
-    records: Sequence[Record], recorded: LoadedDesign, loaded: LoadedDesign, points: list[Point]
+    records: Sequence[Record],
+    recorded: LoadedDesign,
+    loaded: LoadedDesign,
+    points: list[Point],
+    refs: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """``rescore``'s rows over the points' designs, a key path's value merged into its leaf's."""
-    return rescore_sync(records, recorded, [designed(loaded, p) for p in points])
+    """``rescore``'s rows over the points' designs, a key path's value merged into its leaf's,
+    at ``refs``, or every ref ``decided`` gives."""
+    named = decided(loaded) if refs is None else refs
+    return rescore_sync(records, recorded, [designed(loaded, p) for p in points], refs=named)
 
 
 def designed(loaded: LoadedDesign, point: Point) -> LoadedDesign:
@@ -127,12 +151,17 @@ def designed(loaded: LoadedDesign, point: Point) -> LoadedDesign:
 
 
 def same(
-    records: Sequence[Record], recorded: LoadedDesign, loaded: LoadedDesign, points: list[Point]
+    records: Sequence[Record],
+    recorded: LoadedDesign,
+    loaded: LoadedDesign,
+    points: list[Point],
+    refs: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """The grid's rows, asserted equal to ``rescore``'s row for row: as plain data, by
-    canonical bytes, and in type."""
-    rows = rescore_grid_sync(records, recorded, loaded, points)
-    theirs = plain(records, recorded, loaded, points)
+    """The grid's rows at ``refs``, or every ref ``decided`` gives, asserted equal to
+    ``rescore``'s row for row: as plain data, by canonical bytes, and in type."""
+    named = decided(loaded) if refs is None else refs
+    rows = rescore_grid_sync(records, recorded, loaded, points, refs=named)
+    theirs = plain(records, recorded, loaded, points, named)
     assert rows == theirs
     assert [encode(row) for row in rows] == [encode(row) for row in theirs]
     assert repr(rows) == repr(theirs)
@@ -162,7 +191,7 @@ def test_the_gated_grid_equals_plain_rescore_with_fewer_reruns(
     rows = same(records, recorded, loaded, points)
     assert len(rows) == len(points) * len(records)
     assert count[0] < len(points) * len(records)
-    assert 0 < sum(row["decision"] != "not-determined" for row in rows) < len(rows)
+    assert 0 < sum(row["entries"] != "not-determined" for row in rows) < len(rows)
 
 
 def test_a_three_leaf_product_equals_plain_rescore(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,7 +206,7 @@ def test_a_three_leaf_product_equals_plain_rescore(monkeypatch: pytest.MonkeyPat
     count = counted(monkeypatch)
     rows = same(records, recorded, recorded, points)
     assert count[0] < len(points) * len(records)
-    assert len({encode(row["decision"]) for row in rows}) > 2
+    assert len({encode(row["entries"]) for row in rows}) > 2
 
 
 def mood_without_thf() -> LoadedDesign:
@@ -203,7 +232,7 @@ def test_the_mood_tables_equal_plain_rescore_over_a_mapping_leaf(
     count = counted(monkeypatch)
     rows = same(records, loaded, loaded, points)
     assert count[0] < len(points)
-    assert len({encode(row["decision"]) for row in rows}) > 1
+    assert len({encode(row["entries"]) for row in rows}) > 1
 
 
 # ---------------------------------------------------------------------------------------------
@@ -252,7 +281,6 @@ def switcher() -> LoadedDesign:
                 "a/m": Parameter(t.number(0, 1), 0.0),
                 "b/bar": Parameter(t.number(0, 1), 0.5),
             },
-            policy="d:act",
         )
     )
 
@@ -277,7 +305,7 @@ def test_a_label_switching_which_number_meets_the_other_leaf(
     # Leaf A is compared against both labels' probabilities, 0.6 and 0.4, so each of its three
     # points is a region of its own, 0.4 and 0.6 ties on the low side; leaf B has two within each.
     assert count[0] == 6
-    decisions = [row["decision"]["value"] for row in rows]
+    decisions = [at(row)["value"] for row in rows]
     assert decisions[:5] == ["yes", "yes", "no", "no", "no"]  # a 0.4: 0.3 against b
     assert decisions[10:] == ["yes", "yes", "yes", "yes", "no"]  # a 0.7: 0.8 against b
 
@@ -345,7 +373,6 @@ def double_gate(a: float, b: float) -> LoadedDesign:
                 "b/bar": Parameter(t.number(0, 1), b),
                 "b/m": Parameter(t.number(0, 1), 0.0),
             },
-            policy="d:act",
         )
     )
 
@@ -365,7 +392,7 @@ def test_a_source_behind_two_gates_is_not_determined_at_the_joint_point_alone(
     assert count[0] == 4  # one run per side of 0.7 on each leaf
     joint: tuple[Any, list[str]] = ("not-determined", ["q:c"])
     closed: tuple[Any, list[str]] = ({"value": "pass"}, [])
-    assert [(row["decision"], row["stale"]) for row in rows] == [
+    assert [(at(row), row["stale"]) for row in rows] == [
         *([joint, joint, closed] * 2),
         *([closed] * 3),
     ]
@@ -384,7 +411,7 @@ def refused(
 ) -> EvaluationRefusal:
     count = counted(monkeypatch)
     with pytest.raises(EvaluationRefusal) as caught:
-        rescore_grid_sync(records, recorded, loaded, points)
+        rescore_grid_sync(records, recorded, loaded, points, refs=decided(loaded))
     assert count[0] == 0
     return caught.value
 
@@ -411,7 +438,6 @@ def limit_design(policy: Any) -> LoadedDesign:
             sources={},
             rules={"part": policy},
             parameters={"lim/n": Parameter(t.number(), 5.0)},
-            policy="d:part",
         )
     )
 
@@ -490,22 +516,22 @@ def test_a_state_that_does_not_type_under_the_grid_gives_the_broken_entry() -> N
     document["state"] = "record{text: integer}"
     loaded = load(document, functions=recorded._callables)  # pyright: ignore[reportPrivateUsage]
     rows = same([record], recorded, loaded, [{"g/bar": 0.3}, {"g/bar": 0.7}])
-    assert all("marker" in row["decision"] for row in rows)
+    assert all(row["entries"] == {} for row in rows)  # a broken entry writes t:state alone
 
 
 def test_the_arguments_are_refused_as_rescores_are() -> None:
     recorded = gated(0.5)
     record = tr.turn(recorded, 0.9, 0.9)
     with pytest.raises(EntryRefusal):
-        rescore_grid_sync([record], object(), recorded, [{"g/bar": 0.3}])  # type: ignore[arg-type]
+        rescore_grid_sync([record], object(), recorded, [{"g/bar": 0.3}], refs=ACT)  # type: ignore[arg-type]
     with pytest.raises(EntryRefusal):
-        rescore_grid_sync([record], recorded, object(), [{"g/bar": 0.3}])  # type: ignore[arg-type]
+        rescore_grid_sync([record], recorded, object(), [{"g/bar": 0.3}], refs=ACT)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        rescore_grid_sync([record], recorded, recorded, "points")  # type: ignore[arg-type]
+        rescore_grid_sync([record], recorded, recorded, "points", refs=ACT)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        rescore_grid_sync([record], recorded, recorded, [("g/bar", 0.3)])  # type: ignore[list-item]
+        rescore_grid_sync([record], recorded, recorded, [("g/bar", 0.3)], refs=ACT)  # type: ignore[list-item]
     with pytest.raises(TypeError):
-        rescore_grid_sync("records", recorded, recorded, [{"g/bar": 0.3}])  # type: ignore[arg-type]
+        rescore_grid_sync("records", recorded, recorded, [{"g/bar": 0.3}], refs=ACT)  # type: ignore[arg-type]
 
 
 def test_the_records_are_checked_before_the_points(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -517,7 +543,7 @@ def test_the_records_are_checked_before_the_points(monkeypatch: pytest.MonkeyPat
 def test_the_points_are_refused_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded = gated(0.5)
     record = tr.turn(recorded, 0.9, 0.9)
-    assert rescore_grid_sync([record], recorded, recorded, []) == []
+    assert rescore_grid_sync([record], recorded, recorded, [], refs=ACT) == []
     uneven: list[list[Point]] = [[{}], [{"g/bar": 0.3}, {"g/margin": 0.1}], [{"g/bar": 0.3}, {}]]
     for points in uneven:
         refusal = refused(monkeypatch, [record], recorded, recorded, points)
@@ -552,7 +578,6 @@ def tie_table(cell: str) -> LoadedDesign:
                 "k/lo": Parameter(t.number(0, 1), 0.0),
                 "k/hi": Parameter(t.number(0, 1), 1.0),
             },
-            policy="d:act",
         )
     )
 
@@ -565,7 +590,7 @@ def tie_rows(
     count = counted(monkeypatch)
     rows = same([record], loaded, loaded, [{"k/bar": v} for v in TIES])
     assert count[0] == reruns
-    return [row["decision"]["value"] for row in rows]
+    return [at(row)["value"] for row in rows]
 
 
 @pytest.mark.parametrize(
@@ -617,7 +642,6 @@ def test_a_function_rules_mass_tie_is_a_bucket_of_its_own(
                 )
             },
             parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
-            policy="d:act",
         )
     )
     record = answered(loaded, {"n": 0.0}, {"q:m": {"yes": 0.6, "no": 0.4}})
@@ -632,7 +656,7 @@ def test_a_function_rules_null_tie_is_a_bucket_of_its_own(monkeypatch: pytest.Mo
     count = counted(monkeypatch)
     rows = same([record], loaded, loaded, points)
     assert count[0] == 3
-    assert rows[0]["decision"] != rows[2]["decision"]
+    assert at(rows[0], "d:reply") != at(rows[2], "d:reply")
 
 
 def test_a_function_rules_pick_helper_role_tie_is_a_bucket_of_its_own(
@@ -645,7 +669,7 @@ def test_a_function_rules_pick_helper_role_tie_is_a_bucket_of_its_own(
     rows = same([record], recorded, recorded, points)
     # The rule's code compares the bar; the document does not say how, so the tie is rerun.
     assert count[0] == 3
-    assert [row["decision"]["value"] for row in rows] == ["refund", "refund", "ask"]
+    assert [at(row)["value"] for row in rows] == ["refund", "refund", "ask"]
 
 
 def above_bar(r: Any) -> str:
@@ -695,14 +719,13 @@ def test_a_declared_pick_helper_role_compared_strictly_in_code_is_rerun_at_the_t
                 )
             },
             parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
-            policy="d:p",
         )
     )
     record = answered(loaded, tr.STATE, {"q:x": {"yes": 0.6, "no": 0.4}})
     count = counted(monkeypatch)
     rows = same([record], loaded, loaded, [{"k/bar": v} for v in points])
     assert count[0] == 3
-    assert [row["decision"]["value"] for row in rows] == decisions
+    assert [at(row, "d:p")["value"] for row in rows] == decisions
 
 
 # ---------------------------------------------------------------------------------------------
@@ -726,7 +749,6 @@ def two_row_table(first: str, second: str) -> LoadedDesign:
                 )
             },
             parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
-            policy="d:act",
         )
     )
 
@@ -773,7 +795,6 @@ def test_the_leaf_in_two_inputs_on_different_sides_is_rerun_at_the_tie(
                 )
             },
             parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
-            policy="d:act",
         )
     )
     record = decide_sync(loaded, {"n": 0.6, "m": 0.6}, {}).record
@@ -784,7 +805,7 @@ def test_the_leaf_in_two_inputs_on_different_sides_is_rerun_at_the_tie(
     points = [{"k/bar": v} for v in (0.2, 0.3, 0.4, 0.6, 0.8)]
     rows = same([record], loaded, loaded, points)
     assert count[0] == 3
-    assert [row["decision"]["value"] for row in rows] == ["yes", "yes", "yes", "yes", "maybe"]
+    assert [at(row)["value"] for row in rows] == ["yes", "yes", "yes", "yes", "maybe"]
 
 
 def test_an_integer_leaf_is_bucketed_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -797,14 +818,13 @@ def test_an_integer_leaf_is_bucketed_exactly(monkeypatch: pytest.MonkeyPatch) ->
                 "act": Table("d:act", YES_NO, "F", ["t:state.n"], [[">= k/n", "yes"], ["-", "no"]])
             },
             parameters={"k/n": Parameter(t.integer(), 5)},
-            policy="d:act",
         )
     )
     record = decide_sync(loaded, {"n": 5}, {}).record
     count = counted(monkeypatch)
     rows = same([record], loaded, loaded, [{"k/n": v} for v in (3, 5, 6, 2**53 - 1, -(2**53 - 1))])
     assert count[0] == 2
-    assert [row["decision"]["value"] for row in rows] == ["yes", "yes", "no", "no", "yes"]
+    assert [at(row)["value"] for row in rows] == ["yes", "yes", "no", "no", "yes"]
 
 
 def test_signed_zero_shares_zeros_bucket_and_design(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -814,7 +834,7 @@ def test_signed_zero_shares_zeros_bucket_and_design(monkeypatch: pytest.MonkeyPa
     rows = same([record], loaded, loaded, [{"k/bar": v} for v in (-0.0, 0.0, 0.5)])
     assert count[0] == 2
     assert rows[0]["design"] == rows[1]["design"]  # the canonical document writes both as 0
-    assert [row["decision"]["value"] for row in rows] == ["yes", "yes", "no"]
+    assert [at(row)["value"] for row in rows] == ["yes", "yes", "no"]
 
 
 def test_repeated_points_and_points_out_of_axis_order_keep_their_rows(
@@ -826,7 +846,7 @@ def test_repeated_points_and_points_out_of_axis_order_keep_their_rows(
     values = (0.8, 0.4, 0.6, 0.8, 0.4, 0.7)  # descending first, each repeated once
     rows = same([record], loaded, loaded, [{"k/bar": v} for v in values])
     assert count[0] == 2
-    assert [row["decision"]["value"] for row in rows] == ["no", "yes", "yes", "no", "yes", "no"]
+    assert [at(row)["value"] for row in rows] == ["no", "yes", "yes", "no", "yes", "no"]
     assert rows[0]["design"] == rows[3]["design"]
 
 
@@ -858,14 +878,13 @@ def test_a_when_reading_the_leaf_is_an_undeclared_read_at_every_point(
             },
             rules={"act": Rule("d:act", t.label("yes", "no"), act_m, version="1", reads=["q:m"])},
             parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
-            policy="d:act",
         )
     )
     record = answered(loaded, {"n": 0.0}, {"q:m": {"yes": 1.0, "no": 0.0}})
     count = counted(monkeypatch)
     rows = same([record], loaded, loaded, [{"k/bar": v} for v in TIES])
     assert count[0] == 1  # a when declares no leaf, so no point differs from another
-    assert len({encode(row["decision"]) for row in rows}) == 1
+    assert len({encode(row["entries"]) for row in rows}) == 1
 
 
 def test_a_source_needing_a_param_valued_entry_of_the_leaf_is_hidden(
@@ -881,7 +900,6 @@ def test_a_source_needing_a_param_valued_entry_of_the_leaf_is_hidden(
                 "act": Rule("d:act", t.label("yes", "no"), act_m, version="1", reads=["q:m"]),
             },
             parameters={"k/bar": Parameter(t.number(0, 1), 0.5)},
-            policy="d:act",
         )
     )
     record = answered(loaded, {"n": 0.0}, {"q:m": {"yes": 1.0, "no": 0.0}})
@@ -916,7 +934,7 @@ def test_key_paths_vary_a_mapping_leaf_as_number_leaves_would(
     leaf_runs = count[0]
     key_rows = same(part_records(by_keys), by_keys, by_keys, key_points)
     assert count[0] - leaf_runs == leaf_runs < len(leaf_points) * 2
-    assert [r["decision"] for r in key_rows] == [r["decision"] for r in leaf_rows]
+    assert [r["entries"] for r in key_rows] == [r["entries"] for r in leaf_rows]
     point = key_points[7]
     assert (
         key_rows[14]["design"]
@@ -1109,7 +1127,6 @@ def mixed(mode: str = "strict", on: bool = True) -> LoadedDesign:
                 "k/mode": Parameter(t.label("loose", "strict"), mode),
                 "k/on": Parameter(t.boolean, on),
             },
-            policy="d:act",
         )
     )
 
@@ -1243,7 +1260,7 @@ def test_lean_reruns_and_lone_points_rerun_and_row_as_the_full_search_does(
     with monkeypatch.context() as full:
         unoptimised(full)
         their_designs, _ = traced(full)
-        theirs = rescore_grid_sync(records, recorded, loaded, points)
+        theirs = rescore_grid_sync(records, recorded, loaded, points, refs=decided(loaded))
     mine_designs, _ = traced(monkeypatch)
     rows = same(records, recorded, loaded, points)
     assert [encode(row) for row in rows] == [encode(row) for row in theirs]
@@ -1283,4 +1300,49 @@ def test_a_region_is_searched_while_another_point_could_join(
     rows = same([record], loaded, loaded, [{"k/bar": v} for v in (0.4, 0.8)])
     # 0.8 could have joined 0.4's run, so its region is searched; 0.8 is then alone.
     assert (len(designs), regions[0]) == (2, 1)
-    assert [row["decision"]["value"] for row in rows] == ["yes", "no"]
+    assert [at(row)["value"] for row in rows] == ["yes", "no"]
+
+
+# ---------------------------------------------------------------------------------------------
+# The refs: rescore's, checked against ``loaded``; the regions do not depend on them
+
+
+def test_the_regions_and_reruns_are_the_same_whichever_refs_are_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = gated(0.6)
+    records = [tr.turn(recorded, *split) for split in tr.SPLITS]
+    points = [{"g/bar": bar, "g/margin": m} for bar in (*tr.BARS, 0.9) for m in (0.0, 0.24)]
+    counts: list[int] = []
+    by_refs: dict[str, list[dict[str, Any]]] = {}
+    for refs in (["d:act"], ["d:intent"], ["d:act", "d:intent"]):
+        with monkeypatch.context() as m:
+            count = counted(m)
+            by_refs[",".join(refs)] = same(records, recorded, recorded, points, refs)
+            counts.append(count[0])
+    assert len(set(counts)) == 1
+    both = by_refs["d:act,d:intent"]
+    for ref in ("d:act", "d:intent"):
+        assert [at(r, ref) for r in both] == [at(r, ref) for r in by_refs[ref]]
+
+
+def test_a_rerun_keeps_the_named_refs_and_what_the_regions_read() -> None:
+    recorded = gated(0.6)
+    grid = _grid._Grid(recorded, recorded, [{"g/bar": 0.3}], ["d:intent"])  # pyright: ignore[reportPrivateUsage]
+    assert grid.needed == {"d:intent", "q:intent", "q:amount"}  # not d:act, which none reads
+
+
+def test_the_refs_are_refused_as_rescore_refuses_them_before_the_records() -> None:
+    recorded = gated(0.5)
+    record = tr.turn(recorded, 0.9, 0.9)
+    with pytest.raises(TypeError, match="refs is a"):
+        rescore_grid_sync([record], recorded, recorded, [], refs="d:act")
+    with pytest.raises(ValueError, match="refs is empty"):
+        rescore_grid_sync([record], recorded, recorded, [], refs=[])
+    for ref in ("d:none", "q:intent", "d:act.x"):
+        with pytest.raises(ValueError, match=r"^loaded: ") as caught:
+            rescore_grid_sync([{"not": "a record"}], recorded, recorded, [], refs=[ref])
+        assert ref in str(caught.value)
+    loaded = grounded.LOADED
+    with pytest.raises(ValueError, match="d:level"):
+        rescore_grid_sync([], loaded, loaded, [], refs=[grounded.LEVEL])

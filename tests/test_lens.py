@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+from html import unescape
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -14,29 +15,32 @@ from typing import Any
 import pytest
 
 import outline_showcase as showcase
-from designs import full
 from ledger_logs import LOGS, fresh, rehashed
-from ommat import decide_sync, load, read_record
+from ommat import read_record
 from ommat._documents import read_document
 from ommat.lens import page
 from ommat.lens.__main__ import main
 from ommat.outline import design_outline, render_design, render_turn, turn_outline
 
 TESTS = Path(__file__).parent
-IDIA = TESTS / "idia_logs"
+IDIA = TESTS / "showcase"
+"""The idia turn and its design as the engine wrote them while designs named a policy: the
+format-10 record and format-11 design ``tests/idia_logs`` held, naming ``d:route``."""
 FORMAT_10 = TESTS / "format_10"
 FORMAT_9 = TESTS / "format_9"
 STUB = TESTS / "lens_stub.js"
-DESIGN = showcase.loaded()
+DESIGN = showcase.stored("design")
+PLAIN = showcase.stored("plain.design")
+FULL = showcase.stored("full.design")
 _SLOT = re.compile(r'<script id="lens-data" type="application/json">(.*?)</script>', re.S)
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not on the path")
 
 
 def _record(subject: str = "Server down") -> bytes:
-    """A turn the showcase design decides, its state's subject ``subject``."""
-    state = {"subject": subject, "body": "Nothing loads since 9."}
-    bindings = {"llm": showcase.llm(*showcase.DECIDED), "desk": showcase.desk}
-    return decide_sync(DESIGN, state, bindings).record.document
+    """The stored turn the showcase design decides, its state's subject ``subject``."""
+    doc = json.loads(showcase.stored("decided.record"))
+    doc["log"][2]["value"]["subject"] = subject
+    return read_record(rehashed(doc)).document
 
 
 def _ledger(name: str) -> bytes:
@@ -71,19 +75,19 @@ def _with_data(html: str, data: dict[str, Any]) -> str:
 
 def test_the_page_embeds_each_document_s_outline_and_text_and_pairs_a_record_by_hash() -> None:
     record = _record()
-    html = page({"turn.json": record}, [DESIGN.document])
+    html = page({"turn.json": record}, [DESIGN])
     data = _data(html)
     assert data["read"] == 1
     assert data["sets"][0]["name"] == ""
     assert data["sets"][0]["skipped"] == []
     design, turn = data["sets"][0]["docs"]
-    outline = design_outline(DESIGN.document)
+    outline = design_outline(DESIGN)
     assert design == {
         "path": "design 1",
         "outline": json.loads(json.dumps(outline)),
         "text": render_design(outline),
     }
-    paired = turn_outline(record, DESIGN.document)
+    paired = turn_outline(record, DESIGN)
     assert turn == {
         "path": "turn.json",
         "outline": json.loads(json.dumps(paired)),
@@ -100,17 +104,17 @@ def test_a_record_whose_design_is_not_given_is_outlined_unpaired() -> None:
 
 
 def test_a_sequence_of_records_and_designs_is_named_by_position() -> None:
-    other = (IDIA / "design.json").read_bytes()
-    html = page([_record(), _record("Mail is slow")], [DESIGN.document, other])
+    other = (IDIA / "idia.design.json").read_bytes()
+    html = page([_record(), _record("Mail is slow")], [DESIGN, other])
     assert _paths(html, "design") == ["design 1", "design 2"]
     assert _paths(html, "turn") == ["record 1", "record 2"]
 
 
 def test_a_mapping_of_designs_names_them_and_a_design_given_twice_is_kept_once() -> None:
-    other = (IDIA / "design.json").read_bytes()
+    other = (IDIA / "idia.design.json").read_bytes()
     html = page(
         {"turn.json": _record()},
-        {"first.json": DESIGN.document, "again.json": DESIGN.document, "idia.json": other},
+        {"first.json": DESIGN, "again.json": DESIGN, "idia.json": other},
     )
     assert _paths(html, "design") == ["first.json", "idia.json"]
     assert _paths(html, "turn") == ["turn.json"]
@@ -224,7 +228,7 @@ def test_the_data_is_ascii_and_keeps_a_lone_surrogate_as_an_escape() -> None:
 
 
 def test_no_raw_angle_bracket_is_left_in_the_data() -> None:
-    html = page([_record("<!-- <script> </script")], [DESIGN.document])
+    html = page([_record("<!-- <script> </script")], [DESIGN])
     found = _SLOT.search(html)
     assert found is not None
     assert "<" not in found.group(1)
@@ -241,7 +245,7 @@ def test_the_command_writes_a_page_for_every_record_under_a_folder(
     (logs / "older").mkdir(parents=True)
     (logs / "b.json").write_bytes(_record())
     (logs / "older" / "a.jsonl").write_bytes(_record("one") + b"\n" + _record("two") + b"\n")
-    (logs / "design.json").write_bytes(DESIGN.document)
+    (logs / "design.json").write_bytes(DESIGN)
     (logs / "notes.json").write_text('{"note": 1}')
     (logs / "readme.txt").write_text("not read")
     out = tmp_path / "lens.html"
@@ -276,13 +280,13 @@ def test_the_command_exits_1_with_neither_a_record_nor_a_design(
 def test_the_command_writes_a_page_for_a_design_alone(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "design.json").write_bytes(DESIGN.document)
+    (tmp_path / "design.json").write_bytes(DESIGN)
     out = tmp_path / "lens.html"
     assert main([str(tmp_path), "-o", str(out)]) == 0
     html = out.read_text(encoding="utf-8")
     assert _paths(html, "turn") == []
     (design,) = _docs(html)
-    assert design["outline"] == json.loads(json.dumps(design_outline(DESIGN.document)))
+    assert design["outline"] == json.loads(json.dumps(design_outline(DESIGN)))
     assert main([str(tmp_path / "design.json"), "-o", str(out)]) == 0
     # With no record, a design matching none is the point, not a slip to note.
     assert "matches no record" not in capsys.readouterr().err
@@ -349,7 +353,7 @@ def test_the_command_notes_a_design_that_matches_no_record(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "r.json").write_bytes(_record())
-    pretty = json.dumps(json.loads(DESIGN.document), indent=2).encode()
+    pretty = json.dumps(json.loads(DESIGN), indent=2).encode()
     (tmp_path / "pretty.json").write_bytes(pretty)
     out = tmp_path / "lens.html"
     assert main([str(tmp_path), "-o", str(out)]) == 0
@@ -363,7 +367,7 @@ def test_a_design_that_matches_its_record_is_not_noted(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "r.json").write_bytes(_record())
-    (tmp_path / "design.json").write_bytes(DESIGN.document)
+    (tmp_path / "design.json").write_bytes(DESIGN)
     assert main([str(tmp_path), "-o", str(tmp_path / "lens.html")]) == 0
     assert "matches no record" not in capsys.readouterr().err
 
@@ -409,7 +413,7 @@ def test_the_command_shows_a_record_whose_design_item_is_malformed(
     tmp_path: Path, first: bytes
 ) -> None:
     (tmp_path / "r.json").write_bytes(b'{"log": [' + first + b"]}")
-    (tmp_path / "design.json").write_bytes(DESIGN.document)
+    (tmp_path / "design.json").write_bytes(DESIGN)
     out = tmp_path / "lens.html"
     assert main([str(tmp_path), "-o", str(out)]) == 0
     assert _paths(out.read_text(encoding="utf-8"), "turn") == ["r.json"]
@@ -417,7 +421,7 @@ def test_the_command_shows_a_record_whose_design_item_is_malformed(
 
 @needs_node
 def test_the_page_s_script_parses(tmp_path: Path) -> None:
-    html = page([_record()], [DESIGN.document])
+    html = page([_record()], [DESIGN])
     scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
     assert len(scripts) == 1
     script = tmp_path / "page.js"
@@ -460,9 +464,9 @@ def turns() -> dict[str, bytes]:
     """Every kind of turn the page draws: the showcase's decided and undecided turns, idia's
     turn with no bound declared, format 10's, and three ledger turns no design pairs with."""
     return {
-        "decided.json": showcase.turn(DESIGN, *showcase.DECIDED).document,
-        "undecided.json": showcase.turn(DESIGN, *showcase.UNDECIDED).document,
-        "idia.json": (IDIA / "turn.record.json").read_bytes(),
+        "decided.json": showcase.stored("decided.record"),
+        "undecided.json": showcase.stored("undecided.record"),
+        "idia.json": (IDIA / "idia.record.json").read_bytes(),
         "f10.json": (FORMAT_10 / "record.json").read_bytes(),
         "normal.json": _ledger("normal-8"),
         "broken.json": _ledger("broken-8"),
@@ -471,8 +475,8 @@ def turns() -> dict[str, bytes]:
 
 
 DESIGNS = {
-    "showcase.json": DESIGN.document,
-    "idia-design.json": (IDIA / "design.json").read_bytes(),
+    "showcase.json": DESIGN,
+    "idia-design.json": (IDIA / "idia.design.json").read_bytes(),
     "f10-design.json": (FORMAT_10 / "design.json").read_bytes(),
 }
 
@@ -482,7 +486,7 @@ def test_a_design_alone_opens_on_gravity_with_its_summary(tmp_path: Path) -> Non
     """A page given a design alone opens on Gravity; with nothing selected the panel names the
     design, counts its bodies by kind, names its oracles and lists the policy and the targets,
     each a button that selects its body; the parameters and the design's text are folded."""
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     shown = _run(
         html,
         tmp_path,
@@ -557,7 +561,7 @@ def test_an_entry_is_marked_by_its_nearest_bound(tmp_path: Path, turns: dict[str
 
 @needs_node
 def test_declared_hops_are_dashed_and_never_the_root(tmp_path: Path) -> None:
-    html = page({"plain.json": showcase.plain_turn().document}, [load(showcase.PLAIN).document])
+    html = page({"plain.json": showcase.stored("plain.record")}, [PLAIN])
     shown = _run(
         html,
         tmp_path,
@@ -710,7 +714,7 @@ def test_a_record_with_no_paired_design_opens_on_turn_and_says_so(
 def test_a_record_whose_design_hash_differs_is_drawn_over_the_design_of_its_name(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
-    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
     data = _data(html)
     turn = data["sets"][0]["docs"][1]["outline"]
     turn["design_hash"] = "sha256:" + "0" * 64
@@ -731,7 +735,7 @@ def test_a_record_whose_design_hash_differs_is_drawn_over_the_design_of_its_name
 def test_an_outline_of_another_version_is_counted_and_not_drawn(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
-    html = page({"decided.json": turns["decided.json"]}, [DESIGN.document])
+    html = page({"decided.json": turns["decided.json"]}, [DESIGN])
     data = _data(html)
     data["sets"][0]["docs"][1]["outline"]["outline_version"] = 3
     shown = _run(
@@ -782,7 +786,7 @@ def test_the_page_opens_outline_json_in_every_form_it_takes(
 def test_no_view_draws_nan_or_undefined(tmp_path: Path, turns: dict[str, bytes]) -> None:
     """Every design alone and every turn, on Turn and on Gravity with every body selected and
     its tooltip drawn, with the All turns table open, stepping through the set."""
-    designs = {**DESIGNS, "full.json": load(full()).document}
+    designs = {**DESIGNS, "full.json": FULL}
     renders = _run(
         page(turns, designs),
         tmp_path,
@@ -811,7 +815,7 @@ def test_every_view_draws_without_nan_or_undefined(tmp_path: Path, turns: dict[s
     turn, and every control, for each design alone and under each turn; a design with no policy
     node, targets, tables or requirements; and a format-9 policy, which provides no ref."""
     f9 = (FORMAT_9 / "design.json").read_bytes()
-    html = page(turns, {**DESIGNS, "full.json": load(full()).document, "f9.json": f9})
+    html = page(turns, {**DESIGNS, "full.json": FULL, "f9.json": f9})
     data = _data(html)
     bare = json.loads(json.dumps(data["sets"][0]["docs"][0]["outline"]))
     bare.update(policy_node=None, targets=[], requirements=[], path="bare")
@@ -858,7 +862,7 @@ def test_a_view_s_hash_opens_it_again(tmp_path: Path, turns: dict[str, bytes]) -
     shown = _run(
         page(
             {"undecided.json": turns["undecided.json"]},
-            [DESIGN.document, (IDIA / "design.json").read_bytes()],
+            [DESIGN, (IDIA / "idia.design.json").read_bytes()],
         ),
         tmp_path,
         """(() => {
@@ -936,7 +940,7 @@ def test_the_turn_view_says_what_took_place(tmp_path: Path, turns: dict[str, byt
     shown = _run(
         page(
             {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-            [DESIGN.document],
+            [DESIGN],
         ),
         tmp_path,
         """(() => {
@@ -984,7 +988,7 @@ def test_a_ref_chip_on_turn_opens_gravity_with_its_body_selected(
     Gravity with that body selected, as a history step, so back returns to Turn; a chip for a
     source selects its first question or tool result; in Gravity a chip selects in place."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           const pushed = [], out = {}; globalThis.location = {hash: ""};
@@ -1057,7 +1061,7 @@ def _gravity_edges(outline: dict[str, Any]) -> set[tuple[str, str, str]]:
 def test_the_gravity_view_draws_the_outline_s_edges(tmp_path: Path) -> None:
     """The bodies' edges are the outline's: a planted edge, target question and estimating rule
     are drawn, and a rule's declared reads, which the outline's edges already hold, add none."""
-    designs = {**DESIGNS, "full.json": load(full()).document}
+    designs = {**DESIGNS, "full.json": FULL}
     designs["f9.json"] = (FORMAT_9 / "design.json").read_bytes()
     html = page([], designs)
     data = _data(html)
@@ -1129,7 +1133,7 @@ _GRAVITY_POS = """(() => { S.view = "gravity"; S.turn = null; const out = {};
 def test_the_gravity_layout_is_the_same_for_the_same_design(tmp_path: Path) -> None:
     """The layout is a function of the graph: two runs of the page place every body at the
     same point in 2D and in 3D."""
-    designs = {**DESIGNS, "full.json": load(full()).document}
+    designs = {**DESIGNS, "full.json": FULL}
     html = page([], designs)
     first = _run(html, tmp_path, _GRAVITY_POS)
     second = _run(html, tmp_path, _GRAVITY_POS)
@@ -1149,8 +1153,8 @@ def test_the_gravity_overlay_marks_by_dispState(tmp_path: Path, turns: dict[str,
     lineage is lit, its first branch as the main hops, and declared hops are dashed and never
     the root; a round before an entry's leaves it in a later round; a target is not marked."""
     html = page(
-        {"undecided.json": turns["undecided.json"], "plain.json": showcase.plain_turn().document},
-        [DESIGN.document, load(showcase.PLAIN).document],
+        {"undecided.json": turns["undecided.json"], "plain.json": showcase.stored("plain.record")},
+        [DESIGN, PLAIN],
     )
     shown = _run(
         html,
@@ -1214,7 +1218,7 @@ def test_the_gravity_gestures_follow_the_pointer(tmp_path: Path) -> None:
     layout and lets go; in 3D a drag turns by its travel, the wheel keeps the orbit point's
     pointer, a shift-drag moves the orbit point; two fingers pinch the zoom."""
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; drawView(); frames(300);
@@ -1291,7 +1295,7 @@ def test_the_gravity_keys_leave_the_page_s_keys_alone(tmp_path: Path) -> None:
     on every tab; Esc clears a selection first and is the page's with none; f, s, h, 3, + and -
     are the view's."""
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; drawView(); frames(300);
@@ -1332,7 +1336,7 @@ def test_the_page_is_the_same_bytes_for_the_same_documents(turns: dict[str, byte
 def test_the_gravity_view_draws_the_state_and_colours_by_type(tmp_path: Path) -> None:
     """t:state is a body of its own kind with edges to what reads it; a body's colour is its
     kind's, one hue per kind."""
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     o = _data(html)["sets"][0]["docs"][0]["outline"]
     uses = [e for e in o["edges"] if not e["dependency"]]
     assert uses
@@ -1373,7 +1377,7 @@ def test_the_gravity_overlay_shades_targets_by_the_round(
 ) -> None:
     """Under a turn a target is shaded from the entries that estimate it, by the round shown,
     and says so in its description; with no turn there is no overlay."""
-    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
     shown = _run(
         html,
         tmp_path,
@@ -1421,7 +1425,7 @@ def test_the_gravity_move_drag_slides_the_view_without_turning_it(tmp_path: Path
     screen by the pointer's travel at its depth, at any zoom, with no inertia; a plain drag
     still turns; a press on a body drags the body."""
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = true; drawView(); frames(200);
@@ -1484,7 +1488,7 @@ def test_the_gravity_round_keys_step_the_overlay(tmp_path: Path, turns: dict[str
     """a and d step the round shown back and on, clamped at both ends with no wrap, only under a
     turn and not while typing or with a modifier; f, s, h, 3, / and the arrows stay."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = 0; GV.step = null; drawView();
@@ -1530,7 +1534,7 @@ def test_the_gravity_fit_fills_the_canvas_above_the_legend(tmp_path: Path) -> No
     strip, measured as it stands; the bodies fill it in one direction, spreading out rather
     than growing past a readable size; the spread keeps a dragged body under the pointer."""
     shown = _run(
-        page([], [DESIGN.document, (IDIA / "design.json").read_bytes()]),
+        page([], [DESIGN, (IDIA / "idia.design.json").read_bytes()]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; drawView(); frames(100);
@@ -1569,7 +1573,7 @@ def test_the_gravity_fit_fills_the_canvas_above_the_legend(tmp_path: Path) -> No
 def test_the_gravity_edges_thin_with_the_hub_and_keep_the_long_ones(tmp_path: Path) -> None:
     """An edge's alpha falls with its busier end's degree and rises a little with its length; the
     edge colour is its own token, lighter in the dark theme."""
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     assert "--gv-edge: #8c8a84" in html
     assert html.count("--gv-edge: #b4b2aa") == 2  # the system's dark and the picked dark
     shown = _run(
@@ -1590,7 +1594,7 @@ def test_the_gravity_sprites_fall_back_to_flat_when_small(tmp_path: Path) -> Non
     """A body under 9px on screen is a flat fill, bigger ones a cached sprite; the cache is one
     for every design and survives a redraw, and is dropped when the theme's tokens change."""
     shown = _run(
-        page([], [DESIGN.document, load(showcase.PLAIN).document]),
+        page([], [DESIGN, PLAIN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; GV.flat = false;
@@ -1621,7 +1625,7 @@ def test_the_gravity_link_carries_the_round_and_the_filters(
     """The round, lineage only, the questions shown and the selection are each written only when
     not their default, read back, and a restored selection is framed once."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           globalThis.location = {hash: ""};
@@ -1658,7 +1662,7 @@ def test_the_gravity_link_carries_the_round_and_the_filters(
 
 
 def test_the_gravity_toolbar_is_one_short_row_and_every_control_says_what_it_does() -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     bar = html[html.index('id="gvbar"') + 10 : html.index('<div class="gv-stage">')]
     ids = re.findall(r'id="(gv[a-z0-9]+)"', bar)
     assert ids == ["gv3", "gvsearch", "gvhits", "gvstat", "gvq", "gvhelpb"]
@@ -1698,7 +1702,7 @@ def test_esc_clears_one_layer_a_press_and_never_leaves_the_turn(
     turns."""
     html = page(
         {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-        [(IDIA / "design.json").read_bytes(), DESIGN.document],
+        [(IDIA / "idia.design.json").read_bytes(), DESIGN],
     )
     assert 'id="keys"' not in html
     shown = _run(
@@ -1738,7 +1742,7 @@ def test_esc_clears_one_layer_a_press_and_never_leaves_the_turn(
 
 
 def test_the_gravity_help_holds_the_gestures_with_touch_wording() -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     helpbox = html[html.index('id="gvhelp"') : html.index('id="gvov"')]
     assert "Trackpad and touch" in helpbox
     assert "A two-finger scroll or a pinch zooms; drag to pan or turn." in helpbox
@@ -1749,7 +1753,7 @@ def test_the_gravity_help_holds_the_gestures_with_touch_wording() -> None:
 @needs_node
 def test_a_fingertip_picks_with_a_wider_slop_and_the_tooltip_is_short(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; GV.touch = false; GV.sel = null;
@@ -1789,7 +1793,7 @@ def test_the_gravity_pointer_handlers_ask_for_a_frame(tmp_path: Path) -> None:
     """A pointer move queues a frame instead of drawing; the tooltip is rebuilt only when the
     body under the pointer changes."""
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; drawView(); frames(100);
@@ -1837,7 +1841,7 @@ def test_the_target_ring_is_a_donut_split_by_the_held_to_the_open(tmp_path: Path
     """Answered is one full ring, unresolved a double ring, mixed two arcs whose lengths are the
     held to the open; not evaluated stays the dashed ring; a value entry carries a tick."""
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           const T = {good: "G", warn: "W", bad: "B", neutral: "N"}, out = {};
@@ -1875,8 +1879,8 @@ def test_the_lineage_reads_as_a_direction_and_declared_hops_recede(tmp_path: Pat
     toward the root; a declared hop is thinner and fainter than a read one."""
     shown = _run(
         page(
-            {"plain.json": showcase.plain_turn().document},
-            [DESIGN.document, load(showcase.PLAIN).document],
+            {"plain.json": showcase.stored("plain.record")},
+            [DESIGN, PLAIN],
         ),
         tmp_path,
         """(() => {
@@ -1910,7 +1914,7 @@ def test_the_lineage_reads_as_a_direction_and_declared_hops_recede(tmp_path: Pat
 @needs_node
 def test_a_gravity_label_never_covers_a_heavy_body_or_another_label(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; drawView(); frames(100);
@@ -1950,7 +1954,7 @@ def test_every_body_is_labelled_when_there_is_room_and_the_focus_wins(
     overprints a body, a ring or another label; with a body selected its label and its
     neighbours' come first, the others after them, faint."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = 0; GV.mode3 = false; GV.sel = null; drawView(); frames(100);
@@ -1976,7 +1980,7 @@ def test_the_overlay_keeps_each_kind_s_fill_and_draws_flat_with_inset_rims(
     """Under a turn's overlay a body keeps its kind's fill, flat (no sprite), with its rim just
     inside the body so the state ring stands clear of it; the state is a block with an inked
     left bar in both modes; the help says how a turn reads."""
-    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
     shown = _run(
         html,
         tmp_path,
@@ -2039,7 +2043,7 @@ def test_the_gravity_panel_says_what_the_design_and_the_turn_say_of_each_kind(
     turn, what it was given. The neighbour lists are open; no button leads to another tab."""
     html = page(
         {"undecided.json": turns["undecided.json"], "decided.json": turns["decided.json"]},
-        [DESIGN.document],
+        [DESIGN],
     )
     data = _data(html)
     for doc in data["sets"][0]["docs"]:
@@ -2112,7 +2116,7 @@ def test_gravity_search_covers_hidden_bodies_cycles_and_shows_what_it_selects(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = 0; GV.sel = null; GV.find = ""; GV.light = true; GV.cross = false;
@@ -2167,7 +2171,7 @@ def test_the_gravity_turn_panel_steps_rounds_turns_and_states(
     shown = _run(
         page(
             {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-            [DESIGN.document],
+            [DESIGN],
         ),
         tmp_path,
         """(() => {
@@ -2222,7 +2226,7 @@ def test_a_turn_step_keeps_the_round_when_valid(tmp_path: Path, turns: dict[str,
     shown = _run(
         page(
             {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-            [DESIGN.document],
+            [DESIGN],
         ),
         tmp_path,
         """(() => {
@@ -2257,7 +2261,7 @@ def test_a_turn_step_keeps_the_round_when_valid(tmp_path: Path, turns: dict[str,
 
 
 def test_the_gravity_canvas_names_its_keys_and_the_panels_are_live_regions() -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     canvas = html[html.index('<canvas id="gvc"') : html.index("</canvas>", html.index('id="gvc"'))]
     assert 'role="application"' in canvas
     for word in ("period and comma", "Enter", "arrows", "slash", "a and d", "Mouse:"):
@@ -2275,7 +2279,7 @@ def test_the_gravity_canvas_names_its_keys_and_the_panels_are_live_regions() -> 
 @needs_node
 def test_the_gravity_keys_walk_the_bodies_and_the_panel_keeps_the_focus(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; GV.sel = null; drawView(); frames(60);
@@ -2333,7 +2337,7 @@ def test_the_gravity_keys_walk_the_bodies_and_the_panel_keeps_the_focus(tmp_path
 @needs_node
 def test_the_gravity_focus_ring_is_a_dashed_ink_ring_on_the_focused_body(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; drawView(); frames(60);
@@ -2354,7 +2358,7 @@ def test_the_gravity_focus_ring_is_a_dashed_ink_ring_on_the_focused_body(tmp_pat
 def test_the_gravity_panels_sit_beside_the_canvas_and_under_it_when_narrow() -> None:
     """The turn and detail panels are docked beside the canvas, never over it, and stack under
     it on a narrow screen; nothing folds them; the view takes the height the header leaves."""
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     assert "#gvui { display: grid; grid-template-columns: minmax(0, 1fr) 360px;" in html
     assert html.index('<aside id="gvright"') > html.index('<div class="gv-stage">')
     narrow = html[html.index("@media (max-width: 860px) {") :]
@@ -2369,7 +2373,7 @@ def test_the_gravity_panels_sit_beside_the_canvas_and_under_it_when_narrow() -> 
 @needs_node
 def test_a_gravity_label_stays_clear_of_the_toolbar(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; drawView(); frames(60);
@@ -2392,7 +2396,7 @@ def test_the_gravity_legend_draws_a_glyph_per_kind_and_swatches_each_count(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = null; GV.mode3 = false; GV.byDomain = false;
@@ -2426,7 +2430,7 @@ def test_the_step_on_float_buffers_is_the_step_on_objects(tmp_path: Path) -> Non
     their order and the arithmetic, so a settle lands on exactly the same positions as the
     plain-object step: 2D and 3D, all bodies and heavy only, with a body pinned."""
     shown = _run(
-        page([], [DESIGN.document, load(showcase.PLAIN).document]),
+        page([], [DESIGN, PLAIN]),
         tmp_path,
         """(() => {
           const ref = (L, a) => {
@@ -2498,7 +2502,7 @@ def test_a_hash_chip_copies_the_full_hash_and_says_so(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           const out = {}, el = (id) => document.getElementById(id);
@@ -2562,7 +2566,7 @@ def test_a_hash_chip_copies_the_full_hash_and_says_so(
 
 @needs_node
 def test_a_record_without_a_hash_has_no_chip(tmp_path: Path, turns: dict[str, bytes]) -> None:
-    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
     data = _data(html)
     for doc in data["sets"][0]["docs"]:
         if "record_hash" in doc["outline"]:
@@ -2579,7 +2583,7 @@ def test_a_record_without_a_hash_has_no_chip(tmp_path: Path, turns: dict[str, by
 
 
 def test_the_hash_chip_is_styled_as_a_chip_with_hover_and_focus() -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     assert ".hchip { display: inline-flex" in html
     assert "cursor: pointer" in html[html.index(".hchip {") : html.index(".hchip:hover")]
     assert ".hchip:hover, .hchip:focus-visible" in html
@@ -2603,7 +2607,7 @@ def test_the_legend_kinds_are_filters_that_combine_with_the_state_chips(
     too a body must match both; Esc clears the state, then the kind; each chip is a button with
     aria-pressed and a title; a kind hidden by the toolbar has no chip."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           const out = {}, el = (id) => document.getElementById(id);
@@ -2679,7 +2683,7 @@ def test_the_legend_kinds_are_filters_that_combine_with_the_state_chips(
 
 @needs_node
 def test_a_kind_with_no_body_has_no_chip_and_a_stale_link_is_dropped(tmp_path: Path) -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     data = _data(html)
     outline = data["sets"][0]["docs"][0]["outline"]
     for node in outline["nodes"]:
@@ -2700,7 +2704,7 @@ def test_a_kind_with_no_body_has_no_chip_and_a_stale_link_is_dropped(tmp_path: P
 
 
 def test_the_help_and_the_chips_are_keyboard_reachable() -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     helpbox = html[html.index('id="gvhelp"') : html.index('<aside id="gvright"')]
     assert "legend's kinds" in helpbox
     assert "the state, target and kind filters" in helpbox
@@ -2710,7 +2714,7 @@ def test_the_help_and_the_chips_are_keyboard_reachable() -> None:
 @needs_node
 def test_a_body_must_match_both_the_kind_and_the_state_chip(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => {
           const L = {ov: {linN: new Set()}}, body = (kind, os) => ({kind, os, id: kind + os});
@@ -2738,7 +2742,7 @@ def test_the_turn_panel_says_the_verdict_as_turn_does(
     lineage; the bound's caveat is said once, in Turn's Bounds fold, and the arrow chain of the
     why line is gone."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           S.view = "gravity"; S.turn = 0; drawView(); frames(10);
@@ -2768,7 +2772,7 @@ def test_the_turn_panel_says_the_verdict_as_turn_does(
 
 def test_the_help_says_what_the_page_draws() -> None:
     """The help names the rings, marks and arrows as the canvas draws them, and the key l."""
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     helpbox = html[html.index('id="gvhelp"') : html.index('<aside id="gvright"')]
     for words in (
         "Reading a turn",
@@ -2790,7 +2794,7 @@ def test_lineage_round_trips_and_the_target_chips_filter(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           const out = {}, el = (id) => document.getElementById(id);
@@ -2866,7 +2870,7 @@ def test_back_and_forward_replay_every_chip_jump(tmp_path: Path, turns: dict[str
     """A chip from Turn and a tab switch are history steps; back, through the page's own history
     handler, returns to each step in turn, and forward replays them, however many there are."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { """
         + _HISTORY
@@ -2900,7 +2904,7 @@ def test_a_chip_to_a_body_a_filter_hides_shows_and_selects_it(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => {
           S.turn = 0; GV.light = false; render(); showView("turn");
@@ -2922,7 +2926,7 @@ def test_a_chip_to_a_body_a_filter_hides_shows_and_selects_it(
 def test_every_outline_value_is_escaped_in_the_panels(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
-    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
     data = _data(html)
     for doc in data["sets"][0]["docs"]:
         o = doc["outline"]
@@ -2951,7 +2955,7 @@ def test_every_outline_value_is_escaped_in_the_panels(
 @needs_node
 def test_a_theme_change_redraws_both_panels(tmp_path: Path, turns: dict[str, bytes]) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { S.turn = 0; render(); gvSelect(gvL, gvL.byId.get("d:act"));
           let side = 0, ov = 0; const p0 = gvPanel, o0 = gvOvPanel;
@@ -2963,7 +2967,7 @@ def test_a_theme_change_redraws_both_panels(tmp_path: Path, turns: dict[str, byt
 
 @needs_node
 def test_a_target_s_estimators_are_the_outline_s(tmp_path: Path) -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     data = _data(html)
     data["sets"][0]["docs"][0]["outline"]["targets"][0]["estimated_by"].append("rule:ghost")
     shown = _run(
@@ -2978,7 +2982,7 @@ def test_a_target_s_estimators_are_the_outline_s(tmp_path: Path) -> None:
 @needs_node
 def test_selecting_never_zooms_and_pans_only_to_bring_the_body_into_view(tmp_path: Path) -> None:
     shown = _run(
-        page([], [(IDIA / "design.json").read_bytes()]),
+        page([], [(IDIA / "idia.design.json").read_bytes()]),
         tmp_path,
         """(() => { render(); frames(100); const L = gvL, out = {};
           const cam = () => [L.tf.x, L.tf.y, L.tf.k];
@@ -3002,7 +3006,7 @@ def test_selecting_never_zooms_and_pans_only_to_bring_the_body_into_view(tmp_pat
 @needs_node
 def test_fit_leaves_room_for_rings_and_labels_and_follows_the_filters(tmp_path: Path) -> None:
     shown = _run(
-        page([], [(IDIA / "design.json").read_bytes()]),
+        page([], [(IDIA / "idia.design.json").read_bytes()]),
         tmp_path,
         """(() => { render(); frames(100); const L = gvL, out = {};
           gvProject(L);
@@ -3030,7 +3034,7 @@ def test_links_name_the_design_shown_alone_and_reset_what_they_leave_out(
     shown = _run(
         page(
             {"undecided.json": turns["undecided.json"]},
-            [(IDIA / "design.json").read_bytes(), DESIGN.document],
+            [(IDIA / "idia.design.json").read_bytes(), DESIGN],
         ),
         tmp_path,
         """(() => { globalThis.location = {hash: ""};
@@ -3069,7 +3073,7 @@ def test_a_tab_switch_pushes_and_a_turn_step_or_selection_replaces(
 
 
 def test_the_panel_s_table_scrolls_and_the_chrome_is_steady() -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     assert ".tblwrap { overflow-x: auto; }" in html
     assert (
         "#gvov, #gvside { padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr);"
@@ -3083,7 +3087,7 @@ def test_the_panel_s_table_scrolls_and_the_chrome_is_steady() -> None:
 @needs_node
 def test_the_3d_perspective_does_not_grow_with_the_spread(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { render(); const L = gvL; gvSet("mode3", true); frames(300);
           const scales = (sp) => { L.cam.sp = sp; gvProject(L); return L.nodes.map((n) => n.sc); };
@@ -3098,7 +3102,7 @@ def test_a_filter_that_leaves_nothing_says_so_and_a_narrow_select_scrolls_to_the
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { S.turn = 0; render(); const out = {}, el = (id) => document.getElementById(id);
           out.none0 = el("gvnone").hidden;
@@ -3115,7 +3119,7 @@ def test_a_filter_that_leaves_nothing_says_so_and_a_narrow_select_scrolls_to_the
 @needs_node
 def test_a_body_s_label_is_its_full_ref(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { render();
           return Object.fromEntries(gvL.nodes.map((n) => [n.id, n.lbl])); })()""",
@@ -3132,7 +3136,7 @@ def test_the_layout_leans_from_the_sources_to_the_policy(tmp_path: Path) -> None
     """A weak lean by the outline's steps to the policy: the policy to the left of what feeds it,
     and a target, with no steps, leans nowhere; the state's springs are weak."""
     shown = _run(
-        page([], [(IDIA / "design.json").read_bytes()]),
+        page([], [(IDIA / "idia.design.json").read_bytes()]),
         tmp_path,
         """(() => { render(); const L = gvL, x = (id) => L.byId.get(id).x;
           return {route: x("d:route"), rules: ["d:hazard", "d:asset", "d:noticed"].map(x),
@@ -3153,7 +3157,7 @@ def test_the_layout_leans_from_the_sources_to_the_policy(tmp_path: Path) -> None
 def test_the_panel_says_a_hit_policy_a_kind_and_an_unfilled_template_in_words(
     tmp_path: Path,
 ) -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     data = _data(html)
     o = data["sets"][0]["docs"][0]["outline"]
     ask = next(n for n in o["nodes"] if n["id"] == "source:ask")
@@ -3187,7 +3191,7 @@ def test_all_turns_leaves_out_a_column_that_never_changes(
     shown = _run(
         page(
             {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-            [DESIGN.document],
+            [DESIGN],
         ),
         tmp_path,
         """(() => { const h = allTurnsHTML(true);
@@ -3207,7 +3211,7 @@ def test_turn_says_what_wrote_nothing_and_which_rules_hold_no_value(
     and what it is used as; a policy that is a function rule, with its derivation."""
     html = page(
         {"undecided.json": turns["undecided.json"], "idia.json": turns["idia.json"]},
-        [DESIGN.document, (IDIA / "design.json").read_bytes()],
+        [DESIGN, (IDIA / "idia.design.json").read_bytes()],
     )
     data = _data(html)
     for doc in data["sets"][0]["docs"]:
@@ -3258,7 +3262,7 @@ def test_turn_says_a_marker_bound_and_failed_call_as_the_outline_gives_them(
     the outline gives one; a duration reads in sensible units."""
     html = page(
         {"undecided.json": turns["undecided.json"], "decided.json": turns["decided.json"]},
-        [DESIGN.document],
+        [DESIGN],
     )
 
     def undecided(o: dict[str, Any]) -> None:
@@ -3297,7 +3301,7 @@ def test_turn_says_a_marker_bound_and_failed_call_as_the_outline_gives_them(
 @needs_node
 def test_the_file_picker_reads_every_file_of_a_list_that_empties(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { const got = []; const real = loadFiles; loadFiles = (fs) => { got.push(fs.length); };
           const list = [{name: "a.json"}, {name: "b.json"}];
@@ -3313,7 +3317,7 @@ def test_a_resize_keeps_the_user_s_zoom_and_the_turn_page(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { S.turn = 0; render(); const L = gvL; let renders = 0; const r0 = render;
           render = () => { renders++; r0(); };
@@ -3331,7 +3335,7 @@ def test_the_focus_comes_back_after_a_turn_step_a_chip_and_a_find(
     shown = _run(
         page(
             {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-            [DESIGN.document],
+            [DESIGN],
         ),
         tmp_path,
         """(() => { S.turn = cur().order[0]; render(); const out = {}, cv = document.getElementById("gvc");
@@ -3353,7 +3357,7 @@ def test_rings_keep_a_screen_size_follow_their_body_and_number_three_at_most(
     """At any zoom a ring is the same width on screen; a dimmed body's rings dim with it, the
     policy's never below .8; a determined body wears one thin neutral ring; the policy, when it
     is the root, wears at most three; a body too small for a ring takes its state's colour."""
-    html = page({"plain.json": showcase.plain_turn().document}, [load(showcase.PLAIN).document])
+    html = page({"plain.json": showcase.stored("plain.record")}, [PLAIN])
     shown = _run(
         html,
         tmp_path,
@@ -3392,7 +3396,7 @@ def test_rings_keep_a_screen_size_follow_their_body_and_number_three_at_most(
 def test_a_lineage_hop_with_no_design_edge_is_drawn_as_a_curve(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
-    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
 
     def hop(o: dict[str, Any]) -> None:
         o["lineage"].append(
@@ -3433,7 +3437,7 @@ def test_play_pulses_the_new_entries_and_keeps_its_pace_under_reduced_motion(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { S.turn = 0; render(); const L = gvL, out = {};
           gvSet("step", 1); out.pulse = L.pulse ? [...L.pulse.ids].sort() : null;
@@ -3457,7 +3461,7 @@ def test_a_chosen_row_with_an_open_value_is_not_green(
     shown = _run(
         page(
             {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-            [DESIGN.document],
+            [DESIGN],
         ),
         tmp_path,
         """(() => { const out = {};
@@ -3474,7 +3478,7 @@ def test_the_panel_lists_neighbours_by_direction_and_says_what_the_policy_decide
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"decided.json": turns["decided.json"]}, [DESIGN.document]),
+        page({"decided.json": turns["decided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { const side = () => strip(document.getElementById("gvside").innerHTML);
           S.turn = null; render(); const out = {summary: side()};
@@ -3526,7 +3530,7 @@ def test_all_turns_counts_the_loaded_turns_and_a_count_filters_the_table(
 @needs_node
 def test_every_wheel_zooms_and_a_pinch_zooms_faster(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { render(); frames(100); const L = gvL, cv = document.getElementById("gvc"), out = {};
           const k = () => L.tf.k;
@@ -3555,7 +3559,7 @@ def test_single_keys_leave_a_focused_control_alone_and_a_selection_is_announced(
     tmp_path: Path,
 ) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { render(); const out = {};
           out.onButton = gvKey({key: "f", target: {tagName: "BUTTON"}});
@@ -3577,7 +3581,7 @@ def test_single_keys_leave_a_focused_control_alone_and_a_selection_is_announced(
 
 @needs_node
 def test_hostile_text_is_isolated_and_kept_out_of_the_canvas(tmp_path: Path) -> None:
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     assert (
         ".mono, .ref, .tv, .gv-t, .gv-nb, .hchip, blockquote, td { unicode-bidi: isolate; }" in html
     )
@@ -3596,7 +3600,7 @@ def test_hostile_text_is_isolated_and_kept_out_of_the_canvas(tmp_path: Path) -> 
 @needs_node
 def test_copy_link_falls_back_and_the_drop_overlay_is_for_files(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { globalThis.location = {hash: "#design=0", href: "file:///x.html#design=0"};
           globalThis.history = {replaceState() {}};
@@ -3607,7 +3611,7 @@ def test_copy_link_falls_back_and_the_drop_overlay_is_for_files(tmp_path: Path) 
           return out; })()""",  # noqa: E501
     )
     assert shown == {"state": "failed", "shown": "file:///x.html#design=0"}
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     assert ":focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }" in html
     assert (
         "if (m.addEventListener) m.addEventListener('change', gvRetheme); else if (m.addListener)"
@@ -3629,7 +3633,7 @@ def test_a_null_value_and_missing_members_read_as_no_value(
     outside the record's own text form, which is quoted as ommat writes it."""
     html = page(
         {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-        [DESIGN.document],
+        [DESIGN],
     )
     data = _data(html)
     for doc in data["sets"][0]["docs"]:
@@ -3673,7 +3677,7 @@ def test_an_entry_holding_null_is_none_and_a_ref_with_no_entry_is_no_value(
     """An entry that exists and holds JSON null, bare or as an extraction's value, renders as
     the value none in a value chip; "no value" is only for a ref with no entry."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => ({bare: valueCell({holds: "value", value: null}),
           extraction: briefFull({holds: "value", value: {kind: "extraction", value: null}}),
@@ -3692,7 +3696,7 @@ def test_green_is_only_for_a_clear_value_and_red_only_for_unavailable(
     """A determined entry with no bound is a neutral mark, not a green tick; a target is green only
     when its estimates are clear, amber when one is short, neutral when they are only determined
     or Unasked, red only for an Unavailable answer; the panel's mark is the canvas's."""
-    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    html = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
     shown = _run(
         html,
         tmp_path,
@@ -3738,7 +3742,7 @@ def test_a_target_s_ring_colour_follows_what_its_estimates_hold(
         "cause": {"code": "need-undetermined", "refs": []},
     }
     gone: dict[str, Any] = {"kind": "Unavailable", "cause": {"code": "raised", "refs": []}}
-    base = page({"undecided.json": turns["undecided.json"]}, [DESIGN.document])
+    base = page({"undecided.json": turns["undecided.json"]}, [DESIGN])
     out = {}
     for name, states in (
         ("unasked", [("Unasked", unasked)] * 3),
@@ -3759,7 +3763,7 @@ def test_a_tiny_body_keeps_a_hairline_state_ring(tmp_path: Path, turns: dict[str
     """Zoomed far out a body is too small for its ring; it keeps a hairline one in the state's
     colour, dashed for Unasked or absent, so the state is not told by its fill alone."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { S.view = "gravity"; S.turn = 0; render(); frames(60); const L = gvL;
           """
@@ -3783,7 +3787,7 @@ def test_a_hop_s_arrow_points_toward_the_policy_and_a_marker_s_hop_is_thin(
     information flowed, toward the policy; a hop the outline gives as a marker's cause is drawn
     thin, as a declared one is, never with the main chain's weight."""
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { S.view = "gravity"; S.turn = 0; render(); frames(80); const L = gvL;
           """
@@ -3822,7 +3826,7 @@ def test_fired_counts_only_the_turns_paired_by_hash(
 ) -> None:
     html = page(
         {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-        [DESIGN.document],
+        [DESIGN],
     )
 
     def rename(o: dict[str, Any]) -> None:
@@ -3845,7 +3849,7 @@ def test_rows_say_also_matched_no_output_and_an_untested_row_in_one_wording(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { const out = {};
           out.how = tableHow({rows: [{n: 1, result: "matched", chosen: true}, {n: 2, result: "matched"}], hit: "F"});
@@ -3868,13 +3872,13 @@ def test_rows_say_also_matched_no_output_and_an_untested_row_in_one_wording(
 @needs_node
 def test_the_design_buttons_show_only_for_more_than_one_design(tmp_path: Path) -> None:
     one = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { render();
       return document.getElementById("designPick").children.length; })()""",
     )
     two = _run(
-        page([], [DESIGN.document, (IDIA / "design.json").read_bytes()]),
+        page([], [DESIGN, (IDIA / "idia.design.json").read_bytes()]),
         tmp_path,
         """(() => { render(); return document.getElementById("designPick").children.length; })()""",
     )
@@ -3892,7 +3896,7 @@ def test_the_tally_resets_with_the_set_and_keys_keep_off_a_focused_control(
     shown = _run(
         page(
             {"decided.json": turns["decided.json"], "undecided.json": turns["undecided.json"]},
-            [DESIGN.document],
+            [DESIGN],
         ),
         tmp_path,
         """(() => { const out = {}; S.view = "turn"; S.turn = cur().order[0]; render();
@@ -3915,7 +3919,7 @@ def test_print_draws_turn_opens_its_folds_and_closes_them_after(
     tmp_path: Path, turns: dict[str, bytes]
 ) -> None:
     shown = _run(
-        page({"undecided.json": turns["undecided.json"]}, [DESIGN.document]),
+        page({"undecided.json": turns["undecided.json"]}, [DESIGN]),
         tmp_path,
         """(() => { S.view = "gravity"; S.turn = 0; render(); const out = {};
           const folds = [{open: false}, {open: false}]; let asked = "";
@@ -3931,7 +3935,7 @@ def test_print_draws_turn_opens_its_folds_and_closes_them_after(
     assert shown["after"] == [False, False]
     assert shown["drawn"] == 1
     assert shown["turnHtml"] is True
-    html = page([], [DESIGN.document])
+    html = page([], [DESIGN])
     pr = html[html.index("@media print {") :]
     assert ':root, :root[data-theme="dark"], :root:not([data-theme="light"])' in pr[:200]
 
@@ -3939,7 +3943,7 @@ def test_print_draws_turn_opens_its_folds_and_closes_them_after(
 @needs_node
 def test_a_drag_that_is_not_files_is_let_through_and_the_theme_is_checked(tmp_path: Path) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { const out = {}; let prevented = 0;
           const ev = (types) => ({dataTransfer: {types, files: []}, preventDefault() { prevented++; }});
@@ -3961,7 +3965,7 @@ def test_the_camera_is_kept_across_views_and_a_copy_fallback_does_not_pile_up(
     tmp_path: Path,
 ) -> None:
     shown = _run(
-        page([], [DESIGN.document]),
+        page([], [DESIGN]),
         tmp_path,
         """(() => { render(); frames(60); const L = gvL; gvZoomBy(L, 2); const k = L.tf.k;
           S.view = "turn"; render(); S.view = "gravity"; render(); L.fitted = "changed"; gvResize();
@@ -3974,3 +3978,179 @@ def test_the_camera_is_kept_across_views_and_a_copy_fallback_does_not_pile_up(
           return out; })()""",  # noqa: E501
     )
     assert shown == {"kept": True, "fields": 1}
+
+
+# ---------- a design and records that name no policy ----------
+
+
+def _cancelled_free() -> bytes:
+    """The policy-free decided turn as cancellation leaves it: its first round, then a
+    ``cause`` item."""
+    doc = json.loads(showcase.policy_free_record("decided"))
+    log = doc["log"]
+    first = next(i for i, x in enumerate(log) if x["item"] == "round")
+    doc["log"] = [*log[: first + 1], {"cause": {"code": "cancelled", "refs": []}, "item": "cause"}]
+    return json.dumps(rehashed(doc)).encode()
+
+
+def strip_tags(html: str) -> str:
+    """``html``'s text, its tags dropped and its entities read."""
+    return unescape(re.sub(r"<[^>]*>", "", html))
+
+
+def _free_turns() -> dict[str, bytes]:
+    return {
+        "decided.json": showcase.policy_free_record("decided"),
+        "undecided.json": showcase.policy_free_record("undecided"),
+        "broken.json": showcase.policy_free_record("broken"),
+        "cancelled.json": _cancelled_free(),
+    }
+
+
+_FREE_TURN = """(() => {
+  const out = {};
+  for (const t of cur().turns) {
+    S.turn = cur().turns.indexOf(t); S.view = "turn"; drawView();
+    out[t.path] = document.getElementById("vTurn").innerHTML;
+  }
+  S.turn = null; S.view = "turn"; drawView(); out.all = document.getElementById("vTurn").innerHTML;
+  out.pick = turnPickHTML();
+  return out; })()"""
+
+
+@needs_node
+def test_turn_says_a_turn_that_names_no_policy_by_its_status_and_what_ran(
+    tmp_path: Path,
+) -> None:
+    """A record that names no policy has no decision to say: Turn heads it by its status
+    (finished in its rounds, a broken entry, cancelled), lists the tables that ran in the
+    order they ran with none marked or opened first, and has no lineage."""
+    shown = _run(page(_free_turns(), [showcase.policy_free()]), tmp_path, _FREE_TURN)
+    decided, undecided = shown["decided.json"], shown["undecided.json"]
+    for html in (decided, undecided, shown["broken.json"], shown["cancelled.json"]):
+        text = strip_tags(html)
+        for gone in ("No decision", "Decided", "Undecided", "the policy", "What it rests on"):
+            assert gone not in text, gone
+        assert "How it was decided" not in text
+        assert "the decision" not in text
+    assert '<h2 class="vh">Finished in 2 rounds</h2>' in decided
+    assert '<h2 class="vh">Finished in 2 rounds</h2>' in undecided
+    assert "<h3>The tables that ran</h3>" in decided
+    assert "The record keeps which rows matched, not why one did not." in decided
+    assert '<details class="ttable" open>' not in decided
+    assert "Row 1 gave the value." in decided
+    assert "Row 4 gave the value." in undecided
+    assert "Round by round" in decided
+    assert "Bounds" in strip_tags(decided)  # measured, with no word of a decision
+    assert "Its source requirement did not hold" in undecided
+    broken = strip_tags(shown["broken.json"])
+    assert "Broken entry" in broken
+    assert "t:state is unavailable: it returned a value its type refuses (t:state)" in broken
+    cancelled = strip_tags(shown["cancelled.json"])
+    assert "Cancelled" in cancelled
+    assert "The turn was cancelled, after 1 round." in cancelled
+    assert 'aria-label="unfinished"' in shown["cancelled.json"]
+
+
+@needs_node
+def test_all_turns_leaves_out_the_decision_and_root_when_no_turn_names_a_policy(
+    tmp_path: Path,
+) -> None:
+    shown = _run(page(_free_turns(), [showcase.policy_free()]), tmp_path, _FREE_TURN)
+    table = shown["all"].split('id="allturns"')[1]
+    heads = re.findall(r"<th>(.*?)</th>", table)
+    assert heads == ["", "record", "nearest bound"]
+    assert 'class="tallies"' not in table
+    assert "no decision" not in strip_tags(table)
+    # The icon cell marks the cancelled turn alone.
+    assert table.count('class="di ') == 1
+    assert 'aria-label="unfinished"' in table
+    pick = strip_tags(shown["pick"])
+    for word in ("decided · finished", "broken · broken entry", "cancelled · cancelled"):
+        assert word in pick, word
+    assert "undecided · finished" in pick
+
+
+@needs_node
+def test_all_turns_keeps_the_decision_column_when_a_turn_names_a_policy(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    shown = _run(
+        page(
+            {**turns, "free.json": showcase.policy_free_record("decided")},
+            {**DESIGNS, "free.json": showcase.policy_free()},
+        ),
+        tmp_path,
+        """(() => strip(allTurnsHTML(true)))()""",
+    )
+    assert "decisionroot" in shown
+    assert "decided: " in shown and "undecided: " in shown  # noqa: PT018
+    assert "free" in shown
+
+
+@needs_node
+def test_a_tally_filter_shows_no_turn_whose_record_names_no_policy(
+    tmp_path: Path, turns: dict[str, bytes]
+) -> None:
+    """The cancelled ledger turn names a policy and holds no entry at it, "no decision" as a
+    policy-free turn reads; its count's filter shows it alone."""
+    shown = _run(
+        page(
+            {
+                **turns,
+                "free.json": showcase.policy_free_record("decided"),
+                "free2.json": showcase.policy_free_record("undecided"),
+            },
+            {**DESIGNS, "free.json": showcase.policy_free()},
+        ),
+        tmp_path,
+        """(() => { S.view = "turn"; S.turn = at("decided.json"); render(); const out = {};
+          const h = () => document.getElementById("vTurn").innerHTML;
+          out.tally = strip(h().split('class="tallies">')[1].split("<table")[0]);
+          viewsClick({target: {closest: () => ({dataset: {tally: "undecided|no decision"}})}});
+          out.rows = [...h().matchAll(/<tr data-turn="(\\d+)"/g)].map(m => cur().turns[+m[1]].path);
+          return out; })()""",
+    )
+    assert "no decision 1" in shown["tally"]
+    assert shown["rows"] == ["cancelled.json"]
+
+
+@needs_node
+def test_gravity_draws_a_design_that_names_no_policy_with_no_centre_or_lean(
+    tmp_path: Path,
+) -> None:
+    """With no policy no body is the centre: no extra mass, ring, legend chip or "decides
+    between", no lean along x, and no steps to a policy in the panel; a turn over it lights no
+    lineage and notches no root."""
+    free, named = showcase.policy_free(), DESIGN
+    expression = """(() => { render(); const L = gvL;
+      const side = () => strip(document.getElementById("gvside").innerHTML);
+      const out = {policy: L.nodes.filter((n) => n.policy).map((n) => n.id),
+        gx: L.nodes.map((n) => n.gx), act: L.byId.get("d:act").mass, summary: side(),
+        legend: strip(document.getElementById("gvlegend").innerHTML)};
+      gvSelect(L, L.byId.get("d:urgency")); out.urgency = side();
+      gvSelect(L, L.byId.get("d:act")); out.actPanel = side();
+      out.root = L.ov ? L.ov.root : null; out.hops = L.ov ? L.ov.hops.length : null;
+      out.ov = strip(document.getElementById("gvov").innerHTML);
+      return out; })()"""
+    shown = _run(
+        page({"t.json": showcase.policy_free_record("decided")}, [free]), tmp_path, expression
+    )
+    before = _run(
+        page({"t.json": showcase.stored("decided.record")}, [named]), tmp_path, expression
+    )
+    assert shown["policy"] == []
+    assert before["policy"] == ["d:act"]
+    assert all(x == 0 for x in shown["gx"])
+    assert any(x != 0 for x in before["gx"])
+    assert shown["act"] == before["act"] - 12
+    assert "policy" not in shown["legend"]
+    assert "policy" in before["legend"]
+    for panel in (shown["summary"], shown["urgency"], shown["actPanel"]):
+        assert "the policy" not in panel
+        assert "no path to the policy" not in panel
+        assert "decides between" not in panel
+    assert "step to the policy" in before["urgency"]
+    assert (shown["root"], shown["hops"]) == (None, 0)
+    assert "Finished in 2 rounds" in shown["ov"]
+    assert "No decision" not in shown["ov"]

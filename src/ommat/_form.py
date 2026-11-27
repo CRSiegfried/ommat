@@ -117,12 +117,6 @@ class _Form:
         self.fail(names, f"{where} is not a string")
         return None
 
-    def boolean(self, value: object, default: bool, where: str, names: tuple[str, ...]) -> bool:
-        if type(value) is bool:
-            return value
-        self.fail(names, f"{where} is not a boolean")
-        return default
-
     def candidates(self, value: object, where: str, names: tuple[str, ...]) -> bool | str:
         """A ``candidates`` member: ``false``, ``true`` or a candidate field's name."""
         if type(value) is bool:
@@ -180,15 +174,8 @@ class _Form:
             )
             for tid, v in self.members(d.targets, "targets", Target).items()
         }
-        policy: str | None = None
-        if isinstance(d.policy, str) and is_scalar_string(d.policy):
-            policy = string_data(d.policy)
-        else:
-            self.fail(("policy",), "the policy is not a string")
         return Design(
             state=d.state,
-            # None after a failure, so no later check reads it.
-            policy=cast(str, policy),
             sources=sources,
             rules=rules,
             parameters=parameters,
@@ -246,7 +233,6 @@ class _Form:
             timeout=timeout,
             payload=s.payload,
             cost=cost,
-            feedback=self.boolean(s.feedback, False, f"{where}'s feedback", names),
             grounded=self.string(s.grounded, f"{where}'s grounding ref", names),
         )
 

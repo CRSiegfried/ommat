@@ -25,7 +25,6 @@ from ommat import (
     RenderedQuestion,
     SourceCall,
     Unavailable,
-    Unsure,
     ValueType,
 )
 from ommat.bindings.conformance import check
@@ -73,7 +72,7 @@ def test_the_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixture[st
     assert [decision for decision, _ in results] == [
         {"log": ["Quay Street"]},
         {"log": ["Elm Row", "Mill Lane"]},
-        Unsure(Cause("abstained", ["d:streets"])),
+        {"kind": "Unsure", "cause": {"code": "abstained", "refs": ["d:streets"]}},
     ]
     assert [calls for _, calls in results] == [0, 0, 0]
 
@@ -84,7 +83,7 @@ def test_the_idia_driver_prints_what_the_guide_shows(capsys: pytest.CaptureFixtu
 
     assert idia_run.main() == [
         {"log": ["Elm Row", "Mill Lane"]},
-        Unsure(Cause("abstained", ["d:streets"])),
+        {"kind": "Unsure", "cause": {"code": "abstained", "refs": ["d:streets"]}},
     ]
     assert capsys.readouterr().out == _output("leaf calls: 0")
 

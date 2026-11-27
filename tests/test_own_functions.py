@@ -69,7 +69,6 @@ def closures(prefix: str = "") -> LoadedDesign:
                 "reply": Rule("d:reply", t.string, reply, version="1", reads=["d:say"]),
             },
             parameters={"lim/k": Parameter(t.integer(0, 10), 3)},
-            policy="d:reply",
         )
     )
 

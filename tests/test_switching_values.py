@@ -98,18 +98,16 @@ def told(r: Any) -> object:
 
 
 def policy_rule(function: Any, *reads: str, outputs: Any = t.string) -> Rule:
-    """The policy's rule, ``d:act``, of ``function`` over ``reads``."""
+    """The rule ``d:act`` of ``function`` over ``reads``."""
     return Rule("d:act", outputs, function, version="1", reads=list(reads))
 
 
 def designed(policy: Rule | Table | None = None, **fields: Any) -> Any:
-    """``minimal`` with ``policy`` as the policy ``d:act`` beside the rules given, or
-    ``minimal``'s own policy when ``None``."""
+    """``minimal`` with ``policy`` as the rule ``d:act`` beside the rules given and no other, or
+    ``minimal``'s own rule when ``None``."""
     if policy is None:
         return minimal(**fields)
-    return minimal(
-        **{**fields, "rules": {**fields.get("rules", {}), "act": policy}}, policy="d:act"
-    )
+    return minimal(**{**fields, "rules": {**fields.get("rules", {}), "act": policy}}, alone=True)
 
 
 STATE_T = t.record(n=t.number(), k=t.integer(), flag=t.boolean, items=t.list_(t.integer()))
@@ -291,10 +289,12 @@ def test_a_value_whose_design_fails_load_marks_its_range_not_loading(tmp_path: P
     record = decide_sync(loaded, {"k": 4, "j": 9}, {}).record
     value = run(record, loaded, "lim/y", tmp_path)["value"]
     assert value["unseen"] == ["tab"]  # past lim/x the band does not load
-    # d:hi holds wherever the design loads; the decision is listed always.
-    assert list(value["entries"]) == ["d:decision", "d:tab"]
-    decision = value["entries"]["d:decision"]
-    assert [list(c["result"]) for c in decision["classes"]] == [["entry"], ["not-loading"]]
+    # A value that does not load changes every d: entry the record holds: d:hi and d:decision
+    # hold wherever the design loads, and are listed for the not-loading class alone.
+    assert list(value["entries"]) == ["d:decision", "d:hi", "d:tab"]
+    for ref in ("d:decision", "d:hi"):
+        held = value["entries"][ref]
+        assert [list(c["result"]) for c in held["classes"]] == [["entry"], ["not-loading"]]
     tab = value["entries"]["d:tab"]
     assert tab["switching"] == [5, 9]  # beside a not-loading class, as beside any
     assert tab["slacks"] == [None, 3]
@@ -316,10 +316,8 @@ def test_a_boolean_leaf_is_partitioned_false_first(tmp_path: Path) -> None:
     assert shape(value["entries"]["d:on"]) == {
         "classes": [{"values": [False], "result": False}, {"values": [True], "result": True}]
     }
-    # The policy's entry is always listed: d:big's "big" at both values, one class.
-    assert shape(value["entries"]["d:act"]) == {
-        "classes": [{"values": [False, True], "result": "big"}]
-    }
+    # Nothing is listed always: d:act, d:big's "big" at both values, never switches.
+    assert "d:act" not in value["entries"]
 
 
 def test_a_label_leaf_is_partitioned_in_declared_order(tmp_path: Path) -> None:
@@ -420,9 +418,8 @@ def test_a_mapping_leaf_varies_each_key_alone(tmp_path: Path) -> None:
             {"least": 1.0, "greatest": 1.0, "result": "no"},
         ],
     }
-    # calm leads whatever wild's threshold: the decision alone is listed, in one class.
-    assert list(value["keys"]["wild"]["entries"]) == ["d:act"]
-    assert len(value["keys"]["wild"]["entries"]["d:act"]["classes"]) == 1
+    # calm leads whatever wild's threshold: no entry switches, so none is listed.
+    assert value["keys"]["wild"]["entries"] == {}
 
 
 def test_a_pick_bar_is_probed_at_each_labels_probability(tmp_path: Path) -> None:
@@ -462,7 +459,7 @@ def test_a_question_reading_the_leaf_leaves_other_values_not_determined(tmp_path
         "yes",
         "not-determined",
     ]
-    act = value["entries"]["d:act"]  # the policy's entry, listed as any
+    act = value["entries"]["d:act"]  # it changes too, and is listed as any entry
     classes = act["classes"]
     assert [value_of(c["result"]) for c in classes] == ["not-determined", "yes", "not-determined"]
     assert classes[1]["least"] == classes[1]["greatest"] == 0.5
@@ -517,7 +514,7 @@ def test_the_entry_is_written_looked_up_and_returned_as_plain_data(tmp_path: Pat
     key = {"record": record.record_hash, "design": TABLES.design_hash, "parameter": "lim/n"}
     assert {k: entry[k] for k in ("kind", "format", "key")} == {
         "kind": KIND,
-        "format": 2,
+        "format": 3,
         "key": key,
     }
     assert EvaluationStore(tmp_path).lookup(KIND, key) == entry
@@ -902,6 +899,44 @@ def test_a_held_key_refusal_carries_the_key_the_store_looks_up(tmp_path: Path) -
     assert results.lookup(KIND, caught.value.key[0]) == first
 
 
+def test_a_held_entry_of_format_2_is_refused_unknown_entry_before_any_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Format 2 listed the policy's entry always; format 3 lists only what changed, so a
+    format-2 entry is one the job does not read, refused as the gold jobs refuse theirs."""
+    record = tables_record()
+    store = EvaluationStore(tmp_path)
+    key = {"record": record.record_hash, "design": TABLES.design_hash, "parameter": "lim/k"}
+    store.write({"kind": KIND, "format": 2, "key": key, "value": {"unseen": [], "entries": {}}})
+
+    async def replayed(*args: object, **kwargs: object) -> object:
+        raise AssertionError("replayed")
+
+    monkeypatch.setattr(_diff, "_replay_with", replayed)
+    monkeypatch.setattr(_switching, "_rerun", replayed)
+    exc = refusal(record, TABLES, "lim/k", tmp_path)
+    assert exc.reason is R.unknown_entry
+    assert exc.key == [key]
+    assert "format 2, not 3" in str(exc)
+    with pytest.raises(EvaluationRefusal) as raised:
+        _switching.switching_values_batch_sync([record], TABLES, ["lim/k", "lim/n"], results=store)
+    assert raised.value.reason is R.unknown_entry
+    assert raised.value.key == [key]
+
+
+def test_a_batch_refuses_a_held_entry_of_another_format_before_a_held_key(tmp_path: Path) -> None:
+    record = tables_record()
+    store = EvaluationStore(tmp_path)
+    held = run(record, TABLES, "lim/n", tmp_path)
+    assert held["format"] == 3
+    old = {**held["key"], "parameter": "lim/k"}
+    store.write({"kind": KIND, "format": 2, "key": old, "value": held["value"]})
+    with pytest.raises(EvaluationRefusal) as raised:
+        _switching.switching_values_batch_sync([record], TABLES, ["lim/n", "lim/k"], results=store)
+    assert raised.value.reason is R.unknown_entry
+    assert raised.value.key == [old]
+
+
 def three_way(own: float) -> LoadedDesign:
     return load(
         designed(
@@ -1086,7 +1121,7 @@ def test_a_candidate_read_is_probed_at_each_members_field(tmp_path: Path) -> Non
     record = decide_sync(loaded, state, {"default": grounded.answer}).record
     value = run(record, loaded, "lim/age", tmp_path)["value"]
     assert value["unseen"] == []
-    assert list(value["entries"]) == ["d:act", 'd:level["Ana"]', 'd:level["Bo"]']  # code-point
+    assert list(value["entries"]) == ['d:level["Ana"]', 'd:level["Bo"]']  # code-point
     assert value["entries"]['d:level["Ana"]']["switching"] == [31]
     assert value["entries"]['d:level["Ana"]']["slacks"] == [None, 13]
     assert value["entries"]['d:level["Bo"]']["switching"] == [42]
@@ -1115,7 +1150,7 @@ def refs_by_big(r: Any) -> object:
     return Unsure(Cause("abstained", ["d:big"] if r.read("d:big") == "big" else []))
 
 
-def test_a_change_of_the_policys_marker_refs_alone_switches_the_decision(tmp_path: Path) -> None:
+def test_a_change_of_a_markers_cause_refs_alone_is_no_switch(tmp_path: Path) -> None:
     loaded = load(
         designed(
             state=STATE_T,
@@ -1125,17 +1160,14 @@ def test_a_change_of_the_policys_marker_refs_alone_switches_the_decision(tmp_pat
         )
     )
     value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
-    act = value["entries"]["d:act"]
-    assert act["switching"] == [7.0]
-    assert [c["result"]["entry"]["marker"]["cause"]["refs"] for c in act["classes"]] == [
-        ["d:big"],
-        [],
-    ]
+    # d:act's cause refs change at 7 with d:big; its kind and code never do, as for any entry.
+    assert list(value["entries"]) == ["d:big"]
+    assert value["entries"]["d:big"]["switching"] == [7.0]
 
 
-def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def stale_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """``lim/n``'s entries over a turn of ``d:big`` and a constant ``d:act`` whose every rerun asks
+    ``t:a`` stale."""
     loaded = load(
         designed(
             state=STATE_T,
@@ -1155,9 +1187,23 @@ def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
         return rerun, fixture
 
     monkeypatch.setattr(_switching, "_rerun", staled)
-    big = run(record, loaded, "lim/n", tmp_path)["value"]["entries"]["d:big"]
+    return run(record, loaded, "lim/n", tmp_path)["value"]["entries"]
+
+
+def test_a_run_whose_replay_asks_a_stale_question_is_not_determined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    big = stale_entries(tmp_path, monkeypatch)["d:big"]
     # Its own value's result is the record's, not replayed; every other value's is undetermined.
     assert [value_of(c["result"]) for c in big["classes"]] == ["big", "not-determined"]
+
+
+def test_a_stale_run_lists_an_entry_it_writes_as_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The constant d:act is written alike at every value, yet the stale run cannot say so.
+    act = stale_entries(tmp_path, monkeypatch)["d:act"]
+    assert [value_of(c["result"]) for c in act["classes"]] == ["ok", "not-determined"]
 
 
 def test_under_f_a_later_param_row_matched_but_not_first_does_not_carry(tmp_path: Path) -> None:
@@ -1184,7 +1230,7 @@ def test_under_f_a_later_param_row_matched_but_not_first_does_not_carry(tmp_path
     assert entries["d:lit"]["switching"] == [7.0]  # a literal equal to the path is no Param
 
 
-def test_a_policy_table_whose_row_outputs_the_leaf_carries(tmp_path: Path) -> None:
+def test_an_act_table_whose_row_outputs_the_leaf_carries(tmp_path: Path) -> None:
     table = Table("d:act", "number", "F", ["d:big"], [["big", Param("lim/n")], ["-", 0.0]])
     loaded = load(
         designed(
@@ -1198,7 +1244,7 @@ def test_a_policy_table_whose_row_outputs_the_leaf_carries(tmp_path: Path) -> No
     assert value["entries"]["d:act"] == "carries"
 
 
-def test_a_policy_change_of_rows_alone_is_no_switch(tmp_path: Path) -> None:
+def test_a_change_of_an_act_tables_rows_alone_is_no_switch(tmp_path: Path) -> None:
     table = Table("d:act", "string", "F", ["d:big"], [["big", "quiet"], ["-", "quiet"]])
     loaded = load(
         designed(
@@ -1210,10 +1256,7 @@ def test_a_policy_change_of_rows_alone_is_no_switch(tmp_path: Path) -> None:
     )
     value = run(decide_sync(loaded, STATE, {}).record, loaded, "lim/n", tmp_path)["value"]
     assert value["entries"]["d:big"]["switching"] == [7.0]  # the winning row moves there
-    assert list(value["entries"]) == ["d:act", "d:big"]
-    assert shape(value["entries"]["d:act"])["classes"] == [
-        {"least": 5.0, "greatest": 8.0, "result": "quiet"}
-    ]
+    assert list(value["entries"]) == ["d:big"]  # d:act's rows change, its value never
 
 
 def integer_leaf(own: int, k: int) -> tuple[LoadedDesign, Record]:
@@ -1351,9 +1394,7 @@ def test_an_integer_side_past_the_interval_is_clipped_to_it(
     value = run(record, loaded, "lim/k", tmp_path)["value"]
     # 10 and 11 beside k: 11 clipped to 10, so no value outside the interval fails load.
     assert value["unseen"] == []
-    assert list(value["entries"]) == ["d:act"]  # the decision, listed always, never switches
-    assert value["entries"]["d:act"]["switching"] == []
-    assert [(c["least"], c["greatest"]) for c in value["entries"]["d:act"]["classes"]] == [(0, 10)]
+    assert value["entries"] == {}  # no entry switches, and nothing is listed always
     assert seen[0] == 2  # 0 and 10 beside the own 2; 11 is never tried
 
 
@@ -1415,7 +1456,7 @@ def test_an_aggregate_whose_one_row_is_param_is_not_unseen(hit: str, tmp_path: P
     )
     value = run(record, loaded, "lim/n", tmp_path)["value"]
     assert value["entries"]["d:tab"] == "carries"
-    assert value["unseen"] == ["act"]  # the policy reads d:tab, which holds the leaf
+    assert value["unseen"] == ["act"]  # act reads d:tab, which holds the leaf
 
 
 # ---------------------------------------------------------------------------------------------

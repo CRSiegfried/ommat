@@ -63,7 +63,7 @@ from ommat._table import HELPERS  # the engine's helper registry; only the priva
 KINDS = ("noul", "choice", "score", "extraction")
 
 SLICE_KEYS = {"module", "version", "types", "labels", "parameters", "sources", "rules"}
-DOC_KEYS = SLICE_KEYS | {"name", "state", "policy", "targets"}
+DOC_KEYS = SLICE_KEYS | {"name", "state", "targets"}
 SOURCE_KEYS = {"oracle", "needs", "only_when", "ask", "fetch", "timeout", "cost", "grounded"}
 RULE_KEYS = {
     "fn",
@@ -586,19 +586,17 @@ def design_from(
     values: Mapping[str, Any] | None = None,
     types: Mapping[str, str] | None = None,
 ) -> Design:
-    """The whole design: the slice, with its state, its policy rule and its targets.
+    """The whole design: the slice, with its state and its targets.
     `version`, `values` and `types` are as for `slice_from`; `$name` also works in `state`."""
     _keys("document", _mapping("document", doc), DOC_KEYS)
-    for key in ("state", "policy"):
-        if key not in doc:
-            raise AuthoringError(f"document: missing key {key!r}")
+    if "state" not in doc:
+        raise AuthoringError("document: missing key 'state'")
     own = {k: v for k, v in doc.items() if k in SLICE_KEYS}
     inner = slice_from(own, version, values, types)
     merged = _resolve_types(doc.get("types", {}), types)
     return Design(
         name=doc.get("name"),
         state=_type("state", doc["state"], merged),
-        policy=doc["policy"],
         sources=inner.sources,
         rules=inner.rules,
         parameters=inner.parameters,

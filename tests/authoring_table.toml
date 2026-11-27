@@ -4,7 +4,6 @@
 
 version = "1"
 state = "record{n: integer, flag: boolean, items: list<string>, word: string, m: integer}"
-policy = "d:grade"
 
 [types]
 grade = 'label{"high", "low", "none"}'

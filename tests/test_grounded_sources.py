@@ -113,7 +113,6 @@ def design(**changes: Any) -> Design:
             "cities": Rule("d:cities", t.string, cities, version="1", reads=[CITY]),
             "act": Rule("d:act", t.string, act, version="1", reads=["d:cities"]),
         },
-        "policy": "d:act",
     }
     fields.update(changes)
     return Design(**fields)

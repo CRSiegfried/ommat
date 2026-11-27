@@ -45,6 +45,8 @@ from transcript_turns import (
 
 ID = re.compile(r"om_[0-9a-f]{24}_(c[1-9][0-9]*|d)")
 LOADED = load(design())
+REFS = ["d:act"]
+"""The ref the caller acts on: the policy's."""
 
 
 def rec(path: str) -> Record:
@@ -52,7 +54,7 @@ def rec(path: str) -> Record:
 
 
 def chat(path: str, **kw: Any) -> list[dict[str, Any]]:
-    return to_chat_completions(rec(path), LOADED, **kw)
+    return to_chat_completions(rec(path), LOADED, **kw, refs=REFS)
 
 
 def call_ids(messages: list[dict[str, Any]]) -> list[str]:
@@ -73,7 +75,7 @@ def decide_arguments(messages: list[dict[str, Any]]) -> Any:
 
 def test_each_round_s_calls_then_decide_with_empty_arguments_and_compact_answers() -> None:
     record = rec("clear")
-    messages = to_chat_completions(record, LOADED)
+    messages = to_chat_completions(record, LOADED, refs=REFS)
     stem = "om_" + record.record_hash.removeprefix("sha256:")[:24]
     roles = [(m["role"], len(m.get("tool_calls", []))) for m in messages]
     assert roles == [
@@ -101,19 +103,20 @@ def test_each_round_s_calls_then_decide_with_empty_arguments_and_compact_answers
         {"q:route": ["yes", 0.95]},
         {"t:order": {"id": "o-1"}},
         {"q:confirm": ["yes", 0.95]},
-        {"decision": "archive"},
+        {"d:act": {"value": "archive"}},
     ]
 
 
-def test_the_design_cuts_the_board_to_the_policy_s_reads_and_without_it_the_board_is_whole() -> (
-    None
-):
+def test_the_design_cuts_the_board_to_the_refs_reads_and_without_it_the_board_is_whole() -> None:
     record = rec("clear")
-    assert decide_arguments(to_chat_completions(record, LOADED)) == {"d:sure": "yes"}
-    assert decide_arguments(to_chat_completions(record)) == {"d:route": "yes", "d:sure": "yes"}
+    assert decide_arguments(to_chat_completions(record, LOADED, refs=REFS)) == {"d:sure": "yes"}
+    assert decide_arguments(to_chat_completions(record, refs=REFS)) == {
+        "d:route": "yes",
+        "d:sure": "yes",
+    }
 
 
-def test_the_board_keeps_every_marker_the_policy_does_not_read() -> None:
+def test_the_board_keeps_every_marker_the_refs_do_not_read() -> None:
     assert decide_arguments(chat("down")) == {
         "d:route": {"marker": "Unavailable", "cause": "raised"},
         "d:sure": {"marker": "Unavailable", "cause": "need-unavailable"},
@@ -132,7 +135,7 @@ def test_a_failed_call_s_result_is_each_ref_s_marker_kind_and_cause_code() -> No
 
 def test_an_undecided_turn_ends_at_its_kind_root_cause_and_refs() -> None:
     assert results(chat("unsure"))[-1] == {
-        "undecided": {"kind": "Unsure", "root_cause": "abstained", "refs": ["q:confirm"]}
+        "d:act": {"undecided": {"kind": "Unsure", "root_cause": "abstained", "refs": ["q:confirm"]}}
     }
 
 
@@ -146,8 +149,8 @@ def test_the_undecided_reason_follows_a_required_cause_to_its_root() -> None:
     record = turn("unsure", ld).record
     policy = next(i for i in record.log if i["item"] == "entry" and i["ref"] == "d:act")
     assert policy["marker"]["cause"] == {"code": "required", "refs": ["d:sure"]}
-    assert results(to_chat_completions(record, ld))[-1] == {
-        "undecided": {"kind": "Unsure", "root_cause": "abstained", "refs": ["q:confirm"]}
+    assert results(to_chat_completions(record, ld, refs=REFS))[-1] == {
+        "d:act": {"undecided": {"kind": "Unsure", "root_cause": "abstained", "refs": ["q:confirm"]}}
     }
 
 
@@ -158,16 +161,16 @@ def test_a_decided_turn_whose_board_holds_a_marker_ends_at_its_decision() -> Non
 
     rule = Rule("d:act", t.label("archive", "hold"), act, version="1", reads=RULES["act"].reads)
     ld = load(design(rules={**RULES, "act": rule}))
-    messages = to_chat_completions(turn("unsure", ld).record, ld)
+    messages = to_chat_completions(turn("unsure", ld).record, ld, refs=REFS)
     assert decide_arguments(messages) == {"d:sure": {"marker": "Unsure", "cause": "abstained"}}
-    assert results(messages)[-1] == {"decision": "hold"}
+    assert results(messages)[-1] == {"d:act": {"value": "hold"}}
 
 
 def test_an_extraction_answer_is_its_value_and_confidence() -> None:
     ld = extraction.loaded()
     answers = fixed({"q:amount": extraction.AMOUNT, "q:dates": extraction.DATES})
     record = decide_sync(ld, extraction.STATE, {"default": answers}).record
-    assert results(to_chat_completions(record, ld))[0] == {
+    assert results(to_chat_completions(record, ld, refs=["d:reply"]))[0] == {
         "q:amount": [120, 0.9],
         "q:dates": [["2024-02-29"], 1],
     }
@@ -178,7 +181,7 @@ def test_an_extraction_with_no_value_gives_null_and_leaves_its_guess_out() -> No
     none = {"value": None, "guess": 120, "p_null": 0.8, "confidence": None, "span": None}
     answers = fixed({"q:amount": none, "q:dates": extraction.DATES})
     record = decide_sync(ld, extraction.STATE, {"default": answers}).record
-    assert results(to_chat_completions(record, ld))[0]["q:amount"] == [None, None]
+    assert results(to_chat_completions(record, ld, refs=["d:reply"]))[0]["q:amount"] == [None, None]
 
 
 def test_a_value_with_a_marker_field_reads_as_a_value() -> None:
@@ -193,7 +196,7 @@ def test_a_value_with_a_marker_field_reads_as_a_value() -> None:
 
     ld = load(design(sources={**SOURCES, "lookup": lookup}))
     bindings = {"default": confirming(YES), "model": model(), "tools": marked}
-    messages = to_chat_completions(decide_sync(ld, STATE, bindings).record, ld)
+    messages = to_chat_completions(decide_sync(ld, STATE, bindings).record, ld, refs=REFS)
     assert results(messages)[2] == {"t:order": {"id": "o-1", "marker": "m"}}
 
 
@@ -216,7 +219,7 @@ def test_a_source_asking_two_refs_gives_them_in_code_point_order() -> None:
 
     ld = load(design(sources={**SOURCES, "pair": pair}))
     bindings = {"default": confirming(YES), "model": both, "tools": tools}
-    messages = to_chat_completions(decide_sync(ld, STATE, bindings).record, ld)
+    messages = to_chat_completions(decide_sync(ld, STATE, bindings).record, ld, refs=REFS)
     names = [c["function"]["name"] for c in messages[0]["tool_calls"]]
     assert list(results(messages)[names.index("pair")]) == ["q:alpha", "q:zeta"]
 
@@ -224,15 +227,15 @@ def test_a_source_asking_two_refs_gives_them_in_code_point_order() -> None:
 @pytest.mark.parametrize("path", PATHS)
 def test_ids_fit_the_pattern_are_unique_and_one_log_gives_the_same(path: str) -> None:
     record = rec(path)
-    messages = to_chat_completions(record, LOADED)
+    messages = to_chat_completions(record, LOADED, refs=REFS)
     got = call_ids(messages)
     assert all(ID.fullmatch(i) and len(i) <= 40 for i in got)
     assert len(set(got)) == len(got)
-    assert to_chat_completions(read_record(record.document), LOADED) == messages
+    assert to_chat_completions(read_record(record.document), LOADED, refs=REFS) == messages
     replayed, findings = replay_sync(record, LOADED)
     assert findings == []
     assert replayed is not None
-    assert to_chat_completions(replayed, LOADED) == messages
+    assert to_chat_completions(replayed, LOADED, refs=REFS) == messages
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -247,8 +250,8 @@ def test_every_path_ends_at_decide_s_result_each_call_answered_in_order(path: st
 @pytest.mark.parametrize("path", PATHS)
 def test_the_bytes_are_stable_and_in_the_ordered_encoding(path: str) -> None:
     record = rec(path)
-    once = to_chat_completions(record, LOADED)
-    again = to_chat_completions(read_record(record.document), LOADED)
+    once = to_chat_completions(record, LOADED, refs=REFS)
+    again = to_chat_completions(read_record(record.document), LOADED, refs=REFS)
     assert json.dumps(once) == json.dumps(again)
     for m in once:
         strings = [m.get("content")] + [c["function"]["arguments"] for c in m.get("tool_calls", [])]
@@ -285,7 +288,8 @@ def test_the_default_rendering_of_one_record_is_pinned() -> None:
         ),
         (
             "tool",
-            '{"undecided":{"kind":"Unsure","root_cause":"abstained","refs":["q:confirm"]}}',
+            '{"d:act":{"undecided":{"kind":"Unsure","root_cause":"abstained",'
+            '"refs":["q:confirm"]}}}',
             [],
         ),
     ]
@@ -293,6 +297,47 @@ def test_the_default_rendering_of_one_record_is_pinned() -> None:
 
 # ---------------------------------------------------------------------------------------------
 # What a renderer refuses, and a record with no history
+
+
+def test_decide_s_result_is_each_named_ref_in_order_and_the_board_leaves_them_out() -> None:
+    messages = to_chat_completions(rec("clear"), LOADED, refs=["d:route", "d:act"])
+    assert messages[-1]["content"] == '{"d:route":{"value":"yes"},"d:act":{"value":"archive"}}'
+    assert decide_arguments(messages) == {"d:sure": "yes"}  # the act rule's read
+    whole = to_chat_completions(rec("clear"), refs=["d:route", "d:act"])
+    assert decide_arguments(whole) == {"d:sure": "yes"}  # every d: entry but the named
+
+
+def test_the_design_cuts_the_board_to_the_union_of_the_refs_reads_and_every_marker() -> None:
+    messages = to_chat_completions(rec("unsure"), LOADED, refs=["d:sure"])
+    assert results(messages)[-1] == {
+        "d:sure": {
+            "undecided": {"kind": "Unsure", "root_cause": "abstained", "refs": ["q:confirm"]}
+        }
+    }
+    assert decide_arguments(messages) == {"d:act": {"marker": "Unsure", "cause": "abstained"}}
+    assert decide_arguments(to_chat_completions(rec("clear"), LOADED, refs=["d:sure"])) == {}
+
+
+@pytest.mark.parametrize(
+    ("refs", "message"),
+    [
+        ("d:act", "a list or a tuple"),
+        ([], "at least one"),
+        (["q:route"], "d: refs"),
+        ([1], "d: refs"),
+        (["d:act.x"], "not a rule's ref"),
+        (["d:act", "d:act"], "repeat"),
+        (["d:nothing"], "no rule's ref in the record's design"),
+    ],
+)
+def test_refs_that_are_not_distinct_rule_refs_are_refused(refs: Any, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        to_chat_completions(rec("clear"), refs=refs)
+
+
+def test_refs_are_required() -> None:
+    with pytest.raises(TypeError, match="refs"):
+        to_chat_completions(rec("clear"))  # type: ignore[call-arg]
 
 
 OLD_RECORDS = {
@@ -306,10 +351,10 @@ OLD_RECORDS = {
 def test_a_record_before_format_8_renders_no_messages(fmt: int) -> None:
     record = read_record((Path(__file__).parent / OLD_RECORDS[fmt]).read_bytes())
     assert record.log[0].get("format", 1) == fmt
-    assert to_chat_completions(record) == []
+    assert to_chat_completions(record, refs=REFS) == []
 
 
-def test_a_record_with_no_entry_at_the_policy_renders_no_messages() -> None:
+def test_a_record_with_no_entry_at_a_named_ref_renders_no_messages() -> None:
     def cancel(r: Any) -> str:
         raise asyncio.CancelledError
 
@@ -318,24 +363,24 @@ def test_a_record_with_no_entry_at_the_policy_renders_no_messages() -> None:
     with pytest.raises(asyncio.CancelledError) as caught:
         turn("clear", ld)
     record = cast("Record", getattr(caught.value, "record"))  # noqa: B009
-    assert to_chat_completions(record, ld) == []
+    assert to_chat_completions(record, ld, refs=REFS) == []
 
 
 @pytest.mark.parametrize("record", [None, {"log": []}, "record"])
 def test_what_is_not_a_record_is_refused(record: Any) -> None:
     with pytest.raises(ValueError, match="a renderer takes a Record"):
-        to_chat_completions(record)
+        to_chat_completions(record, refs=REFS)
 
 
 def test_a_design_that_is_not_a_loaded_design_is_refused() -> None:
     with pytest.raises(ValueError, match="design must be a LoadedDesign or None"):
-        to_chat_completions(rec("clear"), design())  # type: ignore[arg-type]
+        to_chat_completions(rec("clear"), design(), refs=REFS)  # type: ignore[arg-type]
 
 
 def test_another_design_s_loaded_design_is_refused() -> None:
     other = load(design(name="other"))
     with pytest.raises(ValueError, match="is not the record's"):
-        to_chat_completions(rec("clear"), other)
+        to_chat_completions(rec("clear"), other, refs=REFS)
 
 
 def _named(name: str) -> list[dict[str, Any]]:
@@ -348,7 +393,7 @@ def _named(name: str) -> list[dict[str, Any]]:
 
     ld = load(design(sources={**SOURCES, name: source}))
     bindings = {"default": confirming(YES), "model": answers, "tools": tools}
-    return to_chat_completions(decide_sync(ld, STATE, bindings).record, ld)
+    return to_chat_completions(decide_sync(ld, STATE, bindings).record, ld, refs=REFS)
 
 
 @pytest.mark.parametrize(
@@ -467,21 +512,23 @@ def test_records_whose_stems_differ_only_in_their_last_digit_are_two_records() -
 
 def test_a_turn_stems_every_id_within_the_pattern_and_none_keeps_the_record_s() -> None:
     record = rec("clear")
-    plain = to_chat_completions(record, LOADED)
-    assert plain == to_chat_completions(record, LOADED, turn=None)
-    turned = to_chat_completions(record, LOADED, turn="retry-1")
+    plain = to_chat_completions(record, LOADED, refs=REFS)
+    assert plain == to_chat_completions(record, LOADED, turn=None, refs=REFS)
+    turned = to_chat_completions(record, LOADED, turn="retry-1", refs=REFS)
     old, new = call_ids(plain), call_ids(turned)
     assert all(ID.fullmatch(i) and len(i) <= 40 for i in new)
     assert [i[27:] for i in new] == [i[27:] for i in old]
     assert set(new).isdisjoint(old)
-    assert to_chat_completions(record, LOADED, turn="retry-1") == turned
-    assert to_chat_completions(record, turn=1) != to_chat_completions(record, turn="1")
+    assert to_chat_completions(record, LOADED, turn="retry-1", refs=REFS) == turned
+    assert to_chat_completions(record, turn=1, refs=REFS) != to_chat_completions(
+        record, turn="1", refs=REFS
+    )
 
 
 @pytest.mark.parametrize("turn", [True, 1.5, b"x", ["a"], None.__class__])
 def test_a_turn_of_another_type_is_refused(turn: Any) -> None:
     with pytest.raises(ValueError, match="turn must be a str or an int"):
-        to_chat_completions(rec("clear"), turn=turn)
+        to_chat_completions(rec("clear"), turn=turn, refs=REFS)
 
 
 def test_five_turns_repeating_one_record_repeat_no_id_and_keep_only_the_last() -> None:
@@ -511,10 +558,10 @@ def test_a_turn_the_canonical_encoding_refuses_raises_before_the_record_is_read(
     turn: Any, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        to_chat_completions(None, turn=turn)  # type: ignore[arg-type]
+        to_chat_completions(None, turn=turn, refs=REFS)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match=message):
-        to_chat_completions(rec("clear"), turn=turn)
+        to_chat_completions(rec("clear"), turn=turn, refs=REFS)
 
 
 def test_the_largest_turn_the_encoding_takes_renders() -> None:
-    assert to_chat_completions(rec("clear"), turn=2**53 - 1)
+    assert to_chat_completions(rec("clear"), turn=2**53 - 1, refs=REFS)

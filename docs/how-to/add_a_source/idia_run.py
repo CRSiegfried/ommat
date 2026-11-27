@@ -119,7 +119,9 @@ def main() -> list[object]:
     decisions: list[object] = []
     for report in REPORTS:
         decision = decide_sync(loaded, {"text": report}, idia_bindings(dispatcher))
-        print("decision:", decision.estimate)
+        entry = decision.record.entries["d:route"]
+        decided = entry["value"] if "value" in entry else entry["marker"]
+        print("decision:", decided)
         print("  answers:", answers(decision))
         for call in decision.record.unhashed["calls"].values():
             for line in call.get("warnings", []):
@@ -127,7 +129,7 @@ def main() -> list[object]:
         before = script.calls
         _, findings = replay_sync(read_record(decision.record.document), loaded)
         print("  replay findings:", findings, "| leaf calls:", script.calls - before)
-        decisions.append(decision.estimate)
+        decisions.append(decided)
     asyncio.run(dispatcher.aclose())  # release the leaf: a loaded model's worker, a client
     return decisions
 

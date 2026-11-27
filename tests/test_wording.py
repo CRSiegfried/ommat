@@ -44,7 +44,6 @@ def design(labels: Any = None, wording: Any = None) -> Design:
         state=t.record(),
         sources={"ask": Source({"q:named": q})},
         rules={"act": ACT},
-        policy="d:act",
     )
 
 
@@ -139,7 +138,6 @@ def slotted(template: Any, *slots: dict[str, Any]) -> Design:
         state=t.record(body=t.string),
         sources={"ask": Source({"q:named": q})},
         rules={"act": ACT},
-        policy="d:act",
     )
 
 

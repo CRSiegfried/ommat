@@ -1,13 +1,15 @@
 """The Pydantic AI renderer: a record's turn history as Pydantic AI messages, outside the
 compatibility promise. Install it with ``ommat[pydantic-ai]``.
 
-``to_model_messages(record, design)`` gives each source call and decide as a ``ModelResponse``
-of tool calls and a ``ModelRequest`` of their returns, each marked as ommat's bookkeeping in its
-``metadata``, which Pydantic AI never sends to a model. ``is_bookkeeping(message)``
-reads the mark, and ``drop_earlier_bookkeeping`` is a history processor that keeps the latest
-record's bookkeeping and drops every earlier record's, each return with its call.
+``to_model_messages(record, design, refs=...)`` gives each source call and decide as a
+``ModelResponse`` of tool calls and a ``ModelRequest`` of their returns, each marked as ommat's
+bookkeeping in its ``metadata``, which Pydantic AI never sends to a model.
+``is_bookkeeping(message)`` reads the mark, and ``drop_earlier_bookkeeping`` is a history
+processor that keeps the latest record's bookkeeping and drops every earlier record's, each
+return with its call.
 """
 
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any, cast
@@ -33,20 +35,21 @@ def to_model_messages(
     record: Record,
     design: LoadedDesign | None = None,
     *,
+    refs: Sequence[str],
     model_name: str | None = None,
     provider_name: str | None = None,
     turn: str | int | None = None,
 ) -> list[ModelMessage]:
-    """A record's turn history as Pydantic AI messages, with the board ``to_chat_completions``
-    gives and ``[]`` where it gives none: per group of calls a ``ModelResponse`` of
-    ``ToolCallPart``s, then a ``ModelRequest`` of a ``ToolReturnPart`` per call, a failed source
-    call's with ``outcome="failed"`` and decide's with ``metadata``
-    ``{"record_hash", "design_hash"}``. Every message carries ``metadata``
+    """A record's turn history as Pydantic AI messages, with the board and the per-ref result
+    ``to_chat_completions`` gives for ``refs``, and ``[]`` where it gives none: per group of
+    calls a ``ModelResponse`` of ``ToolCallPart``s, then a ``ModelRequest`` of a
+    ``ToolReturnPart`` per call, a failed source call's with ``outcome="failed"`` and decide's
+    with ``metadata`` ``{"record_hash", "design_hash"}``. Every message carries ``metadata``
     ``{"ommat": "bookkeeping", "record_hash"}``, with ``turn`` when given. Every response carries
     ``model_name`` and ``provider_name``. ``turn`` stems every id, and is held in the mark, as
     ``to_chat_completions`` says. Raises ``ValueError`` as ``to_chat_completions`` does."""
     check_turn(turn)
-    turn_history = history(record, design, turn)
+    turn_history = history(record, design, refs, turn)
     record_hash = turn_history.record_hash
     stamp = {"record_hash": record_hash, "design_hash": turn_history.design_hash}
     messages: list[ModelMessage] = []

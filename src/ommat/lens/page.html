@@ -463,16 +463,27 @@ function stateFor(idx, ref) {
 }
 
 // A turn in brief: its decision in words and by kind, the nearest bound the outline's summary picks, the lineage's root.
+// A record that names no policy has no decision to say: `free`, and its status in a word or two instead.
 function summarise(T, idx) {
   let decision, dkind;
-  if (T.decision) {
+  if (T.policy == null) { dkind = 'none'; decision = statusWord(T); }
+  else if (T.decision) {
     dkind = T.decision.holds === 'value' ? 'decided' : T.decision.holds;
     decision = T.decision.holds === 'value' ? word(T.decision.value) : 'undecided: ' + T.decision.marker.kind + ' ' + T.decision.marker.cause.code;
   } else { dkind = 'none'; decision = T.cause ? 'no decision: cause ' + T.cause.code : 'no decision'; }
   if (!DI[dkind]) dkind = 'Unsure';
   const pick = nearestPick(T, idx);
-  return {pick, decision, dkind, root: rootOf(T)};
+  return {pick, decision, dkind, root: rootOf(T), free: T.policy == null};
 }
+// A turn whose record names no policy, in a word or two: a broken entry, the cause that ended it, or finished.
+const isBroken = T => !!T.state && T.state.holds !== 'value';
+function statusWord(T) {
+  if (isBroken(T)) return 'broken entry';
+  if (T.status !== 'unfinished') return 'finished';
+  return T.cause && T.cause.code === 'cancelled' ? 'cancelled' : T.cause ? 'cause ' + T.cause.code : 'unfinished';
+}
+// The rounds a turn ran, as the outline's summary counts them: round 0 holds the state alone.
+const roundsRun = T => (T.rounds || []).filter(r => Number.isInteger(r.round) && r.round >= 1).length;
 // The one nearest bound the outline's summary names, joined to the entry's bound for what was measured.
 function nearestPick(T, idx) {
   const m = T.summary_nearest;
@@ -482,8 +493,9 @@ function nearestPick(T, idx) {
   const r = cands.find(r => r.distance === m.distance) || cands[0];
   return Object.assign(r ? Object.assign({}, r) : {e, role: m.role, label: m.role, param: m.param, bound: null, measured: null, measure: '?'}, {distance: m.distance, side: m.side, by: m.by});
 }
-// The decision's icon: decided, undecided by its marker's kind, or no decision (an unfinished turn).
-const DI = {decided: ['✓', 'decided'], Unsure: ['?', 'undecided: Unsure'], Unavailable: ['✕', 'undecided: Unavailable'], Unasked: ['–', 'undecided: Unasked'], none: ['⊘', 'no decision']};
+// The decision's icon: decided, undecided by its marker's kind, or no decision (an unfinished turn); a turn whose record
+// names no policy is marked only when unfinished.
+const DI = {decided: ['✓', 'decided'], Unsure: ['?', 'undecided: Unsure'], Unavailable: ['✕', 'undecided: Unavailable'], Unasked: ['–', 'undecided: Unasked'], none: ['⊘', 'no decision'], unfinished: ['⊘', 'unfinished']};
 const decIcon = k => `<span class="di ${esc(k)}" role="img" aria-label="${esc(DI[k][1])}" title="${esc(DI[k][1])}">${DI[k][0]}</span>`;
 
 // A value in a word or two. An entry that holds JSON null holds the value none; "no value" is only
@@ -570,7 +582,7 @@ const CODE_TEXT = {
   'timed-out': 'it timed out', 'round-bound': 'the turn reached its round bound', deadline: 'the turn reached its deadline',
   required: 'a required input was not determined', refused: 'the oracle refused', 'invalid-answer': 'the answer was not valid',
   'label-collision': 'two labels collided', 'label-overflow': 'too many labels', conflict: 'two answers conflicted',
-  settled: 'the decision no longer needed it', 'over-budget': 'the turn was over budget', 'invalid-return': 'it returned a value its type refuses',
+  'over-budget': 'the turn was over budget', 'invalid-return': 'it returned a value its type refuses',
   'design-changed': 'the design changed', cancelled: 'the turn was cancelled', carried: 'carried from an earlier turn',
   abstained: 'no clear answer (it abstained)', unsupported: 'the oracle does not support it',
 };
@@ -618,7 +630,7 @@ function decisionWord(t) {
 function turnPickHTML() {
   const s = cur();
   if (!s.turns.length) return '';
-  return `<option value="">design alone</option>` + s.order.map(i => { const t = s.turns[i]; return `<option value="${i}" ${S.turn === i ? 'selected' : ''}>${esc(turnShort(t, i))} · ${esc(t.sum.dkind === 'decided' ? decisionWord(t) : 'undecided')}</option>`; }).join('');
+  return `<option value="">design alone</option>` + s.order.map(i => { const t = s.turns[i]; return `<option value="${i}" ${S.turn === i ? 'selected' : ''}>${esc(turnShort(t, i))} · ${esc(t.sum.free ? t.sum.decision : t.sum.dkind === 'decided' ? decisionWord(t) : 'undecided')}</option>`; }).join('');
 }
 // The bound the summary names, joined to the entry's bound for what was measured against what.
 function boundSentence(t) {
@@ -687,11 +699,12 @@ function notAskedLine(X, t, s) {
   return `${chipFor(X, 'source:' + s.source, s.source)} <span class="empty">${esc(s.cause ? (CODE_TEXT[s.cause.code] || s.cause.code) : '')}${s.cause && (s.cause.refs || []).length ? ': ' : ''}</span>${s.cause ? (s.cause.refs || []).map(ref => tRef(X, ref)).join(', ') : ''}`;
 }
 // Every turn of the set in time order, one row each: its decision, root and nearest bound; the record's name is a button that
-// opens it. A column that says the same on every row is left out. Above it, counts over the loaded turns, each a filter.
+// opens it. A column that says the same on every row is left out, and the decision and root columns when no loaded turn's
+// record names a policy. Above it, counts of the decided and undecided turns of records that name one, each a filter no other turn matches.
 function allTurnsHTML(open) {
-  const s = cur(), group = t => (t.sum.dkind === 'decided' ? 'decided' : 'undecided'), key = t => group(t) + '|' + decisionWord(t).replace(/^undecided · /, '');
-  const counts = {decided: new Map(), undecided: new Map()};
-  for (const i of s.order) { const t = s.turns[i], k = decisionWord(t).replace(/^undecided · /, ''); counts[group(t)].set(k, (counts[group(t)].get(k) || 0) + 1); }
+  const s = cur(), group = t => (t.sum.dkind === 'decided' ? 'decided' : 'undecided'), key = t => (t.sum.free ? null : group(t) + '|' + decisionWord(t).replace(/^undecided · /, ''));
+  const counts = {decided: new Map(), undecided: new Map()}, named = s.turns.some(t => !t.sum.free);
+  for (const i of s.order) { const t = s.turns[i], k = decisionWord(t).replace(/^undecided · /, ''); if (!t.sum.free) counts[group(t)].set(k, (counts[group(t)].get(k) || 0) + 1); }
   const tally = ['decided', 'undecided'].filter(g => counts[g].size).map(g => { const m = [...counts[g]].sort((a, b) => b[1] - a[1]);
     return `${m.reduce((a, x) => a + x[1], 0)} ${g}: ${m.map(([k, n]) => `<button class="tally" data-tally="${esc(g + '|' + k)}" aria-pressed="${S.tally === g + '|' + k}">${esc(k)} ${n}</button>`).join(' ')}`; }).join(' · ');
   const rows = s.order.filter(i => !S.tally || key(s.turns[i]) === S.tally).map(i => {
@@ -700,14 +713,15 @@ function allTurnsHTML(open) {
     const ties = b && nb0 && Math.abs(nb0.distance) === Math.abs(b.distance) ? Number(T.ties) || 0 : 0;
     const near = b ? `<span class="mono">${esc(b.e.ref)}</span> ${esc(b.role)} ${esc((b.distance >= 0 ? '+' : '') + num(b.distance))}${ties > 1 ? ` <span class="empty">(tied with ${ties - 1} ${ties === 2 ? 'other' : 'others'})</span>` : ''}` : '<span class="empty">none</span>';
     const note = [T.status !== 'finished' ? T.status : '', t.pairBy === 'name' ? 'hash differs' : t.design ? '' : 'no design'].filter(Boolean).join(' · ');
-    return {i, cells: [decIcon(t.sum.dkind), `<button class="rowbtn mono" data-turn="${i}" title="${esc(cut(turnShort(t, i), 300))}">${esc(cut(turnShort(t, i), 80))}</button>${note ? `<span class="sub">${esc(note)}</span>` : ''}`, `<span class="mono">${esc(decisionWord(t))}</span>`,
+    const icon = !t.sum.free ? decIcon(t.sum.dkind) : T.status === 'unfinished' ? decIcon('unfinished') : '';
+    return {i, cells: [icon, `<button class="rowbtn mono" data-turn="${i}" title="${esc(cut(turnShort(t, i), 300))}">${esc(cut(turnShort(t, i), 80))}</button>${note ? `<span class="sub">${esc(note)}</span>` : ''}`, t.sum.free ? '<span class="empty">none</span>' : `<span class="mono">${esc(decisionWord(t))}</span>`,
       t.sum.root ? `<span class="mono">${esc(t.sum.root.ref)}</span>` : '<span class="empty">none</span>', near]};
   });
   const heads = ['', 'record', 'decision', 'root', 'nearest bound'];
-  const keep = heads.map((_, c) => c < 2 || rows.length < 2 || rows.some(r => r.cells[c] !== rows[0].cells[c]));
+  const keep = heads.map((_, c) => (c === 2 || c === 3 ? named : true) && (c < 2 || rows.length < 2 || rows.some(r => r.cells[c] !== rows[0].cells[c])));
   const body = rows.map(r => `<tr data-turn="${r.i}" aria-selected="${S.turn === r.i}">${r.cells.filter((_, c) => keep[c]).map(x => `<td>${x}</td>`).join('')}</tr>`).join('');
   return `<details class="fold" id="allturns"${open ? ' open' : ''}><summary>All turns <span class="empty">· ${plural(s.turns.length, 'turn')} in time order</span></summary>`
-    + `<p class="tallies"><span class="empty">Counts over the loaded turns:</span> ${tally}</p><table class="rows turns"><thead><tr>${heads.filter((_, c) => keep[c]).map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></details>`;
+    + (tally ? `<p class="tallies"><span class="empty">Counts over the loaded turns:</span> ${tally}</p>` : '') + `<table class="rows turns"><thead><tr>${heads.filter((_, c) => keep[c]).map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></details>`;
 }
 function drawTurnView() {
   const host = $('vTurn'), s = cur(), t = curTurn();
@@ -723,15 +737,16 @@ function drawTurnView() {
   if (R) {
     const onLin = preciseRefs(lineage(T));
     const steps = tb => { const n = X && X.N['rule:' + tb.rule]; return n && n.steps_to_policy != null ? n.steps_to_policy : 1e9; };
-    const tables = R.tables.slice().sort((a, b) => (b.policy - a.policy) || (onLin.has(b.ref) - onLin.has(a.ref)) || steps(a) - steps(b) || a.index - b.index);
-    h += `<h3>How it was decided</h3>`;
+    const free = T.policy == null; // no policy: the tables in the order they ran, none first
+    const tables = R.tables.slice().sort((a, b) => (free ? 0 : (b.policy - a.policy) || (onLin.has(b.ref) - onLin.has(a.ref)) || steps(a) - steps(b)) || a.index - b.index);
+    h += free ? (tables.length ? `<h3>The tables that ran</h3>` : '') : `<h3>How it was decided</h3>`;
     const de = d ? t.idx.byRef.get(d.ref) : null;
     if (de && !tables.some(x => x.policy)) {
       h += `<p>${tRef(X, d.ref)} is a function rule; its body is not in the design document.</p>`;
       if ((de.derivation || []).length) h += `<p>Its derivation: ${de.derivation.map(x => esc(x.helper || x.name || 'step') + ' over ' + (x.rested_on || x.refs || []).map(r => tRef(X, r)).join(', ')).join('; ')}.</p>`;
       if ((de.declared_reads || []).length) h += `<p class="empty">It declares these reads; what it read is not recorded:</p><div class="reads">${de.declared_reads.map(r => `<div>${tRef(X, r.ref)} ${valueCell(entryAt(t, r.ref))}</div>`).join('')}</div>`;
     }
-    if (tables.length) h += `<p class="empty">The tables that ran, the policy's first. The record keeps which rows matched, not why one did not.</p>` + tables.map((tb, k) => runTableHTML(X, t, tb, k === 0)).join('');
+    if (tables.length) h += `<p class="empty">${free ? '' : 'The tables that ran, the policy\'s first. '}The record keeps which rows matched, not why one did not.</p>` + tables.map((tb, k) => runTableHTML(X, t, tb, !free && k === 0)).join('');
   }
   // 3. the lineage
   const lin = lineage(T);
@@ -762,7 +777,7 @@ function drawTurnView() {
   }
   // 5. bounds and the record's own details, folded
   const nb = (T.nearest_bounds || []).filter(m => typeof m.distance === 'number');
-  if (nb.length) h += `<details class="fold"><summary>Bounds <span class="empty">· ${nb.length} measured, nearest first</span></summary><p class="empty">How far each answer lies from a bound the design compares it against; short means it does not clear it. That is not how far the decision lies from changing.</p><table class="rows"><tbody>${nb.slice(0, 30).map(m => `<tr><td>${tRef(X, m.ref)}</td><td class="mono">${esc(m.role)} ${esc(m.param)}</td><td class="num">${esc(String(m.distance))}</td><td>${esc(m.side || '')}</td><td class="empty">by ${esc(m.by)}</td></tr>`).join('')}</tbody></table></details>`;
+  if (nb.length) h += `<details class="fold"><summary>Bounds <span class="empty">· ${nb.length} measured, nearest first</span></summary><p class="empty">How far each answer lies from a bound the design compares it against; short means it does not clear it.${T.policy ? ' That is not how far the decision lies from changing.' : ''}</p><table class="rows"><tbody>${nb.slice(0, 30).map(m => `<tr><td>${tRef(X, m.ref)}</td><td class="mono">${esc(m.role)} ${esc(m.param)}</td><td class="num">${esc(String(m.distance))}</td><td>${esc(m.side || '')}</td><td class="empty">by ${esc(m.by)}</td></tr>`).join('')}</tbody></table></details>`;
   const pair = t.pairBy === 'hash' ? 'paired with its design (hash matches)' : t.pairBy === 'name' ? 'paired by name: the design hash differs' : 'no design paired';
   h += `<details class="fold"><summary>Record details</summary>${dlh([
     ['record', hashChip(T.record_hash, '', 'record hash') || '<span class="empty">no hash</span>'], ['design', `${esc(T.design_name || (D && D.name) || '?')} ${hashChip(T.design_hash, '', 'design hash')}`],
@@ -778,6 +793,7 @@ function drawTurnView() {
 // on and, when it lies on the lineage, the bound the outline's summary names. Turn opens with it and Gravity's turn panel says it, so the two cannot differ.
 function verdictHTML(t, X, tests = true) {
   const T = t.outline, d = T.decision;
+  if (t.sum.free) return statusHTML(t, X);
   if (d && d.holds === 'value') {
     const v = d.value == null ? NONE : word(d.value);
     const tb = T.review && (T.review.tables || []).find(x => x.policy), row = tb && tb.rows.find(r => r.chosen);
@@ -793,6 +809,17 @@ function verdictHTML(t, X, tests = true) {
   const bs = T.summary_nearest && T.summary_nearest.on_lineage === true ? boundSentence(t) : ''; // a bound off the lineage does not explain it
   if (bs) h += `<p>${bs}</p>`;
   return h;
+}
+// A turn whose record names no policy, said by its status: a broken entry and its marker, the cause that ended it, or the
+// rounds it finished in. The rest of Turn says what ran.
+function statusHTML(t, X) {
+  const T = t.outline, rounds = plural(roundsRun(T), 'round');
+  if (isBroken(T)) return `<h2 class="vh">Broken entry</h2><p class="lede">${tRef(X, 't:state')} is ${esc(plainMarker(T.state.marker))}, so nothing ran.</p>`;
+  if (T.status === 'unfinished') {
+    const code = T.cause && T.cause.code, why = code ? CODE_TEXT[code] || code : T.status_reason || 'unfinished';
+    return `<h2 class="vh">${decIcon('unfinished')} ${code === 'cancelled' ? 'Cancelled' : 'Unfinished'}</h2><p class="lede">${esc(cap(why))}, after ${esc(rounds)}.</p>`;
+  }
+  return `<h2 class="vh">Finished in ${esc(rounds)}</h2>`;
 }
 // What the turn was given: each field of the state's entry, text in full.
 function givenHTML(T) {
@@ -1704,7 +1731,7 @@ function gvSourceHtml(L, n, N, t) {
 function gvDescribe(L, n) {
   const t = L.ov ? L.ov.t : null, N = n.node ? ixOf(L.D).N[n.node] : null;
   const kind = [GV_KIND[n.kind], n.policy ? 'the policy' : ''];
-  if (N && n.kind === 'rule') kind.push(N.form, stepsText(N));
+  if (N && n.kind === 'rule') kind.push(N.form, L.D.policy_node != null ? stepsText(N) : ''); // no policy: no steps to it
   if (N && n.kind !== 'rule' && N.oracle) kind.push((n.kind === 'tool' ? 'from ' : 'asked of ') + N.oracle);
   if (n.kind === 'question') kind.push(QKIND_TEXT[n.qkind] || n.qkind);
   let h = `<div class="muted">${esc([...new Set(kind.filter(Boolean))].join(' · '))}</div>`;
@@ -2294,7 +2321,7 @@ function render() {
 }
 function selectTurn(i) {
   S.turn = i; render();
-  const t = curTurn(); if (t) gvAnnounce(`${turnShort(t, i)}: ${t.sum.dkind === 'decided' ? 'decided ' + decisionWord(t) : decisionWord(t)}`);
+  const t = curTurn(); if (t) gvAnnounce(`${turnShort(t, i)}: ${t.sum.free ? t.sum.decision : t.sum.dkind === 'decided' ? 'decided ' + decisionWord(t) : decisionWord(t)}`);
 }
 // Back out of a turn to its own design, alone.
 function leaveTurn() { const t = curTurn(); if (t && t.design) S.design = cur().designs.indexOf(t.design); S.turn = null; render(); }

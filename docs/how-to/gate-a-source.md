@@ -97,7 +97,7 @@ The driver runs one turn for each of the first three:
 ```text
 'I want my money back, 40 euros': gate refund; refund source asked; decision queue_refund
 'Why was I charged twice?': gate billing; refund source Unasked (when-false: d:intent_label); decision note
-'Hello?': gate Unsure; refund source Unasked (need-undetermined: d:intent_label); decision Unsure(kind=<MarkerKind.unsure: 'Unsure'>, cause=Cause(code=<CauseCode.abstained: 'abstained'>, refs=('q:ask/intent',)))
+'Hello?': gate Unsure; refund source Unasked (need-undetermined: d:intent_label); decision {'kind': 'Unsure', 'cause': {'code': 'abstained', 'refs': ['q:ask/intent']}}
 ```
 
 Read the gated estimate for a value only on the branch where the gate held, so a turn the gate

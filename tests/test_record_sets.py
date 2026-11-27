@@ -101,7 +101,6 @@ def design(**changes: Any) -> Design:
             ),
             "act": Rule("d:act", t.string, act, version="1", reads=["d:out", "d:known"]),
         },
-        "policy": "d:act",
     }
     fields.update(changes)
     return Design(**fields)
@@ -149,7 +148,7 @@ def failures(d: Design) -> list[tuple[int, str]]:
 def test_a_record_set_loads_with_its_candidate_field() -> None:
     assert dict(LOADED._candidate_sets) == {SET: "name"}
     doc = json.loads(LOADED.document)
-    assert doc["format"] == 11
+    assert doc["format"] == 12
     assert doc["rules"]["people"]["candidates"] == "name"
 
 

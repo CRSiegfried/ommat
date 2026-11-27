@@ -212,10 +212,10 @@ _NO_TABLE = "\0"  # no table owns the use
 class _Use:
     """A ref a declaration reads: the declaration, its role and the parsed ref."""
 
-    owner: str  # the declared name, or "" for the policy
+    owner: str  # the declared name
     where: str
     role: str  # need, slot, candidate, label-set, text, read, helper, boundary, grounding,
-    # policy, source-requirement, group
+    # source-requirement, group
     ref: str
     parsed: _ParsedRef
 
@@ -494,14 +494,6 @@ class _Loader:
                 self.fail(7, (sid, ref), f"{where} names {_q(ref)}, which has a field path")
             elif parsed is not None:
                 self.uses.append(_Use(sid, where, "source-requirement", ref, parsed))
-        if isinstance(cast(object, self.d.policy), str):
-            # The policy names a whole estimate, which check 4 holds to a declared d: ref.
-            policy = self.d.policy
-            parsed = self.ref(policy, "the policy", "")
-            if parsed is not None and parsed.fields:
-                self.fail(7, (policy,), f"the policy names {_q(policy)}, which has a field path")
-            elif parsed is not None:
-                self.uses.append(_Use("", "the policy", "policy", policy, parsed))
 
     def table_refs(
         self, owner: str, where: str, inputs: Sequence[Any], rows: Sequence[Any]
@@ -690,9 +682,7 @@ class _Loader:
                 continue
             levels = allowed.get(u.role)
             names = (u.owner, u.ref) if u.owner else (u.ref,)
-            if u.role == "policy" and u.parsed.level != "d":
-                self.fail(4, names, f"the policy names {_q(u.ref)}, which is not a d: ref")
-            elif levels is not None and u.parsed.level not in levels:
+            if levels is not None and u.parsed.level not in levels:
                 shown = " or ".join(f"{level}:" for level in levels)
                 self.fail(4, names, f"{u.where} reads {_q(u.ref)}, which is not at level {shown}")
             elif u.parsed.candidate is not None:
@@ -729,8 +719,7 @@ class _Loader:
 
     def check_4_grounded(self) -> None:
         """Only a grounded rule or table reads ``candidate`` or ``candidate.f``; a table reads a
-        grounded declared ref only when grounded over the same set; the policy names no grounded
-        declared ref."""
+        grounded declared ref only when grounded over the same set."""
         for owner, where, read, role in self.candidate_reads:
             if role == "boundary":
                 continue  # check 9's
@@ -753,8 +742,6 @@ class _Loader:
                     f"{u.where} names {_q(u.ref)}, a grounded declared ref, which no requirement "
                     "names",
                 )
-            elif u.role == "policy":
-                self.fail(4, names, f"the policy names {_q(u.ref)}, a grounded declared ref")
         tables: list[tuple[str, str | None]] = [(r, t.grounded) for r, t in self.tables()]
         for u in self.uses:
             grounding = next((g for owner, g in tables if owner == u.owner), _NO_TABLE)
@@ -2218,7 +2205,6 @@ class _Loader:
             "format": DESIGN_FORMAT,
             "name": d.name,
             "state": d.state,
-            "policy": d.policy,
             "sources": {sid: _source(s) for sid, s in d.sources.items()},
             "rules": {rid: _rule(r) for rid, r in d.rules.items()},
             "parameters": parameters,
@@ -2930,7 +2916,6 @@ def _source(source: Source) -> dict[str, Any]:
         "timeout": source.timeout,
         "payload": source.payload,
         "cost": source.cost,
-        "feedback": source.feedback,
         "grounded": source.grounded,
         "payload_order": order_of(source.payload),
     }
@@ -3104,7 +3089,6 @@ _DOCUMENT = frozenset(
         "format",
         "name",
         "state",
-        "policy",
         "sources",
         "rules",
         "parameters",
@@ -3127,7 +3111,6 @@ _SOURCE = frozenset(
         "timeout",
         "payload",
         "cost",
-        "feedback",
         "grounded",
         "payload_order",
     }
@@ -3272,7 +3255,7 @@ def _member_failures(doc: dict[str, Any]) -> Iterator[tuple[tuple[str, ...], str
     """Every object's missing or extra member, in one traversal order: the document's members,
     then each block's in code-point order of its name, each declaration's in code-point order
     of its own. A table's inputs and rows are objects of §table-notation's members; their
-    values' forms are check 10's, the policy's among them."""
+    values' forms are check 10's."""
     yield from _missing_or_extra(doc, _DOCUMENT, "the document", ())
     for tid, target in _objects(doc.get("targets")):
         yield from _missing_or_extra(target, _TARGET, f"target {_q(tid)}", (tid,))
@@ -3579,7 +3562,6 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
             timeout=s["timeout"],
             payload=_ordered_value(s["payload"], s.get("payload_order")),
             cost=s["cost"],
-            feedback=s["feedback"],
             grounded=s["grounded"],
         )
 
@@ -3611,7 +3593,6 @@ def _build(doc: dict[str, Any], resolved: Mapping[str, Any]) -> Design:
 
     return Design(
         state=doc["state"],
-        policy=doc["policy"],
         sources=block(doc["sources"], source),
         rules=block(doc["rules"], rule),
         parameters=block(

@@ -3,8 +3,8 @@
 record as the only fixture, and report every way the rerun differs.
 
 ``replay`` refuses a wrong argument before it reads the record. Then, in order: a record before
-format 8 is ``wrong-design``, since it holds no policy's entry; one that is not finished, holding
-a ``cause`` item or no entry at the policy's ref, is ``unfinished``; and one whose ``t:state``
+format 8 is ``wrong-design``; one that is not finished, holding
+a ``cause`` item, is ``unfinished``; and one whose ``t:state``
 entry is a marker (a broken entry, §broken-entry) or is missing is ``nothing-to-replay``: each
 returns ``None`` with that finding alone. Otherwise the record's run settings go through decide's
 bounds check, and decide's body runs through its internal entry: the recorded state entry typed
@@ -32,7 +32,7 @@ from typing import Any, cast
 
 from ommat._binding import OracleBinding
 from ommat._canonical import decode, encode
-from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, run_settings, run_sync
+from ommat._decide import EntryRefusal, _bound, _turn, observer_or_none, recorded_run, run_sync
 from ommat._design import LoadedDesign
 from ommat._fixture import Base, FixtureBinding, Keyed, RecordedCalls
 from ommat._ledger import _ITEM_DEPTH, Observer, Record, finished
@@ -110,14 +110,7 @@ async def _replay_with(
     # Every caller checked that the log holds a value at its state entry.
     state = next(item for item in log if item["item"] == "entry" and item["ref"] == _STATE)
     # The settings item is second in every record from the design item on.
-    recorded = cast("dict[str, Any]", log[1]["settings"])
-    run = run_settings(
-        recorded["round_bound"],
-        recorded["timeout"],
-        recorded["budget"],
-        recorded["deadline"],
-        recorded["certificate_cap"],
-    )
+    run = recorded_run(cast("dict[str, Any]", log[1]["settings"]))
     checked = Base(answers if base is None else base, loaded, design=design, asked=asked)
     fixture = FixtureBinding(
         RecordedCalls(answers),

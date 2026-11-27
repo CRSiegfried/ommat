@@ -1,18 +1,19 @@
 """A closed record as the turn history both renderers give: per round the round's source calls
-and their answers, then decide's call, whose arguments are the board, and its result, the
-decision or why the turn is undecided. Each tool name is checked here, so the renderers refuse
+and their answers, then decide's call, whose arguments are the board, and its result, each
+named ref's value or why it is undecided. Each tool name is checked here, so the renderers refuse
 the same names."""
 
 import hashlib
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from ommat._canonical import encode
 from ommat._design import LoadedDesign
-from ommat._ledger import Record, decision_entry
+from ommat._ledger import Record
 from ommat._refs import code_point_sorted, declared_ref, entry_ref
-from ommat._values import type_name
+from ommat._values import POLICY_FORMAT, type_name
 from ommat._views import escalation
 
 _DECIDE = "decide"
@@ -39,54 +40,87 @@ class Call:
 @dataclass(frozen=True, slots=True)
 class History:
     """A record's turn history: its hashes and its groups of calls, each group one assistant
-    turn. No groups for a record before format 8 or one with no entry at the policy's ref."""
+    turn. No groups for a record before format 8 or one with no entry at a named ref."""
 
     record_hash: str
     design_hash: str
     groups: list[list[Call]]
 
 
-def history(record: object, design: object, turn: object = None) -> History:
-    """The record's turn history, its board cut to the policy's reads and every marker when
+def history(record: object, design: object, refs: object, turn: object = None) -> History:
+    """The record's turn history, decide's result each of ``refs``' entries, its board every
+    ``d:`` entry but theirs, cut to the declared refs their rules read and every marker when
     ``design`` is the record's loaded design. Raises ``ValueError`` for a ``record`` that is not
-    exactly a ``Record``, a ``design`` that is neither ``None`` nor exactly a ``LoadedDesign``,
-    or a design whose hash is not the record's."""
+    exactly a ``Record``, a ``design`` that is neither ``None`` nor exactly a ``LoadedDesign``, a
+    design whose hash is not the record's, or ``refs`` as ``check_refs`` refuses them."""
     if type(record) is not Record:
         raise ValueError(f"a renderer takes a Record, not {type_name(record)}")
+    named = check_refs(refs)
     log = record.log
     design_hash = cast(str, log[0]["hash"])
     loaded = _loaded(design, design_hash)
-    decision = decision_entry(log)
-    if decision is None:
+    if log[0].get("format", 0) < POLICY_FORMAT:
         return History(record.record_hash, design_hash, [])
-    reads = None if loaded is None else _policy_reads(loaded, cast(str, log[1]["policy"]))
+    providers = cast("dict[str, str]", log[1]["providers"])
+    for ref in named:
+        if ref not in providers:
+            raise ValueError(f"{ref!r} is no rule's ref in the record's design")
+    entries: dict[str, dict[str, Any]] = {}
+    for item in log:
+        if item["item"] == "entry":
+            entries.setdefault(cast(str, item["ref"]), item)
+    if any(ref not in entries for ref in named):
+        return History(record.record_hash, design_hash, [])
+    reads = None if loaded is None else _reads(loaded, named)
     stem = "om_" + record.record_hash.removeprefix("sha256:")[:24]
     groups = _source_calls(log, stem)
     board = {
-        cast(str, item["ref"]): _compact(item)
-        for item in log
-        if item["item"] == "entry"
-        and item["ref"].startswith("d:")
-        and item["ref"] != log[1]["policy"]
-        and (reads is None or "marker" in item or declared_ref(item["ref"]) in reads)
+        ref: _compact(item)
+        for ref, item in entries.items()
+        if ref.startswith("d:")
+        and ref not in named
+        and (reads is None or "marker" in item or declared_ref(ref) in reads)
     }
-    if "value" in decision:
-        result: dict[str, Any] = {"decision": decision["value"]}
-    else:
-        escalated = cast("dict[str, Any]", escalation(record))
-        root = cast("dict[str, Any]", escalated["root_cause"])
-        result = {
-            "undecided": {
-                "kind": escalated["kind"],
-                "root_cause": root["code"],
-                "refs": list(root["refs"]),
-            }
-        }
+    result = {ref: _result(record, ref, entries[ref]) for ref in named}
     groups.append([Call(f"{stem}_d", _DECIDE, board, result, decide=True)])
     if turn is not None:
         new = turn_stem(record.record_hash, turn)
         groups = [[replace(call, id=new + call.id[_STEM:]) for call in group] for group in groups]
     return History(record.record_hash, design_hash, groups)
+
+
+def check_refs(refs: object) -> tuple[str, ...]:
+    """``refs`` as a tuple, refused unless a non-empty ``list`` or ``tuple`` of distinct ``d:``
+    refs, each exactly a ``str`` naming an entry, with no field path."""
+    if type(refs) is not list and type(refs) is not tuple:
+        raise ValueError(f"refs must be a list or a tuple of d: refs, not {type_name(refs)}")
+    named = tuple(cast("Sequence[object]", refs))
+    if not named:
+        raise ValueError("refs must name at least one d: ref")
+    for ref in named:
+        if type(ref) is not str or not ref.startswith("d:"):
+            raise ValueError(f"refs must hold d: refs, not {ref!r}")
+        if entry_ref(ref) != ref or declared_ref(ref) != ref:
+            raise ValueError(f"{ref!r} is not a rule's ref")
+    if len(set(named)) != len(named):
+        raise ValueError("refs must not repeat a ref")
+    return cast("tuple[str, ...]", named)
+
+
+def _result(record: Record, ref: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """Decide's result for one named ref: ``{"value"}``, or ``{"undecided"}`` holding the
+    marker's kind and its root cause's code and refs."""
+    if "value" in entry:
+        return {"value": entry["value"]}
+    escalated = cast("dict[str, Any]", escalation(record, ref))
+    root = cast("dict[str, Any]", escalated["root_cause"])
+    return {
+        "undecided": {
+            "kind": escalated["kind"],
+            "root_cause": root["code"],
+            "refs": list(root["refs"]),
+        }
+    }
 
 
 _STEM = 27  # "om_" and 24 hex digits
@@ -103,11 +137,11 @@ def _loaded(design: object, design_hash: str) -> LoadedDesign | None:
     return design
 
 
-def _policy_reads(design: LoadedDesign, policy: str) -> frozenset[str]:
-    """The declared refs the policy reads, each field path dropped."""
-    rule = design._providers[policy]  # pyright: ignore[reportPrivateUsage]
-    reads = design._reads[rule]  # pyright: ignore[reportPrivateUsage]
-    return frozenset(declared_ref(entry_ref(ref)) for ref in reads)
+def _reads(design: LoadedDesign, refs: tuple[str, ...]) -> frozenset[str]:
+    """The declared refs the rules of ``refs`` read, each field path dropped."""
+    providers = design._providers  # pyright: ignore[reportPrivateUsage]
+    rules = design._reads  # pyright: ignore[reportPrivateUsage]
+    return frozenset(declared_ref(entry_ref(r)) for ref in refs for r in rules[providers[ref]])
 
 
 def _source_calls(log: list[dict[str, Any]], stem: str) -> list[list[Call]]:

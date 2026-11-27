@@ -19,23 +19,26 @@ def answering(yes: float) -> OracleBinding:
     return fixed({"q:refund": {"yes": yes, "no": round(1 - yes, 2)}})
 
 
+DECISION = "d:policy"
+"""The ref the caller acts on."""
+
 SILENT = fixed({})
 """A stand-in for a model that cannot answer: the refund question comes back ``unsupported``."""
 
 
 def next_model_note(decision: Decision) -> str:
     """The caller's own words for what the turn settled."""
-    escalated = escalation(decision.record)
+    escalated = escalation(decision.record, DECISION)
     if escalated is not None:
         return f"The turn is undecided: {escalated['root_cause']['code']}."
-    return f"The turn decided {decision.estimate}."
+    return f"The turn decided {decision.record.entries[DECISION]['value']}."
 
 
 def main() -> None:
     loaded = load(DESIGN)
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
     print(next_model_note(decision))
-    for message in to_chat_completions(decision.record, loaded):
+    for message in to_chat_completions(decision.record, loaded, refs=[DECISION]):
         if message["role"] == "assistant":
             for call in message["tool_calls"]:
                 print("call", call["id"], call["function"]["name"], call["function"]["arguments"])

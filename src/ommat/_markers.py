@@ -31,7 +31,6 @@ class CauseCode(enum.StrEnum):
     label_collision = "label-collision"
     label_overflow = "label-overflow"
     conflict = "conflict"
-    settled = "settled"
     over_budget = "over-budget"
     invalid_return = "invalid-return"
     design_changed = "design-changed"  # no producer in this engine

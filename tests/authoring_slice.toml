@@ -4,7 +4,6 @@
 module = "authoring_rules"
 version = "1"
 state = "record{text: string}"
-policy = "d:act"
 
 [types]
 op     = 'label{"keep", "move"}'

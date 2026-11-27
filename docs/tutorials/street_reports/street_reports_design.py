@@ -7,8 +7,8 @@ with its own needs: ``details``, when the problem was first noticed, against the
 where it is; and ``timing``, the time of day it was seen. A registry, called through its own
 oracle, lists the places that already have an open work order.
 
-Every label is described but ``other``, so a binding meets both forms. The policy is ``d:route``,
-an ordinary rule read top to bottom; the first row that matches decides:
+Every label is described but ``other``, so a binding meets both forms. The caller acts on
+``d:route``, an ordinary rule read top to bottom; the first row that matches decides:
 
 ====================  ==============================  ==========================================
 ``d:hazard``          the other reads                 decision
@@ -22,7 +22,7 @@ a marker              anything                        that marker: undecided
 ====================  ==============================  ==========================================
 
 A rule that cannot settle abstains with ``Unsure`` naming the answer that fell short, and the
-policy hands that marker on, so the undecided turn says which answer stopped the order.
+route rule hands that marker on, so the undecided route says which answer stopped the order.
 ``d:noticed`` and ``d:seen_at`` are where ``p_null`` matters: at or above its bar the report
 gives no date or time and the order goes out without one; below it, a missing value abstains.
 """
@@ -263,5 +263,4 @@ DESIGN = Design(
     sources=SOURCES,
     rules=RULES,
     parameters=PARAMETERS,
-    policy="d:route",
 )

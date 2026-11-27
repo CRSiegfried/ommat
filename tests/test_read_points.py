@@ -57,7 +57,6 @@ def design(
     return load(
         Design(
             state=state,
-            policy="d:decision",
             sources={k: v for k, v in sources.items() if v.provides},
             rules={"echo": rule, "decision": Rule("d:decision", t.string, decision, version="p")},
             parameters=parameters or {},

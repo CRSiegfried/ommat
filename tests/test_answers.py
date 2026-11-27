@@ -244,7 +244,7 @@ def test_a_cancelled_records_answered_calls_are_rows() -> None:
 
 def test_a_broken_entry_gives_no_rows_and_no_refusal() -> None:
     broken = go(state={}).record
-    assert escalation(broken) is not None
+    assert escalation(broken, "t:state") is not None
     assert answers([broken], LOADED) == []
 
 

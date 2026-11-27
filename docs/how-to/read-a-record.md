@@ -1,8 +1,8 @@
 # Read a record
 
 This guide answers the questions a caller asks of a turn's record: what an entry holds, which
-call answered a question, why a turn is undecided, which rule failed on a turn that decided, and
-what the model answered across many turns. It assumes you have done
+call answered a question, why an entry is undecided, which rule failed beside an entry that holds
+a value, and what the model answered across many turns. It assumes you have done
 [Write your first design](../tutorials/write-a-design.md). The spec's
 [record document](../spec/README.md#the-record-document),
 [escalation view](../spec/README.md#the-escalation-view),
@@ -66,28 +66,30 @@ it:
 
 `fixed` reports no provenance, so the example's `provider` is `None`.
 
-## Route an undecided turn
+## Route an undecided entry
 
-When the decision is a marker, `escalation(record)` gives its kind and cause, the root cause
-found by following `required` causes to the entry they name, whether that root cause is a
-defect, and the record hash. It is `None` for a turn that decided:
+When the entry your code acts on holds a marker, `escalation(record, ref)` at that ref, here
+`d:policy`, gives its kind and cause, the root cause found by following `required`
+causes to the entry they name, whether that root cause is a defect, and the record hash. It is
+`None` when the entry at `ref` holds a value:
 
 ```python
-    escalated = escalation(silent.record)
+    escalated = escalation(silent.record, "d:policy")
     assert escalated is not None
     print("undecided", escalated["kind"], escalated["root_cause"]["code"])
 ```
 
-## Find a rule that failed on a decided turn
+## Find a rule that failed beside a value
 
-A policy that gives a value hides a rule that raised beside it: the escalation is `None`.
+A rule that gives a value hides a rule that raised beside it: the escalation at its ref is `None`.
 `defects(record)` lists every entry whose cause is a defect by the escalation's test, whatever
-the policy gave. In the second turn the order date does not parse, so `d:days_open` raised
-while the turn still decided. The view is `None` for a record written before format 8:
+the entry you act on holds. In the second turn the order date does not parse, so `d:days_open`
+raised while `d:policy` still holds a value. The view is `None` for a record written before format 8:
 
 ```python
     for found in defects(late.record) or []:
-        print("defect", found["ref"], held(found), "estimate", late.estimate)
+        acted = held(late.record.entries["d:policy"])
+        print("defect", found["ref"], held(found), "d:policy", acted)
     print("tracebacks at", sorted(late.record.unhashed["exceptions"]))
 ```
 
@@ -128,7 +130,7 @@ The driver prints:
 ```text
 d:days_open 5
 q:refund {'yes': 0.9, 'no': 0.1} from ['ask'] None
-defect d:days_open Unavailable raised estimate refund_order
+defect d:days_open Unavailable raised d:policy refund_order
 tracebacks at ['7']
 warned DefectWarning ['d:days_open']
 undecided Unavailable unsupported

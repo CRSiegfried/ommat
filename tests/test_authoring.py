@@ -127,7 +127,6 @@ def slice_twin(version: str = "1", move_at: float = 0.7) -> Design:
     part = twin_parts(version, move_at)
     return Design(
         "record{text: string}",
-        "d:act",
         sources=part.sources,
         rules=part.rules,
         parameters=part.parameters,
@@ -149,7 +148,6 @@ def table_twin() -> Design:
     count = Helper("size", "t:state.items")
     return Design(
         STATE,
-        "d:grade",
         rules={
             "grade": Table("d:grade", GRADE, "F", ["t:state.n", "t:state.flag", count], ROWS),
             "grade_again": Table(
@@ -213,12 +211,12 @@ def test_authoring_error_is_a_value_error_naming_a_path() -> None:
 
 def as_slice(document: Mapping[str, Any]) -> dict[str, Any]:
     """A whole document without the members only a design holds."""
-    return {k: v for k, v in document.items() if k not in ("state", "policy", "targets")}
+    return {k: v for k, v in document.items() if k not in ("state", "targets")}
 
 
 def refused(document: Any, expect: str, **kw: Any) -> None:
     # A whole document is read as a design, so its design keys are checked too.
-    read = design_from if isinstance(document, dict) and "policy" in document else slice_from
+    read = design_from if isinstance(document, dict) and "state" in document else slice_from
     with pytest.raises(AuthoringError) as caught:
         read(cast("dict[str, Any]", document), **kw)
     assert expect in str(caught.value), str(caught.value)
@@ -396,7 +394,6 @@ def test_a_written_type_may_not_be_supplied_and_an_unknown_name_is_refused() -> 
 def test_design_from_takes_values_and_types_and_expands_names_in_state() -> None:
     doc = {
         "state": "record{request: $text, tools: $tools}",
-        "policy": "d:act",
         "module": "authoring_rules",
         "version": "1",
         "types": {"text": "string", "tools": {"required": True}},
@@ -686,12 +683,19 @@ def test_only_when_takes_any_values_as_the_engine_does() -> None:
     assert got.sources["s"].requirement == SourceRequirement("d:x", [True, 1])
 
 
-def test_design_from_refuses_a_document_without_state_or_policy() -> None:
-    refused_whole = {"state": "record{}"}
-    with pytest.raises(AuthoringError, match="document: missing key 'policy'"):
-        design_from(refused_whole)
+def test_design_from_refuses_an_unknown_key_and_names_its_path() -> None:
     with pytest.raises(AuthoringError, match="document: unknown key 'rulez'"):
-        design_from({"state": "record{}", "policy": "d:a", "rulez": {}})
+        design_from({"state": "record{}", "rulez": {}})
+
+
+def test_a_sources_feedback_key_is_refused_as_an_unknown_key_with_its_path() -> None:
+    with pytest.raises(AuthoringError, match=r"^sources\.s: unknown key 'feedback'; it may hold "):
+        design_from({"state": "record{}", "sources": {"s": {"feedback": True}}})
+
+
+def test_a_document_that_still_says_policy_is_refused_as_an_unknown_key() -> None:
+    with pytest.raises(AuthoringError, match=r"^document: unknown key 'policy'; it may hold "):
+        design_from({"state": "record{}", "policy": "d:a"})
 
 
 # ---------------------------------------------------------------------------------------------
@@ -707,7 +711,6 @@ def test_a_shape_load_refuses_is_not_refused_by_the_reader() -> None:
             lambda d: d["sources"]["ask_move"].update(only_when={"d:kind": "move"}),
             "requirement's values are not a list",
         ),
-        (lambda d: d.update(policy=3), "the policy is not a string"),
     ]
     for edit, says in cases:
         doc = slice_doc()
@@ -737,7 +740,7 @@ def test_a_misspelt_then_is_refused_by_load_not_by_the_reader() -> None:
         ],
     )
     with pytest.raises(InvalidDesign):
-        load(Design(STATE, "d:grade", rules={"grade": bad}, parameters=dict(twin.parameters)))
+        load(Design(STATE, rules={"grade": bad}, parameters=dict(twin.parameters)))
 
 
 def test_a_row_without_then_is_refused_even_when_its_other_key_is_an_input() -> None:
@@ -780,7 +783,6 @@ def grounded_twin() -> Design:
     pair = [*street, {"name": "lamp", "origin": {"candidate": "d:streets"}}]
     return Design(
         "record{text: string}",
-        "d:pick",
         sources={
             "lamps": Source(
                 {
@@ -925,7 +927,6 @@ BASE_TYPE = 'label{"a", "b"}'
 def small() -> dict[str, Any]:
     return {
         "state": "record{n: integer, m: integer}",
-        "policy": "d:base",
         "version": "1",
         "targets": {"tg:t": {"statement": "S"}},
         "rules": {
@@ -947,7 +948,6 @@ def small_table(provides: str = "d:base", **kw: Any) -> Table:
 def small_twin(**rules_: Table | Rule) -> Design:
     return Design(
         "record{n: integer, m: integer}",
-        "d:base",
         rules={"base": small_table(), **rules_},
         targets={"tg:t": Target("S")},
     )
@@ -1021,7 +1021,6 @@ def test_a_table_may_name_a_target_and_a_provides() -> None:
     assert hash_of(built) == hash_of(
         Design(
             "record{n: integer, m: integer}",
-            "d:base",
             rules={"base": small_table(target="tg:t")},
             targets={"tg:t": Target("S")},
         )
@@ -1035,14 +1034,12 @@ def test_a_function_rule_may_name_its_own_provides_and_a_design_its_name() -> No
     doc: dict[str, Any] = {
         "name": "mine",
         "state": "record{}",
-        "policy": "d:r",
         "rules": {"r": {"fn": "authoring_rules:pick", "type": "string", "provides": "d:r"}},
     }
     built = design_from(doc, version="V")
     assert built.name == "mine"
     twin = Design(
         "record{}",
-        "d:r",
         rules={"r": Rule("d:r", "string", rules.pick, version="V")},
         name="mine",
     )
@@ -1107,7 +1104,7 @@ def test_a_params_pattern_is_case_sensitive() -> None:
 
 def test_design_from_without_state_is_refused() -> None:
     with pytest.raises(AuthoringError, match=r"^document: missing key 'state'"):
-        design_from({"policy": "d:a"})
+        design_from({"name": "a"})
 
 
 def test_an_unknown_key_in_a_question_a_parameter_or_a_target_is_refused() -> None:
@@ -1122,7 +1119,6 @@ def test_an_unknown_key_in_a_question_a_parameter_or_a_target_is_refused() -> No
     refused(
         {
             "state": "record{}",
-            "policy": "d:a",
             "targets": {"tg:x": {"statement": "S", "valuez": 1}},
         },
         "targets.tg:x: unknown key 'valuez'",

@@ -13,8 +13,7 @@ conforming to the question's value type and list flag or ``None``; a label of ``
 withdraws. The refs of one gold key are the turn's refs asking one question for one candidate.
 
 Refused in order, each before any write: ``invalid-record``, each record read in turn;
-``wrong-design``, a record before format 8; ``unfinished``, a record holding a ``cause`` item or no
-entry at the policy's ref;
+``wrong-design``, a record before format 8; ``unfinished``, a record holding a ``cause`` item;
 ``not-found``, then ``invalid-label``, each label in ``labels``' order; ``conflicting-labels``,
 each key in record and log order; ``empty-copy`` when ``copy_from`` holds none of the keys,
 whatever its entries' formats; for each key given no label, in the same order, ``unknown-entry``
@@ -89,7 +88,7 @@ def write_gold_answers(
     for turn, log in logs.items():
         if not finished(log):
             raise EvaluationRefusal(
-                f"turn {turn} is unfinished: it holds a cause item or no entry at the policy's ref",
+                f"turn {turn} is unfinished: it holds a cause item",
                 reason=_R.unfinished,
                 turn=turn,
             )

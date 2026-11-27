@@ -15,7 +15,7 @@ the sources that name none are one batch through ``default``.
 
 Three ends share one path: at the round bound after the rule phase, and at the budget or the
 deadline in the source phase with no rule phase first, the pending sources are ``Unasked`` and
-the sorter is drained: the drain fires every unfired rule, the policy among them. The budget is
+the sorter is drained: the drain fires every unfired rule. The budget is
 tested before a frontier is asked, then the deadline, which is tested again when the frontier's
 task group closes; under replay the recorded cut stands in for the clock.
 

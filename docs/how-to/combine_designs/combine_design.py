@@ -1,5 +1,5 @@
 """The how-to's designs: a selector that picks a workflow, an email workflow that reads the
-selector's estimates through two ports, and the combined design under a top policy."""
+selector's estimates through two ports, and the combined design with a rule that reads both."""
 
 from ommat import Design, Helper, Input, Parameter, Question, Source, Table, Text
 from ommat import types as t
@@ -45,7 +45,6 @@ SELECTOR = Design(
         "urgent": picked("q:urgent", YES_NO, "selector"),
     },
     parameters=bars("selector"),
-    policy="d:route",
 )
 
 # --- the email workflow, with its ports ---------------------------------------------------
@@ -77,7 +76,6 @@ EMAIL = Part(
             ),
         },
         parameters=bars("email"),
-        policy="d:email/outcome",
     ),
     ports=EMAIL_PORTS,
 )
@@ -95,7 +93,7 @@ ACT = Table(
 DESIGN = combine(
     Part(SELECTOR),
     EMAIL,
+    Part(Design(STATE, rules={"act": ACT})),
     bind={"d:email/chosen": CHOSEN, "d:email/urgent": "d:urgent"},
-    policy=ACT,
     name="assistant",
 )

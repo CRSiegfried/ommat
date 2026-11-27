@@ -69,7 +69,6 @@ def design(pick: Source | None = None, **sources: Source) -> Design:
         state=t.record(candidates=t.list_(t.string)),
         sources={"finder": finder, "pick": asks() if pick is None else pick, **sources},
         rules={"act": ACT},
-        policy="d:act",
     )
 
 
@@ -219,7 +218,6 @@ def rule_set(function: Any) -> Design:
             ),
             "act": ACT,
         },
-        policy=base.policy,
     )
 
 
@@ -455,7 +453,6 @@ def versioned(function: Any, version: str) -> Design:
             ),
             "act": ACT,
         },
-        policy=d.policy,
     )
 
 
@@ -596,7 +593,6 @@ def lint_design(*, pick_reads_other: bool = False) -> Design:
             "sender": Rule("d:sender", t.string, picked, version="1", reads=["q:sender"]),
             "act": Rule("d:act", t.string, mark_if_named, version="1", reads=["d:sender"]),
         },
-        policy="d:act",
     )
 
 
@@ -606,7 +602,7 @@ SETS = {SET: [[], ["ana@x.org"], ["none"]]}
 def test_the_dead_lint_answers_a_candidate_valued_question_over_its_rendered_labels() -> None:
     from ommat.helpers import dead_questions
 
-    report = dead_questions(load(lint_design()), values=SETS)
+    report = dead_questions(load(lint_design()), ["d:act"], values=SETS)
     sender = report["questions"]["q:sender"]
     assert sender["status"] == "live"
     witness = sender["witness"]
@@ -624,13 +620,13 @@ def test_the_dead_lint_writes_no_invalid_answer_for_a_candidate_valued_question(
     seen: list[Any] = []
     real = dead._run
 
-    def spy(loaded: Any, point: Any, keys: Any, runner: Any) -> Any:
-        out = real(loaded, point, keys, runner)
+    def spy(loaded: Any, named: Any, point: Any, keys: Any, runner: Any) -> Any:
+        out = real(loaded, named, point, keys, runner)
         seen.append(out[1])
         return out
 
     monkeypatch.setattr(dead, "_run", spy)
-    dead.dead_questions(load(lint_design()), values=SETS)
+    dead.dead_questions(load(lint_design()), ["d:act"], values=SETS)
     codes = {e["cause"]["code"] for e in (s.get("q:sender", {}) for s in seen) if "cause" in e}
     assert "invalid-answer" not in codes
     assert {"when-false", "label-collision"} <= codes
@@ -640,8 +636,8 @@ def test_a_candidate_valued_question_that_changes_nothing_is_not_on_grid() -> No
     from ommat.helpers import dead_questions
 
     d = lint_design()
-    d = Design(name=d.name, state=d.state, sources=d.sources, rules={"act": ACT}, policy="d:act")
-    report = dead_questions(load(d), values=SETS)
+    d = Design(name=d.name, state=d.state, sources=d.sources, rules={"act": ACT})
+    report = dead_questions(load(d), ["d:act"], values=SETS)
     assert report["questions"]["q:sender"] == {"status": "not-on-grid", "witness": None}
 
 
@@ -649,7 +645,7 @@ def test_a_candidate_set_with_no_values_is_unfilled_before_any_run() -> None:
     from ommat.helpers import dead_questions
 
     with pytest.raises(ValueError, match=SET):
-        dead_questions(load(lint_design()))
+        dead_questions(load(lint_design()), ["d:act"])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -781,9 +777,10 @@ def test_the_dead_lint_takes_the_first_candidate_at_its_position() -> None:
         state=d.state,
         sources={**d.sources, "pick": Source({**pick.provides, "q:sender": q})},
         rules=d.rules,
-        policy=d.policy,
     )
-    assert dead_questions(load(d), values=SETS)["questions"]["q:sender"]["status"] == "live"
+    assert (
+        dead_questions(load(d), ["d:act"], values=SETS)["questions"]["q:sender"]["status"] == "live"
+    )
 
 
 @pytest.mark.parametrize("kind", ["score", "noul"])
@@ -796,7 +793,6 @@ def test_only_a_choice_may_be_candidate_valued(kind: str) -> None:
         state=t.record(),
         sources={"ask": Source({"q:which": q})},
         rules={"act": ACT},
-        policy="d:act",
     )
     with pytest.raises(InvalidDesign, match="only a choice may have"):
         load(d)
@@ -831,7 +827,6 @@ def routed(*rows: Any, inputs: Any = None) -> Design:
             "bar": Parameter(t.number(0, 1), 0.6),
             "margin": Parameter(t.number(0, 1), 0.2),
         },
-        policy="d:act",
     )
 
 
@@ -886,7 +881,6 @@ def test_the_dead_lint_reaches_a_fixed_label_row() -> None:
         sources=d.sources,
         rules={**d.rules, "act": Rule("d:act", t.string, by_route, version="1", reads=["d:route"])},
         parameters=d.parameters,
-        policy=d.policy,
     )
-    report = dead_questions(load(d), values={**SETS, "t:state.candidates": [[]]})
+    report = dead_questions(load(d), ["d:act"], values={**SETS, "t:state.candidates": [[]]})
     assert report["questions"]["q:sender"]["status"] == "live"

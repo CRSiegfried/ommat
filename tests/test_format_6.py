@@ -24,7 +24,7 @@ def test_check_11_refuses_a_stored_format_6_design_naming_its_format() -> None:
     with pytest.raises(InvalidDesign) as raised:
         load((FORMAT_6 / "design.json").read_bytes())
     assert [f.check for f in raised.value.failures] == [11]
-    assert "the document's format 6 is not 11" in str(raised.value)
+    assert "the document's format 6 is not 12" in str(raised.value)
 
 
 def test_a_stored_format_6_record_reads_to_its_own_hash() -> None:
@@ -36,8 +36,8 @@ def test_a_stored_format_6_record_reads_to_its_own_hash() -> None:
 
 def test_a_stored_format_6_record_has_no_view() -> None:
     record = read_record((FORMAT_6 / "record.json").read_bytes())
-    assert escalation(record) is None
-    assert to_chat_completions(record) == []
+    assert escalation(record, "d:route") is None
+    assert to_chat_completions(record, refs=["d:route"]) == []
 
 
 def test_a_stored_format_6_record_replays_as_the_wrong_design() -> None:

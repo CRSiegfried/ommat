@@ -42,13 +42,14 @@ def main() -> None:
     print("q:refund", asked["value"]["probabilities"], "from", call["sources"], call["provider"])
 
     for found in defects(late.record) or []:
-        print("defect", found["ref"], held(found), "estimate", late.estimate)
+        acted = held(late.record.entries["d:policy"])
+        print("defect", found["ref"], held(found), "d:policy", acted)
     print("tracebacks at", sorted(late.record.unhashed["exceptions"]))
     (warned,) = caught
     assert isinstance(warned.message, DefectWarning)
     print("warned", warned.category.__name__, [d["ref"] for d in warned.message.defects])
 
-    escalated = escalation(silent.record)
+    escalated = escalation(silent.record, "d:policy")
     assert escalated is not None
     print("undecided", escalated["kind"], escalated["root_cause"]["code"])
 

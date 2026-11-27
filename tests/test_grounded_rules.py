@@ -132,7 +132,6 @@ def design(**changes: Any) -> Design:
             "summary": Rule("d:summary", t.string, summary, version="1", reads=[FIT]),
             "act": Rule("d:act", t.string, act, version="1", reads=[FIT, "d:summary"]),
         },
-        "policy": "d:act",
     }
     fields.update(changes)
     return Design(**fields)
@@ -409,7 +408,7 @@ def test_a_helper_given_a_candidate_read_names_the_sets_ref() -> None:
     assert item["derivation"] == [{"helper": "unique", "refs": [SET], "rested_on": [SET]}]
 
 
-def test_the_policy_reads_a_grounded_rules_declared_ref_as_a_dict() -> None:
+def test_the_act_rule_reads_a_grounded_rules_declared_ref_as_a_dict() -> None:
     record = decided()
     assert entries(record)["d:act"]["value"] == "fit: {'Bo': 'Bo:yes', 'Ana': 'Ana:yes'}"
 

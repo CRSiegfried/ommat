@@ -88,7 +88,8 @@ def main() -> int:
     for path in (e2e.CLASSIFIER_LOG, e2e.EXTRACTOR_LOG, e2e.RECORD):
         if path.exists():
             problems += scrub(path, credentials)
-    print("decision:", decision.estimate)
+    entry = decision.record.entries["d:route"]
+    print("decision:", entry["value"] if "value" in entry else entry["marker"])
     calls = json.loads(decision.record.document)["unhashed"]["calls"]
     for index, item in enumerate(decision.record.log):
         if item["item"] == "call":

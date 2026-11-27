@@ -10,11 +10,9 @@ import pytest
 import street_reports_design as works
 from ommat import (
     CallResult,
-    Cause,
     Decision,
     LoadedDesign,
     SourceCall,
-    Unsure,
     decide_sync,
     load,
     replay_sync,
@@ -180,7 +178,7 @@ def test_the_document_reloads_to_the_same_hash_and_bytes(loaded: LoadedDesign) -
 
 def test_every_function_component_imports_from_the_design_module(loaded: LoadedDesign) -> None:
     document = json.loads(loaded.document)
-    assert document["policy"] == "d:route"
+    assert "policy" not in document
     components = list(document["rules"].values())
     assert len(components) == len(works.RULES)
     for component in components:
@@ -239,7 +237,7 @@ def test_its_lints_pass(loaded: LoadedDesign) -> None:
         "t:state.filed_on": [FILED_ON],
         "t:state.report": [LIGHT],
     }
-    report = dead_questions(loaded, values=inputs)
+    report = dead_questions(loaded, ["d:route"], values=inputs)
     assert {ref: q["status"] for ref, q in report["questions"].items()} == dict.fromkeys(
         QUESTIONS, "live"
     )
@@ -249,7 +247,10 @@ def test_its_lints_pass(loaded: LoadedDesign) -> None:
 
 
 def decided(decision: Decision) -> object:
-    return decision.estimate
+    entry = decision.record.entries["d:route"]
+    if "value" in entry:
+        return entry["value"]
+    return entry["marker"]
 
 
 def test_a_settled_report_opens_a_work_order(loaded: LoadedDesign) -> None:
@@ -269,7 +270,10 @@ def test_a_report_with_no_date_opens_an_order_without_one(loaded: LoadedDesign) 
 def test_a_missing_date_the_model_thinks_is_there_abstains(loaded: LoadedDesign) -> None:
     report, given, open_orders = TURNS["open-work-order"]
     decision = decide(loaded, report, given() | {"q:details/noticed": none_found(0.1)}, open_orders)
-    assert decided(decision) == Unsure(Cause("abstained", ["q:details/noticed"]))
+    assert decided(decision) == {
+        "kind": "Unsure",
+        "cause": {"code": "abstained", "refs": ["q:details/noticed"]},
+    }
 
 
 def test_a_hazard_sends_a_crew(loaded: LoadedDesign) -> None:
@@ -280,7 +284,10 @@ def test_an_abstaining_rule_leaves_the_turn_undecided_naming_its_answer(
     loaded: LoadedDesign,
 ) -> None:
     decision = run(loaded, "undecided-abstained")
-    assert decided(decision) == Unsure(Cause("abstained", ["q:details/places"]))
+    assert decided(decision) == {
+        "kind": "Unsure",
+        "cause": {"code": "abstained", "refs": ["q:details/places"]},
+    }
     marker = entry(decision, "d:places")["marker"]
     assert marker["cause"] == {"code": "abstained", "refs": ["q:details/places"]}
 

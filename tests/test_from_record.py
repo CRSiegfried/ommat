@@ -35,7 +35,6 @@ from ommat import (
 from ommat import types as t
 from ommat._fixture import Base, _differing
 from ommat._interpret import MAX_WARNINGS, _record_form
-from ommat._ledger import decision_entry
 from scripted import Scripted, raising, returns
 from test_decide import (
     ASK,
@@ -88,10 +87,10 @@ def warned(record: Record, sid: str) -> list[str]:
 
 
 def decision(record: Record) -> dict[str, Any]:
-    """The policy's entry, which the record holds on every finished turn."""
-    entry = decision_entry(record.log)
-    assert entry is not None
-    return entry
+    """Each ``d:`` entry the record holds, by ref: what the turn's rules wrote."""
+    written = {r: e for r, e in entries(record).items() if r.startswith("d:")}
+    assert written
+    return written
 
 
 # ---------------------------------------------------------------------------------------------

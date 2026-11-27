@@ -76,10 +76,9 @@ def src_hash(fn: Callable[..., Any]) -> str:
 def test_a_minimal_design_writes_every_member_with_its_default() -> None:
     loaded = load(minimal())
     assert decode(loaded.document) == {
-        "format": 11,
+        "format": 12,
         "name": None,
         "state": "record{}",
-        "policy": "d:decision",
         "sources": {},
         "rules": {
             "decision": {
@@ -147,7 +146,6 @@ def test_a_source_and_its_questions() -> None:
         "timeout": 30,
         "payload": {"model": "m", "tags": ["a", "b"], "mood": "calm"},
         "cost": 2,
-        "feedback": True,
         "grounded": None,
         # The payload's members as declared, model, tags, mood, by their canonical positions.
         "payload_order": {"0": [0, 2, 1]},
@@ -164,13 +162,12 @@ def test_a_source_and_its_questions() -> None:
         "timeout": None,
         "payload": None,
         "cost": 0,
-        "feedback": False,
         "grounded": None,
         "payload_order": {},
     }
 
 
-def test_function_rules_and_the_policy_member() -> None:
+def test_function_rules_and_no_policy_member() -> None:
     doc = decode(load(full()).document)
     assert doc["rules"]["route"] == {
         "form": "function",
@@ -187,7 +184,7 @@ def test_function_rules_and_the_policy_member() -> None:
         "version": "r2",
         "source": src_hash(designs.route),
     }
-    assert doc["policy"] == "d:act"
+    assert "policy" not in doc
     assert doc["rules"]["act"] == {
         "form": "function",
         "provides": "d:act",
@@ -901,7 +898,6 @@ FORMS: list[Design] = [
     minimal(types=None),
     minimal(groups=None),
     minimal(name=1),
-    minimal(policy=1),
     minimal(sources={"s": 1}),
     minimal(sources={1: Source({})}),
     minimal(rules={"r": 1}),
@@ -928,7 +924,6 @@ FORMS: list[Design] = [
     src(cost=True),
     src(cost=NAN),
     src(cost=2**60),
-    src(feedback=1),
     src(grounded=1),
     # A question and its text
     asks("maybe", Text("Is it?")),
@@ -1153,77 +1148,25 @@ def test_a_refused_form_gates_check_5() -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# The policy ref
+# A design names no policy
 
 
-def test_the_policy_names_a_declared_rule_and_is_written_as_its_ref() -> None:
-    loaded = load(minimal())
-    assert loaded._design.policy == "d:decision"
-    assert decode(loaded.document)["policy"] == "d:decision"
-    other = minimal(
-        policy="d:other",
-        rules={"other": rule("other", outputs=t.string), "decision": designs.DECISION},
-    )
-    assert decode(load(other).document)["policy"] == "d:other"
-    assert load(other).design_hash != loaded.design_hash
+def test_a_design_takes_no_policy() -> None:
+    with pytest.raises(TypeError):
+        Design(t.record(), policy="d:decision")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        Design(t.record(), "d:decision")  # type: ignore[misc]
 
 
-def test_a_policy_table_is_an_ordinary_rule() -> None:
-    act = Table("d:act", t.label("go", "stop"), "F", [], [["go"]])
-    loaded = load(minimal(policy="d:act", rules={"act": act}))
-    assert decode(loaded.document)["rules"]["act"]["form"] == "table"
-    assert loaded._providers["d:act"] == "act"
-
-
-@pytest.mark.parametrize("policy", [None, 1, ["d:decision"], b"d:decision"])
-def test_check_10_a_policy_that_is_no_string(policy: object) -> None:
-    (failure,) = only(minimal(policy=policy), 10)  # type: ignore[arg-type]
-    assert failure.names == ("policy",)
-    assert failure.message == "the policy is not a string"
-
-
-def test_check_3_a_policy_naming_no_declared_rule_has_no_provider() -> None:
-    (failure,) = only(minimal(policy="d:none"), 3)
-    assert failure.names == ("d:none",)
-    assert failure.message == 'the policy names "d:none", which has no provider'
-
-
-@pytest.mark.parametrize("policy", ["decision", "d:", "x:decision", "d:Decision"])
-def test_check_7_a_policy_that_is_not_a_ref(policy: str) -> None:
-    (failure,) = only(minimal(policy=policy), 7)
-    assert failure.names == (policy,)
-
-
-def test_check_7_a_policy_with_a_field_path() -> None:
-    (failure,) = only(minimal(policy="d:decision.f"), 7)
-    assert failure.names == ("d:decision.f",)
-    assert failure.message == 'the policy names "d:decision.f", which has a field path'
-
-
-def test_check_4_a_policy_with_a_bracket() -> None:
-    (failure,) = only(minimal(policy='d:decision["a"]'), 4)
-    assert failure.names == ('d:decision["a"]',)
-    assert "the policy names" in failure.message
-    assert "a grounded ref" in failure.message
-
-
-def test_check_4_a_policy_naming_a_grounded_declared_ref() -> None:
-    finder = Rule("d:g", t.string, designs.route, version="1", reads=["candidate"], grounded="t:s")
-    design = minimal(policy="d:g", rules={"g": finder}, sources={"set": SET})
-    (failure,) = only(design, 4)
-    assert failure.names == ("d:g",)
-    assert failure.message == 'the policy names "d:g", a grounded declared ref'
-
-
-@pytest.mark.parametrize("policy", ["t:state", "t:lookup", "q:intent/tone"])
-def test_check_4_a_policy_at_the_wrong_level(policy: str) -> None:
-    (failure,) = only(full(policy=policy), 4)
-    assert failure.names == (policy,)
-    assert failure.message == f'the policy names "{policy}", which is not a d: ref'
+def test_a_design_whose_rules_feed_nothing_loads_and_its_document_names_no_policy() -> None:
+    loaded = load(minimal(rules={"other": rule("other", outputs=t.string)}))
+    assert "policy" not in decode(loaded.document)
+    assert set(loaded._providers) >= {"d:decision", "d:other"}
+    assert load(Design(t.record())).design_hash
 
 
 def read_by(kind: str) -> Design:
-    """``minimal`` whose policy ``d:decision`` is read by a ``kind`` of its design."""
+    """``minimal`` whose rule's ``d:decision`` is read by a ``kind`` of its design."""
     ref = "d:decision"
     if kind == "rule":
         return with_rule(minimal(), "r", rule("r", reads=(ref,)))
@@ -1242,7 +1185,7 @@ READER = {"need": "s", "rule": "r", "slot": "s", "source-requirement": "s", "tab
 
 
 @pytest.mark.parametrize("kind", sorted(READER))
-def test_the_policy_s_ref_may_be_read_like_any_d_ref(kind: str) -> None:
+def test_a_rules_ref_may_be_read_by_every_kind_of_reader(kind: str) -> None:
     loaded = load(read_by(kind))
     assert loaded._graph[READER[kind]] == frozenset({"decision"})
 
@@ -1251,13 +1194,13 @@ def reading_itself(r: Any) -> bool:
     return bool(r.read("d:decision"))
 
 
-def test_a_policy_reading_its_own_ref_is_a_cycle() -> None:
+def test_a_rule_reading_its_own_ref_is_a_cycle() -> None:
     itself = Rule("d:decision", t.boolean, reading_itself, version="1", reads=["d:decision"])
     found = refused(minimal(rules={"decision": itself}))
     assert [f.check for f in found] == [5]
 
 
-def test_a_group_may_name_the_policy() -> None:
+def test_a_group_may_name_a_rules_ref() -> None:
     load(minimal(groups={"g": Group(["d:decision"], ["convergent"])}))
 
 
@@ -1892,7 +1835,7 @@ def test_check_10_refuses_a_declared_type_over_the_bound_through_its_definitions
     assert failure.names == ("t:state",)
     assert failure.message == f"the state declaration: {_OVER}"
     # At the bound it passes: the state is its own spelling with big's in place of the name,
-    # and the policy's ``boolean`` is summed with it.
+    # and ``d:decision``'s ``boolean`` is summed with it.
     at_bound = _long(_BOUND - len("record{a: }") - len("boolean"))
     load(minimal(types={"big": at_bound}, state="record{a: big}"))
 
@@ -1918,13 +1861,13 @@ def test_check_10_names_each_declaration_whose_type_is_over_the_bound(where: str
 
 def _summed(state_field: str) -> Design:
     """A design whose shape trees' types sum to 2^20 code points with ``state_field`` ``ab``:
-    the state, ``t:x``, the answer's six and the policy's ``number``."""
+    the state, ``t:x``, the answer's six and ``d:decision``'s ``number``."""
     big = _long((_BOUND - len("record{ab: }") - len("answer") - len("number")) // 2)
-    policy_rule = dataclasses.replace(designs.DECISION, outputs=t.number())
+    decision_rule = dataclasses.replace(designs.DECISION, outputs=t.number())
     design = minimal(
         types={"big": big},
         state=f"record{{{state_field}: big}}",
-        rules={"decision": policy_rule},
+        rules={"decision": decision_rule},
     )
     return with_source(
         with_source(design, "s", Source({"t:x": "big"})), "a", Source({"q:ask": question()})
@@ -2228,16 +2171,16 @@ def a_list(r: Any) -> list[str]:
 
 
 CANDIDATE_POLICY = Rule("d:decision", t.list_(t.string), a_list, version="1", candidates=True)
-"""A policy that is a candidate set, not grounded."""
+"""A rule whose estimate is a candidate set, not grounded."""
 
 
-def test_a_policy_that_is_a_candidate_set_loads() -> None:
+def test_a_rule_that_is_a_candidate_set_loads() -> None:
     loaded = load(minimal(rules={"decision": CANDIDATE_POLICY}))
     assert loaded._candidate_sets == {"d:decision": None}
     assert loaded._providers["d:decision"] == "decision"
 
 
-def test_a_source_grounded_over_the_policy_loads() -> None:
+def test_a_source_grounded_over_a_rules_candidate_set_loads() -> None:
     asked = Source(
         {"q:x": question("Is {c}?", slot("c", candidate="d:decision"))}, grounded="d:decision"
     )
@@ -2394,7 +2337,6 @@ def test_with_parameters_refuses_a_value_by_the_two_leaf_clauses_before_any_load
 
 _TABLED = Design(
     state=t.record(n=t.integer(), x=t.number()),
-    policy="d:show",
     sources={
         "ask": Source(
             {

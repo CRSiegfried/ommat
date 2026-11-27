@@ -104,14 +104,13 @@ def design(**changes: Any) -> Design:
             "dates": Rule("d:dates", t.list_(t.string), dates, version="1", reads=["q:dates"]),
             "reply": Rule("d:reply", t.string, reply, version="1", reads=["d:amount", "d:dates"]),
         },
-        "policy": "d:reply",
         "parameters": {
             "amount/null": Parameter(t.number(0, 1), 0.5),
             "amount/big": Parameter(t.number(), 100),
         },
     }
     fields.update(changes)
-    return minimal(**fields)
+    return minimal(**fields, alone=True)
 
 
 def with_question(ref: str, q: Any, **changes: Any) -> Design:

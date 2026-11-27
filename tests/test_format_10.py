@@ -43,7 +43,6 @@ def route(r: Any) -> Any:
 
 DESIGN = Design(
     state=t.record(subject=t.string),
-    policy="d:act",
     name="format 10",
     sources={
         "ask": Source(
@@ -74,7 +73,7 @@ def test_check_11_refuses_the_stored_format_9_design_naming_its_format() -> None
     with pytest.raises(InvalidDesign) as raised:
         load(data)
     assert [f.check for f in raised.value.failures] == [11]
-    assert "the document's format 9 is not 11, the one this engine reads" in str(raised.value)
+    assert "the document's format 9 is not 12, the one this engine reads" in str(raised.value)
 
 
 def test_a_stored_format_8_record_reads_to_its_own_hash() -> None:
@@ -114,10 +113,11 @@ def test_a_stored_format_7_record_reads_to_its_bytes_and_its_hash(path: str) -> 
     assert record.record_hash == FORMAT_7_RECORDS[path]
 
 
-def test_a_stored_format_8_record_gives_its_decision() -> None:
+def test_a_stored_format_8_record_gives_its_policy_s_value() -> None:
     record = read_record((FORMAT_10 / "record.json").read_bytes())
-    assert escalation(record) is None
-    assert json.loads(to_chat_completions(record)[-1]["content"]) == {"decision": "archive"}
+    assert escalation(record, "d:act") is None
+    found = to_chat_completions(record, refs=["d:act"])
+    assert json.loads(found[-1]["content"]) == {"d:act": {"value": "archive"}}
 
 
 def test_a_stored_format_8_record_replays_under_todays_design_as_a_design_mismatch() -> None:
@@ -133,7 +133,7 @@ def test_a_stored_format_8_record_replays_under_todays_design_as_a_design_mismat
         {"kind": FindingKind.helpers_mismatch, "recorded": 3, "replayed": 4},
     ]
     assert rerun is not None
-    assert rerun.log[0]["format"] == 10
+    assert rerun.log[0]["format"] == 11
     entries = [i for i in record.log if i["item"] == "entry"]
     assert [i for i in rerun.log if i["item"] == "entry"] == entries
 

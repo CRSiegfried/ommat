@@ -16,6 +16,7 @@ from ledger_logs import (
     ANSWER,
     BROKEN,
     BROKEN_8,
+    BROKEN_11,
     BROKEN_PLAN,
     CANCEL,
     CANCELLED,
@@ -23,16 +24,19 @@ from ledger_logs import (
     DESIGN,
     DESIGN_8,
     DESIGN_9,
+    DESIGN_11,
     ENTRY_CAUSE,
     LOGS,
     NORMAL,
     NORMAL_8,
     NORMAL_9,
+    NORMAL_11,
     PLAN,
     QUESTIONS,
     SETTINGS,
     SETTINGS_8,
     SETTINGS_9,
+    SETTINGS_11,
     STATE,
     VERDICT,
     call,
@@ -47,8 +51,7 @@ from ommat._canonical import encode, hash_value
 from ommat._ledger import (
     Ledger,
     _LedgerError,
-    decision_bytes,
-    decision_entry,
+    entry_bytes,
     finished,
     record_prefix_hash,
 )
@@ -169,6 +172,7 @@ def test_a_cause_item_after_a_whole_round_is_the_last_item() -> None:
 # ---------------------------------------------------------------------------------------------
 # Rounds
 
+# These logs are format 1's, whose rules, as every format's before 11, admit a certificate item.
 CERT = {"item": "certificate", "round": 2}
 
 
@@ -1824,42 +1828,106 @@ def test_nothing_comes_after_a_broken_entrys_policy_entry(item: dict[str, Any]) 
     refused(LOGS["broken-8"], item, "nothing comes after a broken entry's policy entry")
 
 
+@pytest.mark.parametrize("fmt", [8, 9, 10])
+def test_a_format_8_to_10_record_lacking_the_policy_is_an_invalid_record(fmt: int) -> None:
+    log = fresh(LOGS[f"normal-{fmt}"])
+    del log[1]["policy"]
+    with pytest.raises(InvalidRecord, match="has no 'policy' member"):
+        read_record(rehashed({"log": log, "unhashed": {}}))
+
+
+def test_a_format_11_settings_item_names_no_policy() -> None:
+    ledger_of(NORMAL_11)
+    assert "policy" not in SETTINGS_11
+    refused(
+        [DESIGN_11],
+        with_member(SETTINGS_11, policy="d:route"),
+        "holds policy, which a format-11 record does not",
+    )
+
+
+def test_a_format_11_record_holding_the_policy_is_an_invalid_record() -> None:
+    log = fresh(NORMAL_11)
+    log[1]["policy"] = "d:route"
+    with pytest.raises(InvalidRecord, match="holds policy, which a format-11 record does not"):
+        read_record(rehashed({"log": log, "unhashed": {}}))
+
+
+SETTLED = entry(
+    "d:route", 2, None, marker={"kind": "Unasked", "cause": {"code": "settled", "refs": []}}
+)
+
+
+def test_a_format_11_settings_item_holds_no_certificate_cap() -> None:
+    capped = with_member(SETTINGS_11, settings={**SETTINGS_11["settings"], "certificate_cap": None})
+    refused([DESIGN_11], capped, "hold certificate_cap, which a format-11 record does not")
+    uncapped = with_member(SETTINGS_8, settings=SETTINGS_11["settings"])
+    refused([DESIGN_8], uncapped, "have no 'certificate_cap' member")
+    assert "certificate_cap" in SETTINGS_8["settings"]
+
+
+def test_a_format_11_record_holds_no_certificate_item() -> None:
+    certificate = {"item": "certificate", "round": 2}
+    refused(NORMAL_11[:7], certificate, "a format-11 record holds no certificate item")
+    assert ledger_of([*NORMAL_8[:7], certificate]).close().log[7] == certificate
+
+
+def test_settled_is_a_cause_code_before_format_11_alone() -> None:
+    refused(NORMAL_11[:9], SETTLED, "code 'settled' is not in format 11's cause set")
+    assert ledger_of([*NORMAL_8[:9], SETTLED]).close().log[9]["marker"] == SETTLED["marker"]
+
+
+def test_a_format_11_broken_entry_ends_at_its_t_state_entry() -> None:
+    record = ledger_of(BROKEN_11).close()
+    assert [i["item"] for i in record.log] == ["design", "settings", "entry"]
+    assert record.cause == ENTRY_CAUSE["cause"]
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        entry("d:route", 0, None, marker=copy.deepcopy(ENTRY_CAUSE)),
+        entry("d:tags", 0, None, 1),
+        round_item(0),
+        call_8(1, "fetch_mail"),
+        CANCEL,
+    ],
+    ids=["the old policy entry", "an entry", "a round", "a call", "a cause"],
+)
+def test_nothing_comes_after_a_format_11_marker_state(item: dict[str, Any]) -> None:
+    refused(BROKEN_11, item, "nothing comes after a t:state entry holding a marker")
+
+
 # ---------------------------------------------------------------------------------------------
-# The decision in a read log
+# Reading a log
 
 
-def test_a_log_before_format_8_holds_no_decision() -> None:
-    for log in (NORMAL, BROKEN, CANCELLED):
-        assert decision_entry(log) is None
-        assert decision_bytes(log) is None
-
-
-def test_a_cancelled_log_with_no_policy_entry_holds_no_decision() -> None:
-    assert decision_entry(CANCELLED_8) is None
-    assert decision_bytes(CANCELLED_8) is None
-    assert decision_entry([]) is None
-    assert decision_entry([DESIGN_8]) is None
-
-
-def test_a_turn_is_finished_when_it_holds_the_policy_s_entry_and_no_cause_item() -> None:
+def test_a_turn_is_finished_when_it_holds_no_cause_item() -> None:
     assert finished(NORMAL_8)
-    assert finished(BROKEN_8)  # a broken entry ends at the policy's entry
-    assert not finished(CANCELLED_8)  # a cause item, and no policy's entry
-    assert not finished([*NORMAL_8, CANCEL])  # a cause item after the policy's entry
-    assert not finished(NORMAL_8[:9])  # cut short before the policy's entry
-    assert not finished(BROKEN_8[:3])
-    for log in (NORMAL, BROKEN, CANCELLED, []):  # before format 8: no policy's entry
-        assert not finished(log)
+    assert finished(BROKEN_8)
+    assert not finished(CANCELLED_8)
+    assert not finished(CANCELLED)  # at any format
+    assert not finished([*NORMAL_8, CANCEL])
+    # A log its observer cut short holds no cause item, wherever it ends.
+    for log in (NORMAL_8[:9], NORMAL_8[:3], BROKEN_8[:3], NORMAL, BROKEN, []):
+        assert finished(log)
 
 
-def test_the_decision_is_the_entry_at_the_settings_policy() -> None:
-    assert decision_entry(NORMAL_8) is NORMAL_8[9]
-    assert decision_bytes(NORMAL_8) == encode({"value": "archive"})
-    assert decision_entry(BROKEN_8) is BROKEN_8[3]
-    assert decision_bytes(BROKEN_8) == encode({"marker": ENTRY_CAUSE})
+def test_entry_bytes_are_the_value_or_marker_of_the_entry_at_a_ref() -> None:
+    assert entry_bytes(NORMAL_8, "d:route") == encode({"value": "archive"})
+    assert entry_bytes(BROKEN_8, "t:state") == encode({"marker": ENTRY_CAUSE})
+    assert entry_bytes(BROKEN_8, "d:route") == encode({"marker": ENTRY_CAUSE})
+    assert entry_bytes(NORMAL, "d:route") == encode({"value": "archive"})  # before format 8 too
+    for log, ref in (
+        (NORMAL_8, "d:none"),
+        (NORMAL_8[:9], "d:route"),
+        (BROKEN_8, "q:spam"),
+        ([], "d:route"),
+    ):
+        assert entry_bytes(log, ref) is None
 
 
-def test_two_markers_differing_in_their_cause_code_or_refs_are_two_decisions() -> None:
+def test_two_markers_differing_in_their_cause_code_or_refs_give_two_entry_bytes() -> None:
     def with_marker(marker: dict[str, Any]) -> list[dict[str, Any]]:
         log = fresh(BROKEN_8)
         log[3]["marker"] = marker
@@ -1867,10 +1935,10 @@ def test_two_markers_differing_in_their_cause_code_or_refs_are_two_decisions() -
 
     codes = with_marker(entry_marker("raised"))
     refs = with_marker(entry_marker("invalid-return", ["codec"]))
-    found = {decision_bytes(log) for log in (BROKEN_8, codes, refs)}
+    found = {entry_bytes(log, "d:route") for log in (BROKEN_8, codes, refs)}
     assert len(found) == 3
-    same = decision_bytes(with_marker(fresh([ENTRY_CAUSE])[0]))
-    assert same == decision_bytes(BROKEN_8)
+    same = entry_bytes(with_marker(fresh([ENTRY_CAUSE])[0]), "d:route")
+    assert same == entry_bytes(BROKEN_8, "d:route")
 
 
 USAGE_CALL = {"start": "2026-10-20T00:00:00Z", "latency": 0.25, "attempts": None}
@@ -1998,7 +2066,10 @@ def test_a_format_7_grounded_plan_reads_to_its_own_hash() -> None:
 
 def test_a_format_7_grounded_plan_has_no_view() -> None:
     record = read_log(grounded_plan_log())
-    assert (escalation(record), to_chat_completions(record)) == (None, [])
+    assert (escalation(record, "d:route"), to_chat_completions(record, refs=["d:route"])) == (
+        None,
+        [],
+    )
 
 
 def test_the_ledger_refuses_a_set_naming_no_set() -> None:
@@ -2095,7 +2166,6 @@ def test_logged_equals_a_records_own_entry_over_twelve_ordered_objects() -> None
                 )
             },
             parameters={},
-            policy="d:act",
         )
     )
     record = decide_sync(loaded, {"text": "x"}, {}).record

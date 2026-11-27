@@ -8,6 +8,7 @@ candidate-valued question, and a report of plain data."""
 import asyncio
 import copy
 import json
+import re
 from typing import Any, cast
 
 import pytest
@@ -117,7 +118,6 @@ def design(policy: Rule | Table | None = None, **changes: Any) -> Design:
     rules = changes.pop("rules", {"go": GO})
     fields: dict[str, Any] = {
         "state": t.record(),
-        "policy": "d:act",
         "sources": {"ask": ASK, "late": LATE},
         "rules": {**rules, "act": act(by_go, "d:go") if policy is None else policy},
         "parameters": {
@@ -132,6 +132,8 @@ def design(policy: Rule | Table | None = None, **changes: Any) -> Design:
 LOADED = load(design())
 GATED = load(design(sources={"ask": ASK, "late": LATE, "more": MORE}))
 MARKED = load(design(policy=act(by_known, "d:known"), rules={"go": GO, "known": KNOWN}))
+REFS = ["d:act"]
+"""The ref every trial is judged by unless a test names others."""
 
 WARMISH = {"warm": 0.6, "cold": 0.4}
 
@@ -197,7 +199,7 @@ def p_yes(value: Any) -> object:
 
 def test_each_question_is_reported_with_its_status_and_witness() -> None:
     record = turn()
-    report = question_reach_sync([record], LOADED)
+    report = question_reach_sync([record], LOADED, refs=REFS)
     assert report["records"] == [record.record_hash]
     assert report["narrowed"] == []
     assert report["questions"] == {
@@ -217,7 +219,7 @@ def test_each_question_is_reported_with_its_status_and_witness() -> None:
 def test_a_trial_whose_replay_asks_outside_the_record_is_not_determined(
     tried: list[Any],
 ) -> None:
-    report = question_reach_sync([turn(loaded=GATED)], GATED)
+    report = question_reach_sync([turn(loaded=GATED)], GATED, refs=REFS)
     assert report["questions"]["q:tone"] == {"status": "not-determined", "witness": None}
     tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
     # warm at 1 leaves the gate shut; cold at 1 opens it on a source never called
@@ -232,7 +234,7 @@ def test_a_reaching_trial_beats_an_undetermined_one() -> None:
             rules={"go": GO, "known": KNOWN},
         )
     )
-    report = question_reach_sync([turn(loaded=loaded)], loaded)
+    report = question_reach_sync([turn(loaded=loaded)], loaded, refs=REFS)
     assert report["questions"]["q:tone"]["status"] == "live"  # the marker reaches
 
 
@@ -250,7 +252,7 @@ def test_a_trial_outside_the_record_is_undetermined_though_its_decision_changes(
             rules={"cold": Rule("d:cold", t.boolean, cold, version="1", reads=["q:tone"])},
         )
     )
-    report = question_reach_sync([turn(loaded=loaded)], loaded)
+    report = question_reach_sync([turn(loaded=loaded)], loaded, refs=REFS)
     tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
     # cold at 1 opens the gate on a source never called and changes the decision
     assert "stale-question" in tone[1]
@@ -264,12 +266,12 @@ def leaning(r: Any) -> bool:
     return not isinstance(answer, Undetermined) and answer.probabilities["yes"] >= 0.5
 
 
-def test_a_trial_changing_the_policys_rows_alone_does_not_reach(tried: list[Any]) -> None:
-    """The decision is compared by ``decision_bytes``: the entry's value, not its rows."""
+def test_a_trial_changing_the_act_tables_rows_alone_does_not_reach(tried: list[Any]) -> None:
+    """A named entry is compared by ``entry_bytes``: its value, not its rows."""
     table = Table("d:act", ACT, "F", ["d:yes"], [[True, "proceed"], [False, "proceed"]])
     lean = Rule("d:yes", t.boolean, leaning, version="1", reads=["q:go"])
     loaded = load(design(policy=table, rules={"go": GO, "yes": lean}))
-    report = question_reach_sync([turn(loaded=loaded)], loaded)
+    report = question_reach_sync([turn(loaded=loaded)], loaded, refs=REFS)
     go_trials = [kinds for ref, _, kinds in tried if ref == "q:go"]
     assert any("entry d:act" in kinds for kinds in go_trials)  # its rows changed
     assert report["questions"]["q:go"] == {"status": "no-change-found", "witness": None}
@@ -279,12 +281,12 @@ def refs_by_go(r: Any) -> object:
     return Unavailable(Cause("abstained", ["d:go"] if r.read("d:go") is True else []))
 
 
-def test_a_trial_changing_only_the_policys_marker_refs_is_live() -> None:
-    """The decision is compared by ``decision_bytes``: a marker's cause refs count."""
+def test_a_trial_changing_only_the_act_rules_marker_refs_is_live() -> None:
+    """A named entry is compared by ``entry_bytes``: a marker's cause refs count."""
     loaded = load(design(policy=act(refs_by_go, "d:go")))
     record = turn(loaded=loaded)
     assert entry(record.log, "d:act")["marker"]["cause"] == {"code": "abstained", "refs": ["d:go"]}
-    report = question_reach_sync([record], loaded)
+    report = question_reach_sync([record], loaded, refs=REFS)
     assert report["questions"]["q:go"]["status"] == "live"
     assert report["questions"]["q:tone"]["status"] == "no-change-found"
 
@@ -298,7 +300,7 @@ BOTH = load(design(policy=act(by_both, "d:go", "d:known"), rules={"go": GO, "kno
 
 def test_the_witness_is_the_second_record_when_only_it_reaches(tried: list[Any]) -> None:
     shut, open_ = turn(p_yes=0.0, loaded=BOTH), turn(p_yes=0.95, loaded=BOTH)
-    report = question_reach_sync([shut, open_], BOTH)
+    report = question_reach_sync([shut, open_], BOTH, refs=REFS)
     tone = [kinds for ref, _, kinds in tried if ref == "q:tone"]
     assert len(tone) == 6  # three in each record
     assert not any("entry d:act" in kinds for kinds in tone[:3])  # q:go holds the first
@@ -308,7 +310,7 @@ def test_the_witness_is_the_second_record_when_only_it_reaches(tried: list[Any])
 
 
 def test_no_record_asks_nothing_and_runs_no_trial() -> None:
-    report = question_reach_sync([], LOADED)
+    report = question_reach_sync([], LOADED, refs=REFS)
     assert report["records"] == []
     assert report["trials"] == 0
     assert {q: v["status"] for q, v in report["questions"].items()} == dict.fromkeys(
@@ -321,7 +323,7 @@ def test_an_entry_of_a_failed_call_runs_no_trial(tried: list[Any]) -> None:
 
     replies = Scripted({"ask": Failed(Cause("raised", ["q:go", "q:tone"])), "late": returns({})})
     record = decide_sync(LOADED, {}, {"default": replies}).record
-    report = question_reach_sync([record], LOADED)
+    report = question_reach_sync([record], LOADED, refs=REFS)
     assert report["trials"] == 0
     assert tried == []
     assert report["questions"]["q:go"]["status"] == "never-asked"
@@ -334,7 +336,7 @@ def test_an_entry_of_a_failed_call_runs_no_trial(tried: list[Any]) -> None:
 def test_each_point_but_the_recorded_one_is_tried_in_order_the_marker_last(
     tried: list[Any],
 ) -> None:
-    report = question_reach_sync([turn(p_yes=0.0)], LOADED)
+    report = question_reach_sync([turn(p_yes=0.0)], LOADED, refs=REFS)
     go_tried = [value for ref, value, _ in tried if ref == "q:go"]
     # q:go's nine axis points, the bar, margin and their mirrors, the gaps and the ends, less
     # the recorded 0.0, then the marker
@@ -350,7 +352,7 @@ def test_each_point_but_the_recorded_one_is_tried_in_order_the_marker_last(
 
 
 def test_a_recorded_value_off_the_points_skips_nothing(tried: list[Any]) -> None:
-    report = question_reach_sync([turn(p_yes=0.95)], LOADED)
+    report = question_reach_sync([turn(p_yes=0.95)], LOADED, refs=REFS)
     assert len([ref for ref, _, _ in tried if ref == "q:go"]) == 10
     assert report["trials"] == 10 + 3
 
@@ -359,7 +361,7 @@ def test_a_recorded_marker_skips_the_marker_trial(tried: list[Any]) -> None:
     refused = Unavailable(Cause("refused", ["q:tone"]))
     record = turn(tone=refused, loaded=MARKED)
     assert entry(record.log, "q:tone")["marker"]["cause"]["code"] == "refused"
-    report = question_reach_sync([record], MARKED)
+    report = question_reach_sync([record], MARKED, refs=REFS)
     assert [v for ref, v, _ in tried if ref == "q:tone"] == [
         {"warm": 1.0, "cold": 0.0},
         {"warm": 0.0, "cold": 1.0},
@@ -369,7 +371,7 @@ def test_a_recorded_marker_skips_the_marker_trial(tried: list[Any]) -> None:
 
 
 def test_the_marker_trial_names_the_entry_and_its_witness_is_the_marker_form() -> None:
-    report = question_reach_sync([turn(loaded=MARKED)], MARKED)
+    report = question_reach_sync([turn(loaded=MARKED)], MARKED, refs=REFS)
     assert report["questions"]["q:tone"] == {
         "status": "live",
         "witness": {
@@ -382,13 +384,13 @@ def test_the_marker_trial_names_the_entry_and_its_witness_is_the_marker_form() -
 
 def test_the_witness_is_the_first_reaching_trial_by_record_then_point() -> None:
     low, high = turn(p_yes=0.0), turn(p_yes=0.95)
-    first = question_reach_sync([low, high], LOADED)["questions"]["q:go"]["witness"]
+    first = question_reach_sync([low, high], LOADED, refs=REFS)["questions"]["q:go"]["witness"]
     # from 0.0, holding, the first point that proceeds is the bar
     assert (first["record"], first["value"]["probabilities"]) == (
         low.record_hash,
         {"yes": 0.8, "no": 0.2},
     )
-    second = question_reach_sync([high, low], LOADED)["questions"]["q:go"]["witness"]
+    second = question_reach_sync([high, low], LOADED, refs=REFS)["questions"]["q:go"]["witness"]
     assert (second["record"], second["value"]["probabilities"]) == (
         high.record_hash,
         {"yes": 0.0, "no": 1.0},
@@ -397,8 +399,8 @@ def test_the_witness_is_the_first_reaching_trial_by_record_then_point() -> None:
 
 def test_the_trials_count_every_record_given_a_repeat_included() -> None:
     record = turn()
-    once = question_reach_sync([record], LOADED)
-    twice = question_reach_sync([record, record], LOADED)
+    once = question_reach_sync([record], LOADED, refs=REFS)
+    twice = question_reach_sync([record, record], LOADED, refs=REFS)
     assert twice["trials"] == 2 * once["trials"]
     assert twice["records"] == [record.record_hash] * 2
 
@@ -411,7 +413,7 @@ def test_a_per_candidate_question_is_tried_through_each_grounded_entry_in_log_or
     tried: list[Any],
 ) -> None:
     record = grounded.decided()
-    report = question_reach_sync([record], grounded.LOADED)
+    report = question_reach_sync([record], grounded.LOADED, refs=REFS)
     assert list(report["questions"]) == [grounded.OUT]
     refs = [ref for ref, _, _ in tried]
     ana, bo = f'{grounded.OUT}["Ana"]', f'{grounded.OUT}["Bo"]'
@@ -444,11 +446,10 @@ def test_a_candidate_valued_question_is_tried_at_each_fixed_label_then_the_first
             "who": Rule("d:who", t.string, who, version="1", reads=["q:sender"]),
             "reply": Rule("d:reply", t.string, by_who, version="1", reads=["d:who"]),
         },
-        policy="d:reply",
     )
     loaded = load(d)
     record = label_sets.run(["ann", "bo"], label_sets.Model(top="bo"), d=d)
-    report = question_reach_sync([record], loaded)
+    report = question_reach_sync([record], loaded, refs=["d:reply"])
     labels = ["none", "several", "ann", "bo"]
     assert [v for ref, v, _ in tried if ref == "q:sender"][:3] == [
         dict(zip(labels, [1.0, 0.0, 0.0, 0.0], strict=True)),
@@ -470,7 +471,7 @@ def test_a_candidate_valued_question_is_tried_at_each_fixed_label_then_the_first
 def test_a_candidate_valued_answer_recorded_at_a_point_is_skipped(tried: list[Any]) -> None:
     answers = {"q:sender": {"none": 0.0, "several": 0.0, "ann": 1.0, "bo": 0.0}}
     record = label_sets.run(["ann", "bo"], label_sets.Model(answers=answers))
-    question_reach_sync([record], load(label_sets.design()))
+    question_reach_sync([record], load(label_sets.design()), refs=REFS)
     sender = [v for ref, v, _ in tried if ref == "q:sender"]
     assert len(sender) == 3
     assert isinstance(sender[-1], Unavailable)
@@ -485,14 +486,16 @@ def test_a_candidate_valued_question_over_an_empty_set_is_never_asked(tried: lis
     # rendered a candidate and no trial is ever made without one.
     record = label_sets.run([])
     assert entry(record.log, "q:sender")["call"] is None
-    report = question_reach_sync([record], load(label_sets.design()))
+    report = question_reach_sync([record], load(label_sets.design()), refs=REFS)
     assert [ref for ref, _, _ in tried] == ["q:other"] * 3
     assert report["trials"] == 3
     assert report["questions"]["q:sender"] == {"status": "never-asked", "witness": None}
 
 
 def test_values_narrows_a_label_question_with_no_grid_entry(tried: list[Any]) -> None:
-    report = question_reach_sync([turn()], LOADED, values={"q:tone": ["cold"], "q:late": ["no"]})
+    report = question_reach_sync(
+        [turn()], LOADED, refs=REFS, values={"q:tone": ["cold"], "q:late": ["no"]}
+    )
     assert report["narrowed"] == ["q:late", "q:tone"]
     tone = [v for ref, v, _ in tried if ref == "q:tone"]
     assert tone[0] == {"warm": 0.0, "cold": 1.0}
@@ -517,15 +520,17 @@ def test_a_slip_in_values_is_a_value_error_before_any_record_is_read(
     values: dict[str, Any], message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        question_reach_sync([b"not json"], LOADED, values=values)
+        question_reach_sync([b"not json"], LOADED, refs=REFS, values=values)
 
 
 def test_an_unfilled_question_is_a_value_error_and_an_extraction_value_is_checked() -> None:
     loaded = load(extraction.design())
     with pytest.raises(ValueError, match=r'unfilled: "q:dates"'):
-        question_reach_sync([b"not json"], loaded)
+        question_reach_sync([b"not json"], loaded, refs=["d:reply"])
     with pytest.raises(ValueError, match="does not conform"):
-        question_reach_sync([b"not json"], loaded, values={"q:dates": [["not a date"]]})
+        question_reach_sync(
+            [b"not json"], loaded, refs=["d:reply"], values={"q:dates": [["not a date"]]}
+        )
     record = decide_sync(
         loaded,
         extraction.STATE,
@@ -535,14 +540,76 @@ def test_an_unfilled_question_is_a_value_error_and_an_extraction_value_is_checke
             )
         },
     ).record
-    report = question_reach_sync([record], loaded, values={"q:dates": [["2024-03-01"]]})
+    report = question_reach_sync(
+        [record], loaded, refs=["d:reply"], values={"q:dates": [["2024-03-01"]]}
+    )
     assert report["questions"]["q:dates"]["status"] == "live"
     assert report["questions"]["q:dates"]["witness"]["value"]["value"] == ["2024-03-01"]
 
 
 def test_values_that_is_not_a_mapping_is_a_type_error() -> None:
     with pytest.raises(TypeError):
-        question_reach_sync([], LOADED, values=["q:tone"])  # type: ignore[arg-type]
+        question_reach_sync([], LOADED, refs=REFS, values=["q:tone"])  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------------------------
+# refs
+
+
+def test_a_question_reaches_when_it_changes_any_entry_named() -> None:
+    record = turn(loaded=MARKED)
+    go_only = question_reach_sync([record], MARKED, refs=["d:go"])["questions"]
+    assert (go_only["q:go"]["status"], go_only["q:tone"]["status"]) == ("live", "no-change-found")
+    known_only = question_reach_sync([record], MARKED, refs=["d:known"])["questions"]
+    assert (known_only["q:go"]["status"], known_only["q:tone"]["status"]) == (
+        "no-change-found",
+        "live",
+    )
+    both = question_reach_sync([record], MARKED, refs=("d:go", "d:known"))["questions"]
+    assert (both["q:go"]["status"], both["q:tone"]["status"]) == ("live", "live")
+    assert (
+        both == question_reach_sync([record], MARKED, refs=["d:known", "d:go", "d:go"])["questions"]
+    )
+
+
+@pytest.mark.parametrize("refs", ["d:act", {"d:act"}, None, iter(["d:act"])])
+@pytest.mark.usefixtures("no_trial")
+def test_refs_that_are_not_a_list_or_tuple_are_a_type_error(refs: Any) -> None:
+    with pytest.raises(TypeError, match="not a list or tuple of refs"):
+        question_reach_sync([b"not json"], LOADED, refs=refs)
+
+
+@pytest.mark.parametrize(
+    ("loaded", "refs", "message"),
+    [
+        (LOADED, [], "refs is empty"),
+        (LOADED, ["d:nope"], '"d:nope", which is not a whole d: ref a rule provides'),
+        (LOADED, ["q:go"], '"q:go", which is not a whole d: ref'),
+        (LOADED, ["t:state"], '"t:state", which is not a whole d: ref'),
+        (LOADED, ["d:act.x"], '"d:act.x", which is not a whole d: ref'),
+        (LOADED, ['d:act["x"]'], "which is not a whole d: ref"),
+        (LOADED, ["act"], '"act", which is not a whole d: ref'),
+        (LOADED, [5], "refs holds 5, which is not a ref"),
+        (grounded.LOADED, [grounded.FIT], "which is not a whole d: ref a rule provides"),
+    ],
+)
+@pytest.mark.usefixtures("no_trial")
+def test_refs_naming_anything_but_a_whole_d_ref_a_rule_provides_is_a_value_error(
+    loaded: Any, refs: Any, message: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(message)):
+        question_reach_sync([b"not json"], loaded, refs=refs)
+
+
+@pytest.mark.usefixtures("no_trial")
+def test_every_ref_slip_is_named_in_one_line_before_values_are_checked() -> None:
+    refs: Any = ["d:go", "q:go", 5]
+    with pytest.raises(ValueError, match="refs names") as raised:
+        question_reach_sync([b"not json"], LOADED, refs=refs, values={"q:x": [1]})
+    assert str(raised.value) == (
+        'refs names "q:go", which is not a whole d: ref a rule provides; '
+        "refs holds 5, which is not a ref"
+    )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -551,9 +618,17 @@ def test_values_that_is_not_a_mapping_is_a_type_error() -> None:
 
 def unfinished() -> Record:
     def cut(doc: dict[str, Any]) -> None:
-        """The log with its policy's entry dropped."""
-        policy = doc["log"][1]["policy"]
-        doc["log"] = [i for i in doc["log"] if not (i["item"] == "entry" and i["ref"] == policy)]
+        """The log ending at a cancellation, which leaves the turn unfinished."""
+        doc["log"].append({"item": "cause", "cause": {"code": "cancelled", "refs": []}})
+
+    return edited(turn(), cut)
+
+
+def dropped() -> Record:
+    def cut(doc: dict[str, Any]) -> None:
+        """The log with its ``d:act`` entry dropped, as an observer that ended the turn before
+        ``d:act`` fired leaves it: no ``cause`` item, so finished."""
+        doc["log"] = [i for i in doc["log"] if not (i["item"] == "entry" and i["ref"] == "d:act")]
 
     return edited(turn(), cut)
 
@@ -578,10 +653,11 @@ def test_each_record_is_refused_with_its_turn_before_any_trial() -> None:
         (broken(), R.nothing_to_replay),
         (live(), R.wrong_design),
         (drifted(), R.baseline_differs),
+        (dropped(), R.baseline_differs),
     ):
-        exc = refusal([turn(), given], LOADED)
+        exc = refusal([turn(), given], LOADED, refs=REFS)
         assert (exc.reason, exc.turn) == (reason, given.record_hash)
-    exc = refusal([turn(), b"not json"], LOADED)
+    exc = refusal([turn(), b"not json"], LOADED, refs=REFS)
     assert (exc.reason, exc.turn) == (R.invalid_record, None)
     assert type(exc.error) is InvalidRecord
 
@@ -589,11 +665,11 @@ def test_each_record_is_refused_with_its_turn_before_any_trial() -> None:
 @pytest.mark.usefixtures("no_trial")
 def test_the_records_are_refused_one_by_one_in_list_order() -> None:
     # Each record is read and refused in full before the next is read.
-    exc = refusal([drifted(), b"not json"], LOADED)
+    exc = refusal([drifted(), b"not json"], LOADED, refs=REFS)
     assert exc.reason is R.baseline_differs
-    exc = refusal([unfinished(), broken()], LOADED)
+    exc = refusal([unfinished(), broken()], LOADED, refs=REFS)
     assert exc.reason is R.unfinished
-    exc = refusal([broken(), unfinished()], LOADED)
+    exc = refusal([broken(), unfinished()], LOADED, refs=REFS)
     assert exc.reason is R.nothing_to_replay
 
 
@@ -609,18 +685,18 @@ def test_a_record_differing_only_in_helpers_mismatch_is_tried(
         return rerun, [*found, {"kind": FindingKind.helpers_mismatch}], pinned
 
     monkeypatch.setattr(_diff, "_replayed", noted)
-    assert question_reach_sync([turn()], LOADED)["questions"]["q:go"]["status"] == "live"
+    assert question_reach_sync([turn()], LOADED, refs=REFS)["questions"]["q:go"]["status"] == "live"
 
 
 def test_a_loaded_not_exactly_a_loaded_design_is_refused_first() -> None:
     with pytest.raises(EntryRefusal, match="exactly a LoadedDesign"):
-        question_reach_sync([b"x"], object())  # type: ignore[arg-type]
+        question_reach_sync([b"x"], object(), refs=REFS)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("records", ["abc", b"abc", {"a": 1}, 5])
 def test_records_that_are_not_an_iterable_of_records_are_a_type_error(records: Any) -> None:
     with pytest.raises(TypeError):
-        question_reach_sync(records, LOADED)
+        question_reach_sync(records, LOADED, refs=REFS)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -632,24 +708,24 @@ def test_the_output_is_plain_data_reaching_no_record_and_no_input_changes() -> N
     parsed = json.loads(record.document)
     kept = copy.deepcopy(parsed)
     before = (record.document, MARKED.document)
-    result = question_reach_sync([record], MARKED)
+    result = question_reach_sync([record], MARKED, refs=REFS)
     assert records_in(result) == []
     assert json.loads(json.dumps(result)) == result
     assert copy.deepcopy(result) == result
-    assert question_reach_sync([parsed], MARKED) == result
+    assert question_reach_sync([parsed], MARKED, refs=REFS) == result
     assert (parsed, (record.document, MARKED.document)) == (kept, before)
 
 
 def test_the_job_is_awaitable_and_equals_its_sync_twin() -> None:
     record = turn()
-    awaited = asyncio.run(question_reach([record], LOADED))
-    assert awaited == question_reach_sync([record], LOADED)
+    awaited = asyncio.run(question_reach([record], LOADED, refs=REFS))
+    assert awaited == question_reach_sync([record], LOADED, refs=REFS)
 
 
 def test_the_sync_twin_inside_a_running_loop_raises_before_doing_anything() -> None:
     async def main() -> None:
         with pytest.raises(RuntimeError, match="question_reach_sync was called inside a running"):
-            question_reach_sync(object(), object())  # type: ignore[arg-type]
+            question_reach_sync(object(), object(), refs=REFS)  # type: ignore[arg-type]
 
     asyncio.run(main())
 
@@ -667,7 +743,7 @@ def test_witness_and_trial_values_are_copies(monkeypatch: pytest.MonkeyPatch) ->
         return out
 
     monkeypatch.setattr(_reach, "_applied", holding)
-    report = question_reach_sync([parsed], MARKED)
+    report = question_reach_sync([parsed], MARKED, refs=REFS)
     expected = copy.deepcopy(report)
     assert report["questions"]["q:tone"]["status"] == "live"
     for value, item in held:  # spoil every trial's value and written entry
@@ -677,8 +753,8 @@ def test_witness_and_trial_values_are_copies(monkeypatch: pytest.MonkeyPatch) ->
     assert report == expected  # the witness shares nothing with a trial
     report["questions"]["q:tone"]["witness"]["value"]["cause"]["refs"].append("q:go")
     report["records"].clear()
-    assert question_reach_sync([parsed], MARKED) == expected  # nor with a later run
-    assert question_reach_sync([record], MARKED) == expected
+    assert question_reach_sync([parsed], MARKED, refs=REFS) == expected  # nor with a later run
+    assert question_reach_sync([record], MARKED, refs=REFS) == expected
     assert parsed == kept
 
 
@@ -698,7 +774,7 @@ def test_a_trial_value_spoiled_by_its_trial_reaches_no_later_trial(
         return out
 
     monkeypatch.setattr(_reach, "_applied", spoiling)
-    report = question_reach_sync([record, record], LOADED)
+    report = question_reach_sync([record, record], LOADED, refs=REFS)
     half = len(given) // 2
     assert repr(given[:half]) == repr(given[half:])
     assert report["trials"] == len(given)
@@ -707,10 +783,10 @@ def test_a_trial_value_spoiled_by_its_trial_reaches_no_later_trial(
 def test_every_unfilled_question_is_named_in_one_line_as_the_lints_name_them() -> None:
     loaded = load(extraction.plain())
     with pytest.raises(ValueError, match="unfilled") as raised:
-        question_reach_sync([b"not json"], loaded)
+        question_reach_sync([b"not json"], loaded, refs=["d:reply"])
     assert str(raised.value) == 'unfilled: "q:amount", "q:dates"; give each a list in values'
 
 
 def test_a_values_key_that_is_not_a_string_is_a_value_error() -> None:
     with pytest.raises(ValueError, match="the values key 5 is not a string"):
-        question_reach_sync([b"not json"], LOADED, values={5: [1]})  # type: ignore[dict-item]
+        question_reach_sync([b"not json"], LOADED, refs=REFS, values={5: [1]})  # type: ignore[dict-item]

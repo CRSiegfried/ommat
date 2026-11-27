@@ -3164,7 +3164,7 @@ def test_a_frontier_over_budget_in_round_1_is_not_asked_and_the_drain_fires_behi
     ],
     ids=["round bound", "budget", "deadline"],
 )
-def test_the_drain_fires_the_policy_once_at_the_round_bound_the_budget_and_the_deadline(
+def test_the_drain_fires_the_act_rule_once_at_the_round_bound_the_budget_and_the_deadline(
     limits: dict[str, Any], replies: dict[str, object], code: str
 ) -> None:
     sources = {
@@ -3172,7 +3172,7 @@ def test_the_drain_fires_the_policy_once_at_the_round_bound_the_budget_and_the_d
         "second": Source({"t:b": t.string}, needs=["t:a"], cost=1),
     }
     act = rule("act", lambda r: r.require("t:b"), "t:b", outputs=t.string)
-    loaded = make(sources, {"act": act}, policy="d:act")
+    loaded = make(sources, {"act": act}, alone=True)
     binding = Scripted(replies)
     record = turn(loaded, {"default": binding}, STATE, **limits)
     (policy,) = [i for i in record.log if i["item"] == "entry" and i["ref"] == "d:act"]

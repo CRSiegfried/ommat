@@ -1,7 +1,6 @@
 # pyright: reportPrivateUsage=false
-"""The switching-value job: for one parameter leaf, the values at which each entry, the
-policy's among them, changes, found by replaying the turn under each value's design
-(§switching-value).
+"""The switching-value job: for one parameter leaf, the values at which each entry changes,
+found by replaying the turn under each value's design (§switching-value).
 
 A value's design is the loaded design's document with the leaf, or one key of a numeric mapping
 leaf, replaced, loaded with the caller's ``functions``, or ``loaded``'s own callables when ``None``;
@@ -27,12 +26,13 @@ value, or the same role measure of its answer. A mapping leaf's key is compared 
 names the leaf whole or that key's path, ``leaf.key``. Only an ``int`` or ``float`` is one. A
 ``boolean`` or ``label`` leaf is tried at every value.
 
-``entries`` lists the policy's entry, and each other ref whose entry some run changed in value,
-or in marker kind and cause code, a run asking a stale question included, and each one that
-carries the leaf; a result compares those alone, so a change of ``rows``, ``derivation`` or
-``round`` is none. The policy's entry is the decision, listed always, so a decision that never
-switches shows as one class beside any ``not-loading`` ones, and compared by ``decision_bytes``,
-a marker's cause refs included (§decide-output). A result is ``"carries"`` when at some value
+``entries`` lists each ref whose entry some run changed in value, or in marker kind and cause
+code, a run asking a stale question included, and each one that carries the leaf; a result
+compares those alone, so a change of ``rows``, ``derivation``, ``round`` or a cause's refs is
+none. A value whose design does not load changes every ``d:`` entry the record holds, as a run
+writing no entry there would, so each is listed and its ``not-loading`` class shows beside the
+others; a ref listed by nothing else gives one class beside them. A result is ``"carries"``
+when at some value
 tried, read from that run's rows whatever its value, a table row giving its output, under ``F``
 the first matched, outputs ``Param`` of the leaf; else it gets its classes, and for a numeric
 leaf the switching values between adjacent classes, each given once, and the slacks. Between two
@@ -70,18 +70,18 @@ from typing import Any, cast
 
 from ommat._axis import numeric_axis
 from ommat._canonical import decode, encode
-from ommat._decide import _bound, _opening, run_settings
+from ommat._decide import _bound, _opening, recorded_run
 from ommat._design import InvalidDesign, LoadedDesign
 from ommat._fixture import Base, FixtureBinding, RecordedCalls
 from ommat._interpret import Reuse, interpret
-from ommat._ledger import _logged, decision_bytes
+from ommat._ledger import _logged
 from ommat._load import load, with_parameters
 from ommat._read_view import _ViewError, is_candidate_read, walk
 from ommat._refs import _RefError, code_point_sorted, key_path, parse_ref
 from ommat._replay import _cut
 from ommat._typed import decoded, typed
 from ommat._types import Label, MappingOf, Nullable, RecordOf, Scalar, Type, _numeric, render
-from ommat._values import MAX_DOCUMENT_DEPTH, MAX_INTEGER, type_name
+from ommat._values import MAX_INTEGER, type_name
 from ommat.evaluation._diff import _run_sync, baseline, outcome, own_functions
 from ommat.evaluation._edit import _checked, _declared, _designs
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
@@ -99,7 +99,7 @@ _Result = dict[str, Any] | str
 _Compared = dict[Fraction, set[str]]  # each compared value to the components comparing it
 
 KIND = "switching-value"
-FORMAT = 2
+FORMAT = 3
 _NOT_DETERMINED = "not-determined"
 _STATE = "t:state"
 _DEFAULT = "default"
@@ -115,17 +115,15 @@ async def switching_values(
 ) -> dict[str, Any]:
     """The switching values of the leaf at ``path`` for ``record``, per entry, written to
     ``results`` under the record hash, the design hash and ``path``; the entry written. A key
-    the store holds is refused ``held-key`` before any replay: a caller rerunning a record
-    reads the held entry with ``results.lookup("switching-value", key)``, the key being the one
-    the refusal carries."""
+    the store holds is refused before any replay, ``unknown-entry`` when the entry held is of
+    another format than ``FORMAT``, else ``held-key``: a caller rerunning a record reads the
+    held entry with ``results.lookup("switching-value", key)``, the key being the one the
+    refusal carries."""
     read, log = _checked(record, loaded)
     t = _leaf_type(path, loaded)
     shared = _Shared(loaded, own_functions(loaded, functions))
     key = {"record": read.record_hash, "design": loaded.design_hash, "parameter": path}
-    if results.lookup(KIND, key) is not None:
-        raise EvaluationRefusal(
-            f"the store holds a {KIND} entry under {key!r}", reason=_R.held_key, key=[key]
-        )
+    _refuse_held([key], results)
     await baseline(log, loaded)
     entry = await _entry(_Recorded(log), shared, path, t, key, Reuse())
     results.write(entry)
@@ -146,8 +144,8 @@ async def switching_values_batch(
     load with ``functions``, in the single job's order, before any replay. Then a key named
     twice, and any key the store holds, is refused ``held-key`` before any replay, the refusal
     carrying every such key; a caller rerunning a batch drops them or reads each with
-    ``results.lookup``. A refusal later
-    on leaves the entries already written in the store."""
+    ``results.lookup``, a held entry of another format refused ``unknown-entry`` first. A
+    refusal later on leaves the entries already written in the store."""
     _designs(loaded, None, ("loaded", "rerun_design"))  # checked even with no records
     if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"records are a {type_name(records)}, not a sequence of records")
@@ -170,11 +168,7 @@ async def switching_values_batch(
             reason=_R.held_key,
             key=twice,
         )
-    held = [k for row in keys for k in row if results.lookup(KIND, k) is not None]
-    if held:
-        raise EvaluationRefusal(
-            f"the store holds {len(held)} of the {KIND} keys to write", reason=_R.held_key, key=held
-        )
+    _refuse_held([k for row in keys for k in row], results)
     out: list[dict[str, Any]] = []
     for (_, log), row in zip(checked, keys, strict=True):
         if row:
@@ -204,6 +198,33 @@ def switching_values_batch_sync(
             records, loaded, paths, functions=functions, results=results
         ),
     )
+
+
+def _refuse_held(keys: list[dict[str, str]], results: EvaluationStore) -> None:
+    """Refuse the keys of ``keys`` the store holds: ``unknown-entry``, carrying each, when any
+    held entry is of a format other than ``FORMAT``, whose ``entries`` the job does not read
+    (§evaluation-store); else ``held-key``, carrying every held key."""
+    found = [(k, results.lookup(KIND, k)) for k in keys]
+    held = [(k, e) for k, e in found if e is not None]
+    other = [k for k, e in held if e["format"] != FORMAT]
+    if other:
+        formats = ", ".join(sorted({str(e["format"]) for _, e in held if e["format"] != FORMAT}))
+        raise EvaluationRefusal(
+            f"the store holds {len(other)} {KIND} entries of format {formats}, not {FORMAT}, "
+            "under the keys to write",
+            reason=_R.unknown_entry,
+            key=other,
+        )
+    if len(held) == 1 and len(keys) == 1:
+        raise EvaluationRefusal(
+            f"the store holds a {KIND} entry under {keys[0]!r}", reason=_R.held_key, key=keys
+        )
+    if held:
+        raise EvaluationRefusal(
+            f"the store holds {len(held)} of the {KIND} keys to write",
+            reason=_R.held_key,
+            key=[k for k, _ in held],
+        )
 
 
 async def _entry(
@@ -287,19 +308,17 @@ def _finite(t: Type) -> list[_Value] | None:
 
 class _Run:
     """One run: the rerun's entry item by ref, ``None`` where the record holds one it does
-    not, each ref whose entry changed, the decision's ``decision_bytes``, and whether it asked
-    a stale question, so that it determines nothing."""
+    not, each ref whose entry changed, and whether it asked a stale question, so that it
+    determines nothing."""
 
     def __init__(
         self,
         rerun: _Log,
         recorded: "_Recorded",
         carrying: set[str],
-        decision: bytes | None,
         outside: bool = False,
     ) -> None:
         self.outside = outside
-        self.decision = decision
         self.carrying = carrying  # each ref whose output passed the leaf
         mine, held = recorded.outcomes, recorded.entries
         theirs = {i["ref"]: i for i in rerun if i["item"] == "entry"}
@@ -461,7 +480,7 @@ class _Job:
         if numeric is not None and not integer:
             own = float(own)  # a number leaf's own value as its points are held
         tried: dict[_Value, _Run | _Result] = {
-            own: _Run(self.log, self.recorded, self.carrying(self.log), decision_bytes(self.log))
+            own: _Run(self.log, self.recorded, self.carrying(self.log))
         }
         bounds: set[Fraction] = set()
         if values is not None:
@@ -488,14 +507,13 @@ class _Job:
         entries: dict[str, _Result] = {}
         runs = [run for run in tried.values() if isinstance(run, _Run)]
         carried = {r for run in runs for r in run.carrying}
-        policy = self.loaded._design.policy
-        listed = {r for run in runs for r in run.changed} | carried | {policy}
+        listed = {r for run in runs for r in run.changed} | carried
+        # A value not loading, or a run asking a stale question, changes every d: entry held.
+        if len(runs) < len(tried) or any(run.outside for run in runs):
+            listed |= {ref for ref in self.mine if ref.startswith("d:")}
         for ref in code_point_sorted(listed):
             results = [_result(tried[v], ref, self.mine) for v in ordered]
-            keys = [
-                _key(tried[v], r, ref, ref == policy, self.recorded)
-                for v, r in zip(ordered, results, strict=True)
-            ]
+            keys = [_key(r, ref, self.recorded) for r in results]
             if ref in carried:
                 entries[ref] = "carries"
             elif values is not None:
@@ -518,15 +536,7 @@ class _Job:
         rerun, fixture = await _rerun(self.log, design, self.log, reuse=self.reuse, keep=_entries)
         rerun_log = rerun.log
         outside = bool(fixture.stale)  # a stale ref: the record cannot answer this run
-        policy = self.loaded._design.policy
-        run = _Run(
-            rerun_log,
-            self.recorded,
-            self.carrying(rerun_log),
-            _decision_bytes(rerun_log, policy),
-            outside,
-        )
-        return run, rerun_log
+        return _Run(rerun_log, self.recorded, self.carrying(rerun_log), outside), rerun_log
 
     def compared(self, log: _Log, path: str) -> _Compared:
         """``_compared`` over ``log`` for the leaf, or one key's path, a table whose
@@ -583,15 +593,6 @@ def _entries(ref: str) -> bool:
     return True
 
 
-def _decision_bytes(log: _Log, policy: str) -> bytes:
-    """``decision_bytes`` of a rerun's log kept by ``_entries``, which holds no ``design`` or
-    ``settings`` item to read the format and the policy from: the rerun is in this engine's
-    format, and its ``settings`` item names ``policy``, the design's."""
-    entry = next(i for i in log if i["item"] == "entry" and i["ref"] == policy)
-    member = "value" if "value" in entry else "marker"
-    return encode({member: entry[member]}, MAX_DOCUMENT_DEPTH)
-
-
 class _Rerun:
     """A probe's rerun: its log alone."""
 
@@ -616,16 +617,9 @@ async def _rerun(
     rerun and the fixture, whose ``stale`` names the stale refs. The record checks found a
     value at the state entry, and the caller typed it under ``loaded``. ``reuse`` is the
     record's reference run, which the job's first rerun of it keeps. Given ``keep``, the
-    rerun's log holds only the entries at the refs it keeps, the policy's among them."""
+    rerun's log holds only the entries at the refs it keeps."""
     state = next(i for i in log if i["item"] == "entry" and i["ref"] == _STATE)
-    settings = cast("dict[str, Any]", log[1]["settings"])
-    run = run_settings(
-        settings["round_bound"],
-        settings["timeout"],
-        settings["budget"],
-        settings["deadline"],
-        settings["certificate_cap"],
-    )
+    run = recorded_run(cast("dict[str, Any]", log[1]["settings"]))
     base = Base(answers, loaded, design=design)
     fixture = FixtureBinding(RecordedCalls(answers), loaded, base)
     keys = {s.oracle for s in loaded._design.sources.values() if s.oracle is not None}
@@ -654,11 +648,6 @@ async def _rerun(
         reuse=reuse,
         replaying=True,  # the fixture's calls, over a log that keeps no unhashed write
     )
-    policy = loaded._design.policy
-    if not any(i["item"] == "entry" and i["ref"] == policy for i in kept.log):
-        raise RuntimeError(
-            "the probe's rerun wrote no entry at the policy's ref"
-        )  # pragma: no cover
     return _Rerun(kept.log), fixture
 
 
@@ -674,14 +663,10 @@ def _result(run: _Run | _Result, ref: str, mine: Mapping[str, Any]) -> _Result:
 _Key = tuple[str, bytes | None]
 
 
-def _key(
-    run: _Run | _Result, result: _Result, ref: str, decision: bool, recorded: _Recorded
-) -> _Key:
-    """What a result is compared by: the decision by its ``decision_bytes``, any other entry
-    at ``ref`` by value, or marker kind and code, alone, the record's own entry by the bytes
-    ``recorded`` holds for it; any other result by canonical bytes."""
-    if isinstance(run, _Run) and not run.outside and decision:
-        return "decision", run.decision
+def _key(result: _Result, ref: str, recorded: _Recorded) -> _Key:
+    """What a result is compared by: an entry at ``ref`` by value, or marker kind and code,
+    alone (``outcome``), the record's own entry by the bytes ``recorded`` holds for it; any
+    other result by canonical bytes."""
     if isinstance(result, dict) and "entry" in result:
         entry = result["entry"]
         if entry is None:

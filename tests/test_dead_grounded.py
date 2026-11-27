@@ -93,7 +93,6 @@ def design(fn: Any = b_is_new, *, d_set: bool = False) -> Design:
         state=state,
         sources=sources,
         rules=rules,
-        policy="d:decision",
         parameters={"role/bar": Parameter(t.number(0, 1), BAR)},
     )
 
@@ -109,7 +108,7 @@ AB = {SET: [["a", "b"]]}
 
 
 def test_a_grounded_question_live_through_one_candidate_is_live_with_its_witness() -> None:
-    report = dead_questions(load(design()), values=AB)
+    report = dead_questions(load(design()), ["d:decision"], values=AB)
     assert list(report["questions"]) == ["q:plain", "q:role"]  # keyed by the declared ref
     assert report["questions"]["q:plain"] == {"status": "not-on-grid", "witness": None}
     role = report["questions"]["q:role"]
@@ -128,18 +127,18 @@ def test_a_grounded_question_live_through_one_candidate_is_live_with_its_witness
 
 
 def test_a_grounded_question_that_changes_nothing_is_no_change_found() -> None:
-    report = dead_questions(load(design(heeds_nothing)), values=AB)
+    report = dead_questions(load(design(heeds_nothing)), ["d:decision"], values=AB)
     assert report["questions"]["q:role"] == {"status": "no-change-found", "witness": None}
 
 
 def test_an_always_empty_set_grounds_nothing_and_the_question_is_not_grounded() -> None:
-    report = dead_questions(load(design()), values={SET: [[]]})
+    report = dead_questions(load(design()), ["d:decision"], values={SET: [[]]})
     assert report["questions"]["q:role"] == {"status": "not-grounded", "witness": None}
     assert report["points"] == PLAIN  # one run per assignment, no entry to cross
 
 
 def test_the_points_sum_each_assignments_block() -> None:
-    report = dead_questions(load(design()), values={SET: [[], ["b"], ["a", "b"]]})
+    report = dead_questions(load(design()), ["d:decision"], values={SET: [[], ["b"], ["a", "b"]]})
     assert report["points"] == PLAIN * (1 + ENTRY + ENTRY * ENTRY)
 
 
@@ -155,13 +154,13 @@ def test_every_point_runs_on_one_event_loop(monkeypatch: pytest.MonkeyPatch) -> 
         return loop
 
     monkeypatch.setattr(asyncio.events, "new_event_loop", counted)
-    report = dead_questions(load(design()), values={SET: [[], ["b"], ["a", "b"]]})
+    report = dead_questions(load(design()), ["d:decision"], values={SET: [[], ["b"], ["a", "b"]]})
     assert report["points"] > 1
     assert len(made) == 1
 
 
 def test_an_entry_at_its_own_marker_point_is_shown_under_its_grounded_ref() -> None:
-    report = dead_questions(load(design(b_is_missing)), values={SET: [["b"]]})
+    report = dead_questions(load(design(b_is_missing)), ["d:decision"], values={SET: [["b"]]})
     first, later = report["questions"]["q:role"]["witness"]
     assert list(first) == list(later) == ["q:plain", 'q:role["b"]', SET, "t:state"]
     assert "q:role" not in first
@@ -173,7 +172,7 @@ def test_an_entry_at_its_own_marker_point_is_shown_under_its_grounded_ref() -> N
 
 def test_a_d_set_is_learned_by_a_probe_run_that_counts_as_the_first_point() -> None:
     RUNS.clear()
-    report = dead_questions(load(design(d_set=True)))
+    report = dead_questions(load(design(d_set=True)), ["d:decision"])
     # t:state.many False grounds nothing; True grounds "a" and "b", whose block's first
     # point is the probe, run once.
     assert report["points"] == PLAIN * (1 + ENTRY * ENTRY)
@@ -198,10 +197,8 @@ def test_a_d_set_that_is_always_empty_is_not_grounded() -> None:
             D_SET, t.list_(t.string), none, version="1", reads=["t:state.many"], candidates=True
         ),
     }
-    d = Design(
-        state=d.state, sources=d.sources, rules=rules, policy=d.policy, parameters=d.parameters
-    )
-    report = dead_questions(load(d))
+    d = Design(state=d.state, sources=d.sources, rules=rules, parameters=d.parameters)
+    report = dead_questions(load(d), ["d:decision"])
     assert report["questions"]["q:role"] == {"status": "not-grounded", "witness": None}
     assert report["points"] == PLAIN * 2
 
@@ -238,10 +235,9 @@ def test_a_d_set_that_changes_within_an_assignment_is_refused() -> None:
             ),
             "decision": Rule("d:decision", t.string, by_two, version="1"),
         },
-        policy="d:decision",
     )
     with pytest.raises(ValueError, match="'d:s2' changes within one assignment"):
-        dead_questions(load(design), values={"t:s1": [["a"]]})
+        dead_questions(load(design), ["d:decision"], values={"t:s1": [["a"]]})
 
 
 def test_a_question_that_decides_a_candidate_set_is_live() -> None:
@@ -284,7 +280,15 @@ def test_a_question_that_decides_a_candidate_set_is_live() -> None:
             "n": Rule("d:n", _t.string, count, version="1", reads=["d:s"]),
             "decision": Rule("d:decision", _t.string, decision, version="1", reads=["d:n"]),
         },
-        policy="d:decision",
     )
-    report = _dead(_load(design))
+    report = _dead(_load(design), ["d:decision"])
     assert report["questions"]["q:gate"]["status"] == "live"
+
+
+def test_refs_naming_a_grounded_declared_ref_is_a_value_error_before_any_run() -> None:
+    import test_grounded_rules as grounded
+
+    with pytest.raises(ValueError, match='refs names "d:fit", which is not a whole d: ref'):
+        dead_questions(grounded.LOADED, [grounded.FIT])
+    with pytest.raises(ValueError, match="which is not a whole d: ref"):
+        dead_questions(grounded.LOADED, ['d:fit["Ana"]'])

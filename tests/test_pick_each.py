@@ -114,7 +114,6 @@ def design(
             ),
             "act": Rule("d:act", t.string, escalate, version="1", reads=["d:both"]),
         },
-        policy="d:act",
     )
 
 
@@ -189,7 +188,7 @@ def test_a_rule_passing_one_candidate_s_abstention_on_records_cleanly() -> None:
     assert "Elm Row" not in redacted
 
 
-def test_redact_digests_a_grounded_ref_in_the_policy_s_own_cause() -> None:
+def test_redact_digests_a_grounded_ref_in_the_act_rules_own_cause() -> None:
     doc = json.loads(decided(["Elm Row", "Quay Street"]).document)
     policy = next(i for i in doc["log"] if i["item"] == "entry" and i["ref"] == "d:act")
     policy.pop("value", None)

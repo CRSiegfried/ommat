@@ -31,7 +31,9 @@ def main() -> None:
             outcome = f"{asked['marker']['kind']} ({cause['code']}: {', '.join(cause['refs'])})"
         else:
             outcome = "asked"
-        print(f"{message!r}: gate {held}; refund source {outcome}; decision {decision.estimate}")
+        route = entries["d:route"]
+        decided = route["value"] if "value" in route else route["marker"]
+        print(f"{message!r}: gate {held}; refund source {outcome}; decision {decided}")
 
 
 if __name__ == "__main__":

@@ -30,14 +30,14 @@ deepest member."""
 MAX_DOCUMENT_DEPTH = 128
 """The deepest a document the encoder writes or a reader parses nests."""
 
-RECORD_FORMAT = 10
+RECORD_FORMAT = 11
 """The format number this engine writes into a record. It reads every record format from 1 up
 to it, each under that format's rules."""
 
 RECORD_FORMATS = frozenset(range(1, RECORD_FORMAT + 1))
 """The record formats this engine reads."""
 
-DESIGN_FORMAT = 11
+DESIGN_FORMAT = 12
 """The format number this engine writes into a design document, which changes only when a
 design rule changes, and the only design format it reads."""
 
@@ -101,9 +101,10 @@ SETS_FORMAT = 7
 under ``sets``."""
 
 POLICY_FORMAT = 8
-"""The first record format whose turn ends at the policy's entry: its
-``settings`` item names the ``policy``, its ``t:state`` entry may hold ``Unavailable`` at a broken
-entry, it holds no ``plan`` or ``verdict`` item, and its ``usage`` keys are the closed set."""
+"""The first record format whose ``t:state`` entry may hold ``Unavailable`` at a broken entry,
+which holds no ``plan`` or ``verdict`` item, and whose ``usage`` keys are the closed set. Before
+``NAMELESS_FORMAT`` its ``settings`` item names the design's ``policy``, and a broken entry's
+``t:state`` is followed by the policy's entry."""
 
 SHAPES_FORMAT = 9
 """The first record format whose ``settings`` item holds ``shapes``, each ref's shape tree, in
@@ -114,6 +115,11 @@ EXTRAS_FORMAT = 10
 request the call sent, whose ``usage`` keys are ``input_tokens`` and ``output_tokens`` alone,
 with no ``usage.passes`` as a ``missing`` key or a ``claimed`` name, and whose call item's
 ``provider`` and ``model_requested`` each hold no line boundary."""
+
+NAMELESS_FORMAT = 11
+"""The first record format whose ``settings`` item names no ``policy``, since its design names
+none, and in which nothing comes after a ``t:state`` entry holding a marker. Its run settings
+hold no ``certificate_cap``, and it holds no ``certificate`` item and no ``settled`` code."""
 
 SHAPE_LEAF = "leaf"
 """The one leaf of a shape tree. A shape tree is a class tree's structure with no class: an

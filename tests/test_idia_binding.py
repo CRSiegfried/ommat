@@ -1028,7 +1028,6 @@ def test_a_call_whose_outcome_reports_extras_keeps_its_reasons_and_writes_them()
                 "d:act", t.label("go"), lambda r: "go", version="1", reads=["q:triage/hazard"]
             )
         },
-        policy="d:act",
     )
     binding, _ = built(script)
     record = decide_sync(load(design), {"report": TEXT}, {"o": binding}).record

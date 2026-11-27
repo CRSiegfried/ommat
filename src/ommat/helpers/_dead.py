@@ -1,17 +1,20 @@
 # pyright: reportPrivateUsage=false
 """The dead-question lint, ``dead_questions``: whether any point the lint ran found a
-question's answer changing the decision.
+question's answer changing an entry the caller names.
+
+``refs`` names those entries: a non-empty list or tuple of declared whole ``d:`` refs, each one a
+rule provides and none grounded, checked before any run; a repeat counts once.
 
 It fills the exogenous values, every ref a source provides and ``t:state``, by the read points,
 and runs a turn as ``decide_sync`` does, with no ``DefectWarning``, once per point with the
 default run settings, no codec, the point's ``t:state`` as the state and one binding, under
 ``default`` and every declared oracle name, that answers each asked ref from the point. So the
 ``d:`` values, ``Unasked`` and ``Unsure`` come from the rules and the ``when``s, which decide
-runs. Two runs differ when the canonical bytes of the policy's whole entry, cause included,
-differ. Each point runs once, and every question is judged from those runs. A candidate-valued
-question is answered over the labels each run renders, each fixed label on top and then a
-candidate; it is never on the grid, and a witness shows it as that run's record wrote its
-entry.
+runs. Two runs differ when the ``entry_bytes`` of some named ref differ, a marker's cause and
+refs included, or when one run holds an entry at it and the other none. Each point runs once,
+and every question is judged from those runs. A candidate-valued question is answered over the
+labels each run renders, each fixed label on top and then a candidate; it is never on the grid,
+and a witness shows it as that run's record wrote its entry.
 
 A per-candidate question is no read of its own. At each assignment of the other reads its
 set's value is fixed, a ``t:`` set's by the point and a ``d:`` set's by a probe run with every
@@ -21,7 +24,7 @@ reads in code-point order of their grounded refs, so each assignment holds a blo
 whose size follows its sets. An empty set, or one holding a marker, grounds nothing. Two runs
 whose other reads agree are compared too when each holds every grounded entry at its first
 point, whatever entries each grounds, so a read whose answer changes a set is judged by the
-decision that change gives.
+entries that change gives.
 """
 
 import asyncio
@@ -34,20 +37,21 @@ import ommat._decide as _decide
 from ommat._binding import CallResult, SourceCall
 from ommat._canonical import encode
 from ommat._design import LoadedDesign
-from ommat._ledger import decision_bytes
-from ommat._refs import code_point_sorted, declared_ref, grounded_ref
-from ommat._values import type_name
+from ommat._ledger import entry_bytes
+from ommat._refs import _RefError, code_point_sorted, declared_ref, grounded_ref, parse_ref
+from ommat._values import described, quote, string_data, type_name
 from ommat.helpers._points import OnTop, Point, entry_points, filled, fresh
 
 _STATE = "t:state"
 _DEFAULT = "default"
 
-_Run = bytes
+_Run = tuple[bytes | None, ...]
+"""A run as compared: the ``entry_bytes`` of each named ref, in the order named."""
 
 
 @dataclass(frozen=True, slots=True)
 class _Ran:
-    """One run: the decision's bytes, the index of each other read's point, the
+    """One run: its named entries' bytes, the index of each other read's point, the
     index of each grounded entry's point by grounded ref, and its point as a report shows it."""
 
     run: _Run
@@ -57,11 +61,14 @@ class _Ran:
 
 
 def dead_questions(
-    loaded: LoadedDesign, *, values: Mapping[str, Any] | None = None
+    loaded: LoadedDesign, refs: Sequence[str], *, values: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
     """The report ``{"points": N, "questions": {ref: {"status", "witness"}}, "narrowed":
-    [ref]}``, keyed by every ``q:`` ref a source provides; a ``ValueError`` before any run for a
-    read nothing fills or a slip in ``values``, and during the runs for a ``d:`` set that
+    [ref]}``, keyed by every ``q:`` ref a source provides; a question is ``live`` when changing
+    its answer alone changes the entry at some ref of ``refs``. A ``TypeError`` for ``refs``
+    that is not a list or tuple, and a ``ValueError`` before any run for ``refs`` empty or
+    naming anything but a declared whole ``d:`` ref a rule provides, for a read nothing fills or
+    a slip in ``values``, and during the runs for a ``d:`` set that
     differs within one assignment, or for a point whose turn is a broken entry (its ``t:state``
     entry a marker). ``values`` maps a read the lint fills, ``t:state`` or a field path under
     it, or a ``t:`` or ``q:`` ref a source provides, to a list of its values; a ``d:`` ref is
@@ -69,6 +76,7 @@ def dead_questions(
     list is the labels to try, and ``narrowed`` names each such question in code-point order."""
     if type(loaded) is not LoadedDesign:
         raise TypeError(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
+    named = named_refs(loaded, refs)
     sources = loaded._design.sources.values()
     provided = {ref for s in sources for ref in s.provides} | {_STATE}
     grounded = provided & loaded._grounded.keys()
@@ -82,7 +90,7 @@ def dead_questions(
     with asyncio.Runner() as runner:
         for at in itertools.product(*(range(len(points)) for points in lists)):  # grid order
             point = {r: lists[k][i] for k, (r, i) in enumerate(zip(reads, at, strict=True))}
-            ran += _block(loaded, point, keys, fills, tuple(at), runner)
+            ran += _block(loaded, named, point, keys, fills, tuple(at), runner)
     asked = {declared_ref(g) for r in ran for g in r.entries}  # grounded by some assignment
     questions: dict[str, Any] = {}
     for ref in code_point_sorted(provided):
@@ -106,6 +114,43 @@ def dead_questions(
     return {"points": len(ran), "questions": questions, "narrowed": narrowed}
 
 
+def named_refs(loaded: LoadedDesign, refs: object) -> tuple[str, ...]:
+    """``refs`` checked, each once in the order named: a ``TypeError`` unless it is a list or
+    tuple, and one ``ValueError`` when it is empty or naming each member that is not a declared
+    whole ``d:`` ref a rule provides, a grounded declared ref among them."""
+    if type(refs) is not list and type(refs) is not tuple:
+        raise TypeError(f"refs is a {type_name(refs)}, not a list or tuple of refs")
+    members = cast("list[object] | tuple[object, ...]", refs)
+    if not members:
+        raise ValueError("refs is empty: name at least one d: ref a rule provides")
+    named: dict[str, None] = {}
+    problems: list[str] = []
+    for ref in members:
+        if not isinstance(ref, str):
+            problems.append(f"refs holds {described(ref)}, which is not a ref")
+            continue
+        ref = string_data(ref)
+        if _provided(loaded, ref):
+            named[ref] = None
+        else:
+            problems.append(f"refs names {quote(ref)}, which is not a whole d: ref a rule provides")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return tuple(named)
+
+
+def _provided(loaded: LoadedDesign, ref: str) -> bool:
+    """Whether ``ref`` is a declared whole ``d:`` ref a rule provides and no candidate set
+    grounds."""
+    try:
+        parsed = parse_ref(ref)
+    except _RefError:
+        return False
+    if parsed.level != "d" or parsed.candidate is not None or parsed.fields:
+        return False
+    return loaded._providers.get(ref) in loaded._design.rules and ref not in loaded._grounded
+
+
 class _At(dict[str, Point]):
     """A run's point: each other read's and each grounded entry's, and, for a grounded entry
     it does not hold, as the probe asks one, its declared question's first point."""
@@ -120,6 +165,7 @@ class _At(dict[str, Point]):
 
 def _block(
     loaded: LoadedDesign,
+    named: tuple[str, ...],
     point: dict[str, Point],
     keys: set[str],
     fills: Mapping[str, list[Point]],
@@ -134,7 +180,7 @@ def _block(
         if set_ref in point:  # a t: set, fixed by the point
             sets[set_ref] = point[set_ref].live
     if any(loaded._grounded[ref] not in sets for ref in firsts):  # a d: set: run the probe
-        probe = _run(loaded, _At(point, firsts), keys, runner)
+        probe = _run(loaded, named, _At(point, firsts), keys, runner)
         sets.update(probe[2])
     entries: dict[str, list[Point]] = {}
     for ref in firsts:
@@ -150,7 +196,7 @@ def _block(
         if probe is not None and not any(combo):
             done = probe
         else:
-            done = _run(loaded, given, keys, runner)
+            done = _run(loaded, named, given, keys, runner)
             # A d: set the probe fixed holds for the whole assignment, or the lint cannot fill
             # the entries a run asks (§grounded-declarations).
             for set_ref, value in done[2].items():
@@ -166,9 +212,13 @@ def _block(
 
 
 def _run(
-    loaded: LoadedDesign, point: dict[str, Point], keys: set[str], runner: asyncio.Runner
+    loaded: LoadedDesign,
+    named: tuple[str, ...],
+    point: dict[str, Point],
+    keys: set[str],
+    runner: asyncio.Runner,
 ) -> tuple[_Run, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-    """One turn at ``point``: the decision's canonical bytes, each
+    """One turn at ``point``: the ``entry_bytes`` of each named ref, each
     candidate-valued question's value or marker as the run's record wrote its entry, each
     grounding ``d:`` set's value or marker as the record wrote it, and the record's log."""
 
@@ -187,8 +237,7 @@ def _run(
     decision = _decide._decided_sync(loaded, fresh(point[_STATE].live), bindings, runner=runner)
     log = decision.record.log
     _refuse_broken(point, log)
-    run = decision_bytes(log)
-    assert run is not None  # the turn returned, so the log holds the policy's entry
+    run = tuple(entry_bytes(log, ref) for ref in named)
     written = {
         i["ref"]: i["value"] if "value" in i else i["marker"] for i in log if i["item"] == "entry"
     }

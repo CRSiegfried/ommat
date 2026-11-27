@@ -63,7 +63,6 @@ DESIGN = Design(
         ),
         "act": Rule("d:act", t.label("act", "hold"), act, version="1", reads=["d:urgent"]),
     },
-    policy="d:act",
 )
 
 STATE = {"request": "a cancelled flight"}
@@ -108,7 +107,7 @@ def failures(design: Design | dict[str, Any]) -> list[tuple[int, tuple[str, ...]
 def test_a_design_declaring_targets_writes_them_and_round_trips_byte_for_byte() -> None:
     loaded = load(targeted())
     doc = json.loads(loaded.document)
-    assert doc["format"] == 11
+    assert doc["format"] == 12
     assert doc["targets"] == {
         "tg:distress": {"statement": "How upset the traveller is", "values": None},
         "tg:urgency": {
@@ -280,7 +279,8 @@ def test_a_questions_identity_leaves_its_targets_out() -> None:
 def test_targets_leave_the_decision_and_the_entries_unchanged() -> None:
     plain = decide_sync(load(DESIGN), STATE, {"default": binding})
     with_targets = decide_sync(load(targeted()), STATE, {"default": binding})
-    assert with_targets.estimate == plain.estimate == "act"
+    decided = [d.record.entries["d:act"]["value"] for d in (plain, with_targets)]
+    assert decided == ["act", "act"]
     entries = [[i for i in d.record.log if i["item"] == "entry"] for d in (plain, with_targets)]
     assert entries[0] == entries[1]
 

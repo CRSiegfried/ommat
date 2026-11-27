@@ -96,7 +96,6 @@ DESIGN = Design(
     sources=SOURCES,
     rules=RULES,
     parameters=PARAMETERS,
-    policy="d:policy",
 )
 
 
@@ -119,4 +118,6 @@ if __name__ == "__main__":
     loaded = load(DESIGN)
     for named in (["Quay Street", "Elm Row"], []):
         decision = decide_sync(loaded, {"text": "x", "streets": named}, {"default": binding})
-        print(decision.estimate, "| replay findings:", replay_sync(decision.record, loaded)[1])
+        entry = decision.record.entries["d:policy"]
+        decided = entry["value"] if "value" in entry else entry["marker"]
+        print(decided, "| replay findings:", replay_sync(decision.record, loaded)[1])

@@ -1,7 +1,7 @@
 [project]
 name = "ommat"
-version = "0.4.0"
-description = "Gather evidence from a decision model, decide through one policy rule, and record the turn so it replays."
+version = "0.5.0"
+description = "Gather evidence from a decision model onto a blackboard, fire the rules, and record the turn so it replays."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

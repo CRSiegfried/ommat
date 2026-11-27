@@ -162,7 +162,7 @@ def test_a_calls_extras_is_written_one_object_per_request_in_order() -> None:
     record = turn(attempts=2, extras=extras)
     assert call_item(record)["outcome"] == "returned"
     assert calls_entry(record)["extras"] == [{"note": "x", "passes": 2}, {}]
-    assert record.log[0]["format"] == 10
+    assert record.log[0]["format"] == 11
     back = read_record(record.document)
     assert back.unhashed["calls"] == record.unhashed["calls"]
 

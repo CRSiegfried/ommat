@@ -71,7 +71,7 @@ from test_decide import (
 from test_deciding_inputs import records_in
 from test_extraction_turn import ran as extraction_ran
 from test_replay import entry
-from test_use_answers import CHANGED, HAM, broken, diff, format_7, live, unfinished
+from test_use_answers import CHANGED, HAM, broken, cut, diff, format_7, live, unfinished
 
 pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
 
@@ -96,7 +96,6 @@ TABLED = Design(
             "d:act", t.label("page", "tell"), "F", ["d:level"], [["high", "page"], ["-", "tell"]]
         ),
     },
-    policy="d:act",
 )
 """All tables, the policy a table over ``d:level``."""
 
@@ -1275,6 +1274,15 @@ def test_every_job_refuses_the_record_in_order_before_any_edit(
             assert str(exc).startswith("record")
 
 
+@pytest.mark.parametrize("job", [j for _, j in JOBS], ids=IDS)
+def test_every_job_reruns_a_record_its_observer_cut_short(job: Callable[[object], Any]) -> None:
+    """No ``cause`` item, so not ``unfinished``: the rerun is the whole turn, and each entry the
+    cut lost is an entry finding with nothing recorded."""
+    found = job(cut())["findings"]
+    lost = {f["ref"] for f in found if f["kind"] is K.entry and f["recorded"] is None}
+    assert {"d:act", "d:echo", "d:route"} <= lost
+
+
 @pytest.mark.parametrize(
     "job",
     [
@@ -1360,7 +1368,7 @@ def test_a_stored_record_before_format_8_is_wrong_design(folder: str) -> None:
     exc = refusal(intervene_sync, record, LOADED, [{"ref": "q:spam", "value": NO}])
     assert (exc.reason, exc.turn) == (R.wrong_design, record.record_hash)
     assert str(exc) == (
-        f"record is a format-{fmt} record, before format 8, so it holds no policy's entry"
+        f"record is a format-{fmt} record, before format 8, whose turn this engine does not rerun"
     )
 
 

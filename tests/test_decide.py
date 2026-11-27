@@ -28,8 +28,6 @@ import ommat
 from counting import SmallBounds
 from designs import minimal
 from ommat import (
-    Cause,
-    CauseCode,
     Decision,
     DefectWarning,
     EntryRefusal,
@@ -41,9 +39,6 @@ from ommat import (
     Source,
     Table,
     Text,
-    Unasked,
-    Unavailable,
-    Unsure,
     When,
     _decide,
     decide,
@@ -56,7 +51,7 @@ from ommat import (
 )
 from ommat import types as t
 from ommat._decide import run_settings
-from ommat._ledger import decision_entry, finished
+from ommat._ledger import finished
 from ommat._values import UNREPRESENTABLE
 from ommat.helpers import pick_with_margin
 from scripted import (
@@ -143,10 +138,9 @@ def slice_design(*, act: Rule | None = None, **changes: Any) -> LoadedDesign:
         "state": STATE_T,
         "sources": {"ask": ASK, "body": BODY, "look": LOOK},
         "rules": {**rules, "act": act_rule() if act is None else act},
-        "policy": "d:act",
     }
     fields.update(changes)
-    return load(minimal(**fields))
+    return load(minimal(**fields, alone=True))
 
 
 LOADED = slice_design()
@@ -162,16 +156,16 @@ UNCLEAR = {"q:spam": {"yes": 0.52, "no": 0.48}, "t:body": "text of the mail"}
 """Within the margin, so ``route`` abstains."""
 REPLIES: dict[str, object] = {"ask": returns(SPAM), "look": returns({"t:size": 4})}
 
-GOLDEN_DESIGN = "sha256:72808e4db44f0bb70524f6853fa2edf74e8ab9253da03132eadbad84a50b10a8"
-GOLDEN_RECORD = "sha256:dd3619c3a949df1a7430b1976cbdba92b3bc86da1091170e01cbe85d50c6c413"
-GOLDEN_BROKEN = "sha256:6d7b74d61b2eeffe92968b4cdf59c44533e1bb41be187eb39c7f8e4deb5a19d4"
+GOLDEN_DESIGN = "sha256:feafdeb0e62b157d4a6376ab41809b77a2a6e4c1d9ee0b5f92101996e67357d7"
+GOLDEN_RECORD = "sha256:425f22574e268dc325fd110d6699ba62f029dd5daa4ba97199d1b504d6056627"
+GOLDEN_BROKEN = "sha256:b8bcc318d4cb9dd3f24fc878dbf11667aadda025e5fa243b520e06c991963122"
 GOLDEN_CANCELLED = (
-    "sha256:8225b6c22617032bf8737427fe1a601f5ad0e8ddd1388ec47aa6ecfa7ddd9a04",
-    "sha256:c831e0ed87489c00850de25ad26d4a61ac6b36bac21672d9c59f76fb8f5d6d75",
+    "sha256:9cf8b877ff52d10cb2ae1dbd6fc4c65bc2de61a5d7b89cb9dbc45bd8a0003614",
+    "sha256:90b7d90f1213731d440625c9db3ddd21aaa59436682d2c84455731d2900720aa",
 )
 GOLDEN_UNDECIDED = (
-    "sha256:7b40de51d98074f7b23acb336a80a4b56e1651da96e2298fe4c82e4d8c8910ef",
-    "sha256:8a99fe3136c48aeb5d56ab073a3026b2e4596db50ec51589424d6d8b5513fc10",
+    "sha256:901a24a6818ab9256b9aaafdecb27579f81ab2e5c2a3989d3207b22991002f79",
+    "sha256:98c8ecda17c7a65d033c2cb5a8d6eefec1c02754ecc2439c9b097049703777af",
 )
 """Each a pair: the design hash, then the record hash."""
 
@@ -236,12 +230,16 @@ def kinds(record: Record) -> list[str]:
     return [item["item"] for item in record.log]
 
 
+def act_entry(decision: Decision) -> dict[str, Any]:
+    return decision.record.entries["d:act"]
+
+
 def policy_entries(record: Record) -> list[dict[str, Any]]:
     return [i for i in record.log if i["item"] == "entry" and i["ref"] == "d:act"]
 
 
-BROKEN_KINDS = ["design", "settings", "entry", "entry"]
-"""A broken entry's log: ``t:state`` and the policy's ref ``Unavailable``, and nothing after."""
+BROKEN_KINDS = ["design", "settings", "entry"]
+"""A broken entry's log: ``t:state`` ``Unavailable``, and nothing after."""
 
 
 class Seen:
@@ -277,7 +275,8 @@ def roundtrips(record: Record) -> None:
     """A record decide wrote reads back with the same bytes, and both views take it."""
     assert read_record(record.document).document == record.document
     redact(record, b"\x07" * 32, {})
-    escalation(record)
+    for ref in record.entries:
+        escalation(record, ref)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -301,7 +300,7 @@ def test_a_turn_returns_a_decision_whose_record_holds_every_stage() -> None:
         "entry",
         "round",
     ]
-    assert decision.estimate == "archive"
+    assert act_entry(decision)["value"] == "archive"
     assert policy_entries(record)[0]["value"] == "archive"
     assert decision.design_hash == record.design_hash == LOADED.design_hash
     assert record.cause is None
@@ -354,7 +353,7 @@ def test_the_golden_undecided_record() -> None:
     (entry,) = policy_entries(record)
     assert entry["marker"] == {"kind": "Unsure", "cause": {"code": "required", "refs": ["d:route"]}}
     route = next(i for i in record.log if i["item"] == "entry" and i["ref"] == "d:route")
-    view = escalation(record)
+    view = escalation(record, "d:act")
     assert view == {
         "kind": "Unsure",
         "cause": {"code": "required", "refs": ["d:route"]},
@@ -396,7 +395,7 @@ def test_the_golden_hashes_hold_under_every_hash_seed(seed: str) -> None:
 
 def test_the_design_and_settings_items_bytes() -> None:
     log = go().record.log
-    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 10, "helpers": 4}
+    assert log[0] == {"item": "design", "hash": LOADED.design_hash, "format": 11, "helpers": 4}
     assert log[1] == {
         "item": "settings",
         "settings": {
@@ -404,13 +403,11 @@ def test_the_design_and_settings_items_bytes() -> None:
             "timeout": 60,
             "budget": None,
             "deadline": None,
-            "certificate_cap": None,
         },
         "providers": dict(LOADED._providers),
         "shapes": LOADED._shapes,
         "grounded": {},
         "sets": {},
-        "policy": "d:act",
     }
     assert "t:state" not in log[1]["providers"]
     assert "t:state" in log[1]["shapes"]
@@ -467,75 +464,56 @@ def test_a_decision_is_built_only_by_decide() -> None:
 def test_a_decision_is_frozen() -> None:
     decision = go()
     with pytest.raises(AttributeError):
-        decision.estimate = "keep"  # type: ignore[misc]
+        decision.record = decision.record  # type: ignore[misc]
     with pytest.raises(AttributeError):
         del decision.record  # type: ignore[misc]
     with pytest.raises(AttributeError):
         decision.extra = 1  # type: ignore[attr-defined]
 
 
-def test_a_decision_has_only_its_three_public_attributes() -> None:
+def test_a_decision_has_only_its_two_public_attributes() -> None:
     public = {n for n in dir(Decision) if not n.startswith("_")}
-    assert public == {"estimate", "record", "design_hash"}
+    assert public == {"record", "design_hash"}
     assert Decision.__slots__ == ("_record",)
 
 
-def test_the_design_hash_and_the_estimate_are_derived_from_the_record() -> None:
+def test_the_design_hash_is_derived_from_the_record() -> None:
     decision = go()
     assert decision.design_hash == decision.record.log[0]["hash"]
-    assert decision.estimate == policy_entries(decision.record)[0]["value"]
-    assert repr(decision) == f"Decision(estimate='archive', record={decision.record!r})"
+    assert repr(decision) == f"Decision(record={decision.record!r})"
 
 
-def test_the_estimate_of_a_value_is_the_value_as_recorded() -> None:
+def test_a_value_entry_holds_the_value_as_recorded() -> None:
     keep = go(binds=bindings(ask=returns({**SPAM, "q:spam": {"yes": 0.1, "no": 0.9}})))
-    assert keep.estimate == "keep"
+    assert act_entry(keep)["value"] == "keep"
     blob = go(slice_design(act=Rule("d:act", t.bytes_, lambda r: b"\x00", version="1")))
-    assert blob.estimate == "AA"  # a bytes value as the record holds it
+    assert act_entry(blob)["value"] == "AA"  # a bytes value as the record holds it
 
 
-def test_the_estimate_of_a_marker_is_the_marker_rebuilt_with_its_cause() -> None:
-    estimate = golden_undecided_decision().estimate
-    assert type(estimate) is Unsure
-    assert estimate.cause == Cause(CauseCode.required, ["d:route"])
-    broken = go(state={"subject": "no other field"}).estimate
-    assert type(broken) is Unavailable
-    assert broken.cause == Cause(CauseCode.invalid_return, ["t:state"])
+def test_a_marker_entry_holds_its_kind_and_cause() -> None:
+    assert act_entry(golden_undecided_decision())["marker"] == {
+        "kind": "Unsure",
+        "cause": {"code": "required", "refs": ["d:route"]},
+    }
+    broken = go(state={"subject": "no other field"}).record
+    assert "d:act" not in broken.entries
+    assert broken.entries["t:state"]["marker"] == {
+        "kind": "Unavailable",
+        "cause": {"code": "invalid-return", "refs": ["t:state"]},
+    }
 
 
 def unasked_policy(r: Any) -> str:
     return "archive" if r.require("q:spam") == "yes" else "keep"
 
 
-def test_an_unasked_estimate_is_rebuilt_with_the_cause_its_policy_wrote() -> None:
-    """Under a budget cut ``q:spam`` is ``Unasked``; a policy requiring it carries the kind."""
+def test_an_unasked_marker_entry_holds_the_cause_its_rule_wrote() -> None:
+    """Under a budget cut ``q:spam`` is ``Unasked``; a rule requiring it carries the kind."""
     loaded = slice_design(act=act_rule(unasked_policy, "q:spam"))
-    estimate = go(loaded, settings=RunSettings(budget=0.5)).estimate
-    assert type(estimate) is Unasked
-    assert estimate.cause == Cause(CauseCode.required, ["q:spam"])
-
-
-def test_an_estimate_read_from_a_record_with_no_policy_entry_is_an_engine_defect() -> None:
-    cancelled = record_of(cancelled_mid_turn())
-    decision = Decision(_decide._BUILT_BY_DECIDE, cancelled)
-    with pytest.raises(_decide._EngineDefect, match="no entry at the policy's ref"):
-        decision.estimate  # noqa: B018 - the read raises
-
-
-def test_interpret_ending_with_no_policy_entry_is_an_engine_defect_with_no_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def no_policy(*args: Any, **keywords: Any) -> dict[str, object]:
-        return {"t:state": STATE}
-
-    monkeypatch.setattr(_decide, "interpret", no_policy)
-    seen = Seen()
-    exc = caught(deciding(observer=seen))
-    assert type(exc) is _decide._EngineDefect
-    assert isinstance(exc, RuntimeError)
-    assert "d:act" in str(exc)
-    assert not hasattr(exc, "record")
-    assert [item["item"] for _, item in seen.items] == ["design", "settings", "entry"]
+    assert act_entry(go(loaded, settings=RunSettings(budget=0.5)))["marker"] == {
+        "kind": "Unasked",
+        "cause": {"code": "required", "refs": ["q:spam"]},
+    }
 
 
 def golden_undecided_decision() -> Decision:
@@ -617,7 +595,6 @@ REFUSED: list[tuple[str, dict[str, Any]]] = [
     ("an undeclared oracle name", {"binds": {**bindings(), "post": scripted()}}),
     ("a key that is not a string", {"binds": {**bindings(), 1: scripted()}}),
     ("two keys of one string data", {"binds": {"default": scripted(), Odd("default"): 1}}),
-    ("a non-null certificate cap", {"settings": RunSettings(certificate_cap=1)}),
     ("a codec that is an int", {"codec": 5}),
     ("a codec with an instance __call__", {"codec": instance_call()}),
     ("a codec that cannot be read", {"codec": Untouchable()}),
@@ -668,8 +645,6 @@ def test_a_codec_and_an_observer_callable_by_their_type_are_taken() -> None:
         RunSettings(deadline=0),
         RunSettings(deadline=-0.5),
         RunSettings(deadline=float("inf")),
-        RunSettings(certificate_cap=True),  # type: ignore[arg-type]
-        RunSettings(certificate_cap=0),
     ],
     ids=repr,
 )
@@ -681,19 +656,18 @@ def test_a_setting_outside_its_bounds_is_refused(settings: RunSettings) -> None:
 def test_settings_at_their_bounds_are_accepted() -> None:
     record = go(settings=RunSettings(round_bound=2**53 - 1, timeout=2**53 - 1)).record
     assert record.log[1]["settings"]["round_bound"] == 2**53 - 1
-    run = run_settings(1, 1e-9, 0, 1e300, None)
-    assert run.item() == {
-        "round_bound": 1,
-        "timeout": 1e-9,
-        "budget": 0,
-        "deadline": 1e300,
-        "certificate_cap": None,
-    }
+    run = run_settings(1, 1e-9, 0, 1e300)
+    assert run.item() == {"round_bound": 1, "timeout": 1e-9, "budget": 0, "deadline": 1e300}
 
 
 def test_run_settings_validates_nothing() -> None:
     assert RunSettings(round_bound="x").round_bound == "x"  # type: ignore[arg-type]
-    assert RunSettings() == RunSettings(8, 60, None, None, None)
+    assert RunSettings() == RunSettings(8, 60, None, None)
+
+
+def test_a_certificate_cap_is_no_run_setting() -> None:
+    with pytest.raises(TypeError):
+        RunSettings(certificate_cap=None)  # type: ignore[call-arg]
 
 
 def test_a_settings_object_of_another_type_is_refused_before_any_value_is_read() -> None:
@@ -711,7 +685,8 @@ def test_a_settings_object_of_another_type_is_refused_before_any_value_is_read()
 
 def test_a_design_with_no_source_needs_no_binding_and_takes_default() -> None:
     loaded = load(minimal())
-    assert go(loaded, {}, {}).estimate is True  # the minimal policy reads nothing
+    entries = go(loaded, {}, {}).record.entries
+    assert entries["d:decision"]["value"] is True  # the minimal policy reads nothing
     assert go(loaded, {}, {"default": object()}).record.log[2]["ref"] == "t:state"
 
 
@@ -740,7 +715,7 @@ def test_a_str_subclass_key_is_its_string_data() -> None:
 
     binding = scripted()
     decision = go(binds={Key("default"): binding, Key("mail"): binding})
-    assert decision.estimate == "archive"
+    assert act_entry(decision)["value"] == "archive"
 
 
 def test_two_keys_of_one_string_data_are_refused() -> None:
@@ -782,7 +757,7 @@ def test_the_bindings_are_copied_once_and_only_the_copy_is_read() -> None:
 
     first.replies["ask"] = swap
     decision = go(binds=binds)
-    assert decision.estimate == "archive"
+    assert act_entry(decision)["value"] == "archive"
     assert len(first.batches) == 2
 
 
@@ -916,17 +891,14 @@ INVALID = {"code": "invalid-return", "refs": ["t:state"]}
 RAISED = {"code": "raised", "refs": ["codec"]}
 
 
-def broken_items(cause: dict[str, Any], policy: str = "d:act") -> list[dict[str, Any]]:
-    """A broken entry's items after the settings item: ``t:state`` and the policy's ref
-    ``Unavailable`` with the entry cause in round 0, and nothing after."""
+def broken_items(cause: dict[str, Any]) -> list[dict[str, Any]]:
+    """A broken entry's items after the settings item: ``t:state`` ``Unavailable`` with the
+    entry cause in round 0, and nothing after."""
     marker = {"kind": "Unavailable", "cause": cause}
     # The marker's members as the engine writes every marker: kind, then cause.
     order = {"1": [1, 0]}
     entry = {"item": "entry", "round": 0, "call": None, "marker": marker, "order": order}
-    return [
-        {**entry, "ref": "t:state"},
-        {**entry, "ref": policy},
-    ]
+    return [{**entry, "ref": "t:state"}]
 
 
 def test_the_codec_is_called_once_with_the_state_object() -> None:
@@ -934,7 +906,7 @@ def test_the_codec_is_called_once_with_the_state_object() -> None:
     codec = Counting(value=STATE)
     decision = go(state=state, codec=codec)
     assert codec.calls == [state]
-    assert decision.estimate == "archive"
+    assert act_entry(decision)["value"] == "archive"
 
 
 def test_an_async_codecs_coroutine_is_a_broken_entry_and_no_warning_leaks() -> None:
@@ -1074,7 +1046,7 @@ def test_a_raising_codec_is_a_broken_entry_with_its_text_under_the_state_index()
     decision = go(loaded, codec=codec, binds=bound(binding))
     record = decision.record
     assert record.log[2:] == broken_items(RAISED)
-    assert decision.estimate == Unavailable(Cause(CauseCode.raised, ["codec"]))
+    assert "d:act" not in record.entries
     assert "cause" not in kinds(record)
     assert record.cause == RAISED
     text = record.unhashed["exceptions"]["2"]
@@ -1085,10 +1057,12 @@ def test_a_raising_codec_is_a_broken_entry_with_its_text_under_the_state_index()
     roundtrips(record)
 
 
-def test_a_broken_entry_writes_the_policy_of_the_design_and_runs_no_rule() -> None:
+def test_a_broken_entry_writes_t_state_alone_and_runs_no_rule() -> None:
     decision = go(load(minimal()), {}, {}, codec=Counting(raises=ValueError("x")))
-    assert decision.record.log[2:] == broken_items(RAISED, "d:decision")
-    assert escalation(decision.record) == {
+    assert decision.record.log[2:] == broken_items(RAISED)
+    assert "d:decision" not in decision.record.entries
+    assert escalation(decision.record, "d:decision") is None
+    assert escalation(decision.record, "t:state") == {
         "kind": "Unavailable",
         "cause": RAISED,
         "root_cause": RAISED,
@@ -1210,15 +1184,15 @@ def test_the_observer_raising_at_any_item_ends_the_turn_with_the_record_so_far(a
     roundtrips(record)
 
 
-def test_a_record_an_observer_ended_is_finished_once_it_holds_the_policy_s_entry() -> None:
+def test_a_record_an_observer_ended_is_finished_wherever_it_ends() -> None:
+    """The observer's exception writes no cause item, so the record reads as finished, the
+    policy's entry held or not."""
     ended = [
         record_of(caught(deciding(observer=Seen(at, RuntimeError("x"))))).log
         for at in range(len(NORMAL_LOG))
     ]
-    held = [decision_entry(log) is not None for log in ended]
-    assert [finished(log) for log in ended] == held
-    assert True in held
-    assert False in held
+    assert all(finished(log) for log in ended)
+    assert not all(any(i["item"] == "entry" and i["ref"] == "d:act" for i in log) for log in ended)
 
 
 @pytest.mark.parametrize("at", range(len(BROKEN_LOG)))
@@ -1290,7 +1264,7 @@ def test_a_cancellation_in_interpret_carries_the_record_ending_in_the_cause_item
     assert record.cause == {"code": "cancelled", "refs": []}
     assert set(record.unhashed) == {"turn", "engine"}
     roundtrips(record)
-    assert escalation(record) is None
+    assert escalation(record, "d:act") is None
 
 
 def cancelling(r: Any) -> Any:
@@ -1316,7 +1290,7 @@ def test_a_rule_raising_a_cancellation_in_round_1_keeps_the_rounds_items_so_far(
     roundtrips(record)
 
 
-def test_a_policy_raising_a_cancellation_writes_no_policy_entry() -> None:
+def test_an_act_rule_raising_a_cancellation_writes_no_act_entry() -> None:
     exc = caught(deciding(slice_design(act=act_rule(cancelling))))
     assert type(exc) is asyncio.CancelledError
     record = record_of(exc)
@@ -1432,7 +1406,9 @@ def test_a_turn_on_a_runner_is_the_turn_under_asyncio_run_and_leaves_the_runner_
         first = go(runner=runner).record
         second = go(runner=runner).record
         assert asyncio.all_tasks(runner.get_loop()) == set()
-        assert go(runner=runner).estimate == "archive"  # still open: decide_sync never closes it
+        assert (
+            act_entry(go(runner=runner))["value"] == "archive"
+        )  # still open: decide_sync never closes it
     assert first.record_hash == second.record_hash == fresh.record_hash
 
 
@@ -1618,10 +1594,10 @@ def test_a_budget_within_its_bounds_runs_and_cuts_the_frontier_over_it() -> None
     [RunSettings(round_bound=1), RunSettings(budget=0.5), RunSettings(deadline=0.01)],
     ids=["round bound", "budget", "deadline"],
 )
-def test_the_policy_fires_once_at_every_cut_and_interpret_ends_the_turn(
+def test_the_act_rule_fires_once_at_every_cut_and_interpret_ends_the_turn(
     settings: RunSettings,
 ) -> None:
-    """A cut drains the sorter, so the policy's rule fires there as any rule does."""
+    """A cut drains the sorter, so the act rule fires there as any rule does."""
     codec = Slow(0.05) if settings.deadline is not None else None
     record = go(settings=settings, codec=codec).record
     (entry,) = policy_entries(record)
@@ -1672,9 +1648,7 @@ class _Hidden(metaclass=_Raising):
 
 
 @pytest.mark.parametrize("value", [10**5000, -(10**5000), _Opaque()], ids=["huge", "neg", "repr"])
-@pytest.mark.parametrize(
-    "field", ["round_bound", "timeout", "budget", "deadline", "certificate_cap"]
-)
+@pytest.mark.parametrize("field", ["round_bound", "timeout", "budget", "deadline"])
 def test_a_setting_that_cannot_be_written_is_an_entry_refusal(field: str, value: object) -> None:
     exc = caught(deciding(settings=RunSettings(**cast(dict[str, Any], {field: value}))))
     assert type(exc) is EntryRefusal
@@ -1682,7 +1656,7 @@ def test_a_setting_that_cannot_be_written_is_an_entry_refusal(field: str, value:
 
 def test_a_huge_setting_is_named_by_its_bit_length() -> None:
     with pytest.raises(EntryRefusal, match=r"^the round bound integer of 16610 bits is not"):
-        run_settings(10**5000, 60, None, None, None)
+        run_settings(10**5000, 60, None, None)
 
 
 @pytest.mark.parametrize("key", [10**5000, _Opaque(), _Hidden()], ids=["huge", "repr", "meta"])
@@ -1722,7 +1696,7 @@ def test_a_long_wording_loads_and_decides(small_bounds: SmallBounds) -> None:
         ASK, provides={**ASK.provides, "q:spam": Question("noul", Text(wording))}
     )
     decision = go(slice_design(sources={"ask": ask, "body": BODY, "look": LOOK}))
-    assert decision.estimate == "archive"
+    assert act_entry(decision)["value"] == "archive"
     assert read_record(decision.record.document).document == decision.record.document
 
 
@@ -1730,10 +1704,10 @@ def a_list(r: Any) -> list[str]:
     return ["a", "b"]
 
 
-def test_a_candidate_set_policys_decision_is_the_set() -> None:
+def test_a_candidate_set_rules_value_is_the_set() -> None:
     policy = Rule("d:decision", t.list_(t.string), a_list, version="1", candidates=True)
     decision = decide_sync(load(minimal(rules={"decision": policy})), {}, {})
-    assert decision.estimate == ["a", "b"]
+    assert decision.record.entries["d:decision"]["value"] == ["a", "b"]
 
 
 def reads_the_policy(r: Any) -> bool:
@@ -1744,14 +1718,14 @@ def negated(r: Any) -> bool:
     return not r.read("d:decision")
 
 
-def test_a_rule_a_table_and_a_source_reading_the_policys_ref_load_and_run_after_it() -> None:
+def test_a_rule_a_table_and_a_source_reading_the_top_rules_ref_load_and_run_after_it() -> None:
     reader = Rule("d:r", t.boolean, negated, version="1", reads=["d:decision"])
     table = Table("d:tab", t.boolean, "F", ["d:decision"], [["-", True]])
     asks = Source({"t:x": t.string}, needs=["d:decision"])
     design = minimal(rules={"r": reader, "tab": table}, sources={"s": asks})
     binding = Scripted({"s": returns({"t:x": "a"})})
     decision = decide_sync(load(design), {}, {"default": binding})
-    assert decision.estimate is True
+    assert decision.record.entries["d:decision"]["value"] is True
     entries = {i["ref"]: i for i in decision.record.log if i["item"] == "entry"}
     assert entries["d:r"]["value"] is False
     assert entries["d:tab"]["value"] is True
@@ -1762,7 +1736,7 @@ def test_a_rule_a_table_and_a_source_reading_the_policys_ref_load_and_run_after_
     assert index["d:decision"] < min(index["d:r"], index["d:tab"], index["t:x"])
 
 
-def test_a_function_when_reading_the_policys_ref_runs_when_its_source_needs_it() -> None:
+def test_a_function_when_reading_the_top_rules_ref_runs_when_its_source_needs_it() -> None:
     gated = Source(
         {"t:x": t.string}, needs=["d:decision"], when=When(reads_the_policy, version="1")
     )
@@ -1772,8 +1746,8 @@ def test_a_function_when_reading_the_policys_ref_runs_when_its_source_needs_it()
     assert found["value"] == "a"
 
 
-def test_a_function_when_reading_the_policys_ref_undeclared_fails_at_decide() -> None:
-    # A function when declares no reads, so load cannot see this read of the policy's ref.
+def test_a_function_when_reading_the_top_rules_ref_undeclared_fails_at_decide() -> None:
+    # A function when declares no reads, so load cannot see this read of the top rule's ref.
     gated = Source({"t:x": t.string}, when=When(reads_the_policy, version="1"))
     loaded = load(dataclasses.replace(minimal(), sources={"s": gated}))
     record = decide_sync(loaded, {}, {"default": Scripted({"t:x": "a"})}).record
@@ -1854,4 +1828,4 @@ def test_an_async_observer_is_refused_by_decide_and_replay(observer: Any) -> Non
 
 @pytest.mark.parametrize("observer", [sync_observer, SyncCall(), PartialCall(), _deep(31)])
 def test_a_sync_observer_is_accepted(observer: Any) -> None:
-    assert go(observer=observer).estimate == "archive"
+    assert act_entry(go(observer=observer))["value"] == "archive"

@@ -31,7 +31,6 @@ def act(r: Any) -> str:
 
 DESIGN = Design(
     state=t.record(subject=t.string),
-    policy="d:act",
     sources={"ask": Source({"q:spam": Question("noul", Text("Is it spam?"))}, needs=["t:state"])},
     rules={
         "route": Rule("d:route", t.label("no", "yes"), route, version="1", reads=["q:spam"]),
@@ -57,11 +56,11 @@ def test_one_turn_loads_decides_closes_and_replays() -> None:
     loaded = load(DESIGN)
     assert loaded.design_hash.startswith("sha256:")
 
-    # Decide: one turn against the fixture binding; the decision is the policy's estimate.
+    # Decide: one turn against the fixture binding; the decision is the policy's entry.
     binding = Answering(0.9)
     decision = decide_sync(loaded, {"subject": "win a prize"}, {"default": binding})
     assert len(binding.asked) == 1
-    assert decision.estimate == "archive"
+    assert decision.record.entries["d:act"]["value"] == "archive"
 
     # The record closes with its hash and reads back with the same one.
     record = decision.record
@@ -81,7 +80,7 @@ def test_one_turn_loads_decides_closes_and_replays() -> None:
 def test_a_keep_turn_decides_keep_and_replays() -> None:
     loaded = load(DESIGN)
     decision = decide_sync(loaded, {"subject": "lunch?"}, {"default": Answering(0.1)})
-    assert decision.estimate == "keep"
+    assert decision.record.entries["d:act"]["value"] == "keep"
     rerun, findings = replay_sync(decision.record, loaded)
     assert findings == []
     assert rerun is not None

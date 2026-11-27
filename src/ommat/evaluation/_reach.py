@@ -1,12 +1,13 @@
 # pyright: reportPrivateUsage=false
-"""The question-reach job: for each question, whether its answer, changed alone, changes the
-decision of a recorded turn (§question-reach).
+"""The question-reach job: for each question, whether its answer, changed alone, changes an
+entry the caller names in a recorded turn (§question-reach).
 
-It asks the dead-question lint's question from turns the design is known to reach. ``values``
-is checked as the lints check it, through ``points`` over every ``q:`` ref a source
-provides, before any record is read; a key naming any other read, an unfilled read and each
-other slip is one ``ValueError``. Each record is then read and refused as the deciding inputs
-refuse one, ``invalid-record``, ``wrong-design`` for a record before format 8,
+It asks the dead-question lint's question from turns the design is known to reach. ``refs`` is
+checked as the lint checks it, a non-empty list or tuple of declared whole ``d:`` refs each a
+rule provides, then ``values`` as the lints check it, through ``points`` over every ``q:`` ref a
+source provides, both before any record is read; a key naming any other read, an unfilled read
+and each other slip is one ``ValueError``. Each record is then read and refused as the
+deciding inputs refuse one, ``invalid-record``, ``wrong-design`` for a record before format 8,
 ``unfinished``, ``nothing-to-replay``, ``wrong-design`` for another design hash and
 ``baseline-differs``, each but the first naming its turn, every record in list order before
 any trial.
@@ -19,8 +20,8 @@ a grounded entry's with its own marker last; a candidate-valued question's are e
 and then the first candidate at 1, every other label the call asked with at 0; a returned call
 always rendered a candidate, since an empty set leaves the question out with its call null. A
 trial whose replay reports ``stale-question`` is undetermined, whatever else it finds; any other
-reaches when the policy's entry it wrote differs from the record's by ``decision_bytes``, a
-marker's cause and refs included.
+reaches when, at some named ref, the entry it wrote differs from the record's by
+``entry_bytes``, a marker's cause and refs included, or one of the two holds no entry there.
 
 A question is ``live`` when some trial of an entry of it reaches; else ``not-determined`` when
 some trial was undetermined; else ``no-change-found`` when some trial ran; else
@@ -30,7 +31,7 @@ copy's record wrote it. The report is plain data.
 """
 
 import copy
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, cast
 
 from ommat._answer import AnswerKind
@@ -38,13 +39,14 @@ from ommat._canonical import encode
 from ommat._decide import EntryRefusal
 from ommat._design import LoadedDesign, Question
 from ommat._fixture import _binding_form
-from ommat._ledger import _ITEM_DEPTH, Record
+from ommat._ledger import _ITEM_DEPTH, Record, entry_bytes
 from ommat._markers import Cause, Unavailable
 from ommat._refs import code_point_sorted, declared_ref
 from ommat._values import described, is_scalar_string, quote, string_data, type_name
-from ommat.evaluation._diff import OUTSIDE, _read, _refuse_unfit, _run_sync, baseline, decided
+from ommat.evaluation._diff import OUTSIDE, _read, _refuse_unfit, _run_sync, baseline
 from ommat.evaluation._edit import _applied, _labels, _q_value, _SetEntry
 from ommat.helpers import points
+from ommat.helpers._dead import named_refs
 
 _Log = list[dict[str, Any]]
 
@@ -57,16 +59,23 @@ def _refuse_records(what: str, records: object) -> None:
 
 
 async def question_reach(
-    records: Iterable[object], loaded: LoadedDesign, *, values: Mapping[str, Any] | None = None
+    records: Iterable[object],
+    loaded: LoadedDesign,
+    *,
+    refs: Sequence[str],
+    values: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The report ``{"records": [hash], "trials": N, "questions": {ref: {"status",
-    "witness"}}, "narrowed": [ref]}``, keyed by every ``q:`` ref a source provides; a
-    ``ValueError`` for a slip in ``values`` or a question nothing fills, before any record is
-    read. ``values`` maps a ``q:`` ref a source provides to a list of its values, as the
-    dead-question lint takes it; for a label question with no grid entry, the labels to try."""
+    "witness"}}, "narrowed": [ref]}``, keyed by every ``q:`` ref a source provides; before any
+    record is read, a ``TypeError`` for ``refs`` that is not a list or tuple, and a
+    ``ValueError`` for ``refs`` empty or naming anything but a declared whole ``d:`` ref a rule
+    provides, then for a slip in ``values`` or a question nothing fills. ``values`` maps a
+    ``q:`` ref a source provides to a list of its values, as the dead-question lint takes it;
+    for a label question with no grid entry, the labels to try."""
     if type(loaded) is not LoadedDesign:
         raise EntryRefusal(f"loaded is a {type_name(loaded)}, not exactly a LoadedDesign")
     _refuse_records("records", records)
+    named = named_refs(loaded, refs)
     provided = code_point_sorted(
         ref for s in loaded._design.sources.values() for ref in s.provides if ref.startswith("q:")
     )
@@ -95,7 +104,7 @@ async def question_reach(
                 ran.add(question)
                 if any(f["kind"] in OUTSIDE for f in found):
                     undetermined.add(question)
-                elif question not in witnesses and decided(log, done.record.log):
+                elif question not in witnesses and _reaches(named, log, done.record.log):
                     written = done.items[0]
                     shown = written["value"] if "value" in written else written["marker"]
                     witnesses[question] = {
@@ -123,10 +132,22 @@ async def question_reach(
 
 
 def question_reach_sync(
-    records: Iterable[object], loaded: LoadedDesign, *, values: Mapping[str, Any] | None = None
+    records: Iterable[object],
+    loaded: LoadedDesign,
+    *,
+    refs: Sequence[str],
+    values: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """``question_reach`` run to completion; ``RuntimeError`` inside a running event loop."""
-    return _run_sync("question_reach", lambda: question_reach(records, loaded, values=values))
+    return _run_sync(
+        "question_reach", lambda: question_reach(records, loaded, refs=refs, values=values)
+    )
+
+
+def _reaches(named: tuple[str, ...], log: _Log, rerun: _Log) -> bool:
+    """Whether the entry at some named ref differs between ``log`` and ``rerun`` by
+    ``entry_bytes``."""
+    return any(entry_bytes(log, ref) != entry_bytes(rerun, ref) for ref in named)
 
 
 def _asked(entry: dict[str, Any], log: _Log) -> bool:

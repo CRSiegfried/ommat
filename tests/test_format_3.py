@@ -81,7 +81,7 @@ def test_check_11_refuses_the_stored_format_2_design_naming_its_format() -> None
     with pytest.raises(InvalidDesign) as info:
         load((FORMAT_2 / "design.json").read_bytes())
     assert [f.check for f in info.value.failures] == [11]
-    assert "the document's format 2 is not 11" in str(info.value)
+    assert "the document's format 2 is not 12" in str(info.value)
 
 
 def test_a_format_2_record_reads_back_to_its_own_hash_with_no_hash_member() -> None:
@@ -224,7 +224,7 @@ def test_a_described_design_loads_and_writes_its_labels_as_declared() -> None:
     loaded = load(described())
     asked = decode(loaded.document)["sources"]["ask"]["provides"]["q:tone"]
     assert asked["labels"] == [WARM, "cold"]
-    assert decode(loaded.document)["format"] == 11
+    assert decode(loaded.document)["format"] == 12
     assert loaded._labels["q:tone"] == (("warm", "cold"), ("Friendly or grateful", None))
     assert loaded._labels["q:other"] == (("yes", "no"), (None, None))
 
@@ -949,7 +949,7 @@ def test_a_helpers_frames_inside_a_rule_are_kept() -> None:
     assert no_paths(names)
 
 
-def test_a_raising_policys_traceback_starts_at_the_policy() -> None:
+def test_a_raising_rules_traceback_starts_at_the_rule() -> None:
     policy = Rule("d:decision", t.boolean, broken_policy, version="1")
     text = text_of(ran(loaded=load(described(rules={**described().rules, "decision": policy}))))
     names = frames(text)
@@ -1069,8 +1069,8 @@ def test_a_builtin_components_frames_are_all_kept() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden described record
 
-GOLDEN_DESIGN = "sha256:ba34693f085e4e902cfd2745facfb9990aafd6ce9ebffb7bdf930f97ac61110d"
-GOLDEN_RECORD = "sha256:34fe1853d47faab01a1fcd2787dbfe59a4e6c9fdc8cca7ddbae8e7854c2360df"
+GOLDEN_DESIGN = "sha256:a6c6d7a1976870873af7e8e3097f2883c8989b3d8cde1181fe07daec6584ee6b"
+GOLDEN_RECORD = "sha256:817371f1f352a6fc9d4219aaaa65471444930dc3bfa62b0876bad6bd37804590"
 
 
 def golden() -> Record:
@@ -1079,8 +1079,8 @@ def golden() -> Record:
 
 def test_the_golden_described_record() -> None:
     record = golden()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 10, "helpers": 4}
-    assert record.log[1]["policy"] == "d:decision"
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 11, "helpers": 4}
+    assert "policy" not in record.log[1]
     assert entry(record, "d:tone")["value"] == "warm"
     assert entry(record, "d:decision")["value"] is True
     assert call_of(record)["precision"] == 2

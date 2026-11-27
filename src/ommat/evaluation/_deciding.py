@@ -17,9 +17,7 @@ A trial the form refuses at its target, ``null-call``, ``failed-call``, ``not-fo
 ``candidate-rule``, is not run; any other refusal propagates. A run trial whose replay gives
 ``stale-question`` is undetermined, whatever else it finds. A run trial changes the entry when
 replay gives an ``entry`` finding at its ref whose value, or marker kind and cause code, differ;
-``rows``, ``derivation``, ``round`` or a cause's refs alone are no change. The policy's entry is
-the decision, which a trial changes when its ``decision_bytes``, a marker's cause refs included,
-differ (§decide-output).
+``rows``, ``derivation``, ``round`` or a cause's refs alone are no change, at every ref alike.
 
 A read is ``deciding`` when a run trial, not undetermined, changes the entry; else
 ``not-determined`` when no trial ran, as for a ``candidate`` read, which no form reaches, or one
@@ -45,7 +43,7 @@ from ommat._read_view import is_candidate_read
 from ommat._refs import parse_ref
 from ommat._replay import FindingKind
 from ommat._types import Label, Nullable, RecordOf, Scalar, Type
-from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, changed, decided
+from ommat.evaluation._diff import OUTSIDE, _run_sync, baseline, changed
 from ommat.evaluation._edit import (
     _STATE,
     _Applied,
@@ -127,18 +125,16 @@ async def _classed(
         ran = True
         if any(f["kind"] in OUTSIDE for f in found.findings):
             undetermined = True  # it asked a stale question: no finding of it counts
-        elif _changes(ref, found, log, loaded):
+        elif _changes(ref, found):
             return "deciding"
     if not ran or undetermined:
         return "not-determined"
     return "not-deciding" if exhaustive else "markers-only"
 
 
-def _changes(ref: str, applied: _Applied, log: _Log, loaded: LoadedDesign) -> bool:
-    """Whether a run trial changes the entry at ``ref``: the policy's by ``decided``, any other
-    by an ``entry`` finding at it that ``changed`` counts."""
-    if ref == loaded._design.policy:
-        return decided(log, applied.record.log)
+def _changes(ref: str, applied: _Applied) -> bool:
+    """Whether a run trial changes the entry at ``ref``: an ``entry`` finding at it that
+    ``changed`` counts."""
     return any(f["kind"] is _K.entry and f["ref"] == ref and changed(f) for f in applied.findings)
 
 

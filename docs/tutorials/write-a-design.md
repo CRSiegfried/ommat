@@ -124,7 +124,7 @@ Each `q:` ref maps to a `Question`: its kind, its wording as a `Text`, and any l
 
 ## Rules
 
-A rule turns answers into an estimate, a `d:` ref the policy reads. It is a function of a
+A rule turns answers into an estimate, a `d:` ref other rules and your code read. It is a function of a
 read view, `r`.
 
 1. Find the topic rule. Its function sits at module level, so a stored design reloads it by
@@ -153,7 +153,9 @@ read view, `r`.
 2. Every rule has a `version`, its `reads` and its `params`. `load` refuses a rule with no
    version string; raise it when the function changes. `reads` lists every ref the function
    reads; an undeclared read makes the rule's ref `Unavailable` with the cause
-   `undeclared-read`. `params` lists the parameter paths it reads with `r.param`.
+   `undeclared-read`. `params` lists the parameter paths it reads with `r.param`. A read
+   returns the board's own value, so a rule must not change it: a list sorted or a mapping
+   popped in place changes what every later reader of that ref sees. Build a new value.
 
 3. The bars are parameters, leaves of the design's `parameters`, each a type and a value:
 
@@ -188,9 +190,9 @@ An estimate ommat cannot settle is never `None` or a quiet `no` but a marker: `U
 `Unavailable` or `Unasked`. Each is an `Undetermined`, so one `isinstance` test catches them
 all; `if value:` on a marker raises.
 
-## The policy rule
+## The rule the caller acts on
 
-The policy is an ordinary rule whose estimate is the turn's decision. It reads the other
+The route rule is an ordinary rule whose estimate the caller acts on. It reads the other
 estimates and returns the name of what the caller should do.
 
 1. Find it in `helpdesk_design.py`:
@@ -211,16 +213,17 @@ estimates and returns the name of what the caller should do.
    ```
 
    Each marker is handled on purpose: an unsettled topic is returned as it is, so the
-   turn is undecided; an unsettled urgency never equals `"yes"`; and a missing order number
+   route is undecided; an unsettled urgency never equals `"yes"`; and a missing order number
    still routes.
 
 2. The design wraps it as a rule, `d:route` of type `t.string`, with
-   `reads=["d:topic", "d:urgent", "d:order"]`, and names it in `Design` as
-   `policy="d:route"`, with `state`, `sources` and `rules`.
+   `reads=["d:topic", "d:urgent", "d:order"]`, in `RULES`, which `Design` takes as
+   `rules`, beside `state` and `sources`.
 
-3. The caller reads `decision.estimate` and acts on it; a source could instead act during
-   the turn ([Add a source](../how-to/add-a-source.md#a-source-that-changes-state)). When the estimate is a marker, the turn is
-   undecided, and `escalation(record)` routes it by its root cause.
+3. The caller reads the route's entry, `decision.record.entries["d:route"]`, which holds a
+   `value` or a `marker`, and acts on it; a source could instead act during
+   the turn ([Add a source](../how-to/add-a-source.md#a-source-that-changes-state)). When the entry is a marker, the route is
+   undecided, and `escalation(record, "d:route")` routes it by its root cause.
 
 ## Bindings and decide
 

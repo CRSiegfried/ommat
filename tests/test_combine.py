@@ -1,6 +1,6 @@
-"""Combining designs: ``combine`` unions parts into one design under a top policy, each port
-bound to a rule or a ref, and refuses what load cannot see; ``standalone`` loads one part
-alone."""
+"""Combining designs: ``combine`` unions parts into one design, each port bound to a rule or a
+ref, a rule reading across parts a part of its own, and refuses what load cannot see;
+``standalone`` loads one part alone."""
 
 import dataclasses
 from typing import Any, cast
@@ -75,7 +75,6 @@ SELECTOR = Design(
         ),
     },
     parameters=_bars("route"),
-    policy="d:route",
 )
 """The workflow selector: it picks a workflow, and says whether it picked the calendar."""
 
@@ -98,7 +97,6 @@ def _workflow(name: str, outcomes: tuple[str, str]) -> Part:
             ),
         },
         parameters=_bars(name),
-        policy=f"d:{name}/outcome",
     )
     return Part(design, {chosen: t.boolean})
 
@@ -117,7 +115,9 @@ ACT = Table(
         ["other", "-", "-", "skip"],
     ],
 )
-"""The top policy: the chosen workflow's outcome."""
+"""The top rule: the chosen workflow's outcome."""
+TOP = Part(Design(STATE, rules={"act": ACT}))
+"""The top rule as a part of its own, reading what the other parts provide."""
 EMAIL_CHOSEN = Table(
     "d:email/chosen", t.boolean, "F", ["d:route"], [["email", True], ["Known", False]]
 )
@@ -130,10 +130,10 @@ def email_chosen(r: ReadView) -> object:
     return route if isinstance(route, Undetermined) else route == "email"
 
 
-def combined(**changes: Any) -> Design:
-    fields: dict[str, Any] = {"bind": BIND, "policy": ACT, "name": "assistant"}
+def combined(top: Part = TOP, **changes: Any) -> Design:
+    fields: dict[str, Any] = {"bind": BIND, "name": "assistant"}
     fields.update(changes)
-    return combine(Part(SELECTOR), EMAIL, CALENDAR, **fields)
+    return combine(Part(SELECTOR), EMAIL, CALENDAR, top, **fields)
 
 
 SURE = {"yes": 0.9, "no": 0.1}
@@ -151,7 +151,7 @@ def decided(design: Design, route: str, **answers: Any) -> Any:
 
 
 def refused(*parts: Part, **changes: Any) -> list[str]:
-    fields: dict[str, Any] = {"bind": BIND, "policy": ACT}
+    fields: dict[str, Any] = {"bind": BIND}
     fields.update(changes)
     with pytest.raises(InvalidCombination) as caught:
         combine(*parts, **fields)
@@ -164,9 +164,9 @@ def refused(*parts: Part, **changes: Any) -> list[str]:
 @pytest.mark.parametrize(
     ("route", "act"), [("email", "file"), ("calendar", "accept"), ("other", "skip")]
 )
-def test_two_parts_and_a_top_policy_decide(route: str, act: str) -> None:
+def test_two_parts_and_a_top_rule_decide(route: str, act: str) -> None:
     decision = decided(combined(), route)
-    assert decision.estimate == act
+    assert decision.record.entries["d:act"]["value"] == act
     entries = decision.record.entries
     assert entries["d:email/chosen"]["value"] is (route == "email")
     assert entries["d:calendar/chosen"]["value"] is (route == "calendar")
@@ -174,7 +174,6 @@ def test_two_parts_and_a_top_policy_decide(route: str, act: str) -> None:
 
 def test_a_combined_design_keeps_every_declaration_under_its_own_name() -> None:
     design = combined()
-    assert design.policy == "d:act"
     assert design.name == "assistant"
     assert design.state == STATE
     assert set(design.sources) == {"router", "email/ask", "calendar/ask"}
@@ -196,6 +195,14 @@ def test_a_combined_design_keeps_every_declaration_under_its_own_name() -> None:
     }
 
 
+def test_parts_with_no_top_rule_combine_into_their_union_and_the_port_rules() -> None:
+    design = combine(Part(SELECTOR), EMAIL, CALENDAR, bind=BIND)
+    assert set(design.rules) == set(combined().rules) - {"act"}
+    entries = decided(design, "email").record.entries
+    assert entries["d:email/outcome"]["value"] == "file"
+    assert "d:act" not in entries
+
+
 def test_a_port_bound_to_a_ref_is_a_pass_through_table() -> None:
     rule = combined().rules["calendar/chosen"]
     assert isinstance(rule, Table)
@@ -207,7 +214,7 @@ def test_a_port_bound_to_a_ref_is_a_pass_through_table() -> None:
 def test_a_pass_through_passes_a_marker_on_naming_its_ref() -> None:
     unsure = dict.fromkeys(ROUTES, 1 / 3)
     decision = decided(combined(), "other", **{"q:route": unsure})
-    assert isinstance(decision.estimate, Unsure)
+    assert decision.record.entries["d:act"]["marker"]["kind"] == "Unsure"
     entry = decision.record.entries["d:calendar/chosen"]
     assert entry["marker"] == {
         "kind": "Unsure",
@@ -234,8 +241,8 @@ def test_a_port_bound_to_a_field_path_passes_the_field_through() -> None:
         Part(selector),
         EMAIL,
         CALENDAR,
+        TOP,
         bind={**BIND, "d:email/chosen": "d:picked.calendar"},
-        policy=ACT,
     )
     assert decided(design, "email").record.entries["d:email/chosen"]["value"] is True
 
@@ -244,15 +251,16 @@ def test_a_port_bound_to_a_function_rule_decides() -> None:
     rule = Rule("d:email/chosen", t.boolean, email_chosen, version="1", reads=["d:route"])
     design = combined(bind={**BIND, "d:email/chosen": rule})
     assert design.rules["email/chosen"] is rule
-    assert decided(design, "email").estimate == "file"
+    assert decided(design, "email").record.entries["d:act"]["value"] == "file"
 
 
-def test_the_top_policy_may_be_a_function_rule() -> None:
+def test_the_top_rule_may_be_a_function_rule() -> None:
     def act(r: ReadView) -> object:
         return r.read("d:email/outcome")
 
-    policy = Rule("d:act", t.label(*ACTS), act, version="1", reads=["d:email/outcome"])
-    assert decided(combined(policy=policy), "email").estimate == "file"
+    top = Rule("d:act", t.label(*ACTS), act, version="1", reads=["d:email/outcome"])
+    entries = decided(combined(Part(Design(STATE, rules={"act": top}))), "email").record.entries
+    assert entries["d:act"]["value"] == "file"
 
 
 # --- front-loading and the record ----------------------------------------------------------
@@ -290,7 +298,7 @@ def test_a_combined_design_with_a_function_port_reloads_by_import() -> None:
 
 def test_the_lint_and_the_read_points_reach_a_combined_design() -> None:
     loaded = load(combined())
-    report = dead_questions(loaded, values={"t:state.message": ["hello"]})
+    report = dead_questions(loaded, ["d:act"], values={"t:state.message": ["hello"]})
     assert set(report["questions"]) == {"q:route", "q:email/sure", "q:calendar/sure"}
     assert {q["status"] for q in report["questions"].values()} == {"live"}
     assert points(loaded, "d:email/chosen") == [False, True]
@@ -302,18 +310,17 @@ def test_the_lint_and_the_read_points_reach_a_combined_design() -> None:
 @pytest.mark.parametrize(("chosen", "outcome"), [(True, "file"), (False, "skip")])
 def test_standalone_decides_a_part_alone(chosen: bool, outcome: str) -> None:
     design = standalone(EMAIL, {"d:email/chosen": chosen})
-    assert design.policy == "d:email/outcome"
     assert design.name == "email"
     loaded = load(design)
     decision = decide_sync(loaded, {"message": "hi"}, {"default": fixed({"q:email/sure": SURE})})
-    assert decision.estimate == outcome
+    assert decision.record.entries["d:email/outcome"]["value"] == outcome
     assert load(loaded.document).design_hash == loaded.design_hash
 
 
 def test_standalone_takes_unsure_for_a_port() -> None:
     loaded = load(standalone(EMAIL, {"d:email/chosen": Unsure}))
     decision = decide_sync(loaded, {"message": "hi"}, {"default": fixed({"q:email/sure": SURE})})
-    assert isinstance(decision.estimate, Unsure)
+    assert decision.record.entries["d:email/outcome"]["marker"]["kind"] == "Unsure"
 
 
 def test_standalone_refuses_a_missing_or_an_extra_port_value() -> None:
@@ -337,7 +344,7 @@ def test_a_given_port_takes_its_value_each_turn_from_the_ports_source(
         "ports": fixed({"t:email/chosen": chosen}),
     }
     decision = decide_sync(loaded, {"message": "hi"}, bindings)
-    assert decision.estimate == outcome
+    assert decision.record.entries["d:email/outcome"]["value"] == outcome
     _, findings = replay_sync(decision.record, loaded)
     assert findings == []
 
@@ -450,7 +457,7 @@ def _asks_now(part: Part, bar: float, **source: Any) -> Part:
 
 def test_a_source_and_a_rule_declared_alike_are_kept_once_and_asked_once() -> None:
     email, calendar = _asks_now(EMAIL, 0.6), _asks_now(CALENDAR, 0.95)
-    design = combine(Part(SELECTOR), email, calendar, bind=BIND, policy=ACT)
+    design = combine(Part(SELECTOR), email, calendar, TOP, bind=BIND)
     assert set(design.sources) == {"router", "email/ask", "calendar/ask", "now/ask"}
     assert design.rules["now/request"] == email.design.rules["now/request"]
     loaded = load(design)
@@ -488,7 +495,7 @@ def test_a_source_or_a_rule_declared_differently_is_refused() -> None:
 def test_types_groups_and_targets_declared_alike_are_kept_once() -> None:
     email = Part(_extra(EMAIL.design), EMAIL.ports)
     calendar = Part(_extra(CALENDAR.design), CALENDAR.ports)
-    design = combine(Part(_extra(SELECTOR)), email, calendar, bind=BIND, policy=ACT)
+    design = combine(Part(_extra(SELECTOR)), email, calendar, TOP, bind=BIND)
     assert dict(design.types) == {"yes_no": YES_NO}
     assert list(design.groups) == ["g"]
     assert list(design.targets) == ["tg:x"]
@@ -522,7 +529,7 @@ def test_sources_and_rules_share_one_id_namespace() -> None:
 
 
 def test_the_combined_design_holds_the_design_fields_and_no_class_block() -> None:
-    design = combine(Part(SELECTOR), EMAIL, CALENDAR, bind=BIND, policy=ACT)
+    design = combine(Part(SELECTOR), EMAIL, CALENDAR, TOP, bind=BIND)
     fields = {f.name for f in dataclasses.fields(design)}
     assert "classes" not in fields
     assert fields == {f.name for f in dataclasses.fields(Design)}
@@ -579,9 +586,11 @@ def test_a_ref_provider_that_is_no_d_ref_is_refused() -> None:
 
 
 def test_an_added_rule_whose_id_a_part_declares_is_refused() -> None:
-    policy = dataclasses.replace(ACT, provides="d:route")
-    assert refused(Part(SELECTOR), EMAIL, CALENDAR, policy=policy) == [
-        'the rule for "d:route" takes the id "route", which part 1 ("selector") declares'
+    elsewhere = dataclasses.replace(EMAIL_CHOSEN, provides="d:elsewhere")
+    selector = dataclasses.replace(SELECTOR, rules={**SELECTOR.rules, "email/chosen": elsewhere})
+    assert refused(Part(selector), EMAIL, CALENDAR) == [
+        'the rule for "d:email/chosen" takes the id "email/chosen", which part 1 ("selector") '
+        "declares"
     ]
 
 
@@ -603,7 +612,7 @@ def test_load_still_checks_what_combine_leaves_to_it() -> None:
 
 def test_a_failure_names_what_it_concerns_in_code_point_order() -> None:
     with pytest.raises(InvalidCombination) as caught:
-        combine(Part(SELECTOR), EMAIL, CALENDAR, bind={}, policy=ACT)
+        combine(Part(SELECTOR), EMAIL, CALENDAR, TOP, bind={})
     assert caught.value.failures == (
         CombineFailure(("d:calendar/chosen",), 'the port "d:calendar/chosen" is not bound'),
         CombineFailure(("d:email/chosen",), 'the port "d:email/chosen" is not bound'),
@@ -614,11 +623,11 @@ def test_a_failure_names_what_it_concerns_in_code_point_order() -> None:
 @pytest.mark.parametrize(
     ("call", "message"),
     [
-        (lambda: combine(bind={}, policy=ACT), "at least one part"),
-        (lambda: combine(SELECTOR, bind={}, policy=ACT), "not a Part"),  # type: ignore[arg-type]
-        (lambda: combine(Part(SELECTOR), bind=[], policy=ACT), "bind is a list"),  # type: ignore[arg-type]
-        (lambda: combine(Part(SELECTOR), bind={}, policy="d:route"), "not a Rule or a Table"),  # type: ignore[arg-type]
-        (lambda: combine(EMAIL, bind={"d:email/chosen": 1}, policy=ACT), "not a d: ref"),  # type: ignore[dict-item]
+        (lambda: combine(bind={}), "at least one part"),
+        (lambda: combine(SELECTOR, bind={}), "not a Part"),  # type: ignore[arg-type]
+        (lambda: combine(Part(SELECTOR), bind=[]), "bind is a list"),  # type: ignore[arg-type]
+        (lambda: combine(Part(SELECTOR), bind={}, policy=ACT), "policy"),  # type: ignore[call-arg]
+        (lambda: combine(EMAIL, bind={"d:email/chosen": 1}), "not a d: ref"),  # type: ignore[dict-item]
         (lambda: standalone(EMAIL, []), "ports are a list"),  # type: ignore[arg-type]
     ],
 )

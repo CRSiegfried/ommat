@@ -14,25 +14,26 @@ record. ``use_answers`` reruns one record's turn with another record's calls ans
 intervention on it changes that entry: ``deciding``, ``not-deciding``, ``markers-only`` or
 ``not-determined``. ``switching_values`` replays a record under each value of one parameter leaf,
 probed at the values the turn compares it against and the gap and end values between and beyond
-them, and writes, per entry, the policy's among them, the switching values, slacks and classes, or a
+them, and writes, per entry that switches, the switching values, slacks and classes, or a
 ``boolean`` or ``label`` leaf's partition, to the evaluation store. ``screen_switches``, sync, reads
 each record alone, replaying nothing, and says per numeric leaf whether every value within a window
-of its own decides the turn as recorded, naming the compared values that part the window, so a
-caller runs the switching values only over the records it does not clear. ``write_gold_answers``,
+of its own gives the turn its recorded entries, naming the compared values that part the window, so
+a caller runs the switching values only over the records it does not clear. ``write_gold_answers``,
 sync, writes a labeller's labels for the questions finished turns asked under a named gold set,
 copying an old set's for the questions given none. ``gold_record`` replays a turn with every
-question it asked set to its gold answer, so its decision is what correct answers lead to.
+question it asked set to its gold answer, so its entries are what correct answers lead to.
 ``answers``, sync, gives the answers table, one row per question a call answered in each record,
 with its gold answer and whether it erred when a gold set is given. ``question_reach`` tries each
 question's answer, changed alone at each of its read points by an entry set, in every ``q:`` entry a
 returned call wrote in the records given, and reports a question ``live`` with its first witness
-when some trial changes the decision, else ``not-determined``, ``no-change-found`` or
+when some trial changes a named entry, else ``not-determined``, ``no-change-found`` or
 ``never-asked``. ``DesignStore`` keeps a loaded design's document under its design hash and fetches
 it back through ``load``; ``EvaluationStore`` keeps write-once entries by kind and key. ``rescore``
 decides recorded turns again under each of several designs, from their own answers, building no
-record, for a grid of settings scored by decision alone; ``rescore_grid`` gives its rows over a list
-of parameter points, rerunning each record once per region of points whose runs cannot differ. A job
-or a store refuses with ``EvaluationRefusal``, its ``reason`` a ``RefusalReason``.
+record, for a grid of settings scored by the entries at the refs the caller names;
+``rescore_grid`` gives its rows over a list of parameter points, rerunning each record once per
+region of points whose runs cannot differ. A job or a store refuses with ``EvaluationRefusal``,
+its ``reason`` a ``RefusalReason``.
 
 ``intervene`` and ``scenario`` are in ``_edit``, the answers table in ``_answers``, the deciding
 inputs, tried through it, in ``_deciding``, the switching-value job in ``_switching`` and its

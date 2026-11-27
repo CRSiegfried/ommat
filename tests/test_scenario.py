@@ -135,7 +135,7 @@ CHAIN = load(
             "big": Rule("d:big", t.boolean, big, version="1", reads=["t:a"]),
             "say": Rule("d:say", t.string, say, version="1", reads=["t:b"]),
         },
-        policy="d:say",
+        alone=True,
     )
 )
 
@@ -302,6 +302,7 @@ def test_a_live_binding_is_given_the_calls_seconds() -> None:
 
     out = scenario_sync(go().record, LOADED, [{"ask": "ask"}], live(ask=slow))
     assert finished(out["record"].log)
+    assert "d:act" in out["record"].entries
 
 
 def test_a_bindings_key_the_design_does_not_declare_is_refused() -> None:
@@ -325,6 +326,7 @@ def test_a_base_cut_by_its_deadline_runs_past_the_cut_live() -> None:
     assert all(r["deadline"] is False for r in rounds(out["record"]))
     assert out["stale"] == ["q:spam", "t:body", "t:size"]
     assert finished(out["record"].log)
+    assert "d:act" in out["record"].entries
 
 
 def test_a_live_scenario_enforces_the_bases_deadline() -> None:

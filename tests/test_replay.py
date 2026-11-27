@@ -349,16 +349,48 @@ def test_an_entry_finding_names_no_rule_for_a_d_ref_the_given_design_does_not_pr
 # The early returns
 
 
-def test_a_record_cut_short_before_the_policy_s_entry_is_unfinished_and_runs_nothing() -> None:
+def test_a_record_its_observer_cut_short_replays_and_finds_what_the_cut_lost() -> None:
+    """The observer's exception writes no cause item, so the cut record is finished: it replays,
+    each source whose call the cut left unanswered is stale, and each entry the full turn
+    writes after the cut is an entry finding with nothing recorded."""
     record = record_of(caught(deciding(observer=Seen(5))))
-    seen = Seen()
-    assert asyncio.run(replay(record, LOADED, observer=seen)) == (None, [{"kind": K.unfinished}])
-    assert seen.items == []
+    assert [i.get("ref") for i in record.log if i["item"] == "entry"] == ["t:state", "q:spam"]
+    assert record.cause is None
+    rerun, found = run(record)
+    assert rerun is not None
+    assert [(f["kind"], f["ref"]) for f in found] == [
+        (K.stale_question, "t:body"),
+        (K.stale_question, "t:size"),
+        (K.entry, "d:act"),
+        (K.entry, "d:echo"),
+        (K.entry, "d:route"),
+        (K.entry, "t:body"),
+        (K.entry, "t:size"),
+    ]
+    assert all(f["clause"] == "no-answer" for f in found if f["kind"] == K.stale_question)
+    assert all(f["recorded"] is None for f in found if f["kind"] == K.entry)
+
+
+def test_a_record_its_observer_ended_after_the_last_round_replays_with_no_finding() -> None:
+    whole = go().record
+    record = record_of(caught(deciding(observer=Seen(len(whole.log) - 1))))
+    assert record.log == whole.log
+    rerun, found = run(record)
+    assert found == []
+    assert rerun is not None
 
 
 def test_a_cancelled_record_is_unfinished_whatever_the_design() -> None:
-    record = record_of(caught(deciding(observer=Seen(0))))
-    assert run(record, CHANGED) == (None, [{"kind": K.unfinished}])
+    rules = {**RULES, "echo": Rule("d:echo", t.string, cancelling, version="1", reads=["t:body"])}
+    record = record_of(caught(deciding(slice_design(rules=rules))))
+    assert record.cause == {"code": "cancelled", "refs": []}
+    seen = Seen()
+    for loaded in (LOADED, CHANGED):
+        assert asyncio.run(replay(record, loaded, observer=seen)) == (
+            None,
+            [{"kind": K.unfinished}],
+        )
+    assert seen.items == []
 
 
 def test_a_broken_entry_has_nothing_to_replay_and_no_design_mismatch() -> None:
@@ -406,28 +438,24 @@ def test_a_cancelled_record_before_format_8_is_wrong_design_before_unfinished() 
         assert run(record, CHANGED) == (None, [{"kind": K.wrong_design}])
 
 
-@pytest.mark.parametrize(
-    ("at", "kind"),
-    [(2, K.unfinished), (3, K.nothing_to_replay)],
-    ids=["at the state entry", "at the policy's entry"],
-)
-def test_a_broken_entry_cut_short_is_unfinished_until_its_policy_entry(at: int, kind: K) -> None:
+def test_a_broken_entry_its_observer_ended_has_nothing_to_replay() -> None:
     """The ledger refuses a ``cause`` item after a marker state, so the closest record is a
-    broken entry the observer cut short: before the policy's entry it is unfinished; at it,
-    the entry is kept and the turn is finished."""
-    exc = caught(deciding(observer=Seen(at), codec=Counting(raises=ValueError("bad"))))
+    broken entry whose observer raised at its last item: finished, its state entry a marker."""
+    exc = caught(deciding(observer=Seen(2), codec=Counting(raises=ValueError("bad"))))
     record = record_of(exc)
     assert entry(record.log, "t:state")["marker"]["kind"] == "Unavailable"
-    assert len(record.log) == at + 1
-    assert run(record) == (None, [{"kind": kind}])
+    assert len(record.log) == 3
+    assert run(record) == (None, [{"kind": K.nothing_to_replay}])
 
 
-def test_a_finished_record_with_its_policy_s_entry_dropped_is_unfinished() -> None:
+def test_a_finished_record_with_the_act_entry_dropped_finds_the_entry() -> None:
     record = go().record
     policy = entry(record.log, "d:act")
     copy_ = edited(record, lambda d: d["log"].remove(entry(d["log"], "d:act")))
     assert policy not in copy_.log
-    assert run(copy_) == (None, [{"kind": K.unfinished}])
+    rerun, found = run(copy_)
+    assert rerun is not None
+    assert [(f["kind"], f["ref"], f["recorded"]) for f in found] == [(K.entry, "d:act", None)]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -652,7 +680,7 @@ def keep_all(r: Any) -> str:
     return "keep"
 
 
-def test_a_changed_policy_is_the_entry_finding_at_its_ref() -> None:
+def test_a_changed_act_rule_is_the_entry_finding_at_its_ref() -> None:
     record = go().record
     assert entry(record.log, "d:act")["value"] == "archive"
     changed = slice_design(act=act_rule(keep_all))
@@ -680,15 +708,14 @@ def test_a_state_the_given_design_refuses_replays_as_a_broken_entry() -> None:
     rerun, found = run(go().record, changed)
     assert rerun is not None
     assert rerun.cause == {"code": "invalid-return", "refs": ["t:state"]}
-    # The broken entry writes the policy's ref Unavailable and no other rule's entry.
+    # The broken entry writes t:state alone, so no rule's entry.
     assert found[1] == {
         "kind": K.entry,
         "ref": "d:act",
         "recorded": entry(go().record.log, "d:act"),
-        "replayed": entry(rerun.log, "d:act"),
+        "replayed": None,
         "rule": rule_of(changed, "act"),
     }
-    assert entry(rerun.log, "d:act")["marker"]["cause"] == rerun.cause
     assert found[2] == {
         "kind": K.entry,
         "ref": "d:echo",
@@ -765,7 +792,7 @@ def test_an_uncallable_observer_is_refused_before_the_record_is_read() -> None:
         replay_sync(unfinished, LOADED, observer=42)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("settings", [{"certificate_cap": 1}, {"timeout": 0}, {"deadline": -1}])
+@pytest.mark.parametrize("settings", [{"budget": -1}, {"timeout": 0}, {"deadline": -1}])
 def test_a_recorded_setting_outside_its_bounds_is_refused_with_no_findings(
     settings: dict[str, Any],
 ) -> None:

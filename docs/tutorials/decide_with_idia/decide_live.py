@@ -19,7 +19,6 @@ from ommat import (
     Decision,
     LoadedDesign,
     SourceCall,
-    Undetermined,
     decide,
     from_record,
     load,
@@ -54,17 +53,22 @@ async def registry(batch: tuple[SourceCall, ...], *, seconds: float) -> CallResu
     return CallResult({"t:open_orders": ["Station Road"]})
 
 
-def said(estimate: object) -> str:
-    """A value as it is, a marker as its kind and its cause's code and refs."""
-    if isinstance(estimate, Undetermined):
-        cause = estimate.cause
-        return f"{estimate.kind.value} ({cause.code.value} on {', '.join(cause.refs)})"
-    return str(estimate)
+ROUTE = "d:route"
+"""The ref the caller acts on: the design's route rule."""
+
+
+def said(entry: dict[str, Any]) -> str:
+    """A value entry as its value, a marker entry as its kind and its cause's code and refs."""
+    if "value" in entry:
+        return str(entry["value"])
+    marker = entry["marker"]
+    cause = marker["cause"]
+    return f"{marker['kind']} ({cause['code']} on {', '.join(cause['refs'])})"
 
 
 def show(decision: Decision) -> None:
     """The decision, then each call: its sources, precision, attempts and warnings lines."""
-    print("decision:", said(decision.estimate))
+    print("decision:", said(decision.record.entries[ROUTE]))
     unhashed = decision.record.unhashed["calls"]
     for index, item in enumerate(decision.record.log):
         if item["item"] == "call":
@@ -95,7 +99,7 @@ async def run(providers: Providers = live_providers) -> list[Any]:
             stored.append(decision.record.document)
             rerun, findings = await replay(read_record(stored[-1]), loaded)
             print("  replay findings:", findings)
-            results.append((decision.estimate, findings, rerun is not None))
+            results.append((decision.record.entries[ROUTE], findings, rerun is not None))
 
         # The first turn again, every model answer from its record and no provider called; the
         # registry is bound to the idia binding, which asks q: refs only.
@@ -108,7 +112,7 @@ async def run(providers: Providers = live_providers) -> list[Any]:
         state = {"report": REPORTS[0], "filed_on": FILED_ON}
         again = await decide(loaded, state, answered)
         show(again)
-        results.append((again.estimate, again.record))
+        results.append((again.record.entries[ROUTE], again.record))
     return results
 
 

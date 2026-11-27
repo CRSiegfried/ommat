@@ -28,18 +28,19 @@ the selector's:
 EMAIL_PORTS = {"d:email/chosen": t.boolean, "d:email/urgent": YES_NO}
 ```
 
-The workflow's own policy, `d:email/outcome`, becomes an ordinary rule of the combined design.
+A part's rules stay ordinary rules of the combined design, `d:email/outcome` among them.
 
-## Bind each port and name the top policy
+## Bind each port and add the rule that reads across parts
 
-`combine` takes the parts, a provider for each port, and the top policy:
+`combine` takes the parts and a provider for each port. A rule that reads more than one part's
+estimates goes in as a part of its own, a design that holds only that rule:
 
 ```python
 DESIGN = combine(
     Part(SELECTOR),
     EMAIL,
+    Part(Design(STATE, rules={"act": ACT})),
     bind={"d:email/chosen": CHOSEN, "d:email/urgent": "d:urgent"},
-    policy=ACT,
     name="assistant",
 )
 ```
@@ -52,7 +53,7 @@ the selector's route into the boolean the workflow reads:
 CHOSEN = Table("d:email/chosen", t.boolean, "F", ["d:route"], [["email", True], ["Known", False]])
 ```
 
-The top policy reads the selector's route and the workflow's outcome:
+`d:act`, the entry the caller acts on, reads the selector's route and the workflow's outcome:
 
 ```python
 ACT = Table(

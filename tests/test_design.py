@@ -41,7 +41,7 @@ def test_form_is_a_member_no_constructor_sets() -> None:
 def test_a_design_snapshots_its_mappings_and_sequences() -> None:
     sources = {"s": Source({"t:x": t.string})}
     rules = {"decision": designs.DECISION}
-    design = Design(state=t.record(), policy="d:decision", sources=sources, rules=rules)
+    design = Design(state=t.record(), sources=sources, rules=rules)
     sources["other"] = Source({"t:y": t.string})
     rules["extra"] = designs.rule("extra")
     assert list(design.sources) == ["s"]
@@ -69,8 +69,7 @@ def test_keys_that_would_share_string_data_are_kept_as_given() -> None:
 
 
 def test_the_design_defaults() -> None:
-    design = Design(state=t.record(), policy="d:decision")
-    assert design.policy == "d:decision"
+    design = Design(state=t.record())
     assert design.name is None
     for name in ("sources", "rules", "parameters", "types", "groups", "targets"):
         assert dict(getattr(design, name)) == {}
@@ -78,20 +77,27 @@ def test_the_design_defaults() -> None:
 
 def test_a_design_declares_no_classes() -> None:
     with pytest.raises(TypeError, match="classes"):
-        Design(state=t.record(), policy="d:decision", classes={})  # type: ignore[call-arg]
+        Design(state=t.record(), classes={})  # type: ignore[call-arg]
 
 
-def test_a_design_takes_only_its_state_and_policy_positionally() -> None:
-    assert Design("t:state", "d:decision").policy == "d:decision"
+def test_a_design_takes_only_its_state_positionally_and_no_policy() -> None:
+    assert Design("t:state").state == "t:state"
     with pytest.raises(TypeError, match="positional"):
-        Design("t:state", "d:decision", {})  # type: ignore[misc]
+        Design("t:state", "d:decision")  # type: ignore[misc]
+    with pytest.raises(TypeError, match="policy"):
+        Design("t:state", policy="d:decision")  # type: ignore[call-arg]
+
+
+def test_a_source_takes_no_feedback_flag() -> None:
+    with pytest.raises(TypeError, match="feedback"):
+        Source({}, feedback=True)  # type: ignore[call-arg]
 
 
 def test_source_defaults_and_its_provides() -> None:
     source = Source({"t:a": Name("string"), "t:b": {"type": t.string, "candidates": True}})
     assert type(source.provides["t:a"]) is str
     assert dict(source.provides["t:b"]) == {"type": "string", "candidates": True}
-    assert (source.cost, source.feedback, source.payload, source.oracle) == (0, False, None, None)
+    assert (source.cost, source.payload, source.oracle) == (0, None, None)
     assert (source.timeout, source.when, source.requirement, source.grounded) == (None,) * 4
 
 
@@ -135,7 +141,7 @@ def test_a_texts_slots_are_snapshotted() -> None:
         lambda: Source({}, needs="t:x"),
         lambda: Source({}, needs=[1]),  # type: ignore[list-item]
         lambda: Source({}, when=1),  # type: ignore[arg-type]
-        lambda: Source({}, cost=True, timeout=-1, feedback=1),  # type: ignore[arg-type]
+        lambda: Source({}, cost=True, timeout=-1),  # type: ignore[arg-type]
         lambda: Rule("d:r", t.boolean, 1),  # type: ignore[arg-type]
         lambda: Rule(1, None, designs.route, boundaries=[]),  # type: ignore[arg-type]
         lambda: SourceRequirement("d:x", "ab"),
@@ -143,7 +149,7 @@ def test_a_texts_slots_are_snapshotted() -> None:
         lambda: Source({}, when=designs.route),  # type: ignore[arg-type]
         lambda: Group("q:x", ["convergent"]),
         lambda: Table(1, t.boolean, "U", [], []),  # type: ignore[arg-type]
-        lambda: Design(state=None, policy=1),  # type: ignore[arg-type]
+        lambda: Design(state=None),  # type: ignore[arg-type]
         lambda: designs.minimal(sources=None, rules={"r": Source({})}),
         lambda: designs.minimal(name=1, types=None),
     ],

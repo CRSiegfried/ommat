@@ -432,7 +432,7 @@ def turn_outline(record_document: object, design_document: object = None) -> dic
         }
     esc, found_defects = None, None
     if record is not None:
-        esc = escalation(record)
+        esc = None if policy is None else escalation(record, policy)
         found = defects(record)
         found_defects = None if found is None else [x["ref"] for x in found]
     turn = obj(unhashed.get("turn"))

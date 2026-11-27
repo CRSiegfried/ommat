@@ -84,7 +84,6 @@ DESIGN = Design(
             "d:report", t.string, report, version="1", reads=["d:kept", "d:lost", "t:c/size"]
         ),
     },
-    policy="d:report",
 )
 LOADED = load(DESIGN)
 YES = {"yes": 0.8, "no": 0.2}
@@ -131,7 +130,6 @@ def seen_seconds(settings: RunSettings | None = None, **source: Any) -> list[flo
             "x": Rule("d:x", t.label("no", "yes"), lambda r: "yes", version="1", reads=[]),
             "ok": Rule("d:ok", t.boolean, lambda r: True, version="1", reads=["d:x"]),
         },
-        policy="d:ok",
     )
     decide_sync(load(design), {}, {"o": binding}, settings)
     return seen
@@ -197,9 +195,8 @@ def test_a_per_ref_timed_out_and_raised_stand_beside_an_answered_ref() -> None:
         "c: HTTP 503 Service Unavailable",
     ]
     assert calls["attempts"] == 3
-    assert decide_sync(LOADED, {"text": "a report"}, {"o": split}).estimate == (
-        "value, marker, marker"
-    )
+    decision = decide_sync(LOADED, {"text": "a report"}, {"o": split})
+    assert decision.record.entries["d:report"]["value"] == "value, marker, marker"
 
 
 def test_a_per_ref_record_replays_with_no_finding_and_its_markers_as_recorded() -> None:
@@ -224,14 +221,14 @@ def test_from_record_answers_a_per_ref_marker_as_unsupported() -> None:
     assert any("t:c/size" in line for line in lines)
 
 
-GOLDEN_DESIGN = "sha256:e25116359956ed3601d67d1e7d2c31007a4ad9bbfd0ddc9f1936a98a0d8ab9d7"
-GOLDEN_RECORD = "sha256:e6901e8c9cb9c63eaf2862be2a334668699fe24709e8fbbf3511ebf472173105"
+GOLDEN_DESIGN = "sha256:58f570c379b3f7de7b88d99e6f7545f2259d7acbe30884d51ff9e53e9cafa229"
+GOLDEN_RECORD = "sha256:a9d2ef3cc5631400e1551aba7e7c9c098f5a1ea6c82d839026f8230634c5db3f"
 
 
 def test_the_golden_per_ref_record() -> None:
     record = per_ref_turn()
-    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 10, "helpers": 4}
-    assert record.log[1]["policy"] == "d:report"
+    assert record.log[0] == {"item": "design", "hash": GOLDEN_DESIGN, "format": 11, "helpers": 4}
+    assert "policy" not in record.log[1]
     assert entry(record, "d:report")["value"] == "value, marker, marker"
     assert (record.design_hash, record.record_hash) == (GOLDEN_DESIGN, GOLDEN_RECORD)
     assert decode(record.document)["hash"] == GOLDEN_RECORD
@@ -298,7 +295,7 @@ def test_check_11_refuses_the_stored_format_3_design_naming_its_format() -> None
     with pytest.raises(InvalidDesign) as info:
         load((FORMAT_3 / "design.json").read_bytes())
     assert [f.check for f in info.value.failures] == [11]
-    assert "the document's format 3 is not 11" in str(info.value)
+    assert "the document's format 3 is not 12" in str(info.value)
 
 
 def test_a_format_3_record_reads_back_to_its_own_hash() -> None:

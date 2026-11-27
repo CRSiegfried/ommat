@@ -86,14 +86,16 @@ def main() -> list[tuple[object, int]]:
     results: list[tuple[object, int]] = []
     for report in REPORTS:
         decision = decide_sync(loaded, {"text": report}, {"spans": binding})
-        print("decision:", decision.estimate)
+        entry = decision.record.entries["d:route"]
+        decided = entry["value"] if "value" in entry else entry["marker"]
+        print("decision:", decided)
         print("  answers:", answers(decision))
 
         record = read_record(decision.record.document)
         before = model.calls
         _, findings = replay_sync(record, loaded)
         print("  replay findings:", findings, "| model calls:", model.calls - before)
-        results.append((decision.estimate, model.calls - before))
+        results.append((decided, model.calls - before))
     return results
 
 
