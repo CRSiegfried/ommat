@@ -1,6 +1,6 @@
 # Decide with real models through idia
 
-In this tutorial you bind an ommat design to two real decision models through the idia
+In this tutorial you bind an ommat design to two real judgement models through the idia
 binding, decide two street reports, read what the record holds about each call, replay the
 records, and answer a turn again from a stored record. You need Python 3.11 or later, an OpenAI
 API key, and a Cloudflare account id and API token with Workers AI access. It builds on

@@ -319,7 +319,7 @@ def _span(span: object, located: object, is_list: bool) -> Any:
 
 @dataclass(frozen=True, slots=True, init=False)
 class ExtractionAnswer:
-    """A typed value a decision model read from a text, as its question asked.
+    """A typed value a judgement model read from a text, as its question asked.
 
     ``value_type`` is a ``ValueType`` member or its string and ``is_list`` exactly a ``bool``,
     both copied from the question. ``value`` and ``guess`` are each ``None`` or a value of the

@@ -1,6 +1,6 @@
 """A design for a city's public-works desk: triage one street report into a work order.
 
-A resident files a report about something in the street. Each oracle stands for one decision
+A resident files a report about something in the street. Each oracle stands for one judgement
 model. The classifier answers ``triage``: whether people are in danger, which asset is involved
 and how serious it is. The extractor reads from the report through two sources in one batch, each
 with its own needs: ``details``, when the problem was first noticed, against the filing date, and

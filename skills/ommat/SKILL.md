@@ -1,6 +1,6 @@
 ---
 name: ommat
-description: Use when turning LLM or decision-model answers into a replayable decision with ommat, the Python decision engine; when writing or changing a design (sources, questions, rules); when calling load, decide or replay; when routing an undecided entry with escalation; when making agent decisions auditable or replayable with ommat; or when binding ommat to models through ommat[idia].
+description: Use when turning LLM or judgement-model answers into a replayable decision with ommat, the Python decision engine; when writing or changing a design (sources, questions, rules); when calling load, decide or replay; when routing an undecided entry with escalation; when making agent decisions auditable or replayable with ommat; or when binding ommat to models through ommat[idia].
 ---
 
 # ommat
