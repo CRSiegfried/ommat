@@ -1,7 +1,7 @@
 [project]
 name = "ommat"
 version = "0.5.0"
-description = "Gather evidence from a decision model onto a blackboard, fire the rules, and record the turn so it replays."
+description = "Gather evidence from a judgement model onto a blackboard, fire the rules, and record the turn so it replays."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -10,7 +10,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = []
-keywords = ["blackboard", "decision model", "llm", "agents", "rules engine"]
+keywords = ["blackboard", "judgement model", "llm", "agents", "rules engine"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

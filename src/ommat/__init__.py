@@ -1,6 +1,6 @@
 """ommat: a blackboard decision engine.
 
-Decide runs interpret, which gathers evidence from a decision model onto a blackboard and
+Decide runs interpret, which gathers evidence from a judgement model onto a blackboard and
 fires every rule. It returns the turn's replayable record, which holds each entry, and the
 caller reads the estimates it acts on from it. A source's binding may call any tool, one that writes
 included. Replay reruns a record under any loaded design and reports how the rerun

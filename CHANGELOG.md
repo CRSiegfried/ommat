@@ -4,6 +4,10 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- The kind of model that answers a closed question with probabilities instead of prose is called a judgement model, not a decision model, in the package description, keywords and docstrings.
+
 ## [0.5.0] - 2026-11-27
 
 ### Added
