@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / "skills" / "ommat" / "SKILL.md"
 TEXT = SKILL.read_text(encoding="utf-8")
-TAG = "v0.4.0"
+TAG = "v0.5.0"
 
 
 def test_the_frontmatter_names_the_skill() -> None:

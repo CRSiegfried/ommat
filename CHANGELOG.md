@@ -4,6 +4,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-27
+
 ### Added
 
 - `decide_sync` and `replay_sync` take `runner=None`, an `asyncio.Runner` the caller owns. Each turn then runs by `runner.run` in a copy of the caller's context, not under `asyncio.run` on a fresh loop, so many turns on one thread share one loop and pay for none. A runner not exactly an `asyncio.Runner` is an `EntryRefusal`, raised before the coroutine is built; a closed runner raises its own `RuntimeError` and runs nothing.
@@ -252,7 +254,8 @@ All notable changes to ommat are recorded here. The format follows [Keep a Chang
 - `load` refuses decision tables, policy tables, data rules, plan declarations, candidate sets, candidate-valued label sets and grounded declarations.
 - No state carries from one turn to the next.
 
-[Unreleased]: https://github.com/CRSiegfried/ommat/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/CRSiegfried/ommat/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/CRSiegfried/ommat/releases/tag/v0.5.0
 [0.4.0]: https://github.com/CRSiegfried/ommat/releases/tag/v0.4.0
 [0.3.0]: https://github.com/CRSiegfried/jurat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/CRSiegfried/jurat/compare/v0.1.0...v0.2.0

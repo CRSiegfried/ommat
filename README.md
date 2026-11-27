@@ -126,14 +126,14 @@ Each `decide_sync` call builds and closes an event loop of its own. To decide ma
 ommat is installed from its git tag until it is on a package index:
 
 ```sh
-pip install "ommat @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
+pip install "ommat @ git+https://github.com/CRSiegfried/ommat@v0.5.0"
 ```
 
 The core imports only the Python standard library. `ommat[idia]` is the binding ommat ships to decision-model providers, through the [idia](https://github.com/CRSiegfried/idia) library; install idia from its tag first, with the extras for the providers you use, as the [tutorial](docs/tutorials/decide-with-idia.md) shows, since pip ignores ommat's `[tool.uv.sources]` and `pip install "ommat[idia] @ git+…"` alone cannot find idia, which is on no package index yet:
 
 ```sh
 pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.2.0"
-pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
+pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.5.0"
 ```
 
 `ommat.bindings.idia` and its `oracle_binding` follow idia while idia is 0.x: they may change in any minor release when idia changes, and the changelog will say so.
@@ -141,7 +141,7 @@ pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
 `ommat[pydantic-ai]` adds the Pydantic AI renderer, `ommat.conversation.pydantic_ai`, outside the compatibility promise like the rest of `ommat.conversation`:
 
 ```sh
-pip install "ommat[pydantic-ai] @ git+https://github.com/CRSiegfried/ommat@v0.4.0"
+pip install "ommat[pydantic-ai] @ git+https://github.com/CRSiegfried/ommat@v0.5.0"
 ```
 
 To look at stored records, write them to `.json` files as `decision.record.document`, with the design's `loaded.document` beside them, and run `python -m ommat.lens <file or folder> --open`. The page opens on Gravity, the design drawn as bodies with the selected turn's entries, lineage and rounds over it and a panel that says what the design and the turn say of each body: the decision tables' rows as the turn ran them, each rule's parameters and bounds, each question's wording and answer, and each source asked or not and why. Turn says in plain words what the record shows took place, with the turns of the set as a table. A design file alone is enough to see the design. It holds the records whole, so keep it as you keep them. `ommat.lens` is outside the compatibility promise too. For the same files as text, one node, call or entry per line, or as JSON, run `python -m ommat.outline <file or folder>`.
@@ -164,7 +164,7 @@ To write a design as a TOML file instead of Python, read it with `tomllib` and p
 
 ## Using with an AI coding agent
 
-[skills/ommat](skills/ommat/SKILL.md) is an agent skill: it tells a coding agent when to use ommat, the core pattern and the pitfalls, and links into these docs for the rest. Copy it from a clone at v0.4.0 into your agent's skills folder, for Claude Code:
+[skills/ommat](skills/ommat/SKILL.md) is an agent skill: it tells a coding agent when to use ommat, the core pattern and the pitfalls, and links into these docs for the rest. Copy it from a clone at v0.5.0 into your agent's skills folder, for Claude Code:
 
 ```sh
 cp -r skills/ommat ~/.claude/skills/
@@ -174,9 +174,9 @@ To use ommat with idia, add idia's own skill too, from its [skills/idia](https:/
 
 ## Status
 
-Pre-release, at 0.4.0. It writes format-11 records and format-12 design documents. It reads record formats 1 to 11, replays formats 8 to 11 (a format-8 record replayed under a loaded format-12 design reports `design-mismatch` and `helpers-mismatch`), and loads only design format 12; a design of an earlier format is refused, naming its format.
+Pre-release, at 0.5.0. It writes format-11 records and format-12 design documents. It reads record formats 1 to 11, replays formats 8 to 11 (a format-8 record replayed under a loaded format-12 design reports `design-mismatch` and `helpers-mismatch`), and loads only design format 12; a design of an earlier format is refused, naming its format.
 
-0.4.0 runs decision tables and data rules, a `choice` over a candidate set, a question once per candidate of one, candidate sets of records, grounded rules, and tables and `t:` sources. `load` refuses the forms the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
+0.5.0 runs decision tables and data rules, a `choice` over a candidate set, a question once per candidate of one, candidate sets of records, grounded rules, and tables and `t:` sources. `load` refuses the forms the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
 
 ## Contributing
 
