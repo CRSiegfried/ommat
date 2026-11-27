@@ -1,5 +1,5 @@
-"""The README's demo runs and prints what the README shows, and the demo its recording
-shows decides and replays as recorded."""
+"""The README's demo runs and prints what the README shows, the assistant demo decides and
+replays as its script prints, and the README's animation is what its script draws."""
 
 import os
 import re
@@ -57,3 +57,15 @@ def test_the_recorded_demo_decides_and_replays(tmp_path: Path) -> None:
     replayed = _assistant(tmp_path, "--replay")
     assert "replayed 2 recorded turns" in replayed
     assert "0 model calls, 0 differences" in replayed
+
+
+def test_the_animation_is_what_its_script_draws() -> None:
+    done = subprocess.run(
+        [sys.executable, "-X", "utf8", DEMO / "draw.py"],
+        capture_output=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    drawn = (DEMO.parent / "demo.svg").read_text(encoding="utf-8")
+    assert done.stdout == drawn, "run draw.py again: docs/assets/demo.svg is not what it draws"

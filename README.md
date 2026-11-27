@@ -2,9 +2,9 @@
 
 ommat is a Python decision engine for workflows that put many small, closed questions to a model. You write each question and each rule separately and declare what it reads. ommat works out the order, skips the questions that earlier answers make unnecessary, and returns a record of the turn that can be replayed without calling the model.
 
-![A terminal: an assistant design with nine questions decides two requests call by call, then replays both](docs/assets/demo.gif)
+![An ommat, drawn as a soft, uneven shape with three eyes, sends a design's questions to a model round by round for three requests](docs/assets/demo.svg)
 
-*A nine-question assistant design decides two requests, then replays both. The model's answers are canned so the recording needs no API key; the ordering, the skipped questions, the `Unsure` and the replay are the engine's. [Source](docs/assets/demo).*
+*An assistant design with nine questions, each drawn as a small idia, decides three requests. Each round, ommat sends the model only the questions that are ready. The first two requests each take five questions in two calls, a different pair in the second call, and four are never asked. The third is vague, so `d:action` is the marker `Unsure` after one call and nothing more is asked. The model's answers are canned; the calls, the skipped questions, the values and the marker are drawn from a run of the engine by [draw.py](docs/assets/demo/draw.py), and [assistant.py](docs/assets/demo/assistant.py) prints a turn in a terminal.*
 
 ## TL;DR
 
