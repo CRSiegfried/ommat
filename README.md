@@ -1,187 +1,194 @@
 # ommat
 
-Write each question and rule on its own. ommat composes them into the decision.
+ommat is a Python decision engine for workflows that put many small, closed questions to a model. You write each question and each rule separately and declare what it reads. ommat works out the order, skips the questions that earlier answers make unnecessary, and returns a record of the turn that can be replayed without calling the model.
 
-A workflow's decision is rarely one question. Ask about this; the answer decides whether you ask about that; once that is known, a rule can settle something else. Each piece is simple. The web of them is not, and the web is what you end up holding in your head and in the order of your code.
+![A terminal: an assistant design with nine questions decides two requests call by call, then replays both](docs/assets/demo.gif)
 
-With ommat you write only the pieces, each declaring what it reads, and ommat works out the order:
+*A nine-question assistant design decides two requests, then replays both. The model's answers are canned so the recording needs no API key; the ordering, the skipped questions, the `Unsure` and the replay are the engine's. [Source](docs/assets/demo).*
 
-- **A source** asks a model closed questions, yes or no, which label, a score or a value read from a text, each answer with probabilities, or with a confidence where the model gives one. A `when` asks it only if earlier answers call for it.
-- **A rule** reads answers and settles an estimate, or returns a marker such as `Unsure`, never a `None` standing in for no answer. It is a function, or a decision table of rows over its inputs.
-- **Your code** reads the entries it acts on. Each holds a value, or a marker when it is undecided.
-- **ommat** builds the dependency graph from those declarations and runs it in rounds, and `load` checks the whole design before any turn: every read has a provider, nothing depends on itself, and the types agree. Get each piece right and `load` makes sure the pieces fit, whether you have a dozen questions or a few hundred.
-- **Each turn** comes with a record that replays it with no model call, and each undecided entry with the root cause that says where to send it.
+## TL;DR
 
-[idia](https://github.com/CRSiegfried/idia) puts the questions to the models; ommat decides.
-
-## How a turn runs
-
-```mermaid
-flowchart TD
-  S["State"] --> Bd
-  subgraph I["Interpret, in rounds"]
-    Src["Sources"] --> B["Bindings: yours, or ommat[idia]"] -->|answers| Bd["Board"]
-    Bd --> Ru["Rules"] -->|"estimates or markers"| Bd
-    Bd -->|"needs, next round"| Src
-  end
-  Bd --> D["Decision: record"] --> Rp["Replay the record: no model call"]
-  D --> C["Your code: reads the entries it acts on"]
-```
-
-ommat's one operation is **decide**, which runs interpret. Interpret: sources fetch model answers and other outside values onto a shared board, a blackboard, in rounds, through bindings the caller supplies; rules, which are functions or tables with declared reads, turn them into estimates. An unknown stays unknown, as a marker (`Unsure`, `Unavailable` or `Unasked`), never a quiet no or a `None`. Your code reads the entries it acts on.
-
-Decide returns a `Decision`: `.record`, the record of the turn, and `.design_hash`. `decision.record.entries[ref]` is the entry at a ref, `{"value": v}` or `{"marker": {"kind", "cause"}}` beside its round and call. A source's binding is your code and may call any tool, one that writes included; the record holds what it returned, and later sources and rules read it. An entry whose estimate is a marker is undecided, and `escalation(record, ref)`, at the ref you act on, gives the marker's kind and cause, the root cause it traces to, and the record hash, to route it. To hand a turn on to a generative model, render the record with `ommat.conversation`: every source call of the turn, your tools' reads and writes included, and the value at each ref you name or why it is undecided, as minimal tool calls and their results. Nothing after decide consults the model.
-
-## A first decision
-
-This runs as it is, with no API keys: a fixed binding answers in place of a model. The design asks one choice question, turns its answer into a topic with one rule, and decides the route with another, `d:route`, the entry the caller acts on:
-
-<!-- demo -->
-```python
-from ommat import Design, Question, ReadView, Rule, Source, Text
-from ommat import Undetermined, decide_sync, escalation, load, replay_sync
-from ommat import types as t
-from ommat.bindings import fixed
-from ommat.helpers import pick_with_margin
-
-topics = ["billing", "shipping", "other"]
-ask = Question("choice", Text("What is the message about?"), topics)
-
-
-def topic(r: ReadView) -> str | Undetermined:
-    return pick_with_margin(r, "q:topic", 0.6, 0.2)
-
-
-def route(r: ReadView) -> str | Undetermined:
-    value = r.read("d:topic")
-    if isinstance(value, Undetermined):
-        return value
-    return f"open_{value}_ticket"
-
-
-DESIGN = Design(
-    name="helpdesk",
-    state=t.record(message=t.string),
-    sources={"triage": Source({"q:topic": ask}, needs=["t:state"])},
-    rules={
-        "topic": Rule("d:topic", t.label(*topics), topic, version="1", reads=["q:topic"]),
-        "route": Rule("d:route", t.string, route, version="1", reads=["d:topic"]),
-    },
-)
-```
-
-The demo keeps everything in one script; in a real project keep the design in a module (see the tutorial [Write a design](docs/tutorials/write-a-design.md)).
-
-A binding answers a source's questions. `fixed` answers each ref it is asked from a mapping, here the probability of each topic, and stands in for a model in a test. With `ommat[idia]` installed, `ommat.bindings.idia.oracle_binding` builds a binding over a real provider: it receives a call's sources together and sends those that share a state and options to the provider as one request, split only where the provider's limits require; a source the provider's preflight refuses with the others, or whose state differs, goes on its own. A binding of your own is a plain async function, as [Add a source](docs/how-to/add-a-source.md) shows; its [Path C](docs/how-to/add-a-source.md#path-c-write-a-binding-over-a-chat-endpoint) answers `noul` and `choice` questions with probabilities over a chat endpoint, importing only `ommat` and `ommat.bindings`:
-
-```python
-classifier = fixed({"q:topic": {"billing": 0.8, "shipping": 0.1, "other": 0.1}})
-```
-
-Decide, print the decision, then replay the turn from its record:
-
-```python
-loaded = load(DESIGN)
-message = {"message": "The invoice is overdue and I want a refund."}
-decision = decide_sync(loaded, message, {"default": classifier})
-entry = decision.record.entries["d:route"]
-print(entry["value"] if "value" in entry else entry["marker"])
-print("escalation:", escalation(decision.record, "d:route"))
-rerun, findings = replay_sync(decision.record, loaded)
-print("replay findings:", findings)
-```
-
-It prints:
-
-```text
-open_billing_ticket
-escalation: None
-replay findings: []
-```
-<!-- /demo -->
-
-`billing` is at 0.8, at or above the bar of 0.6 and 0.7 ahead of the next label, so the topic rule picks it and the route rule decides `open_billing_ticket`. Had `billing` been under 0.6, or less than 0.2 ahead, the topic rule would have returned `Unsure`, the route rule would have passed it on, and `d:route` would be undecided: its entry, `decision.record.entries["d:route"]`, would hold that marker and `escalation(decision.record, "d:route")` would say why. Here the caller opens the ticket. Replay reruns the turn from the record, under the same loaded design, with no model call, and finds no difference.
-
-Each `decide_sync` call builds and closes an event loop of its own. To decide many turns from sync code, open one `asyncio.Runner` and pass it to each call as `runner=`, or await `ommat.helpers.decide_many`; a loop per turn is slow, and on Windows thousands of them use up the ephemeral ports.
-
-**The name.** Ommat and Idia come from *ommatidia*, the thousands of small hexagonal eyes that make up a compound eye and combine into one picture: *ommat-* is the Greek stem for "eye", *-idia* "little ones". Many small, cheap questions add up to one full picture. Ommat is the engine that asks them; Idia puts them to the models.
-
-```text
-                .--.       .--.
-            _.-'    `-.__.-'    `-._
-          .'      (o)     (o)        `.
-         /   (o)                  (o) \
-        /              .------.        \
-       |     (o)      /        \   (o)  |
-       |              |   @    |        |
-       |  (o)         \        /   (o)  |
-        \       (o)    `------'        /
-         \                   (o)      /
-          `-.    _       _         .-'
-             `--' `-----' `-------'
-```
+- You write questions and rules, and each declares what it reads. You don't write the order they run in.
+- ommat builds the dependency graph from those declarations, runs it in rounds, and sends the questions that are ready at the same time in one call. A question that depends on an earlier answer is asked only when that answer calls for it.
+- When an answer isn't confident enough to act on, the result is a marker (`Unsure`, `Unavailable` or `Unasked`) that names its cause, so your code can send it to a person or a larger model. It is never `None`.
+- Each turn produces a record. Replaying it reruns the rules against the recorded answers with no model call, which makes debugging and evals cheap.
+- The core imports only the standard library. Python 3.11+, MIT.
 
 ## Install
-
-ommat is installed from its git tag until it is on a package index:
 
 ```sh
 pip install "ommat @ git+https://github.com/CRSiegfried/ommat@v0.5.0"
 ```
 
-The core imports only the Python standard library. `ommat[idia]` is the binding ommat ships to decision-model providers, through the [idia](https://github.com/CRSiegfried/idia) library; install idia from its tag first, with the extras for the providers you use, as the [tutorial](docs/tutorials/decide-with-idia.md) shows, since pip ignores ommat's `[tool.uv.sources]` and `pip install "ommat[idia] @ git+…"` alone cannot find idia, which is on no package index yet:
+It installs from its git tag until it is on a package index.
+
+## A first decision
+
+This runs as it is, with no API key: a fixed binding answers in place of a model.
+
+The design is a help desk. A source puts questions to a model: a `choice` picks a label and a `noul` is yes or no. A rule reads answers and settles a value. The design asks what a message is about, and asks whether the customer wants money back only when the message is about billing:
+
+<!-- demo -->
+```python
+from ommat import Design, Question, ReadView, Rule, Source, SourceRequirement, Text
+from ommat import Undetermined, decide_sync, escalation, load, replay_sync
+from ommat import types as t
+from ommat.bindings import fixed
+from ommat.helpers import pick_with_margin
+
+TOPICS = ["billing", "shipping", "other"]
+
+
+def topic(r: ReadView) -> str | Undetermined:
+    return pick_with_margin(r, "q:topic", 0.6, 0.2)  # top label at 0.6 or more, 0.2 clear
+
+
+def route(r: ReadView) -> str | Undetermined:
+    topic = r.read("d:topic")
+    if topic != "billing":
+        return topic  # a queue name, or the marker saying why there is none
+    refund = pick_with_margin(r, "q:refund", 0.6, 0.2)
+    if isinstance(refund, Undetermined):
+        return refund
+    return "refunds" if refund == "yes" else "billing"
+
+
+DESIGN = Design(
+    name="helpdesk",
+    state=t.record(message=t.string),
+    sources={
+        "triage": Source(
+            {"q:topic": Question("choice", Text("What is the message about?"), TOPICS)},
+            needs=["t:state"],
+        ),
+        "billing": Source(
+            {"q:refund": Question("noul", Text("Does the customer want money back?"))},
+            needs=["t:state"],
+            requirement=SourceRequirement("d:topic", ["billing"]),  # ask only about billing
+        ),
+    },
+    rules={
+        "topic": Rule("d:topic", t.label(*TOPICS), topic, version="1", reads=["q:topic"]),
+        "route": Rule(
+            "d:route",
+            t.label("refunds", *TOPICS),
+            route,
+            version="1",
+            reads=["d:topic", "q:refund"],
+        ),
+    },
+)
+```
+
+The design doesn't say what runs first. `route` reads `d:topic` and the `billing` source requires it, and ommat orders the turn from those declarations.
+
+Now decide three messages. The stand-in model would answer yes to the refund question for all three, so when `q:refund` goes unasked, that is the engine's decision:
+
+```python
+loaded = load(DESIGN)  # checks the whole design before any turn runs
+
+YES = {"yes": 0.9, "no": 0.1}
+INBOX = {
+    "The invoice is wrong and I want a refund.": {"billing": 0.8, "shipping": 0.1, "other": 0.1},
+    "Where is my parcel?": {"billing": 0.05, "shipping": 0.9, "other": 0.05},
+    "Hello?": {"billing": 0.4, "shipping": 0.35, "other": 0.25},
+}
+
+for message, topics in INBOX.items():
+    model = fixed({"q:topic": topics, "q:refund": YES})
+    record = decide_sync(loaded, {"message": message}, {"default": model}).record
+    asked = [ref for ref, e in record.entries.items() if ref[:2] == "q:" and "value" in e]
+    print(message)
+    print("  route:", record.entries["d:route"].get("value", "undecided"))
+    print("  asked:", ", ".join(asked))
+    if why := escalation(record, "d:route"):
+        print("  why:", why["kind"], why["root_cause"])
+    _, findings = replay_sync(record, loaded)
+    print("  replay findings:", findings)
+```
+
+It prints:
+
+```text
+The invoice is wrong and I want a refund.
+  route: refunds
+  asked: q:topic, q:refund
+  replay findings: []
+Where is my parcel?
+  route: shipping
+  asked: q:topic
+  replay findings: []
+Hello?
+  route: undecided
+  asked: q:topic
+  why: Unsure {'code': 'abstained', 'refs': ['q:topic']}
+  replay findings: []
+```
+<!-- /demo -->
+
+The parcel message was never asked the refund question: its topic wasn't billing, so `q:refund` holds `Unasked`. For "Hello?" no topic reached the 0.6 bar, so `d:topic` is `Unsure`, `d:route` passes that marker on, and `escalation` traces it back to `q:topic`. Each `replay_sync` reran its turn from the record and found no differences.
+
+In a real project the design lives in its own module, so that it has the same hash from every script that imports it. The tutorial [Write your first design](docs/tutorials/write-a-design.md) starts there.
+
+## Why it exists
+
+Judgement models answer a closed question with probabilities instead of prose, quickly and cheaply enough that I stopped rationing questions. A dozen can be sequenced by hand. A hundred can't, because the answer to one decides whether another is asked at all, and those dependencies end up encoded in the order of the code, where they are hard to see and easy to break.
+
+With ommat each piece declares what it reads and the engine does the sequencing. `load` checks the whole design before any turn runs, and refuses one where a read has no provider, something depends on itself, or the types disagree.
+
+A rule can also be a decision table as DMN 1.5 defines one, and the declared reads are DMN's information requirements. ommat adds what DMN leaves out and this job needs: markers with causes where DMN has one `null`, rounds where DMN has a single pass, and a record of every turn.
+
+## Is it for you?
+
+It fits when:
+
+- your workflow's decision is made of many closed questions, and later ones depend on earlier answers;
+- you need to explain why a turn went the way it did, or rerun last month's turns against today's rules without paying for the model again;
+- an uncertain answer has to be routed somewhere, and a default value would hide it.
+
+It doesn't fit when:
+
+- one prompt and an `if` statement cover the decision;
+- you want generated text. ommat only decides, though it can [hand the turn](docs/how-to/hand-off-a-turn.md) to a generative model afterwards;
+- you want a workflow runner. ommat has no schedules or retries, and no state carries between turns.
+
+## Real models
+
+[idia](https://github.com/CRSiegfried/idia) puts the questions to judgement-model providers, and `ommat[idia]` ships the binding. idia isn't on a package index yet either, so install it from its tag first:
 
 ```sh
 pip install "idia[openai,cloudflare] @ git+https://github.com/CRSiegfried/idia@v0.2.0"
 pip install "ommat[idia] @ git+https://github.com/CRSiegfried/ommat@v0.5.0"
 ```
 
-`ommat.bindings.idia` and its `oracle_binding` follow idia while idia is 0.x: they may change in any minor release when idia changes, and the changelog will say so.
+The tutorial [Decide with real models through idia](docs/tutorials/decide-with-idia.md) covers the rest. A binding of your own is a plain async function, as [Add a source](docs/how-to/add-a-source.md) shows.
 
-`ommat[pydantic-ai]` adds the Pydantic AI renderer, `ommat.conversation.pydantic_ai`, outside the compatibility promise like the rest of `ommat.conversation`:
+## Viewing a turn
 
-```sh
-pip install "ommat[pydantic-ai] @ git+https://github.com/CRSiegfried/ommat@v0.5.0"
-```
-
-To look at stored records, write them to `.json` files as `decision.record.document`, with the design's `loaded.document` beside them, and run `python -m ommat.lens <file or folder> --open`. The page opens on Gravity, the design drawn as bodies with the selected turn's entries, lineage and rounds over it and a panel that says what the design and the turn say of each body: the decision tables' rows as the turn ran them, each rule's parameters and bounds, each question's wording and answer, and each source asked or not and why. Turn says in plain words what the record shows took place, with the turns of the set as a table. A design file alone is enough to see the design. It holds the records whole, so keep it as you keep them. `ommat.lens` is outside the compatibility promise too. For the same files as text, one node, call or entry per line, or as JSON, run `python -m ommat.outline <file or folder>`.
-
-To write a design as a TOML file instead of Python, read it with `tomllib` and pass the mapping to `ommat.authoring.design_from`, or `slice_from` for a part a larger design merges; a slip is an `AuthoringError` naming its path, and `load` still refuses what the design gets wrong. The reader imports each rule's `fn`, so read only documents you trust as source code.
-
-## Where next
-
-- [Write your first design](docs/tutorials/write-a-design.md), the tutorial to start with.
-- [Decide with real models through idia](docs/tutorials/decide-with-idia.md), which binds a design to model providers.
-- [Add a source](docs/how-to/add-a-source.md), which answers a new oracle through idia or a binding of your own.
-- [Gate a source on an earlier estimate](docs/how-to/gate-a-source.md), which asks a later question only when an estimate holds a value, without sending the estimate to the model.
-- [Hand off a turn](docs/how-to/hand-off-a-turn.md), which gives the next model in a conversation the turn's calls and decision as Chat Completions or Pydantic AI messages, with the words you choose.
-- [Combine small designs into one](docs/how-to/combine-designs.md), which rolls a workflow selector and its workflows up into one design, so their questions go to the model in one call.
-- [Read a record](docs/how-to/read-a-record.md), which reads an entry, the call that answered it, why an entry is undecided, a rule that failed beside an entry that holds a value, and the answers across turns.
-- [Lay out a design module so it reads](docs/how-to/lay-out-a-design.md), which orders a design's module, names its rules, tables and bars, and checks its docstring map and a tidy in its tests.
-- [The spec](docs/spec/README.md), what ommat does and leaves out.
-- [CHANGELOG.md](CHANGELOG.md), each release.
-- [idia](https://github.com/CRSiegfried/idia), the library that puts the questions to the models.
-
-## Using with an AI coding agent
-
-[skills/ommat](skills/ommat/SKILL.md) is an agent skill: it tells a coding agent when to use ommat, the core pattern and the pitfalls, and links into these docs for the rest. Copy it from a clone at v0.5.0 into your agent's skills folder, for Claude Code:
+Save `decision.record.document` and `loaded.document` as `.json` files, then:
 
 ```sh
-cp -r skills/ommat ~/.claude/skills/
+python -m ommat.lens records/ --open   # a page that draws each turn
+python -m ommat.outline records/       # the same, as text
 ```
 
-To use ommat with idia, add idia's own skill too, from its [skills/idia](https://github.com/CRSiegfried/idia/tree/v0.2.0/skills/idia).
+![The quickstart's three turns in ommat's lens, drawn round by round](docs/assets/three-turns.gif)
+
+These are the quickstart's three turns. The page holds the records whole, user text included, so store it as carefully as you store them.
+
+## Docs
+
+- [Write your first design](docs/tutorials/write-a-design.md): the tutorial to start with.
+- [Decide with real models through idia](docs/tutorials/decide-with-idia.md): bind a design to providers.
+- How-tos: [add a source](docs/how-to/add-a-source.md), [gate a source on an earlier estimate](docs/how-to/gate-a-source.md), [read a record](docs/how-to/read-a-record.md), [hand off a turn](docs/how-to/hand-off-a-turn.md) to a generative model, [combine designs](docs/how-to/combine-designs.md) and [lay out a design module](docs/how-to/lay-out-a-design.md).
+- [The spec](docs/spec/README.md): the normative description, including [evals from recorded turns](docs/spec/README.md#evaluation) and [designs as TOML](docs/spec/README.md#the-authoring-reader).
+- [skills/ommat](skills/ommat/SKILL.md): a skill for coding agents. For Claude Code, from a clone at v0.5.0: `cp -r skills/ommat ~/.claude/skills/`.
+- [CHANGELOG.md](CHANGELOG.md): each release.
 
 ## Status
 
-Pre-release, at 0.5.0. It writes format-11 records and format-12 design documents. It reads record formats 1 to 11, replays formats 8 to 11 (a format-8 record replayed under a loaded format-12 design reports `design-mismatch` and `helpers-mismatch`), and loads only design format 12; a design of an earlier format is refused, naming its format.
+ommat is pre-release, at 0.5.0, with one maintainer. The public names carry no stability promise before 1.0, and the changelog says what each release changes. Issues come first: see [CONTRIBUTING.md](CONTRIBUTING.md), and report vulnerabilities privately as [SECURITY.md](SECURITY.md) describes. MIT licensed.
 
-0.5.0 runs decision tables and data rules, a `choice` over a candidate set, a question once per candidate of one, candidate sets of records, grounded rules, and tables and `t:` sources. `load` refuses the forms the [spec](docs/spec/README.md) lists beside what it covers. No state carries from one turn to the next: each turn stands alone, and the caller gives a second turn what it needs, the prior turn's record hash included, in its input state.
+## The name
 
-## Contributing
-
-Issues first: see [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md). This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+Ommat and Idia come from *ommatidia*, the thousands of small hexagonal eyes that make up a compound eye and combine into one picture. Many small, cheap questions add up to one full picture. Ommat is the engine that asks them; Idia puts them to the models.
