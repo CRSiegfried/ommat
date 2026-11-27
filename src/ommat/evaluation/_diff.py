@@ -28,7 +28,6 @@ from ommat._ledger import (
     _ITEM_DEPTH,
     InvalidRecord,
     Record,
-    decision_bytes,
     finished,
     read_record,
 )
@@ -68,23 +67,23 @@ def _refuse_unfit(
     logs: tuple[list[dict[str, Any]], ...],
     loaded: LoadedDesign,
 ) -> None:
-    """Refuse, in order, ``wrong-design`` for a record before format 8, which holds no
-    policy's entry; ``unfinished`` for one not finished, holding a ``cause`` item or no entry at
-    the policy's ref; ``nothing-to-replay`` for one whose state entry is missing or holds a
-    marker; and ``wrong-design`` for a design hash other than ``loaded``'s; each checked on every
-    record in turn, its ``turn`` the record's hash (§do-and-diff)."""
+    """Refuse, in order, ``wrong-design`` for a record before format 8, whose turn this engine
+    does not rerun; ``unfinished`` for one not finished, holding a ``cause`` item;
+    ``nothing-to-replay`` for one whose state entry is missing or holds a marker; and
+    ``wrong-design`` for a design hash other than ``loaded``'s; each checked on every record in
+    turn, its ``turn`` the record's hash (§do-and-diff)."""
     for name, r, log in zip(names, records, logs, strict=True):
         if log[0]["format"] < POLICY_FORMAT:
             raise EvaluationRefusal(
                 f"{name} is a format-{log[0]['format']} record, before format {POLICY_FORMAT}, "
-                "so it holds no policy's entry",
+                "whose turn this engine does not rerun",
                 reason=_R.wrong_design,
                 turn=r.record_hash,
             )
     for name, r, log in zip(names, records, logs, strict=True):
         if not finished(log):
             raise EvaluationRefusal(
-                f"{name} is unfinished: it holds a cause item or no entry at the policy's ref",
+                f"{name} is unfinished: it holds a cause item",
                 reason=_R.unfinished,
                 turn=r.record_hash,
             )
@@ -213,12 +212,6 @@ def _run_sync(name: str, job: Callable[[], Coroutine[Any, Any, _T]]) -> _T:
     else:
         raise RuntimeError(f"{name}_sync was called inside a running event loop; await {name}")
     return asyncio.run(job())
-
-
-def decided(log: list[dict[str, Any]], rerun: list[dict[str, Any]]) -> bool:
-    """Whether a rerun changed the decision: the policy's entries of the two logs differ by
-    ``decision_bytes``, a marker's cause and refs included (§decide-output)."""
-    return decision_bytes(log) != decision_bytes(rerun)
 
 
 def _read(document: object, name: str) -> Record:

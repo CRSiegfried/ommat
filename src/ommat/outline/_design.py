@@ -252,10 +252,12 @@ def _node_ids(doc: dict[str, Any]) -> dict[str, str]:
 
 def _policy_name(doc: dict[str, Any], ids: dict[str, str]) -> str | None:
     """The bare name of the rule whose estimate is the decision: the rule providing the
-    design's policy ref, or a format-9 policy."""
+    design's policy ref, or a format-9 policy; ``None`` for a design that names no policy."""
     policy = doc.get("policy")
     if is_dict(policy):
         return "policy"
+    if not isinstance(policy, str):
+        return None
     return next(
         (r for r, x in obj(doc.get("rules")).items() if obj(x).get("provides") == policy), None
     )
@@ -388,8 +390,9 @@ def design_outline(document: object) -> dict[str, Any]:
         }
         if kind == "source":
             s = obj(sources[n])
-            for k in ("oracle", "needs", "requirement", "cost", "timeout", "feedback", "grounded"):
+            for k in ("oracle", "needs", "requirement", "cost", "timeout", "grounded"):
                 values[k] = s.get(k)
+            values["feedback"] = s.get("feedback", False)  # a format-11 or earlier source's flag
             values["payload"] = held(s.get("payload"), s.get("payload_order"))
             values["when"] = _function_of(s.get("when"))
             provided = [(r, obj(q)) for r, q in obj(s.get("provides")).items()]

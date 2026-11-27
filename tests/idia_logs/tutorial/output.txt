@@ -28,8 +28,8 @@ decision: send_crew
   replay findings: []
 decision: Unsure (abstained on q:triage/hazard)
   call 3: ['details', 'timing'], precision None, attempts None
-    answered from record sha256:ee6ecd871d3219eb935c32d4c58286e6cf6f1c84a6c330c1bc9626b3e33a0c98
+    answered from record sha256:06c31ff54a17f0f4e7474bb2040b7808f2360fac85684051421af063ccf7a807
   call 4: ['registry'], precision None, attempts None
     registry: unsupported: the idia binding asks q: refs only, not t:open_orders
   call 5: ['triage'], precision None, attempts None
-    answered from record sha256:ee6ecd871d3219eb935c32d4c58286e6cf6f1c84a6c330c1bc9626b3e33a0c98
+    answered from record sha256:06c31ff54a17f0f4e7474bb2040b7808f2360fac85684051421af063ccf7a807

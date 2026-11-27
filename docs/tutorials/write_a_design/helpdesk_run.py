@@ -60,7 +60,9 @@ def main() -> list[tuple[object, list[Mapping[str, object]]]]:
     results: list[tuple[object, list[Mapping[str, object]]]] = []
     for message in MESSAGES:
         decision = decide_sync(loaded, {"message": message}, bindings)
-        print("decision:", decision.estimate)
+        entry = decision.record.entries["d:route"]  # a value, or a marker when undecided
+        decided = entry["value"] if "value" in entry else entry["marker"]
+        print("decision:", decided)
 
         stored = decision.record.document  # the bytes you would save
         record = read_record(stored)
@@ -75,7 +77,7 @@ def main() -> list[tuple[object, list[Mapping[str, object]]]]:
         assert rerun is not None
         print("  replay findings:", findings)
         print("  same hash:", rerun.record_hash == record.record_hash)
-        results.append((decision.estimate, list(findings)))
+        results.append((decided, list(findings)))
     return results
 
 

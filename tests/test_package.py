@@ -38,7 +38,6 @@ def test_core_imports_only_the_standard_library(module: str) -> None:
 
 # The public API names.
 PUBLIC = {
-    "transcript",
     "Design",
     "DesignFailure",
     "Group",
@@ -306,7 +305,7 @@ def test_plain_literals_and_lambdas_build_the_public_types() -> None:
     import typing_strict
 
     assert typing_strict.source.needs == ("t:state",)
-    assert typing_strict.design.policy == "d:act"
+    assert "act" in typing_strict.design.rules
 
 
 GONE = {

@@ -74,5 +74,4 @@ DESIGN = Design(
         "refund/bar": Parameter(t.number(0, 1), 0.7),
         "refund/margin": Parameter(t.number(0, 1), 0.2),
     },
-    policy="d:policy",
 )

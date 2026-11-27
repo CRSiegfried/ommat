@@ -113,5 +113,4 @@ DESIGN = Design(
     sources={"ask": ASK, "refund": REFUND},
     rules=RULES,
     parameters=PARAMETERS,
-    policy="d:route",
 )

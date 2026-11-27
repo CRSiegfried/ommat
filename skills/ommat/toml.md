@@ -22,7 +22,7 @@ The reader imports each rule's `fn`, which runs that module's top-level code. A 
 
 ## What a document holds
 
-Top level: `module`, `version`, `[types]`, `[labels]`, `[parameters]`, `[sources.*]`, `[rules.*]`; a whole design adds `state` and `policy` (both required), `name` and `[targets]`. Any other key is refused.
+Top level: `module`, `version`, `[types]`, `[labels]`, `[parameters]`, `[sources.*]`, `[rules.*]`; a whole design adds `state` (required), `name` and `[targets]`. Any other key is refused.
 
 - **module.** `fn = "op"` is a name in the top-level `module`; `fn = "pkg.mod:name"` is a full path. A rename or move changes the design hash, which covers the function's module, qualname and source.
 - **version.** Every function rule's version unless a rule gives its own; a table has none. Give it in the file or from the caller (`version=`), never both.
@@ -72,6 +72,6 @@ The caller owns `version`, `values` and `types`, passed as arguments; never edit
 
 ## Not spelt yet
 
-Write these in Python: rules generated from arguments, a source's `when`, `payload` and `feedback`, a design's `groups`, a `fetch` with a candidates mapping, a rule's `boundaries`, parameters built from a model dump, a question built per call, and a reference to a Python object for a wording or target.
+Write these in Python: rules generated from arguments, a source's `when` and `payload`, a design's `groups`, a `fetch` with a candidates mapping, a rule's `boundaries`, parameters built from a model dump, a question built per call, and a reference to a Python object for a wording or target.
 
 More: [the spec's section on the reader](https://github.com/CRSiegfried/ommat/blob/v0.4.0/docs/spec/README.md#the-authoring-reader).

@@ -211,7 +211,6 @@ def swept(version: str = "1") -> LoadedDesign:
                 "g/floor": Parameter(t.label("ten", "five"), "ten"),
                 "g/stated": Parameter(t.number(0, 1), 0.5),
             },
-            policy="d:act",
         )
     )
 
@@ -244,6 +243,13 @@ def designs() -> Iterator[LoadedDesign]:
 
 
 DESIGNS = list(designs())
+_RULES = LOADED._design.rules  # pyright: ignore[reportPrivateUsage]
+REFS = sorted(
+    ref
+    for ref, rid in LOADED._providers.items()  # pyright: ignore[reportPrivateUsage]
+    if ref.startswith("d:") and rid in _RULES and _RULES[rid].grounded is None
+)
+"""Every entry the rescoring jobs can name: the reuse must keep each, not the policy's alone."""
 
 
 # One event loop for the module's reruns: a loop per rerun, over this many, uses up Windows's
@@ -308,12 +314,12 @@ def test_the_runs_reach_every_way_a_leaf_changes_a_turn() -> None:
 
 def test_rescore_gives_a_full_rerun_s_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     CALLS[0] = 0
-    rows = rescore_sync(RECORDS, LOADED, DESIGNS)
+    rows = rescore_sync(RECORDS, LOADED, DESIGNS, refs=REFS)
     assert CALLS[0] == len(RECORDS)  # once per record, not per design
     monkeypatch.setattr(_rescore, "Reuse", _Never)
-    theirs = rescore_sync(RECORDS, LOADED, DESIGNS)
+    theirs = rescore_sync(RECORDS, LOADED, DESIGNS, refs=REFS)
     assert [encode(row) for row in rows] == [encode(row) for row in theirs]
-    assert {encode(row["decision"]) for row in rows} != {encode(rows[0]["decision"])}
+    assert {encode(row["entries"]) for row in rows} != {encode(rows[0]["entries"])}
 
 
 def test_the_grid_gives_a_full_rerun_s_rows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -324,9 +330,9 @@ def test_the_grid_gives_a_full_rerun_s_rows(monkeypatch: pytest.MonkeyPatch) -> 
         for floor in LEAVES["g/floor"]
         for mode in LEAVES["g/mode"]
     ]
-    rows = rescore_grid_sync(RECORDS, LOADED, LOADED, points)
+    rows = rescore_grid_sync(RECORDS, LOADED, LOADED, points, refs=REFS)
     monkeypatch.setattr(_grid, "Reuse", _Never)
-    theirs = rescore_grid_sync(RECORDS, LOADED, LOADED, points)
+    theirs = rescore_grid_sync(RECORDS, LOADED, LOADED, points, refs=REFS)
     assert [encode(row) for row in rows] == [encode(row) for row in theirs]
 
 
@@ -462,7 +468,6 @@ def branches() -> LoadedDesign:
                 ),
             },
             parameters={"g/k": Parameter(t.number(0, 1), 0.5)},
-            policy="d:act",
         )
     )
 
@@ -567,11 +572,11 @@ def test_a_job_computes_each_design_s_shape_once_across_its_records(
         load(d.document, functions=LOADED._callables)  # pyright: ignore[reportPrivateUsage]
         for d in DESIGNS[:6]
     ]
-    rows = rescore_sync(RECORDS, LOADED, fresh)
+    rows = rescore_sync(RECORDS, LOADED, fresh, refs=REFS)
     # Each design's, and the reference's unless an earlier run read it: not once per record.
     assert len(fresh) <= len(shaped) <= len(fresh) + 1
     monkeypatch.setattr(_rescore, "Reuse", _Never)
-    theirs = rescore_sync(RECORDS, LOADED, fresh)
+    theirs = rescore_sync(RECORDS, LOADED, fresh, refs=REFS)
     assert [encode(row) for row in rows] == [encode(row) for row in theirs]
 
 
@@ -629,7 +634,6 @@ def test_a_probe_keeping_its_entries_alone_writes_what_a_whole_log_does(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import test_switching_values as sv
-    from ommat._ledger import decision_bytes
 
     jobs: list[tuple[list[Record], LoadedDesign, list[str]]] = [
         (RECORDS, LOADED, ["g/bar", "g/stated", "g/count", "g/mode", "g/word"]),
@@ -648,9 +652,6 @@ def test_a_probe_keeping_its_entries_alone_writes_what_a_whole_log_does(
     async def whole(*a: Any, **k: Any) -> Any:
         k["keep"] = None
         out = await real(*a, **k)
-        policy = a[1]._design.policy  # pyright: ignore[reportPrivateUsage]
-        mine = _switching._decision_bytes(out[0].log, policy)  # pyright: ignore[reportPrivateUsage]
-        assert mine == decision_bytes(out[0].log)
         probes[0] += 1
         return out
 
@@ -684,8 +685,8 @@ def test_a_rerun_writing_no_unhashed_entry_skips_the_sum_check_and_writes_the_sa
     paths = ["g/bar", "g/stated", "g/mode"]
 
     def jobs(where: str) -> list[bytes]:
-        out = [encode(r) for r in rescore_sync(RECORDS, LOADED, DESIGNS[:9])]
-        out += [encode(r) for r in rescore_grid_sync(RECORDS, LOADED, LOADED, points)]
+        out = [encode(r) for r in rescore_sync(RECORDS, LOADED, DESIGNS[:9], refs=REFS)]
+        out += [encode(r) for r in rescore_grid_sync(RECORDS, LOADED, LOADED, points, refs=REFS)]
         store = EvaluationStore(tmp_path / where)
         out += [
             encode(e) for e in switching_values_batch_sync(RECORDS, LOADED, paths, results=store)
@@ -840,7 +841,7 @@ def test_every_probe_design_hashes_as_a_fresh_load_of_its_document(
     points = [
         {"g/bar": bar, "g/floor": floor} for bar in (0.1, 0.65) for floor in LEAVES["g/floor"]
     ]
-    rescore_grid_sync(RECORDS, LOADED, LOADED, points)
+    rescore_grid_sync(RECORDS, LOADED, LOADED, points, refs=REFS)
     for values in itertools.product(*LEAVES.values()):
         _checked_build(LOADED, dict(zip(LEAVES, values, strict=True)), seen)
     assert seen["spliced"] > 0
@@ -906,7 +907,6 @@ def chained() -> LoadedDesign:
                 "g/k": Parameter(t.number(0, 10), 1.0),
                 "g/other": Parameter(t.number(0, 1), 0.5),
             },
-            policy="d:act",
         )
     )
 
@@ -1000,8 +1000,8 @@ def test_the_jobs_write_the_same_with_and_without_a_source_s_call_from_the_refer
             out.extend(encode(r) for r in rows())
             calls[name] = len(asked) - before
 
-        run("rescore", lambda: rescore_sync(RECORDS, LOADED, DESIGNS))
-        run("rescore_grid", lambda: rescore_grid_sync(RECORDS, LOADED, LOADED, points))
+        run("rescore", lambda: rescore_sync(RECORDS, LOADED, DESIGNS, refs=REFS))
+        run("rescore_grid", lambda: rescore_grid_sync(RECORDS, LOADED, LOADED, points, refs=REFS))
         run(
             "switching_values",
             lambda: [
@@ -1199,7 +1199,6 @@ def mixed() -> LoadedDesign:
                 "g/open": Parameter(t.number(0, 1), 0.9),
                 "g/other": Parameter(t.number(0, 1), 0.5),
             },
-            policy="d:act",
         )
     )
 
@@ -1265,7 +1264,6 @@ def lamps() -> LoadedDesign:
                 "g/n": Parameter(t.integer(0, 4), 2),
                 "g/other": Parameter(t.number(0, 1), 0.5),
             },
-            policy="d:act",
         )
     )
 
@@ -1445,7 +1443,6 @@ def picking() -> LoadedDesign:
                 "g/n": Parameter(t.integer(1, 4), 2),
                 "g/other": Parameter(t.number(0, 1), 0.5),
             },
-            policy="d:act",
         )
     )
 

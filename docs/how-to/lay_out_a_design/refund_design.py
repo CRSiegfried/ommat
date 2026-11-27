@@ -157,7 +157,6 @@ DESIGN = Design(
         ),
         "outcome": OUTCOME,
     },
-    policy="d:outcome",
 )
 
 
@@ -175,7 +174,7 @@ def read_refund(record: Record) -> RefundReading:
     """The turn's outcome and reason; ``outcome`` is ``None`` when a person must look, and
     ``defect`` says the design, not the evidence, is at fault (the escalation view's test)."""
     entries = record.entries  # decoded afresh at each read, so read once
-    held = escalation(record)
+    held = escalation(record, "d:outcome")
     return RefundReading(
         outcome=_value(entries, "d:outcome"),
         reason=_value(entries, "d:reason"),

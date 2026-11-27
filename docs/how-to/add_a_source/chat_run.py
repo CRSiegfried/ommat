@@ -38,8 +38,10 @@ def main() -> list[tuple[object, int]]:
     results: list[tuple[object, int]] = []
     for report in REPORTS:
         decision = decide_sync(loaded, {"text": report}, {"chat": binding})
-        print("decision:", decision.estimate)
         entries = decision.record.entries
+        entry = entries["d:route"]
+        decided = entry["value"] if "value" in entry else entry["marker"]
+        print("decision:", decided)
         print(
             "  answers:",
             {r: e["value"]["probabilities"] for r, e in entries.items() if r[0] == "q"},
@@ -50,7 +52,7 @@ def main() -> list[tuple[object, int]]:
         before = endpoint.calls
         _, findings = replay_sync(read_record(decision.record.document), loaded)
         print("  replay findings:", findings, "| endpoint calls:", endpoint.calls - before)
-        results.append((decision.estimate, endpoint.calls - before))
+        results.append((decided, endpoint.calls - before))
     return results
 
 

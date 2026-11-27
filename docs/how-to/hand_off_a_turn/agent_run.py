@@ -38,8 +38,8 @@ def main() -> None:
     loaded = load(DESIGN)
     decision = decide_sync(loaded, STATE, {"default": answering(0.9)})
     history: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(str(STATE["message"]))])]
-    history += to_model_messages(decision.record, loaded, model_name="ommat")
-    if decision.estimate == "refund_order":
+    history += to_model_messages(decision.record, loaded, refs=["d:policy"], model_name="ommat")
+    if decision.record.entries["d:policy"].get("value") == "refund_order":
         refund_order(str(STATE["order"]["id"]))  # type: ignore[index]
     result = asyncio.run(agent.run(None, message_history=history))
     print(result.output)
@@ -49,8 +49,8 @@ def main() -> None:
     unsure = decide_sync(loaded, again, {"default": answering(0.6)})
     history = result.all_messages()
     history.append(ModelRequest(parts=[UserPromptPart(said)]))
-    history += to_model_messages(unsure.record, loaded, model_name="ommat")
-    if unsure.estimate == "ask_if_refund":
+    history += to_model_messages(unsure.record, loaded, refs=["d:policy"], model_name="ommat")
+    if unsure.record.entries["d:policy"].get("value") == "ask_if_refund":
         reply = "Would you like a refund for this order?"
         history.append(ModelResponse(parts=[TextPart(reply)], model_name="ommat"))
         print(reply)

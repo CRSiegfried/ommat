@@ -19,6 +19,6 @@ def test_the_dead_question_lint_grounds_a_t_sources_entries() -> None:
         sources.CITY: ["Oslo", None],
         sources.INFO: [{"city": "x"}],
     }
-    report = dead_questions(sources.LOADED, values=values)
+    report = dead_questions(sources.LOADED, ["d:act"], values=values)
     assert report["questions"] == {sources.OUT: {"status": "not-on-grid", "witness": None}}
     assert report["points"] > 0

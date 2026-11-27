@@ -88,7 +88,6 @@ def state_design() -> Design:
             ),
             "act": ACT,
         },
-        policy="d:act",
     )
 
 
@@ -169,7 +168,6 @@ def weights_design() -> Design:
             ),
             "act": ACT,
         },
-        policy="d:act",
     )
 
 
@@ -209,7 +207,6 @@ def test_use_answers_refuses_a_state_held_in_another_order_as_another_turn() -> 
         name="mapped state",
         state=t.record(tags=t.mapping(t.integer())),
         rules={"act": ACT},
-        policy="d:act",
     )
     loaded = load(design)
     one = decide_sync(loaded, {"tags": {"b": 1, "a": 2}}, {}).record
@@ -265,7 +262,6 @@ def test_a_replay_that_rebuilds_another_order_is_a_finding() -> None:
                     "act": ACT,
                 },
                 parameters={"keys": Parameter(t.list_(t.string), keys)},
-                policy="d:act",
             )
         )
 
@@ -302,7 +298,6 @@ def test_a_format_5_record_reads_in_canonical_order_and_is_refused_by_replay() -
                 "built": Rule("d:built", t.mapping(t.integer()), built, version="1"),
                 "act": ACT,
             },
-            policy="d:act",
         )
     )
     record = decide_sync(loaded, {}, {"default": Seen({"t:weights": dict(RETURNED)})}).record
@@ -510,7 +505,6 @@ def ordered_design(template: Any = TEMPLATE) -> Design:
             "act": ACT,
         },
         parameters={"weights": Parameter(t.mapping(t.number()), WEIGHTS)},
-        policy="d:act",
     )
 
 
@@ -521,7 +515,7 @@ def check_param_functions() -> dict[str, Any]:
 def test_a_document_from_format_6_writes_each_order_and_loads_back_to_its_own_hash() -> None:
     loaded = load(ordered_design())
     doc = decode(loaded.document)
-    assert doc["format"] == 11
+    assert doc["format"] == 12
     assert doc["sources"]["ask"]["payload_order"] == {"0": [1, 2, 0], "1": [1, 0]}
     assert doc["parameters"]["weights"]["order"] == {"0": [1, 0]}
     assert doc["sources"]["ask"]["provides"]["q:it"]["wording"]["order"] == {"0": [2, 1, 0]}
@@ -565,7 +559,6 @@ def test_a_mapping_leaf_of_any_scalar_keeps_its_order_through_its_document(
         state=t.record(),
         parameters={"weights": Parameter(leaf_type, value)},
         rules={"act": ACT},
-        policy="d:act",
     )
     loaded = load(design)
     assert decode(loaded.document)["parameters"]["weights"]["order"] == {"0": [1, 0]}
@@ -581,7 +574,6 @@ def test_a_template_of_a_list_of_objects_keeps_each_objects_order() -> None:
         state=t.record(),
         sources={"ask": Source({"q:it": Question("noul", Structured(template))})},
         rules={"act": ACT},
-        policy="d:act",
     )
     loaded = load(design)
     again = load(loaded.document, functions={"act": inform})
@@ -660,7 +652,6 @@ def needing_design() -> LoadedDesign:
                 ),
             },
             rules={"act": ACT},
-            policy="d:act",
         )
     )
 
@@ -732,7 +723,6 @@ def built_design() -> LoadedDesign:
                 "built": Rule("d:built", t.mapping(t.integer()), built_mapping, version="1"),
                 "act": ACT,
             },
-            policy="d:act",
         )
     )
 

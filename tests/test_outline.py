@@ -26,6 +26,9 @@ TESTS = Path(__file__).parent
 FORMAT_10 = TESTS / "format_10"
 FORMAT_9 = TESTS / "format_9"
 IDIA = TESTS / "idia_logs"
+OLD_IDIA = (TESTS / "showcase" / "idia.record.json", TESTS / "showcase" / "idia.design.json")
+"""The idia turn as the engine wrote it before designs named no policy: a format-10 record and
+its format-11 design, which name ``d:route`` as the policy."""
 
 NODE_KEYS = {
     *("id", "kind", "policy", "name", "refs", "round", "wavefront", "predecessors"),
@@ -75,13 +78,12 @@ def ledger(name: str) -> bytes:
 
 @pytest.fixture(scope="module")
 def shown() -> dict[str, Any]:
-    """The showcase design, a turn it decides and a turn it leaves undecided."""
-    loaded = showcase.loaded()
+    """The stored showcase design, a turn it decides and a turn it leaves undecided."""
     return {
-        "design": loaded.document,
-        "decided": showcase.turn(loaded, *showcase.DECIDED),
-        "undecided": showcase.turn(loaded, *showcase.UNDECIDED),
-        "level": showcase.turn(loaded, 0.6, showcase.DECIDED[1]),
+        "design": showcase.stored("design"),
+        "decided": read_record(showcase.stored("decided.record")),
+        "undecided": read_record(showcase.stored("undecided.record")),
+        "level": read_record(showcase.stored("level.record")),
     }
 
 
@@ -99,7 +101,7 @@ def fixtures() -> list[tuple[str, bytes | None, bytes | None]]:
             (FORMAT_9 / "record.json").read_bytes(),
         ),
         ("idia", (IDIA / "design.json").read_bytes(), (IDIA / "turn.record.json").read_bytes()),
-        ("full", load(full()).document, None),
+        ("full", showcase.stored("full.design"), None),
         ("normal-8", None, ledger("normal-8")),
         ("broken-8", None, ledger("broken-8")),
         ("cancelled-8", None, ledger("cancelled-8")),
@@ -335,10 +337,9 @@ def test_the_dependency_edges_are_the_loaded_designs_graph(which: str) -> None:
 
 def paired_turns() -> list[tuple[str, bytes | dict[str, Any], bytes]]:
     """Every stored fixture's record with the design it ran under, and the showcase's turns."""
-    loaded = showcase.loaded()
     shown = [
-        (name, loaded.document, showcase.turn(loaded, *answers).document)
-        for name, answers in (("decided", showcase.DECIDED), ("undecided", showcase.UNDECIDED))
+        (name, showcase.stored("design"), showcase.stored(f"{name}.record"))
+        for name in ("decided", "undecided")
     ]
     stored = [(n, d, r) for n, d, r in fixtures() if d is not None and r is not None]
     return [*stored, *shown]
@@ -585,7 +586,7 @@ def test_each_kind_of_bound_measures_and_sides_as_its_helper() -> None:
 
 
 def test_a_format_11_design_outline_has_no_classes_key_and_no_classes_line() -> None:
-    document = load(full()).document
+    document = showcase.stored("full.design")
     assert "classes" not in json.loads(document)
     o = design_outline(document)
     assert "classes" not in o
@@ -594,15 +595,29 @@ def test_a_format_11_design_outline_has_no_classes_key_and_no_classes_line() -> 
     check_shape(o)
 
 
+def test_a_format_11_sources_feedback_flag_outlines_and_a_format_12_source_holds_false() -> None:
+    old = design_outline(showcase.stored("full.design"))
+    flags = {n["id"]: n["feedback"] for n in old["nodes"] if n["kind"] == "source"}
+    assert flags == {"source:lookup": False, "source:intent": True}
+    head = "[source] intent  oracle mail  needs t:state, t:state.sender  cost 2  timeout 30"
+    assert f"{head}  feedback" in render_design(old)
+    today = design_outline(load(full()).document)
+    assert {n["feedback"] for n in today["nodes"] if n["kind"] == "source"} == {False}
+    assert "feedback" not in render_design(today)
+    check_shape(old)
+    check_shape(today)
+
+
 def test_escalation_and_defects_are_the_engines_views(shown: dict[str, Any]) -> None:
     records: list[Record] = [shown["undecided"], read_record(ledger("broken-8"))]
     for record in records:
         o = turn_outline(record.document)
-        assert o["escalation"] == escalation(record)
+        policy = record.log[1]["policy"]
+        assert o["escalation"] == escalation(record, policy)
         found = defects(record)
         assert found is not None
         assert o["defects"] == [x["ref"] for x in found]
-        esc = escalation(record)
+        esc = escalation(record, policy)
         assert esc is not None
         assert f"escalation  {esc['kind']}  cause {esc['cause']['code']}" in render_turn(o)
     broken = turn_outline(ledger("broken-8"))
@@ -653,7 +668,7 @@ def test_a_record_before_format_8_prints_entries_and_calls_alone() -> None:
     assert o["defects"] is None
     assert entries(o)
     assert any(r["calls"] for r in o["rounds"])
-    assert "decision  none: the record holds no policy (before format 8)" in render_turn(o)
+    assert "decision  none: the record names no decision" in render_turn(o)
 
 
 def test_a_cancelled_turn_prints_what_is_there() -> None:
@@ -829,10 +844,10 @@ def test_the_layout_uncrosses_idia_and_crosses_no_more_elsewhere() -> None:
         ),
         (1, 2, ["rule"], ["rule:route"]),
     ]
-    for document in (showcase.loaded().document, load(full()).document):
+    for document in (showcase.stored("design"), showcase.stored("full.design")):
         o = design_outline(document)
         assert crossings(o, laid(o)) <= crossings(o, seeded(o))
-    for o in (idia, design_outline(showcase.loaded().document)):
+    for o in (idia, design_outline(showcase.stored("design"))):
         assert o["layout"]["nodes"]["state"] == {"col": 0, "row": 0, "round": 0, "wavefront": 0}
         assert [n["id"] for n in o["nodes"]] == list(o["layout"]["nodes"])
         kind = {n["id"]: n["kind"] for n in o["nodes"]}
@@ -947,9 +962,7 @@ def test_the_lineage_walks_back_from_the_decision(shown: dict[str, Any]) -> None
     # Unpaired, a table's rows name no inputs, so the marker's cause alone is followed.
     alone = turn_outline(shown["undecided"].document)
     assert path_of(alone)[:2] == [("d:act", None, None), ("d:urgency", "cause", "d:act")]
-    idia = turn_outline(
-        (IDIA / "turn.record.json").read_bytes(), (IDIA / "design.json").read_bytes()
-    )
+    idia = turn_outline(OLD_IDIA[0].read_bytes(), OLD_IDIA[1].read_bytes())
     assert path_of(idia) == [("d:route", None, None), ("q:triage/hazard", "cause", "d:route")]
     broken = turn_outline(ledger("broken-8"))
     assert path_of(broken) == [("d:route", None, None), ("t:state", "cause", "d:route")]
@@ -958,7 +971,7 @@ def test_the_lineage_walks_back_from_the_decision(shown: dict[str, Any]) -> None
 
 
 def test_a_plain_rule_s_declared_reads_follow_the_record_s_own_hops() -> None:
-    record, design = showcase.plain_turn().document, load(showcase.PLAIN).document
+    record, design = showcase.stored("plain.record"), showcase.stored("plain.design")
     paired = turn_outline(record, design)
     # Neither rule names what it read, so the design's declared reads are followed: the
     # policy's in declared order, then those of the entries they reach.
@@ -976,9 +989,7 @@ def test_a_plain_rule_s_declared_reads_follow_the_record_s_own_hops() -> None:
 
 
 def test_a_ref_the_record_names_keeps_its_hop_when_a_declared_read_also_reaches_it() -> None:
-    idia = turn_outline(
-        (IDIA / "turn.record.json").read_bytes(), (IDIA / "design.json").read_bytes()
-    )
+    idia = turn_outline(OLD_IDIA[0].read_bytes(), OLD_IDIA[1].read_bytes())
     # d:route declares many reads, among them d:hazard, whose own reads reach q:triage/hazard;
     # the marker's cause names q:triage/hazard, which keeps its ``cause`` hop.
     assert ("q:triage/hazard", "cause", "d:route") in path_of(idia)
@@ -986,12 +997,10 @@ def test_a_ref_the_record_names_keeps_its_hop_when_a_declared_read_also_reaches_
 
 
 def test_only_hops_the_record_names_put_an_entry_on_the_lineage() -> None:
-    record, design = showcase.plain_turn().document, load(showcase.PLAIN).document
+    record, design = showcase.stored("plain.record"), showcase.stored("plain.design")
     o = turn_outline(record, design)
     assert precise_refs(o["lineage"]) == {"d:verdict"}
-    marked = turn_outline(
-        showcase.turn(showcase.loaded(), *showcase.DECIDED).document, showcase.loaded().document
-    )
+    marked = turn_outline(showcase.stored("decided.record"), showcase.stored("design"))
     assert precise_refs(marked["lineage"]) == {p["ref"] for p in marked["lineage"]}
     assert "d:flag *" not in render_turn(o)
     assert "d:verdict *" in render_turn(o)
@@ -1113,9 +1122,7 @@ def test_the_text_says_why_and_shows_the_lineage_and_the_nearest_bounds(
     decided = render_turn(turn_outline(shown["decided"].document, shown["design"]))
     assert decided.splitlines()[1] == 'why  decided "escalate" by d:act'
     assert "  q:tone  choice  warm 0.10  cold 0.80  neutral 0.10  (call 3)" in decided  # no star
-    idia = turn_outline(
-        (IDIA / "turn.record.json").read_bytes(), (IDIA / "design.json").read_bytes()
-    )
+    idia = turn_outline(OLD_IDIA[0].read_bytes(), OLD_IDIA[1].read_bytes())
     assert "\nnearest bounds  none\n" in render_turn(idia)
     idia_why = render_turn(idia).splitlines()[1]
     assert (
@@ -1125,12 +1132,12 @@ def test_the_text_says_why_and_shows_the_lineage_and_the_nearest_bounds(
     assert idia_why.endswith("(root q:triage/hazard, defect no)")
     assert (
         "(no design paired) (root"
-        in render_turn(turn_outline((IDIA / "turn.record.json").read_bytes())).splitlines()[1]
+        in render_turn(turn_outline(OLD_IDIA[0].read_bytes())).splitlines()[1]
     )
     alone = render_turn(turn_outline(shown["undecided"].document))
     assert "nearest bounds" not in alone
     assert "(defect no)" not in alone
-    assert "why  no decision: the record holds no policy" in render_turn(
+    assert "why  no decision: the record names none" in render_turn(
         turn_outline((FORMAT_9 / "record.json").read_bytes())
     )
     differs = json.loads(shown["design"])
@@ -1459,3 +1466,97 @@ def test_a_calls_extras_is_outlined_and_survives_redaction() -> None:
     (none,) = [c for rnd in bare["rounds"] for c in rnd["calls"]]
     assert none["unhashed"]["extras"] is None
     assert "extras" not in render_turn(bare)
+
+
+# --- a design and records that name no policy -------------------------------------------------
+
+
+def _cancelled_free() -> bytes:
+    """The policy-free decided turn as cancellation leaves it: its first round, then a
+    ``cause`` item."""
+    doc = json.loads(showcase.policy_free_record("decided"))
+    log = doc["log"]
+    first = next(i for i, x in enumerate(log) if x["item"] == "round")
+    doc["log"] = [*log[: first + 1], {"cause": {"code": "cancelled", "refs": []}, "item": "cause"}]
+    return json.dumps(rehashed(doc)).encode()
+
+
+def test_a_design_that_names_no_policy_outlines_with_every_key_and_no_policy() -> None:
+    o = design_outline(showcase.policy_free())
+    named = design_outline(showcase.stored("design"))
+    check_shape(o)
+    assert set(o) == set(named)
+    assert o["outline_version"] == named["outline_version"] == 8
+    assert (o["policy"], o["policy_node"]) == (None, None)
+    assert [n["policy"] for n in o["nodes"]] == [False] * len(o["nodes"])
+    assert [n["steps_to_policy"] for n in o["nodes"]] == [None] * len(o["nodes"])
+    assert [t["path"] for t in o["targets"]] == [None]
+    # The same nodes in the same order: the policy-last move has nothing to move.
+    assert [n["id"] for n in o["nodes"]] == [n["id"] for n in named["nodes"]]
+    # Each role keeps its policy term, ``no``, so a fingerprint keeps its meaning.
+    assert all(";policy=no;" in role for role in o["fingerprint"]["roles"])
+    text = render_design(o)
+    assert "polic" not in text
+    assert text == render_design(json.loads(ordered(o)))
+
+
+@pytest.mark.parametrize("turn", ["decided", "undecided", "broken"])
+def test_a_record_that_names_no_policy_outlines_with_every_key_and_no_decision(
+    turn: str,
+) -> None:
+    design = showcase.policy_free()
+    o = turn_outline(showcase.policy_free_record(turn), design)
+    named = turn_outline(showcase.stored(f"{turn}.record"), showcase.stored("design"))
+    check_shape(o)
+    assert set(o) == set(named)
+    assert o["outline_version"] == 8
+    assert o["paired"] is True
+    assert o["design_hash_matches"] is True
+    assert o["policy"] is None
+    assert o["status"] == "finished"
+    assert (o["decision"], o["escalation"], o["lineage"]) == (None, None, [])
+    assert not any(e["policy"] for e in entries(o))
+    assert not any(t["policy"] for t in o["review"]["tables"])
+    assert [m["on_lineage"] for m in o["nearest_bounds"]] == [False] * len(o["nearest_bounds"])
+    assert root_chain(o["lineage"]) == []
+    assert precise_refs(o["lineage"]) == set()
+    assert o["summary"].split("  ")[2:4] == ["-", "root -"]
+    assert o["why"] == "no decision: the record names none"
+    # The entries are the named record's, at the same places.
+    assert [(e["ref"], e["holds"]) for e in entries(o)] == [
+        (e["ref"], e["holds"]) for e in entries(named) if turn != "broken" or e["ref"] != "d:act"
+    ]
+    text = render_turn(o)
+    assert "decision  none: the record names no decision\n" in text
+    assert "[policy]" not in text
+    assert "policy  " not in text
+    assert text == render_turn(json.loads(ordered(o)))
+
+
+def test_a_broken_entry_that_names_no_policy_ends_at_the_state() -> None:
+    o = turn_outline(showcase.policy_free_record("broken"), showcase.policy_free())
+    assert [e["ref"] for e in entries(o)] == ["t:state"]
+    assert o["state"] is not None
+    assert o["state"]["holds"] == "Unavailable"
+    assert o["absent"] == ["d:act", "d:urgency", "q:tone", "q:urgent", "t:ticket"]
+
+
+def test_a_record_that_names_no_policy_is_unfinished_only_at_a_cause_item() -> None:
+    o = turn_outline(_cancelled_free(), showcase.policy_free())
+    assert (o["status"], o["status_reason"]) == ("unfinished", "the log ends at a cause item")
+    assert o["cause"] == {"code": "cancelled", "refs": []}
+    assert "d:act" not in {e["ref"] for e in entries(o)}
+    # With a policy named, the same cut is unfinished at the cause item too.
+    assert turn_outline(ledger("cancelled-8"))["status"] == "unfinished"
+
+
+def test_the_command_takes_a_design_that_names_no_policy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "design.json").write_bytes(showcase.policy_free())
+    (tmp_path / "turn.json").write_bytes(showcase.policy_free_record("decided"))
+    assert main([str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    assert "skipped" not in captured.err
+    assert 'design  "showcase"  format 12' in captured.out
+    assert 'paired with design "showcase" (hash matches)\n' in captured.out

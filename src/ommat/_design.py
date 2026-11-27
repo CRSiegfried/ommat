@@ -345,7 +345,6 @@ class Source:
     timeout: float | None = None
     payload: Any = None
     cost: float = 0
-    feedback: bool = False
     grounded: str | None = None
 
     def __post_init__(self) -> None:
@@ -468,17 +467,15 @@ class Table:
 
 @dataclass(frozen=True, slots=True)
 class Design:
-    """A design: the state declaration, the policy and the components.
+    """A design: the state declaration and the components.
 
-    ``policy`` is the ``d:`` ref of the rule whose estimate is the decision. ``sources``,
-    ``rules``, ``types`` and ``groups`` map each declared name to its declaration;
+    ``sources``, ``rules``, ``types`` and ``groups`` map each declared name to its declaration;
     ``parameters`` maps each leaf's full path to a ``Parameter``; ``targets`` maps each target id
-    to a ``Target``; each defaults to empty. ``state`` and ``policy`` are positional; every
-    other field is keyword-only, so a field added or removed never rebinds a positional argument.
+    to a ``Target``; each defaults to empty. ``state`` is positional; every other field is
+    keyword-only, so a field added or removed never rebinds a positional argument.
     """
 
     state: str
-    policy: str
     _: KW_ONLY
     sources: Mapping[str, Source] = field(default_factory=_empty)
     rules: Mapping[str, Rule | Table] = field(default_factory=_empty)
@@ -497,7 +494,6 @@ class Design:
         _set(
             self,
             state=_string(self.state),
-            policy=_string(self.policy),
             sources=_mapping(self.sources),
             rules=_mapping(self.rules),
             parameters=_mapping(self.parameters),

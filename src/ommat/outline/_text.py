@@ -359,7 +359,7 @@ def render_turn(o: dict[str, Any], *, detail: bool = False) -> str:
         lines.append(f"cause  {_cause_text(o['cause'])}")
     d = o["decision"]
     if o["policy"] is None:
-        lines.append("decision  none: the record holds no policy (before format 8)")
+        lines.append("decision  none: the record names no decision")
     elif d is None:
         lines.append(f"decision  {o['policy']}: no entry")
     elif d["holds"] != "value":
@@ -451,7 +451,7 @@ def _why_line(o: dict[str, Any], by_index: dict[Any, dict[str, Any]]) -> str:
     root, the root's nearest bound, the root and whether the escalation is a defect."""
     d = o["decision"]
     if d is None:
-        held = "the record holds no policy" if o["policy"] is None else f"no entry at {o['policy']}"
+        held = "the record names none" if o["policy"] is None else f"no entry at {o['policy']}"
         return f"why  no decision: {held}"
     if d["holds"] == "value":
         return f"why  decided {cut(text_of(d['value']))} by {d['ref']}"

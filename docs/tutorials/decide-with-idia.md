@@ -116,15 +116,15 @@ A source names the oracle that answers it, and `decide` takes one binding per or
      replay findings: []
    decision: Unsure (abstained on q:triage/hazard)
      call 3: ['details', 'timing'], precision None, attempts None
-       answered from record sha256:ee6ecd871d3219eb935c32d4c58286e6cf6f1c84a6c330c1bc9626b3e33a0c98
+       answered from record sha256:06c31ff54a17f0f4e7474bb2040b7808f2360fac85684051421af063ccf7a807
      call 4: ['registry'], precision None, attempts None
        registry: unsupported: the idia binding asks q: refs only, not t:open_orders
      call 5: ['triage'], precision None, attempts None
-       answered from record sha256:ee6ecd871d3219eb935c32d4c58286e6cf6f1c84a6c330c1bc9626b3e33a0c98
+       answered from record sha256:06c31ff54a17f0f4e7474bb2040b7808f2360fac85684051421af063ccf7a807
    ```
 
 2. The first report is undecided: the classifier put 0.58 on a danger to people, below the
-   design's bar of 0.6, so the rule abstained and the policy's estimate is that `Unsure`,
+   design's bar of 0.6, so the rule abstained and the route's estimate, `d:route`, is that `Unsure`,
    naming the answer that fell short. The second is decided, `send_crew`: the classifier
    judged a deep pothole a danger.
 
@@ -178,7 +178,7 @@ and from the record's `unhashed` part its `attempts` and its `warnings` lines.
    }
    ```
 
-2. It gives the first turn's decision again: the policy's estimate is the `Unsure` that
+2. It gives the first turn's decision again: the route's estimate is the `Unsure` that
    `d:hazard` abstained with, as in the first turn.
    Each call it answered opens its `warnings` with `answered from record` and the stored
    record's hash, and holds no precision and no attempts, since it called no model.

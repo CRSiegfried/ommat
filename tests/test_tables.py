@@ -83,13 +83,12 @@ def show(r: Any) -> Any:
 
 
 def design(*tables: tuple[str, Any], reads: tuple[str, ...] = (), **changes: Any) -> Design:
-    """The tables as rules; unless ``changes`` names a ``policy``, the policy is ``d:show``, a
-    function rule reading ``reads``."""
+    """The tables as rules; unless ``changes`` says ``alone``, beside ``d:show``, a function rule
+    reading ``reads``."""
     rules: dict[str, Any] = {**dict(tables), **changes.pop("rules", {})}
     fields: dict[str, Any] = {"state": STATE, "parameters": LEAVES}
-    if "policy" not in changes:
+    if not changes.pop("alone", False):
         rules["show"] = Rule("d:show", t.string, show, version="1", reads=list(reads))
-        fields["policy"] = "d:show"
     fields["rules"] = rules
     fields.update(changes)
     return Design(**fields)
@@ -257,7 +256,7 @@ def test_a_stored_earlier_format_document_holding_a_table_is_refused_naming_its_
     }
     found = failures(encode(doc))
     assert [c for c, _ in found] == [11]
-    assert "format 6 is not 11" in found[0][1]
+    assert "format 6 is not 12" in found[0][1]
 
 
 def test_a_document_rows_member_set_differing_fails_load() -> None:
@@ -649,8 +648,8 @@ def asked(*tables: tuple[str, Any], **changes: Any) -> Design:
 
 
 def policy_design(act: Table = ACT) -> Design:
-    """The design whose policy, ``d:act``, is a decision table over ``d:urgent``."""
-    return asked(("act", act), policy="d:act")
+    """The design whose ``d:act`` is a decision table over ``d:urgent``."""
+    return asked(("act", act), alone=True)
 
 
 def answering(p_yes: float | None) -> Callable[..., Any]:
@@ -679,25 +678,24 @@ def test_a_data_rule_picks_and_passes_the_pick_through() -> None:
     assert marker == {"kind": "Unsure", "cause": {"code": "required", "refs": ["q:urgent"]}}
 
 
-def test_a_policy_table_is_a_rule_whose_entry_is_the_decision() -> None:
+def test_an_act_table_is_a_rule_whose_entry_holds_its_value_and_rows() -> None:
     loaded = load(policy_design())
     for p_yes, expected, rows in ((0.9, "page", [1, 3]), (0.1, "tell", [2, 3]), (0.55, "ask", [3])):
         decision = decide_sync(loaded, BASE, {"default": answering(p_yes)})
         entry = item(decision.record, "entry", "d:act")
         assert entry["value"] == expected
         assert entry["rows"] == rows
-        assert decision.estimate == expected
         assert "derivation" not in entry
 
 
-def test_the_policy_table_names_the_marker_its_input_gave() -> None:
+def test_the_act_table_names_the_marker_its_input_gave() -> None:
     decision = decide_sync(load(policy_design()), BASE, {"default": answering(None)})
     entry = item(decision.record, "entry", "d:act")
+    assert entry["marker"]["kind"] == "Unavailable"
     assert entry["marker"]["cause"] == {"code": "required", "refs": ["d:urgent"]}
-    assert isinstance(decision.estimate, Unavailable)
 
 
-def test_a_raising_helper_in_the_policy_table_is_the_policys_marker(
+def test_a_raising_helper_in_the_act_table_is_the_rules_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from ommat.helpers import _choice
@@ -716,8 +714,8 @@ def test_a_raising_helper_in_the_policy_table_is_the_policys_marker(
     decision = decide_sync(load(policy_design(act)), BASE, {"default": answering(0.9)})
     entry = item(decision.record, "entry", "d:act")
     assert entry["marker"]["cause"] == {"code": "raised", "refs": ["act"]}
+    assert entry["marker"]["kind"] == "Unavailable"
     assert entry["rows"] == []
-    assert isinstance(decision.estimate, Unavailable)
 
 
 def test_replay_reproduces_a_table_turn_and_finds_a_changed_rows() -> None:
@@ -742,8 +740,8 @@ def edited(record: Record, change: Callable[[dict[str, Any]], object]) -> dict[s
     return doc
 
 
-GOLDEN_DESIGN = "sha256:df7ab30bda3987770d58231ff26a36e5785741b278adb9e8acf280ca5a5c7cfd"
-GOLDEN_RECORD = "sha256:e7ac03e54821f6be68ae02a50c2b824fb8cbdf6bee73fd0ed46244b09dde8c8e"
+GOLDEN_DESIGN = "sha256:14bff3e38db7225bb8f5986b98d3afc91a9c1e92645c222af1eb05e691426e73"
+GOLDEN_RECORD = "sha256:0a338e78aa055a0b13e624efcbfec3f2f8cbee84757bb668b1e3ad2ef9043cde"
 
 
 def test_a_golden_table_turn() -> None:
@@ -811,8 +809,8 @@ def test_a_count_table_is_probed_over_the_values_given() -> None:
     )
     assert "t:state.items" not in loaded._grid
     with pytest.raises(ValueError, match="unfilled"):
-        dead_questions(loaded)
-    assert dead_questions(loaded, values={"t:state.items": [[], [1, 2]]})["points"] == 2
+        dead_questions(loaded, ["d:show"])
+    assert dead_questions(loaded, ["d:show"], values={"t:state.items": [[], [1, 2]]})["points"] == 2
 
 
 # ---------------------------------------------------------------------------------------------
@@ -961,9 +959,9 @@ def test_a_comparison_against_a_marker_and_an_in_over_a_marker_do_not_match() ->
     assert value(table, rules={"s0": listed}) == 2
 
 
-def test_the_dead_question_lint_finds_a_question_a_policy_table_rests_on_live() -> None:
+def test_the_dead_question_lint_finds_a_question_an_act_table_rests_on_live() -> None:
     loaded = load(dataclasses.replace(policy_design(), state=t.record(name=t.string)))
-    dead = dead_questions(loaded, values={"t:state.name": ["Ada"]})
+    dead = dead_questions(loaded, ["d:act"], values={"t:state.name": ["Ada"]})
     assert dead["questions"]["q:urgent"]["status"] == "live"
 
 
@@ -1124,7 +1122,7 @@ def test_an_integer_value_cell_is_probed_on_both_sides() -> None:
     assert [p.live for p in fill(loaded, ["t:state.n"], {})["t:state.n"]] == [4, 5, 6]
 
 
-def test_the_grid_takes_intervals_extract_values_and_the_policy_tables_cells() -> None:
+def test_the_grid_takes_intervals_extract_values_and_the_act_tables_cells() -> None:
     table = tab("F", ["t:state.n", "t:state.x"], [["[2, 5]", "[lo, hi]", 1], ["-", "-", 0]])
     loaded = load(design(("tab", table)))
     assert loaded._grid["t:state.n"] == (2, 5)
@@ -1132,7 +1130,7 @@ def test_the_grid_takes_intervals_extract_values_and_the_policy_tables_cells() -
     act = Table(
         "d:act", t.label("page", "ask"), "F", ["t:state.n"], [[">= 2", "page"], ["-", "ask"]]
     )
-    loaded = load(design(("act", act), policy="d:act"))
+    loaded = load(design(("act", act), alone=True))
     assert loaded._grid["t:state.n"] == (2,)
     leaves = {**LEAVES, "null": Parameter(t.number(0, 1), 0.5), "big": Parameter(t.number(), 9)}
     number_ref = Source(
@@ -1397,24 +1395,23 @@ def test_a_value_row_after_a_known_cell_over_an_outage_does_not_meet_rule_2() ->
     assert value(tab("F", ["d:s0"], [["Known", 1], ["-", 2]]), rules=rules) == 2
 
 
-def test_a_known_cell_lets_a_policy_row_over_an_outage_give_way() -> None:
-    def decided(rows: list[Any]) -> tuple[Any, Record]:
+def test_a_known_cell_lets_an_act_row_over_an_outage_give_way() -> None:
+    def decided(rows: list[Any]) -> Record:
         act = Table("d:act", t.label("page", "tell", "ask"), "F", ["d:urgent", "d:s0"], rows)
         design_ = dataclasses.replace(
             policy_design(act), rules={**policy_design(act).rules, **srcs("Unavailable")}
         )
-        decision = decide_sync(load(design_), BASE, {"default": answering(0.9)})
-        return decision, decision.record
+        return decide_sync(load(design_), BASE, {"default": answering(0.9)}).record
 
     rows = [["yes", "Known", "page"], ["yes", "-", "tell"], ["-", "-", "ask"]]
-    decision, record = decided(rows)
-    assert decision.estimate == "tell"
+    record = decided(rows)
+    assert item(record, "entry", "d:act")["value"] == "tell"
     assert item(record, "entry", "d:act")["rows"] == [2, 3]
     assert item(record, "entry", "d:s0")["marker"]["kind"] == "Unavailable"
     # With a value cell over the same outage the policy is Unavailable, naming the input.
     rows = [["yes", 1, "page"], ["yes", "-", "tell"], ["-", "-", "ask"]]
-    decision, record = decided(rows)
-    assert isinstance(decision.estimate, Unavailable)
+    record = decided(rows)
+    assert item(record, "entry", "d:act")["marker"]["kind"] == "Unavailable"
     cause = item(record, "entry", "d:act")["marker"]["cause"]
     assert cause == {"code": "required", "refs": ["d:s0"]}
 
@@ -1429,7 +1426,7 @@ def test_a_known_cell_stands_over_a_bare_question_and_a_record() -> None:
 def test_a_known_cell_is_written_tagged_and_round_trips() -> None:
     loaded = load(design(("tab", tab("F", ["t:state.n"], [["Known", 1], ["-", 0]]))))
     doc = json.loads(loaded.document)
-    assert doc["format"] == 11
+    assert doc["format"] == 12
     assert doc["rules"]["tab"]["rows"][0]["cells"][0] == {"known": True}
     assert load(loaded.document).design_hash == loaded.design_hash
 

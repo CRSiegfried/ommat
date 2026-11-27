@@ -104,7 +104,7 @@ def test_the_dead_question_lint_runs_its_points_in_grid_order() -> None:
         minimal(state=t.record(), sources={"s": Source(provides)}, rules={"decision": policy})
     )
     ran_at.clear()
-    report = dead_questions(loaded)
+    report = dead_questions(loaded, ["d:decision"])
     expected = list(itertools.product(*(points(loaded, ref) for ref in GRID_REFS)))
     assert report["points"] == len(expected) == 12
     assert ran_at == expected
@@ -168,19 +168,19 @@ REPLAYED = load(
                 params=["lim"],
             )
         },
-        policy="d:act",
+        alone=True,
         parameters={"lim": Parameter(t.number(), 1.0)},
     )
 )
 
 
-def capped() -> Record:
-    """A finished turn whose recorded certificate cap replay refuses: the read takes any
-    integer there, and decide's bounds check takes only ``None``."""
+def timeless() -> Record:
+    """A finished turn whose recorded timeout replay refuses: the read takes any number there,
+    and decide's bounds check takes only a positive one."""
     binding = Scripted({"ask": returns({"q:spam": SPAM})})
     record = decide_sync(REPLAYED, {"n": 2.0}, {"default": binding}).record
     doc = json.loads(record.document)
-    doc["log"][1]["settings"]["certificate_cap"] = 1
+    doc["log"][1]["settings"]["timeout"] = 0
     return read_record(rehashed(doc))
 
 
@@ -196,7 +196,7 @@ JOBS: dict[str, Callable[[Record, Path], object]] = {
         r, REPLAYED, [], {"default": answering}, rerun_design=REPLAYED
     ),
     "deciding_inputs": lambda r, _: deciding_inputs_sync(r, REPLAYED, "d:act"),
-    "question_reach": lambda r, _: question_reach_sync([r], REPLAYED),
+    "question_reach": lambda r, _: question_reach_sync([r], REPLAYED, refs=["d:act"]),
     "gold_record": lambda r, root: gold_record_sync(
         r, REPLAYED, "g1", results=EvaluationStore(root)
     ),
@@ -206,8 +206,10 @@ JOBS: dict[str, Callable[[Record, Path], object]] = {
     "switching_values_batch": lambda r, root: switching_values_batch_sync(
         [r], REPLAYED, ["lim"], results=EvaluationStore(root)
     ),
-    "rescore": lambda r, _: rescore_sync([r], REPLAYED, [REPLAYED]),
-    "rescore_grid": lambda r, _: rescore_grid_sync([r], REPLAYED, REPLAYED, [{"lim": 3.0}]),
+    "rescore": lambda r, _: rescore_sync([r], REPLAYED, [REPLAYED], refs=["d:act"]),
+    "rescore_grid": lambda r, _: rescore_grid_sync(
+        [r], REPLAYED, REPLAYED, [{"lim": 3.0}], refs=["d:act"]
+    ),
 }
 
 
@@ -215,17 +217,17 @@ JOBS: dict[str, Callable[[Record, Path], object]] = {
 def test_an_entry_refusal_from_replay_passes_through_each_replaying_job_unwrapped(
     job: str, tmp_path: Path
 ) -> None:
-    with pytest.raises(EntryRefusal, match="certificate cap 1") as info:
-        JOBS[job](capped(), tmp_path)
+    with pytest.raises(EntryRefusal, match="the timeout 0 is not") as info:
+        JOBS[job](timeless(), tmp_path)
     assert type(info.value) is EntryRefusal
     assert info.value.__cause__ is None
     assert not any(tmp_path.iterdir())  # refused before any store write
 
 
-def test_the_capped_record_replays_cleanly_once_its_cap_is_none() -> None:
+def test_the_timeless_record_replays_cleanly_once_its_timeout_is_positive() -> None:
     """The refusal above is the recorded setting's, not the turn's."""
-    doc = json.loads(capped().document)
-    doc["log"][1]["settings"]["certificate_cap"] = None
+    doc = json.loads(timeless().document)
+    doc["log"][1]["settings"]["timeout"] = 60
     rerun, found = replay_sync(read_record(rehashed(doc)), REPLAYED)
     assert rerun is not None
     assert [f["kind"] for f in found] == []

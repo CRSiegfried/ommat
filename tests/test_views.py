@@ -1,9 +1,9 @@
 # pyright: reportPrivateUsage=false
-"""The record views: the escalation's five members, the root cause its ``required`` chain
-ends at, whether that is a defect, and when a record holds none; the transcript of a decided
-turn; and the redacted view, its digests recomputed here independently with ``hmac`` and the
-``rfc8785`` oracle, over records decide wrote and over the synthetic logs and every prefix of
-them. A candidate-valued answer's labels are tested in ``test_label_sets.py``; a grounded ref's
+"""The record views: the escalation's five members at the caller's ref, the root cause its
+``required`` chain ends at, whether that is a defect, and when a record holds none; and the
+redacted view, its digests recomputed here independently with ``hmac`` and the ``rfc8785``
+oracle, over records decide wrote and over the synthetic logs and every prefix of them. A
+candidate-valued answer's labels are tested in ``test_label_sets.py``; a grounded ref's
 candidate, ``sums`` and ``truncated`` in ``test_per_candidate.py``, ``test_grounded_rules.py``,
 ``test_grounded_sources.py``, ``test_record_sets.py`` and ``test_extraction_turn.py``; a set
 literal in ``test_ledger.py``."""
@@ -63,7 +63,6 @@ from ommat import (
     load,
     read_record,
     redact,
-    transcript,
 )
 from ommat import types as t
 from ommat._canonical import decode, encode
@@ -73,7 +72,6 @@ from ommat._views import _defect
 
 pytestmark = [
     pytest.mark.filterwarnings("ignore::ommat.DefectWarning"),  # defects are the point here
-    pytest.mark.filterwarnings("ignore:transcript is deprecated:DeprecationWarning"),
 ]
 
 ROOT = bytes(range(32))
@@ -114,6 +112,10 @@ def view(record: Record, root: bytes = ROOT, policy: Any = None) -> dict[str, An
 # ---------------------------------------------------------------------------------------------
 # Turns decide wrote: the policy ``d:act`` reads ``d:mid``, which reads ``d:gone``
 
+ACT = "d:act"
+ROUTE = "d:route"
+"""The policy's ref in the turns decide writes here, and in the synthetic logs."""
+
 
 def send(r: Any) -> str:
     return "send"
@@ -148,7 +150,7 @@ def loaded_with(policy: Callable[[Any], str], **changes: Any) -> LoadedDesign:
                 "d:act", t.label("send", "hold"), policy, version="1", reads=["d:flag", "d:mid"]
             ),
         },
-        "policy": "d:act",
+        "alone": True,
     }
     fields.update(changes)
     return load(minimal(**fields))
@@ -162,13 +164,13 @@ def turn(policy: Callable[[Any], str], **changes: Any) -> Record:
 # The escalation
 
 
-def test_a_value_at_the_policys_ref_holds_no_escalation() -> None:
-    assert escalation(turn(send)) is None
+def test_a_value_at_the_ref_holds_no_escalation() -> None:
+    assert escalation(turn(send), ACT) is None
 
 
 def test_the_root_cause_follows_required_across_two_hops() -> None:
     record = turn(requiring)
-    found = escalation(record)
+    found = escalation(record, ACT)
     assert found == {
         "kind": "Unavailable",
         "cause": {"code": "required", "refs": ["d:mid"]},
@@ -184,7 +186,7 @@ def test_a_cause_not_required_is_its_own_root() -> None:
 
     record = turn(raising)
     cause = {"code": "raised", "refs": ["act"]}
-    assert escalation(record) == {
+    assert escalation(record, ACT) == {
         "kind": "Unavailable",
         "cause": cause,
         "root_cause": cause,
@@ -195,7 +197,8 @@ def test_a_cause_not_required_is_its_own_root() -> None:
 
 def test_a_broken_entry_escalates_with_its_entry_cause() -> None:
     record = decide_sync(loaded_with(send), {}, {}).record  # the state does not conform
-    found = escalation(record)
+    assert escalation(record, ACT) is None  # a broken entry writes t:state alone
+    found = escalation(record, "t:state")
     assert found is not None
     assert found["kind"] == "Unavailable"
     assert found["cause"] == found["root_cause"]
@@ -206,13 +209,13 @@ def test_the_root_cause_stops_at_a_ref_with_no_marker_entry_and_at_a_loop() -> N
     log = fresh(NORMAL_8)
     required = {"kind": "Unsure", "cause": {"code": "required", "refs": ["d:tags.a"]}}
     log[9] = entry("d:route", 2, None, marker=required)  # d:tags holds a value
-    assert escalation(read(log))["root_cause"] == required["cause"]  # type: ignore[index]
+    assert escalation(read(log), ROUTE)["root_cause"] == required["cause"]  # type: ignore[index]
     looped = {"kind": "Unsure", "cause": {"code": "required", "refs": ["d:route"]}}
     log[9] = entry("d:route", 2, None, marker=looped)
-    assert escalation(read(log))["root_cause"] == looped["cause"]  # type: ignore[index]
+    assert escalation(read(log), ROUTE)["root_cause"] == looped["cause"]  # type: ignore[index]
     log[9] = entry("d:route", 2, None, marker=required)
     log[10] = entry("d:tags", 2, None, marker=looped)  # d:route -> d:tags -> d:route
-    assert escalation(read(log))["root_cause"] == required["cause"]  # type: ignore[index]
+    assert escalation(read(log), ROUTE)["root_cause"] == required["cause"]  # type: ignore[index]
 
 
 def whole(r: Any) -> Any:
@@ -232,7 +235,7 @@ def test_the_root_cause_hops_from_a_field_path_to_the_marker_at_its_entry() -> N
         ),
     }
     record = turn(requiring_a_field, rules=rules)
-    found = escalation(record)
+    found = escalation(record, ACT)
     assert found is not None
     assert found["cause"] == {"code": "required", "refs": ["d:whole.f"]}
     assert found["root_cause"] == {"code": "raised", "refs": ["whole"]}
@@ -286,13 +289,13 @@ def test_the_root_cause_hops_from_a_grounded_ref_to_the_entry_the_ledger_wrote()
                     reads=["d:fit"],
                 ),
             },
-            policy="d:act",
+            alone=True,
         )
     )
     record = decide_sync(loaded, {"names": ["ok", AWKWARD]}, {}).record
     written = grounded_ref("d:fit", AWKWARD)
     assert written in {i["ref"] for i in record.log if i["item"] == "entry"}
-    found = escalation(record)
+    found = escalation(record, ACT)
     assert found is not None
     assert found["cause"] == {"code": "required", "refs": [written]}
     assert found["root_cause"] == {"code": "raised", "refs": ["fit"]}
@@ -322,7 +325,7 @@ def test_a_root_cause_is_a_defect_when_its_code_is_and_it_names_a_rule_or_the_co
 
 
 def test_the_escalation_is_plain_data_of_exactly_five_members() -> None:
-    found = escalation(turn(requiring))
+    found = escalation(turn(requiring), ACT)
     assert found is not None
     assert type(found) is dict
     assert list(found) == ["kind", "cause", "root_cause", "defect", "record_hash"]
@@ -334,24 +337,51 @@ def test_the_escalation_is_plain_data_of_exactly_five_members() -> None:
 
 @pytest.mark.parametrize("name", ["normal", "broken", "cancelled", "extraction", "described"])
 def test_a_record_before_format_8_holds_no_escalation(name: str) -> None:
-    assert escalation(read(fresh(LOGS[name]))) is None
+    assert escalation(read(fresh(LOGS[name])), ROUTE) is None
 
 
-def test_a_record_with_no_entry_at_the_policys_ref_holds_no_escalation() -> None:
-    assert escalation(read(fresh(CANCELLED_8))) is None
+def test_a_record_with_no_entry_at_the_ref_holds_no_escalation() -> None:
+    assert escalation(read(fresh(CANCELLED_8)), ROUTE) is None
     for n in range(1, 10):  # every prefix before the policy's entry
-        assert escalation(read(fresh(NORMAL_8[:n]))) is None
+        assert escalation(read(fresh(NORMAL_8[:n])), ROUTE) is None
 
 
 def test_the_escalation_reads_the_markers_and_the_hash() -> None:
     record = read(fresh(BROKEN_8))
-    assert escalation(record) == {
+    assert escalation(record, ROUTE) == {
         "kind": "Unavailable",
         "cause": ENTRY_CAUSE["cause"],
         "root_cause": ENTRY_CAUSE["cause"],
         "defect": True,
         "record_hash": record.record_hash,
     }
+
+
+def test_the_escalation_is_of_the_ref_the_caller_names_whatever_the_act_rule_gave() -> None:
+    record = turn(send)  # the act rule gives a value; d:mid holds a marker
+    assert escalation(record, ACT) is None
+    assert escalation(record, "d:mid") == {
+        "kind": "Unavailable",
+        "cause": {"code": "required", "refs": ["d:gone"]},
+        "root_cause": {"code": "raised", "refs": ["gone"]},
+        "defect": True,
+        "record_hash": record.record_hash,
+    }
+    assert escalation(record, "d:absent") is None
+
+
+@pytest.mark.parametrize(
+    ("ref", "message"),
+    [
+        (None, "takes a ref, not None"),
+        (1, "takes a ref"),
+        ("act", "does not start"),
+        ("d:whole.f", "names a field"),
+    ],
+)
+def test_the_escalation_refuses_a_ref_that_names_no_entry(ref: Any, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        escalation(turn(send), ref)
 
 
 class Untouchable:
@@ -365,8 +395,8 @@ class SubRecord(Record):
 
 # Built in the test, since pytest reads a parameter at collection.
 NOT_RECORDS: list[Callable[[], Any]] = [lambda: NORMAL, lambda: None, Untouchable]
-VIEWS = [escalation, defects, transcript]
-VIEW_IDS = ["escalation", "defects", "transcript"]
+VIEWS: list[Callable[[Record], Any]] = [lambda r: escalation(r, ACT), defects]
+VIEW_IDS = ["escalation", "defects"]
 
 
 @pytest.mark.parametrize("record", NOT_RECORDS, ids=["a log", "None", "untouchable"])
@@ -393,7 +423,7 @@ def test_each_view_refuses_a_record_subclass_by_its_exact_type(
 
 def test_a_rule_that_raised_on_a_decided_turn_is_a_defect_the_escalation_cannot_show() -> None:
     record = turn(send)
-    assert escalation(record) is None
+    assert escalation(record, ACT) is None
     found = defects(record)
     assert found is not None
     assert [item["ref"] for item in found] == ["d:gone"]  # d:mid's required cause is not one
@@ -405,7 +435,7 @@ def test_the_defects_hold_the_root_cause_of_an_escalation_that_is_a_defect(
     policy: Callable[[Any], str],
 ) -> None:
     record = turn(policy)
-    found = escalation(record)
+    found = escalation(record, ACT)
     listed = [item["marker"]["cause"] for item in defects(record) or []]
     if found is not None:
         assert found["defect"] is (found["root_cause"] in listed)
@@ -427,60 +457,8 @@ def test_a_record_before_format_8_holds_no_defects(name: str) -> None:
     assert defects(read(fresh(LOGS[name]))) is None
 
 
-# ---------------------------------------------------------------------------------------------
-# The transcript
-
-
-def test_the_transcript_ends_at_decides_call_the_board_and_its_result_the_decision() -> None:
-    record = read(fresh(NORMAL_8))
-    stem = "om_" + record.record_hash.removeprefix("sha256:")[:24]
-    found = transcript(record)
-    assert found is not None
-    assert found["record_hash"] == record.record_hash
-    assert found["design"] == {"hash": NORMAL_8[0]["hash"]}
-    assert [[c["source"] for c in r] for r in found["rounds"]] == [["fetch_mail"], ["ask_spam"]]
-    assert found["rounds"][1][0]["answers"] == {"q:spam": {"value": NORMAL_8[8]["value"]}}
-    assert found["decide"] == {
-        "id": f"{stem}_d",
-        "board": {"d:tags": {"value": [{"a": "x"}, None]}},  # the policy's own entry left out
-        "decision": {"value": "archive"},
-    }
-
-
-def test_the_transcript_of_a_decided_turn_holds_its_board_and_decision() -> None:
-    record = turn(requiring, name="mail")
-    found = transcript(record)
-    assert found is not None
-    assert found["design"] == {"hash": record.design_hash}
-    assert found["rounds"] == []
-    decided = found["decide"]
-    assert set(decided["board"]) == {"d:flag", "d:gone", "d:mid"}
-    assert decided["decision"] == {
-        "marker": {"kind": "Unavailable", "cause": {"code": "required", "refs": ["d:mid"]}}
-    }
-    assert set(decided) == {"id", "board", "decision"}
-
-
-def test_no_policys_entry_or_a_record_before_format_8_gives_no_transcript() -> None:
-    assert transcript(read(fresh(NORMAL))) is None
-    assert transcript(read(fresh(CANCELLED_8))) is None
-    assert transcript(read(fresh(NORMAL_8[:9]))) is None
-
-
-def test_a_broken_entrys_transcript_holds_no_rounds_and_the_entry_cause() -> None:
-    found = transcript(read(fresh(BROKEN_8)))
-    assert found is not None
-    assert found["rounds"] == []
-    assert found["decide"]["board"] == {}
-    assert found["decide"]["decision"] == {"marker": ENTRY_CAUSE}
-
-
-def test_a_record_cancelled_after_the_policy_fired_still_shows_its_decision() -> None:
-    record = read(fresh([*NORMAL_8, CANCEL]))
-    assert escalation(record) is None
-    found = transcript(record)
-    assert found is not None
-    assert found["decide"]["decision"] == {"value": "archive"}
+def test_a_record_cancelled_after_the_policy_fired_holds_no_escalation_at_its_value() -> None:
+    assert escalation(read(fresh([*NORMAL_8, CANCEL])), "d:route") is None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1179,7 +1157,7 @@ def test_every_prefix_of_the_test_logs_redacts_and_escalates(name: str, n: int) 
     assert out["redacted"] == record.record_hash
     assert out.get("hash") == (record.record_hash if record.log[0]["format"] >= 3 else None)
     assert len(out["log"]) == n
-    escalation(record)
+    escalation(record, ROUTE)
     defects(record)
 
 
@@ -1214,7 +1192,7 @@ def at(record: Record, ref: str) -> int:
 def test_a_decided_turn_holds_its_shapes_and_digests_what_the_policy_names_nothing_for() -> None:
     loaded = loaded_with(send, name="mail")
     record = decide_sync(loaded, {"subject": "secret"}, {}, RunSettings()).record
-    assert record.log[0]["format"] == 10
+    assert record.log[0]["format"] == 11
     assert record.log[1]["shapes"]["t:state"] == {"subject": "leaf"}
     assert "classes" not in record.log[1]
     out = view(record)
@@ -1233,7 +1211,7 @@ def test_a_decided_turns_policy_names_a_class_over_its_shapes() -> None:
     assert out["applied"]["d:flag"] == "identifier"
 
 
-def test_a_decided_policy_entry_is_digested_unless_opened_and_a_marker_passes() -> None:
+def test_a_decided_act_entry_is_digested_unless_opened_and_a_marker_passes() -> None:
     record = decide_sync(loaded_with(send), {"subject": "hi"}, {}, RunSettings()).record
     out = view(record)
     assert out["log"][at(record, "d:act")]["value"] == digest("send", out)

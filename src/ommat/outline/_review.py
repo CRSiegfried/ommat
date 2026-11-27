@@ -10,7 +10,7 @@ from ommat.outline._types import cell_text, output_text
 # Why a source wrote markers and no call: the cause codes each class takes.
 _NEED = ("need-undetermined", "need-unavailable")
 _WHEN = ("when-false", "when-failed", "undeclared-read")
-_STOPPED = ("round-bound", "deadline", "settled", "over-budget", "cancelled")
+_STOPPED = ("round-bound", "deadline", "over-budget", "cancelled")
 
 
 def _why_not_asked(source: dict[str, Any], sid: str, cause: dict[str, Any]) -> str:

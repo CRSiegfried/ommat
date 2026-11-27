@@ -1,12 +1,12 @@
 # pyright: reportPrivateUsage=false
-"""Combining designs: ``combine`` unions parts into one design under a top policy, and
-``standalone`` makes one part loadable alone.
+"""Combining designs: ``combine`` unions parts into one design, and ``standalone`` makes one
+part loadable alone.
 
 A ``Part`` is a design and its ports, the ``d:`` refs it reads and no declaration of it
 provides. ``combine`` adds a rule for each port, the caller's or a one-input pass-through
-table it builds, and the caller's top policy, and renames nothing. It refuses what load cannot
-see, the parts' structure and their ports, listing every failure in one
-``InvalidCombination``; load checks the combined design as it checks any other. What combine
+table it builds, and renames nothing; a rule that reads across parts is a part of its own. It
+refuses what load cannot see, the parts' structure and their ports, listing every failure in
+one ``InvalidCombination``; load checks the combined design as it checks any other. What combine
 adds is a table where it builds one, so a combined design's document reloads by import.
 
 ``combine`` is not a helper a rule calls, so ``HELPERS`` does not count it.
@@ -284,24 +284,21 @@ def _constant(port: str, type_: str, value: object) -> Table:
 def combine(
     *parts: Part,
     bind: Mapping[str, str | Rule | Table],
-    policy: Rule | Table,
     name: str | None = None,
 ) -> Design:
-    """One design holding every part's declarations, a rule for each port from ``bind`` and
-    ``policy``, the top policy, as its policy; or ``InvalidCombination`` listing every failure.
+    """One design holding every part's declarations and a rule for each port from ``bind``;
+    or ``InvalidCombination`` listing every failure.
     A source, rule, type, target or group two parts declare alike under one id is kept once; one
     they declare differently is refused, as is a parameter path two parts declare.
 
     ``bind`` maps each port to its provider: a ``Rule`` or ``Table`` providing the port, or a
     ``d:`` ref, a field path allowed, whose value the port takes through a pass-through table.
-    Each rule combine adds is keyed by its ref's name, the port's or the policy's."""
+    Each rule combine adds is keyed by its port's name."""
     if not parts:
         raise TypeError("combine takes at least one part")
     labelled = [(_label(n, _check_part(p, f"part {n}")), p) for n, p in enumerate(parts, 1)]
     if not isinstance(bind, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"bind is a {type_name(bind)}, not a mapping")
-    if type(policy) not in (Rule, Table):
-        raise TypeError(f"policy is a {type_name(policy)}, not a Rule or a Table")
     for ref, provider in bind.items():
         if type(provider) not in (str, Rule, Table):
             raise TypeError(
@@ -357,28 +354,15 @@ def combine(
         if ref not in bind:
             failures.add([ref], f"the port {_q(ref)} is not bound")
 
-    top = _whole_d_ref(policy.provides)
-    if top is None:
-        failures.add(
-            [policy.provides],
-            f"the policy provides {_shown(policy.provides)}, which is not a d: ref with no "
-            "field path",
-        )
     ids = {ref: cast(str, _whole_d_ref(ref)) for ref in added}
-    if top is not None:
-        if top in ids.values():
-            failures.add([top], f"the policy and a port's rule both take the id {_q(top)}")
-        ids[policy.provides] = top
     _added_ids(ids, _ids(labelled), failures)
     if failures:
         raise InvalidCombination(failures)
 
     for ref, rule in added.items():
         rules[ids[ref]] = rule
-    rules[cast(str, top)] = policy
     return Design(
         state=designs[0].state,
-        policy=policy.provides,
         sources=sources,
         rules=rules,
         parameters=_merged(designs, "parameters"),

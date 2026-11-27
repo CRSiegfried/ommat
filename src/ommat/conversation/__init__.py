@@ -1,14 +1,16 @@
 """The conversation renderers: a record rendered as its turn history for the next model in an
 LLM conversation, outside the compatibility promise.
 
-``to_chat_completions(record, design)`` renders a turn as Chat Completions messages: each source
-call and decide as a tool call and its result, minimal. A renderer words nothing.
+``to_chat_completions(record, design, refs=...)`` renders a turn as Chat Completions messages:
+each source call and decide as a tool call and its result, minimal, decide's result the entries
+at the caller's ``refs``. A renderer words nothing.
 ``is_bookkeeping`` and ``drop_earlier_bookkeeping`` tell ommat's bookkeeping, its source calls
 and decide, from the model's own messages, by their ids.
 ``ommat.conversation.pydantic_ai`` renders a turn as Pydantic AI messages. ``import ommat``
 does not import this package, and this module takes nothing beyond the standard library.
 """
 
+from collections.abc import Sequence
 from typing import Any, cast
 
 from ommat._canonical import ordered
@@ -20,22 +22,29 @@ __all__ = ["drop_earlier_bookkeeping", "is_bookkeeping", "to_chat_completions"]
 
 
 def to_chat_completions(
-    record: Record, design: LoadedDesign | None = None, *, turn: str | int | None = None
+    record: Record,
+    design: LoadedDesign | None = None,
+    *,
+    refs: Sequence[str],
+    turn: str | int | None = None,
 ) -> list[dict[str, Any]]:
     """A record's turn history as Chat Completions messages, ``[]`` for a record before format 8
-    or one with no entry at the policy's ref: per group of calls an assistant message with null
-    ``content`` and its ``tool_calls``, then a ``tool`` message per call. With ``design``, the
-    record's loaded design, decide's arguments are the board entries the policy reads and every
-    marker; without it, the whole board. Every argument and result is in the ordered encoding,
-    so a record renders to the same bytes each time. Raises ``ValueError`` for a ``record`` that
-    is not exactly a ``Record``, a ``design`` that is not its ``LoadedDesign``, or a tool name no
-    provider takes: a source named ``decide`` or a name over 64 characters. ``turn``, exactly a
-    ``str`` or an ``int`` the canonical encoding takes, else ``ValueError``, gives every id a stem
-    hashed from the record hash and the turn, so one record rendered for two turns of a
-    conversation repeats no id; ``None`` keeps the record's ids."""
+    or one with no entry at one of ``refs``: per group of calls an assistant message with null
+    ``content`` and its ``tool_calls``, then a ``tool`` message per call. ``refs``, a non-empty
+    ``list`` or ``tuple`` of distinct ``d:`` refs of the record's rules, names the entries the
+    caller acts on: decide's result is ``{ref: {"value": v}}`` or ``{ref: {"undecided": {"kind",
+    "root_cause", "refs"}}}`` per ref, in their order, and decide's arguments are every other
+    ``d:`` entry, cut with ``design``, the record's loaded design, to those the rules of ``refs``
+    read and every marker. Every argument and result is in the ordered encoding, so a record
+    renders to the same bytes each time. Raises ``ValueError`` for a ``record`` that is not
+    exactly a ``Record``, a ``design`` that is not its ``LoadedDesign``, ``refs`` that are not
+    such refs, or a tool name no provider takes: a source named ``decide`` or a name over 64
+    characters. ``turn``, exactly a ``str`` or an ``int`` the canonical encoding takes, else
+    ``ValueError``, gives every id a stem hashed from the record hash and the turn, so one record
+    rendered for two turns of a conversation repeats no id; ``None`` keeps the record's ids."""
     check_turn(turn)
     messages: list[dict[str, Any]] = []
-    for group in history(record, design, turn).groups:
+    for group in history(record, design, refs, turn).groups:
         calls = [
             {
                 "id": call.id,

@@ -34,6 +34,8 @@ from ommat.conversation.pydantic_ai import (
 from transcript_turns import PATHS, SOURCES, STATE, YES, confirming, design, tools, turn
 
 LOADED = load(design())
+REFS = ["d:act"]
+"""The ref the caller acts on: the policy's."""
 
 
 def rec(path: str) -> Record:
@@ -41,7 +43,7 @@ def rec(path: str) -> Record:
 
 
 def rendered(path: str, **kw: Any) -> list[ModelMessage]:
-    return to_model_messages(rec(path), LOADED, **kw)
+    return to_model_messages(rec(path), LOADED, **kw, refs=REFS)
 
 
 def named(name: str) -> Record:
@@ -81,7 +83,9 @@ def returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:
 @pytest.mark.parametrize("path", PATHS)
 def test_every_path_renders_as_responses_of_calls_and_requests_of_returns(path: str) -> None:
     record = rec(path)
-    messages = to_model_messages(record, LOADED, model_name="ommat", provider_name="ommat")
+    messages = to_model_messages(
+        record, LOADED, model_name="ommat", provider_name="ommat", refs=REFS
+    )
     kinds = [type(m).__name__ for m in messages]
     rounds = len({i["round"] for i in record.log if i["item"] == "call"})
     assert kinds == ["ModelResponse", "ModelRequest"] * (rounds + 1)
@@ -94,7 +98,7 @@ def test_every_path_renders_as_responses_of_calls_and_requests_of_returns(path: 
 
 def test_the_parts_carry_the_history_s_names_arguments_and_results() -> None:
     record = rec("clear")
-    messages = to_model_messages(record, LOADED)
+    messages = to_model_messages(record, LOADED, refs=REFS)
     made = calls(messages)
     assert [c.tool_name for c in made] == [
         "ask-again",
@@ -107,7 +111,7 @@ def test_the_parts_carry_the_history_s_names_arguments_and_results() -> None:
     assert made[4].args == {"d:sure": "yes"}
     back = returns(messages)
     assert back[1].content == {"q:route": ["yes", 0.95]}
-    assert back[4].content == {"decision": "archive"}
+    assert back[4].content == {"d:act": {"value": "archive"}}
     stamp = {"record_hash": record.record_hash, "design_hash": record.design_hash}
     assert back[4].metadata == stamp
     assert [r.metadata for r in back[:4]] == [None] * 4
@@ -122,10 +126,12 @@ def test_a_failed_call_s_return_is_its_markers_with_outcome_failed() -> None:
 
 def test_the_messages_do_not_share_the_record_s_objects() -> None:
     record = rec("clear")
-    back = returns(to_model_messages(record, LOADED))
+    back = returns(to_model_messages(record, LOADED, refs=REFS))
     cast("dict[str, Any]", back[2].content)["t:order"]["id"] = "changed"
     assert record.entries["t:order"]["value"] == {"id": "o-1"}
-    assert returns(to_model_messages(record, LOADED))[2].content == {"t:order": {"id": "o-1"}}
+    assert returns(to_model_messages(record, LOADED, refs=REFS))[2].content == {
+        "t:order": {"id": "o-1"}
+    }
 
 
 def test_the_messages_survive_pydantic_ai_s_own_serialization() -> None:
@@ -139,7 +145,14 @@ def test_the_messages_survive_pydantic_ai_s_own_serialization() -> None:
 
 def test_what_is_not_a_record_is_refused() -> None:
     with pytest.raises(ValueError, match="a renderer takes a Record"):
-        to_model_messages(None)  # type: ignore[arg-type]
+        to_model_messages(None, refs=REFS)  # type: ignore[arg-type]
+
+
+def test_refs_are_refused_as_the_chat_renderer_refuses_them() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        to_model_messages(rec("clear"), LOADED, refs=[])
+    with pytest.raises(ValueError, match="no rule's ref"):
+        to_model_messages(rec("clear"), LOADED, refs=["d:nothing"])
 
 
 def test_an_agent_answers_from_the_history_ending_at_decide_s_return() -> None:
@@ -315,7 +328,7 @@ def test_a_marked_request_holding_a_prompt_is_not_bookkeeping() -> None:
 )
 def test_the_names_refused_are_the_chat_renderer_s(name: str, message: str) -> None:
     with pytest.raises(ValueError, match=re.escape(message)):
-        to_model_messages(named(name))
+        to_model_messages(named(name), refs=REFS)
 
 
 def test_a_marked_response_holding_text_is_not_bookkeeping() -> None:

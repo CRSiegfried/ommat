@@ -21,17 +21,20 @@ def main() -> None:
         decision = decide_sync(loaded, {"message": message}, {"default": model})
         calls = [item["sources"] for item in decision.record.log if item["item"] == "call"]
         _, findings = replay_sync(decision.record, loaded)
-        print(f"{message!r}: calls {calls}; decision {decision.estimate}; findings {findings}")
+        decided = decision.record.entries["d:act"]["value"]
+        print(f"{message!r}: calls {calls}; decision {decided}; findings {findings}")
 
     alone = load(standalone(EMAIL, {"d:email/chosen": True, "d:email/urgent": "no"}))
     model = fixed({"q:email/folder_named": NO})
     decision = decide_sync(alone, {"message": "Move it"}, {"default": model})
-    print(f"email alone, chosen and not urgent: decision {decision.estimate}")
+    decided = decision.record.entries["d:email/outcome"]["value"]
+    print(f"email alone, chosen and not urgent: decision {decided}")
 
     given = load(standalone(EMAIL, {"d:email/urgent": "no"}, given=["d:email/chosen"]))
     ports = fixed({"t:email/chosen": True})
     decision = decide_sync(given, {"message": "Move it"}, {"default": model, "ports": ports})
-    print(f"email alone, chosen this turn: decision {decision.estimate}")
+    decided = decision.record.entries["d:email/outcome"]["value"]
+    print(f"email alone, chosen this turn: decision {decided}")
 
 
 if __name__ == "__main__":

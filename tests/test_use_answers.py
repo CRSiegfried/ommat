@@ -35,7 +35,7 @@ from ommat.evaluation import (
     use_answers,
     use_answers_sync,
 )
-from scripted import Scripted, returns, unsupported
+from scripted import Scripted, raising, returns, unsupported
 from test_decide import (
     ASK,
     BODY,
@@ -46,6 +46,7 @@ from test_decide import (
     SPAM,
     STATE,
     Seen,
+    bindings,
     bound,
     caught,
     deciding,
@@ -326,7 +327,19 @@ def test_a_source_the_seconds_thresholds_skipped_shows_in_the_replay_and_the_dif
 
 
 def unfinished() -> Record:
-    return record_of(caught(deciding(observer=Seen(5))))
+    """A cancelled turn: a binding raised the cancellation, so the log ends at a ``cause``
+    item."""
+    record = record_of(caught(deciding(binds=bindings(ask=raising(asyncio.CancelledError())))))
+    assert record.cause == {"code": "cancelled", "refs": []}
+    return record
+
+
+def cut(at: int = 5) -> Record:
+    """A turn its observer ended at index ``at``: no ``cause`` item, so finished, however far it
+    got (the default, before any rule's entry)."""
+    record = record_of(caught(deciding(observer=Seen(at))))
+    assert record.cause is None
+    return record
 
 
 def broken() -> Record:
@@ -357,9 +370,29 @@ def test_an_unfinished_record_or_other_is_refused_record_first() -> None:
         assert exc.turn == name.record_hash
 
 
-def test_a_broken_entry_ends_at_its_policy_entry_with_a_marker_at_its_state_entry() -> None:
+def test_a_record_its_observer_cut_short_is_not_refused_and_the_cut_is_found() -> None:
+    """Either way round, the rerun is the whole turn: what the cut lost is found, as entry
+    findings with nothing recorded or as stale questions with no answer."""
+    whole = go().record
+    found = use_answers_sync(cut(), LOADED, whole)["findings"]
+    assert [(f["kind"], f["ref"]) for f in found] == [
+        (K.entry, "d:act"),
+        (K.entry, "d:echo"),
+        (K.entry, "d:route"),
+        (K.entry, "t:body"),
+        (K.entry, "t:size"),
+    ]
+    assert all(f["recorded"] is None for f in found)
+    found = use_answers_sync(whole, LOADED, cut())["findings"]
+    assert [(f["kind"], f["ref"]) for f in found][:2] == [
+        (K.stale_question, "t:body"),
+        (K.stale_question, "t:size"),
+    ]
+
+
+def test_a_broken_entry_ends_at_its_state_entry_holding_a_marker() -> None:
     log = broken().log
-    assert log[-1] == entry(log, "d:act")
+    assert log[-1] == entry(log, "t:state")
     assert entry(log, "t:state")["marker"]["kind"] == "Unavailable"
 
 

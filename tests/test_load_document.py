@@ -86,7 +86,7 @@ def test_a_document_resolves_each_function_component_to_its_callable() -> None:
         "route": designs.route,
         "score": designs.score,
     }
-    assert loaded._design.policy == "d:act"
+    assert "act" in loaded._design.rules
 
 
 def test_a_bytes_leaf_written_as_base64url_is_bytes_again() -> None:
@@ -221,9 +221,11 @@ def parsed_cases() -> list[tuple[Any, str]]:
         ({**with_check_1_defect(), "name": b"x"}, "outside the value domain"),
         ({**with_check_1_defect(), "extra": 1}, 'the member "extra"'),
         ({**with_check_1_defect(), "classes": {}}, 'the member "classes"'),
+        # A format-12 document names no policy.
+        ({**with_check_1_defect(), "policy": "d:x"}, 'the member "policy"'),
     ]
     for value in (0, 9, DESIGN_FORMAT + 1):
-        cases.append(({**with_check_1_defect(), "format": value}, f"format {value} is not 11"))
+        cases.append(({**with_check_1_defect(), "format": value}, f"format {value} is not 12"))
     for value in (True, "1", 1.0, None):
         cases.append(({**with_check_1_defect(), "format": value}, "format is not an integer"))
     for member in ("state", "targets"):
@@ -277,7 +279,7 @@ def component_cases() -> list[tuple[Callable[[dict[str, Any]], None], tuple[str,
         doc["rules"]["route"]["form"] = "data"
 
     return [
-        (drop("policy"), (), 'the document has no member "policy"'),
+        (drop("state"), (), 'the document has no member "state"'),
         (drop("rules", "route", "version"), ("route",), 'rule "route" has no member "version"'),
         (add("rules", "route", "inputs"), ("route",), 'the member "inputs"'),
         (drop("rules", "route", "form"), ("route",), 'no member "form"'),
@@ -618,10 +620,6 @@ def test_a_document_with_a_dropped_leaf_still_declares_it() -> None:
 @pytest.mark.parametrize(
     ("member", "value"),
     [
-        ("policy", 5),
-        ("policy", None),
-        ("policy", ["d:decision"]),
-        ("policy", {"ref": "d:decision"}),
         ("groups", []),
         ("groups", {"g": "q:x"}),
         ("sources", {"s": "a source"}),

@@ -44,7 +44,7 @@ from ommat.evaluation import (
 )
 from scripted import Scripted, returns
 from test_decide import ASK, BODY, LOADED, RULES, act_rule, slice_design
-from test_use_answers import CHANGED, broken, format_7, live, unfinished
+from test_use_answers import CHANGED, broken, cut, format_7, live, unfinished
 
 pytestmark = pytest.mark.filterwarnings("ignore::ommat.DefectWarning")  # defects are the point here
 
@@ -325,11 +325,11 @@ def refs_by_flag(r: Any) -> object:
     return Unsure(Cause("abstained", ["t:state.flag"] if r.read("t:state.flag") else []))
 
 
-def test_a_change_of_the_policys_marker_refs_alone_changes_the_decision() -> None:
+def test_a_change_of_the_act_rules_marker_refs_alone_is_no_change_either() -> None:
     act = act_rule(refs_by_flag, "t:state.flag")
-    design = load(minimal(state=STATE_T, policy="d:act", rules={"act": act}))
+    design = load(minimal(state=STATE_T, alone=True, rules={"act": act}))
     record = decide_sync(design, STATE, {}).record
-    assert deciding_inputs_sync(record, design, "d:act") == {"t:state.flag": "deciding"}
+    assert deciding_inputs_sync(record, design, "d:act") == {"t:state.flag": "not-deciding"}
 
 
 def test_a_d_read_is_tried_at_unsure_then_each_value() -> None:
@@ -493,6 +493,14 @@ def test_a_ref_no_rule_provides_in_the_record_is_not_found(ref: Any) -> None:
     exc = refusal(decided(), DESIGN, ref)
     assert exc.reason is R.not_found
     assert exc.ref == (ref if type(ref) is str else None)
+
+
+def test_the_deciding_inputs_refuse_a_record_its_observer_cut_short() -> None:
+    """At a ref the cut kept the record is ``baseline-differs``; at one it lost, ``not-found``."""
+    kept = refusal(cut(9), LOADED, "d:route")
+    assert kept.reason is R.baseline_differs
+    lost = refusal(cut(), LOADED, "d:route")
+    assert lost.reason is R.not_found
 
 
 @pytest.mark.usefixtures("no_replay")

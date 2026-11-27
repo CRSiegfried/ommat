@@ -1,14 +1,11 @@
 """The record views: pure functions from a closed record to a value, for the caller, the
 escalation target or a verifier.
 
-``escalation(record)`` returns an undecided turn's five members: the marker's kind, its cause, the
-root cause, whether that is a defect, and the record hash; ``None`` when the policy gave a value.
-``defects(record)`` returns every entry whose cause is a defect by the same test, whatever the
-policy gave.
-``transcript(record)``, deprecated, returns every source call and the decision, unworded. Each
-of the escalation, the defects and the transcript gives ``None`` for a record before format 8,
-which holds no policy's entry, and the escalation and the transcript find the decision as
-``decision_entry`` does. ``redact(record, root_key, policy)`` returns the redacted view's
+``escalation(record, ref)`` returns the five members of the marker at ``ref``: its kind, its
+cause, the root cause, whether that is a defect, and the record hash; ``None`` when ``ref`` holds
+a value or no entry. ``defects(record)`` returns every entry whose cause is a defect by the same
+test. Each of the escalation and the defects gives ``None`` for a record before format 8.
+``redact(record, root_key, policy)`` returns the redacted view's
 document as canonical bytes: the record's ``log`` and ``unhashed`` with a keyed digest where
 each ``content`` or ``identifier`` value was, ``redacted``, the record hash its key came from,
 ``applied``, the policy applied, each ref's class tree in full, and from format 3 on the
@@ -36,16 +33,13 @@ Each view raises ``ValueError`` before reading anything when
 here.
 """
 
-import warnings
 from collections.abc import Mapping
-from copy import deepcopy
 from typing import Any, cast
 
 from ommat._canonical import encode, hash_value, keyed_digest, turn_key
 from ommat._ledger import (
     Record,
     _with_held_order,  # pyright: ignore[reportPrivateUsage]
-    decision_entry,
 )
 from ommat._markers import CauseCode
 from ommat._refs import code_point_sorted, declared_ref, entry_ref, grounded_ref, parse_ref
@@ -78,16 +72,23 @@ def _closed(record: object) -> Record:
 # The escalation
 
 
-def escalation(record: Record) -> dict[str, Any] | None:
-    """An undecided turn's escalation: ``kind``, the policy's marker's kind; ``cause``, its
-    cause; ``root_cause``, the cause reached by following each ``required`` cause to the entry
-    its first ref names, until a cause whose code is not ``required`` or a ref with no marker
-    entry; ``defect``, whether the root cause is ``raised``, ``invalid-return`` or
-    ``undeclared-read`` naming a rule or the codec; and ``record_hash``. ``None`` when the
-    policy gave a value, when the log holds no entry at the policy's ref, or for a record
-    before format 8."""
+def escalation(record: Record, ref: str) -> dict[str, Any] | None:
+    """The escalation of the marker at ``ref``, the caller's: ``kind``, the marker's kind;
+    ``cause``, its cause; ``root_cause``, the cause reached by following each ``required`` cause
+    to the entry its first ref names, until a cause whose code is not ``required`` or a ref with
+    no marker entry; ``defect``, whether the root cause is ``raised``, ``invalid-return`` or
+    ``undeclared-read`` naming a rule or the codec; and ``record_hash``. ``None`` when the entry
+    at ``ref`` holds a value, when the log holds no entry at ``ref``, or for a record before
+    format 8. Raises ``ValueError`` for a ``ref`` that is not exactly a ``str`` naming an entry:
+    a ref with no field path."""
     log = _closed(record).log
-    entry = decision_entry(log)
+    if type(ref) is not str:
+        raise ValueError(f"escalation takes a ref, not {type_name(ref)}")
+    if entry_ref(ref) != ref:
+        raise ValueError(f"{ref!r} names a field, not an entry")
+    if not log or log[0].get("format", 0) < POLICY_FORMAT:
+        return None
+    entry = next((item for item in log if item["item"] == "entry" and item["ref"] == ref), None)
     if entry is None or "value" in entry:
         return None
     marker = cast("dict[str, Any]", entry["marker"])
@@ -122,9 +123,9 @@ def _defect(log: list[dict[str, Any]], root: dict[str, Any]) -> bool:
 
 def defects(record: Record) -> list[dict[str, Any]] | None:
     """Every entry item whose marker's cause is a defect by the test ``escalation`` applies to
-    its root cause, in log order, whatever the policy gave; ``None`` for a record before
-    format 8. A ``required`` cause is never one, so a rule's defect is listed at its own
-    entry, not at the entries that required it."""
+    its root cause, in log order; ``None`` for a record before format 8. A ``required`` cause
+    is never one, so a rule's defect is listed at its own entry, not at the entries that
+    required it."""
     log = _closed(record).log
     if not log or log[0].get("format", 0) < POLICY_FORMAT:
         return None
@@ -167,80 +168,6 @@ def _entry_ref(ref: str) -> str | None:
         return entry_ref(ref)
     except ValueError:
         return None
-
-
-# ---------------------------------------------------------------------------------------------
-# The transcript
-
-
-def transcript(record: Record) -> dict[str, Any] | None:
-    """Every source call of a closed record and its decision, unworded: ``record_hash``,
-    ``design``, ``rounds`` of calls, then ``decide``, decide's call and its result: the
-    ``board``, each ``d:`` entry but the policy's, and the ``decision``, the policy's entry.
-    ``None`` for a record before format 8, or one with no entry at the policy's ref. Each value
-    and marker is tagged, and each id is ``om_``, the record hash's first 24 hex digits and
-    ``_c<n>`` or ``_d``. Deprecated: it warns, and leaves ``ommat`` in a later minor release;
-    render the record with ``ommat.conversation`` instead."""
-    warnings.warn(
-        "transcript is deprecated; pass the record to an ommat.conversation renderer",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    closed = _closed(record)
-    log = closed.log
-    decision = decision_entry(log)
-    if decision is None:
-        return None
-    stem = "om_" + closed.record_hash.removeprefix("sha256:")[:24]
-    settings = log[1]
-    providers = cast("dict[str, str]", settings["providers"])
-    written: dict[int, dict[str, Any]] = {}
-    for item in log:
-        if item["item"] == "entry" and item.get("call") is not None:
-            written.setdefault(item["call"], {})[item["ref"]] = _tagged(item)
-    rounds: list[list[dict[str, Any]]] = []
-    held: dict[int, list[dict[str, Any]]] = {}
-    n = 0
-    for index, item in enumerate(log):
-        if item["item"] != "call":
-            continue
-        answers = written.get(index, {})
-        for source in cast("list[str]", item["sources"]):
-            n += 1
-            # A per-candidate entry is its declared ref's source's.
-            asks = code_point_sorted(r for r in answers if providers.get(declared_ref(r)) == source)
-            call = {
-                "id": f"{stem}_c{n}",
-                "source": source,
-                "asks": asks,
-                "outcome": deepcopy(item["outcome"]),
-                "answers": {ref: answers[ref] for ref in asks},
-            }
-            if item["round"] not in held:
-                held[item["round"]] = []
-                rounds.append(held[item["round"]])
-            held[item["round"]].append(call)
-    board = {
-        entry["ref"]: _tagged(entry)
-        for entry in log
-        if entry["item"] == "entry"
-        and entry["ref"].startswith("d:")
-        and entry["ref"] != settings["policy"]
-    }
-    decided = {"id": f"{stem}_d", "board": board, "decision": _tagged(decision)}
-    return {
-        "record_hash": closed.record_hash,
-        "design": {"hash": log[0]["hash"]},
-        "rounds": rounds,
-        "decide": decided,
-    }
-
-
-def _tagged(entry: dict[str, Any]) -> dict[str, Any]:
-    """An entry's value as ``{"value"}`` or its marker as ``{"marker"}``, as recorded."""
-    if "value" in entry:
-        return {"value": entry["value"]}
-    return {"marker": entry["marker"]}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -595,8 +522,8 @@ class _Walk:
             ]
         # Every other member is open, a cause's refs but their grounded refs: markers,
         # derivation, rows, slots, a plan's context entry's ref and its block's switches, the
-        # verdict's other members, the run settings, the policy's ref and the call item's other
-        # members.
+        # verdict's other members, the run settings, an old record's policy ref and the call
+        # item's other members.
         if "order" in item:  # derived afresh over the item as the view writes it
             out = _with_held_order({k: v for k, v in out.items() if k != "order"})
         return out

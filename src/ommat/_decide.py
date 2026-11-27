@@ -4,10 +4,10 @@
 ``decide`` refuses a wrong caller argument with ``EntryRefusal`` before anything runs. Then it reads
 the monotonic clock, opens the ledger, writes ``unhashed``'s ``turn.start``, ``engine`` and
 ``codec``, appends the ``design`` and ``settings`` items and the state entry ``t:state``, runs
-interpret, which fires every rule and so the policy, and returns the frozen ``Decision``, whose
-estimate is the policy's entry: nothing is written after interpret. A codec that raises an
+interpret, which fires every rule, and returns the frozen ``Decision``, which holds the closed
+record: nothing is written after interpret. A codec that raises an
 ``Exception``, or a state that does not conform, is a broken entry: decide writes ``t:state``
-and then the policy's ref as ``Unavailable`` with the entry cause, both in round 0, and runs no
+as ``Unavailable`` with the entry cause in round 0, writes nothing after it and runs no
 interpret.
 
 One handler sorts what ends a turn early by identity first: the observer's exception closes
@@ -37,9 +37,9 @@ from typing import Any, cast
 from ommat._binding import OracleBinding
 from ommat._component import exception_record, now, refuse_awaitable
 from ommat._design import LoadedDesign
-from ommat._interpret import _MARKER_KINDS, _marker_document, interpret
-from ommat._ledger import Ledger, Observer, Record, decision_entry
-from ommat._markers import Cause, CauseCode, Unavailable, Undetermined
+from ommat._interpret import _marker_document, interpret
+from ommat._ledger import Ledger, Observer, Record
+from ommat._markers import Cause, CauseCode, Unavailable
 from ommat._refs import code_point_sorted
 from ommat._typed import is_a, typed
 from ommat._values import (
@@ -134,19 +134,14 @@ class RunSettings:
     timeout: float = 60
     budget: float | None = None
     deadline: float | None = None
-    certificate_cap: int | None = None
 
 
 _BUILT_BY_DECIDE = object()
 
 
-_MARKERS: dict[str, type[Undetermined]] = {kind: cls for cls, kind in _MARKER_KINDS.items()}
-
-
 class Decision:
-    """A turn's decision and its record: the estimate is the policy's entry and the design
-    hash is the record's, each read from the record and stored nowhere. Frozen, and built
-    only by decide."""
+    """A turn's closed record and its design hash, read from the record and stored nowhere. A
+    caller reads an entry from ``record.entries``. Frozen, and built only by decide."""
 
     __slots__ = ("_record",)
 
@@ -172,21 +167,8 @@ class Decision:
         """The record's design hash, read from it and stored nowhere."""
         return self._record.design_hash
 
-    @property
-    def estimate(self) -> object:
-        """The policy's estimate, read from its entry in the record: the value as recorded, or
-        an ``Unsure``, ``Unavailable`` or ``Unasked`` rebuilt with its cause."""
-        entry = decision_entry(self._record.log)
-        if entry is None:  # decide writes the policy's entry on every turn it returns
-            raise _EngineDefect("the record holds no entry at the policy's ref")
-        if "value" in entry:
-            return entry["value"]
-        marker = cast("dict[str, Any]", entry["marker"])
-        cause = cast("dict[str, Any]", marker["cause"])
-        return _MARKERS[marker["kind"]](Cause(cause["code"], cause["refs"]))
-
     def __repr__(self) -> str:
-        return f"Decision(estimate={self.estimate!r}, record={self._record!r})"
+        return f"Decision(record={self._record!r})"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -237,7 +219,6 @@ async def _decided(
         settings.timeout,
         settings.budget,
         settings.deadline,
-        settings.certificate_cap,
     )
     bound = _bound(loaded, copied)
     # The running loop's clock, the one asyncio's timeouts read: the deadline runs from here,
@@ -329,7 +310,6 @@ class _Run:
     timeout: float
     budget: float | None
     deadline: float | None
-    certificate_cap: int | None
 
     def item(self) -> dict[str, object]:
         return {
@@ -337,15 +317,12 @@ class _Run:
             "timeout": self.timeout,
             "budget": self.budget,
             "deadline": self.deadline,
-            "certificate_cap": self.certificate_cap,
         }
 
 
-def run_settings(
-    round_bound: object, timeout: object, budget: object, deadline: object, certificate_cap: object
-) -> _Run:
-    """The run settings in force from five values each read once, or ``EntryRefusal`` for one
-    outside its bounds, its exact type included; replay passes the record's."""
+def run_settings(round_bound: object, timeout: object, budget: object, deadline: object) -> _Run:
+    """The run settings in force from four values each read once, or ``EntryRefusal`` for one
+    outside its bounds, its exact type included; ``recorded_run`` passes a record's."""
     if not _integer(round_bound) or cast(int, round_bound) < 1:
         raise EntryRefusal(
             f"the round bound {described(round_bound)} is not an integer of at least 1"
@@ -358,15 +335,23 @@ def run_settings(
         raise EntryRefusal(
             f"the deadline {described(deadline)} is not a positive number of seconds or None"
         )
-    if certificate_cap is not None:
-        # This engine does not implement the certificate.
-        raise EntryRefusal(f"the certificate cap {described(certificate_cap)} is not None")
     return _Run(
         cast(int, round_bound),
         cast(float, timeout),
         cast("float | None", budget),
         cast("float | None", deadline),
-        None,
+    )
+
+
+def recorded_run(settings: Mapping[str, object]) -> _Run:
+    """The run settings a record's ``settings`` item holds, as decide checks them. A record
+    before format 11 also holds ``certificate_cap``, which no turn of this engine ran with: one
+    that is not null is an ``EntryRefusal``."""
+    cap = settings.get("certificate_cap")
+    if cap is not None:
+        raise EntryRefusal(f"the recorded certificate cap {described(cap)} is not None")
+    return run_settings(
+        settings["round_bound"], settings["timeout"], settings["budget"], settings["deadline"]
     )
 
 
@@ -517,17 +502,17 @@ async def _turn(
                 text = exception_record(exc)
             if text is not None:
                 # Outside the except block, so an observer's raise is chained to nothing.
-                return _broken(ledger, loaded, Cause(CauseCode.raised, [_CODEC]), text)
+                return _broken(ledger, Cause(CauseCode.raised, [_CODEC]), text)
             if awaitable:
                 text = None if closing is None else exception_record(closing)
-                return _broken(ledger, loaded, Cause(CauseCode.invalid_return, [_STATE]), text)
+                return _broken(ledger, Cause(CauseCode.invalid_return, [_STATE]), text)
         forms = typed(value, loaded._types[_STATE])
         if forms is None:
-            return _broken(ledger, loaded, Cause(CauseCode.invalid_return, [_STATE]), None)
+            return _broken(ledger, Cause(CauseCode.invalid_return, [_STATE]), None)
         recorded, live = forms
         # Checked and appended with no await between.
         ledger.append({"item": "entry", "ref": _STATE, "round": 0, "call": None, "value": recorded})
-        board = await interpret(
+        await interpret(
             ledger,
             loaded,
             live,
@@ -540,10 +525,6 @@ async def _turn(
             cut=cut,
             carried=frozenset(),
         )
-        if loaded._design.policy not in board:
-            raise _EngineDefect(
-                f"interpret ended with no entry at the policy's ref {quote(loaded._design.policy)}"
-            )
         return Decision(_BUILT_BY_DECIDE, _end(ledger))
     except BaseException as exc:
         if exc is ledger.observer_error:  # by identity, never by type
@@ -574,29 +555,20 @@ def _opening(loaded: LoadedDesign, settings: dict[str, object]) -> list[dict[str
             "shapes": loaded._shapes,
             "grounded": dict(loaded._grounded),
             "sets": dict(loaded._candidate_sets),
-            "policy": loaded._design.policy,
         },
     ]
 
 
-class _EngineDefect(RuntimeError):
-    """A turn the engine cannot finish by its own rules; never a caller's error."""
-
-
-def _broken(
-    ledger: Ledger, loaded: LoadedDesign, cause: Cause, text: dict[str, str] | None
-) -> Decision:
-    """A broken entry: ``t:state`` and then the policy's ref written ``Unavailable`` with the
-    entry cause in round 0; a raising codec's text, or its closed coroutine's, under the
-    ``t:state`` entry's index, taken at the catch and written after the append."""
+def _broken(ledger: Ledger, cause: Cause, text: dict[str, str] | None) -> Decision:
+    """A broken entry: ``t:state`` written ``Unavailable`` with the entry cause in round 0 and
+    nothing after it; a raising codec's text, or its closed coroutine's, under the ``t:state``
+    entry's index, taken at the catch and written after the append."""
     marker = _marker_document(Unavailable(cause))
     index = ledger.append(
         {"item": "entry", "ref": _STATE, "round": 0, "call": None, "marker": marker}
     )
     if text is not None:
         ledger.write_unhashed("exceptions", text, index)
-    policy = loaded._design.policy
-    ledger.append({"item": "entry", "ref": policy, "round": 0, "call": None, "marker": marker})
     return Decision(_BUILT_BY_DECIDE, _end(ledger))
 
 

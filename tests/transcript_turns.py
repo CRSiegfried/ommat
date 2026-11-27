@@ -1,4 +1,4 @@
-"""A design for the transcript view and the conversation renderers, and its four paths.
+"""A design for the conversation renderers, and its four paths.
 
 Round 1 asks ``mail/router`` and ``ask/again`` together, one call item to the ``model``
 oracle, and the tool source ``lookup`` apart; round 2 asks ``confirm``, which needs ``d:route``,
@@ -77,7 +77,6 @@ def design(**changes: Any) -> Design:
         "state": t.record(message=t.string, account=t.string),
         "sources": SOURCES,
         "rules": RULES,
-        "policy": "d:act",
     }
     fields.update(changes)
     return Design(**fields)

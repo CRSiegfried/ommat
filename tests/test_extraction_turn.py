@@ -639,16 +639,17 @@ def test_a_format_1_record_reads_back_to_its_own_hash() -> None:
 
 def test_the_append_refuses_a_design_item_of_an_unknown_format() -> None:
     ledger = Ledger()
-    with pytest.raises(_LedgerError, match="the format 11 is not one this ledger knows"):
-        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 11, "helpers": 2})
+    with pytest.raises(_LedgerError, match="the format 12 is not one this ledger knows"):
+        ledger.append({"item": "design", "hash": GOLDEN_X_DESIGN, "format": 12, "helpers": 2})
 
 
 def test_a_record_of_an_unknown_format_is_refused() -> None:
     def change(doc: dict[str, Any]) -> None:
-        doc["log"][0]["format"] = 11
+        doc["log"][0]["format"] = 12
 
     with pytest.raises(
-        InvalidRecord, match="format 11 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+        InvalidRecord,
+        match="format 12 is not one this reader knows: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11",
     ):
         read_record(edited(change))
 
@@ -656,8 +657,8 @@ def test_a_record_of_an_unknown_format_is_refused() -> None:
 # ---------------------------------------------------------------------------------------------
 # The golden extraction record
 
-GOLDEN_X_DESIGN = "sha256:59c2489df31aed2ead677fabbd0866cd670bde788f46dd93c459729b131f4012"
-GOLDEN_X_RECORD = "sha256:12e92f8a85630a7973942c3a9220792bfe4b86aa9a8316203e41f6ff57048f73"
+GOLDEN_X_DESIGN = "sha256:984e982241780101c9b1686e21bfbf33453897d374149cd00411c6ee9bd89fe4"
+GOLDEN_X_RECORD = "sha256:77c41055813675f61c16f5d1a8bbe65c46aa2d5d06bad25abf3a602e5855a2d9"
 
 
 def test_the_golden_extraction_record() -> None:
@@ -665,7 +666,7 @@ def test_the_golden_extraction_record() -> None:
     assert record.log[0] == {
         "item": "design",
         "hash": GOLDEN_X_DESIGN,
-        "format": 10,
+        "format": 11,
         "helpers": HELPERS,
     }
     assert entry(record, "d:reply")["value"] == "big; 2024-02-29"
@@ -778,7 +779,7 @@ def test_a_recorded_probability_answer_asked_now_as_an_extraction_is_not_answere
 
 
 def test_a_format_1_design_is_refused_naming_its_format() -> None:
-    with pytest.raises(InvalidDesign, match="format 1 is not 11"):
+    with pytest.raises(InvalidDesign, match="format 1 is not 12"):
         load((FORMAT_1 / "design.json").read_bytes())
 
 
@@ -843,14 +844,14 @@ def test_an_extraction_read_off_the_grid_is_filled_from_values() -> None:
 )
 def test_an_extraction_reads_fill_raises_before_any_run(values: Any, says: str) -> None:
     with pytest.raises(ValueError, match=says):
-        dead_questions(x.loaded(), values=values)
+        dead_questions(x.loaded(), ["d:reply"], values=values)
 
 
 def test_an_extraction_value_outside_the_value_domain_is_refused_before_any_run(
     small_bounds: SmallBounds,
 ) -> None:
     with pytest.raises(ValueError, match='a value for "q:dates" is outside the value domain'):
-        dead_questions(x.loaded(), values={"q:dates": [["2024-02-29"] * 40]})
+        dead_questions(x.loaded(), ["d:reply"], values={"q:dates": [["2024-02-29"] * 40]})
 
 
 @pytest.mark.parametrize(
@@ -870,7 +871,7 @@ def test_an_extraction_number_value_in_values_is_of_its_domain(
     listed: list[Any], says: str
 ) -> None:
     with pytest.raises(ValueError, match=says):
-        dead_questions(load(x.plain()), values={"q:amount": listed})
+        dead_questions(load(x.plain()), ["d:reply"], values={"q:amount": listed})
 
 
 def gridded(entry: dict[str, list[str]]) -> LoadedDesign:
@@ -903,7 +904,7 @@ STATE_VALUES: dict[str, list[Any]] = {"t:state.body": [x.BODY], "t:state.today":
 
 def test_the_dead_question_lint_runs_extraction_points() -> None:
     values = {**STATE_VALUES, "q:dates": [["2024-02-29"], []]}
-    report = dead_questions(x.loaded(), values=values)
+    report = dead_questions(x.loaded(), ["d:reply"], values=values)
     assert report["questions"]["q:amount"]["status"] == "live"
     assert report["questions"]["q:dates"]["status"] == "live"
     witness = report["questions"]["q:amount"]["witness"]
@@ -914,7 +915,9 @@ def test_the_dead_question_lint_runs_extraction_points() -> None:
     ]
 
     ignored = load(x.replaced(x.design(), rules=x.dates_only_rules(x.design())))
-    report = dead_questions(ignored, values={**STATE_VALUES, "q:dates": [["2024-02-29"]]})
+    report = dead_questions(
+        ignored, ["d:reply"], values={**STATE_VALUES, "q:dates": [["2024-02-29"]]}
+    )
     assert report["questions"]["q:amount"] == {"status": "no-change-found", "witness": None}
 
 
@@ -922,7 +925,7 @@ def test_an_extraction_read_with_no_grid_entry_that_changes_nothing_is_not_on_gr
     d = x.plain()
     loaded = load(x.replaced(d, rules=x.dates_only_rules(d)))
     values = {**STATE_VALUES, "q:amount": [5], "q:dates": [["2024-02-29"]]}
-    report = dead_questions(loaded, values=values)
+    report = dead_questions(loaded, ["d:reply"], values=values)
     assert report["questions"]["q:amount"] == {"status": "not-on-grid", "witness": None}
 
 

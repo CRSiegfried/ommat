@@ -8,15 +8,16 @@ as ``with_parameters`` builds it. A point names a leaf whole, or one key of a nu
 leaf by its key path, ``leaf.key``, that key's value replacing the one ``loaded``'s leaf holds.
 A run reaches a numeric leaf only by comparing values the turn holds against it, so two points
 on the same side of every value a run compared give that run again: the same questions asked,
-the same values read and compared, the same decision. The job reruns one uncovered point with
-the switching job's light ledger, keeping only the entries the job reads: the policy's, each
+the same values read and compared, the same entries. The job reruns one uncovered point with the
+switching job's light ledger, keeping only the entries the job reads: the named refs', each
 table input's read and grounded set, and each function rule's ``boundaries`` reads. It reads
-from that log each grid leaf's compared values and the side a leaf value equal to one joins,
-and gives that run's row to every uncovered point whose values fall in the same bucket on every
-grid leaf, until every point is covered; a point whose ``boolean``, ``label`` and wording-slot
-values no other uncovered point shares covers itself without a region search. A key path, and
-each key of a mapping leaf given whole, is bucketed on its own axis: the comparisons naming the
-leaf whole or that key's path. A tie joins the side the predicate puts it on where the document
+from that log each grid leaf's compared values, from every comparison the rerun makes whatever
+refs are named, and the side a leaf value equal to one joins, and gives that run's row to every
+uncovered point whose values fall in the same bucket on every grid leaf, until every point is
+covered; a point whose ``boolean``, ``label`` and wording-slot values no other uncovered point
+shares covers itself without a region search. A key path, and each key of a mapping leaf
+given whole, is bucketed on its own axis: the comparisons naming the leaf whole or that key's
+path. A tie joins the side the predicate puts it on where the document
 fixes the predicate, a table's pick helper and ``extract`` bindings and a table cell's own
 comparison; a function rule's ``boundaries`` roles and its bare reads, compared in code the
 document does not hold, put a tie in a bucket of its own. A ``boolean`` or ``label`` leaf, and a
@@ -32,7 +33,7 @@ a reader of an entry that holds it, a table row outputting ``Param`` of it under
 and a function rule declaring it whose output type can hold a number. A function rule's
 ``boundaries`` are trusted as the switching job trusts them, each key path for its key. Records
 of one hash are rerun once. The rows are ``rescore``'s, in its order, with each point's design
-hash, and equal ``rescore`` over the points' designs row for row.
+hash, and equal ``rescore`` over the points' designs, with the same ``refs``, row for row.
 """
 
 from bisect import bisect_left
@@ -52,7 +53,7 @@ from ommat._types import MappingOf, Type
 from ommat._values import type_name
 from ommat.evaluation._diff import _read, _refuse_unfit, _run_sync, _state
 from ommat.evaluation._refusal import EvaluationRefusal, RefusalReason
-from ommat.evaluation._rescore import NOT_DETERMINED, _broken_state, _run_of
+from ommat.evaluation._rescore import NOT_DETERMINED, _named, _run_of
 from ommat.evaluation._switching import (
     _HIGH,
     _LOW,
@@ -73,7 +74,7 @@ _R = RefusalReason
 _Log = list[dict[str, Any]]
 _Doc = dict[str, Any]
 _Point = Mapping[str, object]
-_Result = tuple[dict[str, Any] | str, list[str]]  # a row's decision and stale refs
+_Result = tuple[dict[str, Any] | str, list[str]]  # a row's entries and stale refs
 _STATE = "t:state"
 
 
@@ -82,10 +83,12 @@ async def rescore_grid(
     recorded: LoadedDesign,
     loaded: LoadedDesign,
     points: Sequence[_Point],
+    *,
+    refs: Sequence[str],
 ) -> list[dict[str, Any]]:
-    """``rescore(records, recorded, designs)``, ``designs`` being ``loaded`` with each point's
-    leaves holding its values, ``points`` a sequence of ``{leaf path: value}`` mappings all
-    naming one non-empty set of leaves: the same rows, in the same order, one per point and
+    """``rescore(records, recorded, designs, refs=refs)``, ``designs`` being ``loaded`` with each
+    point's leaves holding its values, ``points`` a sequence of ``{leaf path: value}`` mappings
+    all naming one non-empty set of leaves: the same rows, in the same order, one per point and
     record, each with its point's design hash. Each record is rerun once per region of points
     that cannot differ, not once per point. Each record is checked as ``rescore`` checks it,
     then the grid leaves and each point's design, before any run."""
@@ -100,6 +103,7 @@ async def rescore_grid(
             raise TypeError(f"points[{i}] is a {type_name(point)}, not a mapping of leaf values")
     if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"records are a {type_name(records)}, not a sequence of records")
+    named = _named(refs, {"loaded": loaded})
     names = tuple(f"records[{i}]" for i in range(len(records)))
     read = tuple(_read(r, name) for r, name in zip(records, names, strict=True))
     # Read once, as every read decodes afresh: one log object per record, which the fixture's
@@ -110,7 +114,7 @@ async def rescore_grid(
         _run_of(log)  # a recorded setting decide refuses is refused here, before any run
     if not points:
         return []
-    grid = _Grid(recorded, loaded, points)
+    grid = _Grid(recorded, loaded, points, named)
     results: list[list[_Result]] = []
     by_hash: dict[str, list[_Result]] = {}  # records of one hash are rerun once
     for r, log in zip(read, logs, strict=True):
@@ -121,12 +125,12 @@ async def rescore_grid(
     rows: list[dict[str, Any]] = []
     for i, design in enumerate(grid.designs):
         for r, found in zip(read, results, strict=True):
-            decision, stale = found[i]
+            entries, stale = found[i]
             rows.append(
                 {
                     "design": design.design_hash,
                     "record": r.record_hash,
-                    "decision": _copy(decision),
+                    "entries": _copy(entries),
                     "stale": list(stale),
                 }
             )
@@ -138,20 +142,30 @@ def rescore_grid_sync(
     recorded: LoadedDesign,
     loaded: LoadedDesign,
     points: Sequence[_Point],
+    *,
+    refs: Sequence[str],
 ) -> list[dict[str, Any]]:
     """``rescore_grid`` run to completion on one event loop; ``RuntimeError`` inside a running
     event loop."""
-    return _run_sync("rescore_grid", lambda: rescore_grid(records, recorded, loaded, points))
+    return _run_sync(
+        "rescore_grid", lambda: rescore_grid(records, recorded, loaded, points, refs=refs)
+    )
 
 
 class _Grid:
     """The grid's value-free work: its leaves, checked; each point's design; and each point's
     bucket material per leaf, a compared leaf's values exact."""
 
-    def __init__(self, recorded: LoadedDesign, loaded: LoadedDesign, points: Sequence[_Point]):
+    def __init__(
+        self,
+        recorded: LoadedDesign,
+        loaded: LoadedDesign,
+        points: Sequence[_Point],
+        refs: Sequence[str],
+    ):
         self.recorded = recorded
         self.loaded = loaded
-        self.policy: str = loaded._design.policy
+        self.refs = refs
         self.paths = list(points[0])
         if not self.paths or any(set(point) != set(self.paths) for point in points):
             raise EvaluationRefusal(
@@ -215,15 +229,16 @@ class _Grid:
         for group in by_value.values():
             for i in group:
                 self.peers[i] = frozenset(group)
-        self.needed = _needed(self.document, self.policy)
+        self.needed = _needed(self.document, refs)
         self.kept: dict[str, bool] = {}
 
     async def results(self, log: _Log) -> list[_Result]:
-        """One record's decision and stale refs per point."""
+        """One record's entries and stale refs per point."""
         state = cast("dict[str, Any]", _state(log))  # the record checks found a value there
         t = self.loaded._types[_STATE]
         if typed(decoded(state["value"], t), t) is None:  # the same under every point
-            return [(_broken_state(), [])] * len(self.designs)
+            # A broken entry: decide writes t:state alone, so no named entry.
+            return [({}, []) for _ in self.designs]
         out: list[_Result | None] = [None] * len(self.designs)
         uncovered = set(range(len(self.designs)))
         reuse = Reuse()  # the first region's rerun, which each later one fires unchanged rules from
@@ -233,7 +248,7 @@ class _Grid:
                 log, self.designs[at], log, design=self.recorded, reuse=reuse, keep=self.keeps
             )
             stale = code_point_sorted(fixture.stale)
-            result: _Result = (NOT_DETERMINED, stale) if stale else (self.decision(rerun.log), [])
+            result: _Result = (NOT_DETERMINED, stale) if stale else (self.entries(rerun.log), [])
             peers = uncovered & self.peers[at]
             for q in [at] if len(peers) == 1 else self.region(at, peers, rerun.log):
                 out[q] = result
@@ -241,17 +256,21 @@ class _Grid:
         return cast("list[_Result]", out)
 
     def keeps(self, ref: str) -> bool:
-        """Whether a rerun's log keeps the entry at ``ref``: one ``region`` or ``decision``
+        """Whether a rerun's log keeps the entry at ``ref``: one ``region`` or ``entries``
         reads."""
         found = self.kept.get(ref)
         if found is None:
             found = self.kept[ref] = _declared_ref(ref) in self.needed
         return found
 
-    def decision(self, log: _Log) -> dict[str, Any]:
-        """The policy's entry as decide writes it, from the rerun's log."""
-        entry = next(i for i in log if i["item"] == "entry" and i["ref"] == self.policy)
-        return {k: entry[k] for k in ("value", "marker") if k in entry}
+    def entries(self, log: _Log) -> dict[str, Any]:
+        """The entry at each named ref the rerun wrote, in their order, as decide writes it."""
+        held = {i["ref"]: i for i in log if i["item"] == "entry" and i["ref"] in self.refs}
+        return {
+            ref: {k: held[ref][k] for k in ("value", "marker") if k in held[ref]}
+            for ref in self.refs
+            if ref in held
+        }
 
     def region(self, at: int, uncovered: set[int], log: _Log) -> list[int]:
         """The uncovered points whose runs cannot differ from the run at ``at``, read from its
@@ -319,11 +338,11 @@ def _axis(found: list[tuple[str, str | None, Fraction]]) -> Callable[[Fraction],
     return bucket
 
 
-def _needed(document: _Doc, policy: str) -> frozenset[str]:
-    """The declared refs whose entries ``region`` and ``decision`` read from a rerun: the
-    policy's, each table input's read and grounded set, and each function rule's
-    ``boundaries`` reads."""
-    out = {policy}
+def _needed(document: _Doc, refs: Sequence[str]) -> frozenset[str]:
+    """The declared refs whose entries ``region`` and ``entries`` read from a rerun: ``refs``,
+    each table input's read and grounded set, and each function rule's ``boundaries``
+    reads."""
+    out = set(refs)
     for c in _components(document).values():
         if c["form"] == "table":
             out.update(_declared_ref(i["read"]) for i in cast("list[dict[str, Any]]", c["inputs"]))

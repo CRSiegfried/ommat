@@ -51,7 +51,7 @@ def test_a_turn_with_a_defect_warns_once_after_its_record_closes() -> None:
     assert text.startswith("the turn's record holds 1 defect:\n")
     assert "  d:days_open: Unavailable, raised naming days_open" in text
     assert "ValueError: Invalid isoformat string: 'last week'" in text
-    assert decision.estimate == "refund_order"  # the turn still decided
+    assert decision.record.entries["d:policy"]["value"] == "refund_order"  # the turn still decided
 
 
 @pytest.mark.parametrize(
@@ -74,9 +74,10 @@ def test_a_broken_entry_warns_once_with_the_codecs_traceback() -> None:
     (warned,) = caught
     message = warned.message
     assert isinstance(message, DefectWarning)
-    assert [d["ref"] for d in message.defects] == ["t:state", "d:policy"]
+    assert [d["ref"] for d in message.defects] == ["t:state"]
     assert "LookupError: no such customer" in str(message)
-    assert decision.record.entries["d:policy"]["marker"]["cause"]["code"] == "raised"
+    assert decision.record.entries["t:state"]["marker"]["cause"]["code"] == "raised"
+    assert "d:policy" not in decision.record.entries
 
 
 def test_under_an_error_filter_decide_raises_it_with_the_whole_record() -> None:
@@ -215,7 +216,6 @@ def one_rule(function: Any) -> Any:
             sources={},
             rules={"act": Rule("d:act", t.string, function, version="1")},
             parameters={},
-            policy="d:act",
         )
     )
 

@@ -399,7 +399,7 @@ conformance: []
 decision: {'log': ['Elm Row', 'Mill Lane']}
   answers: {'q:places/street': 'Elm Row', 'q:places/streets': ['Elm Row', 'Mill Lane']}
   replay findings: [] | leaf calls: 0
-decision: Unsure(kind=<MarkerKind.unsure: 'Unsure'>, cause=Cause(code=<CauseCode.abstained: 'abstained'>, refs=('d:streets',)))
+decision: {'kind': 'Unsure', 'cause': {'code': 'abstained', 'refs': ['d:streets']}}
   answers: {'q:places/street': 'unsupported', 'q:places/streets': 'unsupported'}
   warning: places: unsupported: the state alone is estimated at 346 tokens, over the limit of 256
   replay findings: [] | leaf calls: 0
@@ -1001,14 +1001,14 @@ decision: {'log': ['Quay Street']}
 decision: {'log': ['Elm Row', 'Mill Lane']}
   answers: {'q:places/street': 'Elm Row', 'q:places/streets': ['Elm Row', 'Mill Lane']}
   replay findings: [] | model calls: 0
-decision: Unsure(kind=<MarkerKind.unsure: 'Unsure'>, cause=Cause(code=<CauseCode.abstained: 'abstained'>, refs=('d:streets',)))
+decision: {'kind': 'Unsure', 'cause': {'code': 'abstained', 'refs': ['d:streets']}}
   answers: {'q:places/street': None, 'q:places/streets': []}
   replay findings: [] | model calls: 0
 ```
 
 In the second report the best street scores 0.7, below `places/sure_at`, 0.8, so `d:street`
 is `Unsure` and the decision logs the list. The third names none: the list is `[]`, so the
-policy's estimate is an `Unsure` naming `d:streets`, and the turn is undecided. Each replay
+entry at `d:route` is an `Unsure` naming `d:streets`, and the route is undecided. Each replay
 rebuilds its decision with no model call.
 
 ## Ask a question per candidate

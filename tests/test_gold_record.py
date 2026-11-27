@@ -184,14 +184,24 @@ def test_a_record_before_format_8_is_wrong_design(tmp_path: Path) -> None:
     assert (raised.value.reason, raised.value.turn) == (R.wrong_design, old.record_hash)
 
 
-def test_a_record_with_its_policy_s_entry_cut_is_unfinished(tmp_path: Path) -> None:
+def test_a_cancelled_record_is_unfinished(tmp_path: Path) -> None:
+    from test_use_answers import unfinished
+
+    cancelled = unfinished()
+    with pytest.raises(EvaluationRefusal) as raised:
+        gold_record_sync(cancelled, LOADED, "g", results=EvaluationStore(tmp_path))
+    assert (raised.value.reason, raised.value.turn) == (R.unfinished, cancelled.record_hash)
+
+
+def test_a_record_with_an_entry_cut_is_rerun_and_the_entry_found(tmp_path: Path) -> None:
+    """No ``cause`` item, so finished: the rerun writes the entry the record lacks."""
     doc = json.loads(go().record.document)
-    policy = doc["log"][1]["policy"]
+    policy = "d:act"
     doc["log"] = [i for i in doc["log"] if not (i["item"] == "entry" and i["ref"] == policy)]
     cut = read_record(rehashed(doc))
-    with pytest.raises(EvaluationRefusal) as raised:
-        gold_record_sync(cut, LOADED, "g", results=EvaluationStore(tmp_path))
-    assert (raised.value.reason, raised.value.turn) == (R.unfinished, cut.record_hash)
+    store = labelled(tmp_path, cut, {"q:spam": "yes"})
+    found = gold_record_sync(cut, LOADED, "g", results=store)["findings"]
+    assert [(f["kind"], f["ref"], f["recorded"]) for f in found] == [("entry", policy, None)]
 
 
 def test_gold_record_is_awaitable_and_its_twin_refuses_inside_a_loop(tmp_path: Path) -> None:

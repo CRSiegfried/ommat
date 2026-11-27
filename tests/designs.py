@@ -46,18 +46,18 @@ STATE = t.record(subject=t.string, sender=t.record(address=t.string))
 VERDICT = t.label("no", "yes")
 ACT = t.label("send", "archive", "hold")
 DECISION = Rule("d:decision", t.boolean, decision, version="p1")
-"""``minimal``'s policy, a rule that reads nothing."""
+"""``minimal``'s rule, which reads nothing."""
 
 
 def minimal(**changes: Any) -> Design:
-    """A state, the policy ``d:decision`` and its rule. Rules given in ``changes`` are added
-    beside the policy's, unless ``changes`` names the policy too."""
+    """A state and the rule ``d:decision``. Rules given in ``changes`` are added beside it,
+    unless ``changes`` says ``alone``."""
     fields: dict[str, Any] = {
         "state": t.record(),
-        "policy": "d:decision",
         "rules": {"decision": DECISION},
     }
-    if changes.get("rules") is not None and "policy" not in changes:
+    alone = changes.pop("alone", False)
+    if changes.get("rules") is not None and not alone:
         changes = {**changes, "rules": {"decision": DECISION, **changes["rules"]}}
     fields.update(changes)
     return Design(**fields)
@@ -88,7 +88,6 @@ def intent_source(**changes: Any) -> Source:
         "timeout": 30,
         "payload": {"model": "m", "tags": ("a", "b"), "mood": Mood.calm},
         "cost": 2,
-        "feedback": True,
     }
     fields.update(changes)
     return Source(**fields)
@@ -131,7 +130,6 @@ def full(**changes: Any) -> Design:
                 params=["list/cap"],
             ),
         },
-        "policy": "d:act",
         "parameters": {
             "intent/bar": Parameter(t.number(0, 1), 0.9),
             "list/cap": Parameter(t.list_(t.string), ("a", "b")),
@@ -305,6 +303,5 @@ def parts(boundaries: dict[str, list[str]] | None = None, *, leaves: bool = Fals
             sources={},
             rules={"fired": rule},
             parameters=parameters,
-            policy="d:fired",
         )
     )

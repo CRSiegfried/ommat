@@ -1,5 +1,5 @@
 """The desk design: whether a customer asks for a refund, and how many days their order has
-been open, which the policy does not read."""
+been open, which ``d:policy`` does not read."""
 
 import datetime as dt
 
@@ -84,5 +84,4 @@ DESIGN = Design(
         ),
     },
     parameters=PARAMETERS,
-    policy="d:policy",
 )

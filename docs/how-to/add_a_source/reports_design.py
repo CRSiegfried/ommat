@@ -106,5 +106,4 @@ DESIGN = Design(
     sources=SOURCES,
     rules=RULES,
     parameters=PARAMETERS,
-    policy="d:route",
 )

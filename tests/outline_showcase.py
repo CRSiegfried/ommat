@@ -1,8 +1,15 @@
 """A small design for the outline tests that exercises what the stored fixtures leave out: a
 function rule with a ``boundaries`` field, a table with a helper input, a source requirement,
 wording slots from the state and from a parameter, and targets; and stub bindings that answer
-it, so a test decides a turn under it."""
+it, so a test decides a turn under it. The documents the outline and lens tests read are stored
+under tests/showcase/ (``stored``), and ``policy_free`` gives them as a design that names no
+policy and its records are written."""
 
+import json
+from pathlib import Path
+from typing import Any
+
+from ledger_logs import rehashed
 from ommat import (
     CallResult,
     Design,
@@ -24,8 +31,46 @@ from ommat import (
     load,
 )
 from ommat import types as t
+from ommat._canonical import encode
+from ommat._documents import design_key
 from ommat.bindings import OracleBinding
 from ommat.helpers import pick_with_margin
+
+SHOWCASE = Path(__file__).parent / "showcase"
+
+
+def stored(name: str) -> bytes:
+    """The stored document ``tests/showcase/<name>.json``: ``design``, ``plain.design`` or
+    ``full.design``, a format-11 design that names a policy; or ``<turn>.record``, a format-10
+    record decided under one, for the turns ``decided``, ``undecided``, ``level``, ``broken``
+    and ``plain``."""
+    return (SHOWCASE / f"{name}.json").read_bytes()
+
+
+def policy_free(design: str = "design") -> bytes:
+    """The stored design ``design`` as a design that names no policy is written: no
+    ``policy`` member, no source's ``feedback`` member, design format 12."""
+    doc: dict[str, Any] = json.loads(stored(design))
+    del doc["policy"]
+    for source in doc["sources"].values():
+        del source["feedback"]
+    doc["format"] = 12
+    return encode(doc)
+
+
+def policy_free_record(turn: str, design: str = "design") -> bytes:
+    """The stored record ``turn`` as a turn under ``policy_free(design)`` is written: record
+    format 11, its ``design`` item holding that design's hash, its ``settings`` item no
+    ``policy`` and its run settings no ``certificate_cap``, and a broken entry's log ending at
+    its ``t:state`` entry."""
+    doc: dict[str, Any] = json.loads(stored(f"{turn}.record"))
+    log: list[dict[str, Any]] = doc["log"]
+    log[0].update(format=11, hash=design_key(policy_free(design)))
+    del log[1]["policy"], log[1]["settings"]["certificate_cap"]
+    state = next(i for i, x in enumerate(log) if x.get("ref") == "t:state")
+    if "marker" in log[state]:
+        del log[state + 1 :]
+    return encode(rehashed(doc))
 
 
 def urgency(r: ReadView) -> object:
@@ -35,7 +80,6 @@ def urgency(r: ReadView) -> object:
 DESIGN = Design(
     name="showcase",
     state=t.record(subject=t.string, body=t.string),
-    policy="d:act",
     targets={"tg:urgent": Target("The mail needs an answer today", "yes or no")},
     sources={
         "ask": Source(
@@ -163,7 +207,6 @@ def verdict(r: ReadView) -> object:
 PLAIN = Design(
     name="plain",
     state=t.record(subject=t.string),
-    policy="d:verdict",
     sources={
         "ask": Source(
             {

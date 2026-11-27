@@ -1,14 +1,14 @@
 # pyright: reportPrivateUsage=false
 """The switch screen: for each record and numeric leaf, whether every value of the leaf within a
-window around its own value decides the record's turn as the record did, read from the record
-alone, with no replay (§switch-screen).
+window around its own value gives the record's turn the record's own entries, read from the
+record alone, with no replay (§switch-screen).
 
 A run reaches a numeric leaf only by comparing values the turn holds against it, so two values
 of the leaf on the same side of every value a run compared give that run again (§rescore-grid).
 The record is the run at the leaf's own value, so when no value the record compares the leaf
 against lies in the window, past the side a tie joins, every value in the window gives the
 record's own entries: the same questions asked, the same values read and compared, the same
-decision. A value only a changed run would compare cannot arise inside the window, since the
+entries written. A value only a changed run would compare cannot arise inside the window, since the
 run there does not change. The screen reads the record's compared values as the switching job's
 round 0 reads them, and the grid's reach test: a leaf a run could reach other than by a
 comparison, a table whose ``candidate`` read finds its set holding no value, and a leaf filling
@@ -76,8 +76,9 @@ def screen_switches(
     records: Sequence[object], loaded: LoadedDesign, within: Mapping[str, int | float]
 ) -> list[dict[str, Any]]:
     """For each record and each path ``within`` names, whether every value of that numeric
-    leaf, or key of one, within ``within[path]`` of its own value decides the record's turn as
-    the record did: one row per record and path, record-major, paths in code-point order."""
+    leaf, or key of one, within ``within[path]`` of its own value gives the record's turn the
+    record's own entries: one row per record and path, record-major, paths in code-point
+    order."""
     _designs(loaded, None, ("loaded", "rerun_design"))
     if isinstance(records, str | bytes) or not isinstance(records, Sequence):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"records are a {type_name(records)}, not a sequence of records")

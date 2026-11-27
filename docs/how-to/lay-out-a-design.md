@@ -195,7 +195,7 @@ def read_refund(record: Record) -> RefundReading:
     """The turn's outcome and reason; ``outcome`` is ``None`` when a person must look, and
     ``defect`` says the design, not the evidence, is at fault (the escalation view's test)."""
     entries = record.entries  # decoded afresh at each read, so read once
-    held = escalation(record)
+    held = escalation(record, "d:outcome")
     return RefundReading(
         outcome=_value(entries, "d:outcome"),
         reason=_value(entries, "d:reason"),
@@ -203,7 +203,7 @@ def read_refund(record: Record) -> RefundReading:
     )
 ```
 
-An undecided turn is not an error: raise only on `defect`, a rule or the codec at fault, and
+An undecided outcome is not an error: raise only on `defect`, a rule or the codec at fault, and
 hand the rest to whoever decides when the model could not.
 
 ## Use one word per meaning, and no history

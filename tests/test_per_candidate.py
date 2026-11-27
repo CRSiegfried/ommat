@@ -3,7 +3,7 @@
 question holding a candidate slot once per candidate, under its grounded ref, beside its other
 questions asked once; load's checks 3, 4 and 12 on grounded declarations; the markers a set and
 a cut give the declared ref; the read view's ``{candidate: entry}``; the format-6 record's
-``grounded`` and where it admits a grounded ref; the redacted view, the transcript, replay and
+``grounded`` and where it admits a grounded ref; the redacted view, the turn history, replay and
 ``from_record``."""
 
 import copy
@@ -43,7 +43,6 @@ from ommat import (
     read_record,
     redact,
     replay_sync,
-    transcript,
 )
 from ommat import types as t
 from ommat._canonical import decode
@@ -136,7 +135,6 @@ def design(source: Source | None = None, **changes: Any) -> Design:
             "out": Rule("d:out", t.list_(t.string), out, version="1", reads=[OUT]),
             "act": Rule("d:act", t.string, escalate, version="1", reads=["d:out"]),
         },
-        "policy": "d:act",
     }
     fields.update(changes)
     return Design(**fields)
@@ -415,7 +413,7 @@ def test_the_settings_item_names_each_grounded_refs_set() -> None:
     record = decided()
     assert record.log[1]["grounded"] == {OUT: SET}
     assert record.log[1]["sets"] == {SET: None}
-    assert record.log[0]["format"] == 10
+    assert record.log[0]["format"] == 11
 
 
 def test_a_question_identity_is_one_across_candidates_and_turns() -> None:
@@ -822,19 +820,9 @@ def test_redact_passes_a_grounded_ref_whose_set_is_open() -> None:
     assert set(entry.get("sums", {})) <= set(q_refs(record))
 
 
-@pytest.mark.filterwarnings("ignore:transcript is deprecated:DeprecationWarning")
-def test_the_transcript_asks_each_grounded_ref() -> None:
-    record = decided(STREETS[:3])
-    shown = transcript(record)
-    assert shown is not None
-    ((call,),) = shown["rounds"]
-    assert call["asks"] == code_point_sorted([*REFS[:3], URGENT])
-    assert list(call["answers"]) == call["asks"]
-
-
 def test_the_turn_history_answers_each_grounded_ref_under_its_source() -> None:
     record = decided(STREETS[:3])
-    calls, result, *_ = to_chat_completions(record)
+    calls, result, *_ = to_chat_completions(record, refs=["d:act"])
     assert len(calls["tool_calls"]) == 1
     assert list(json.loads(result["content"])) == code_point_sorted([*REFS[:3], URGENT])
 

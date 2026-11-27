@@ -2,9 +2,9 @@
 each classified as a record or a design, and the files under a folder walked in one order.
 
 ``read_document`` reads bytes as ommat reads a record's bytes. ``kind_of`` calls a JSON object
-with a ``log`` list a record and one with a ``policy`` and no ``log`` list a design. ``gather``
-reads files, a ``.jsonl`` file line by line, skips anything else with its reason, and keys each
-design by the SHA-256 of its exact bytes, the hash a record's ``design`` item holds.
+with a ``log`` list a record and one with a ``rules`` object and no ``log`` list a design.
+``gather`` reads files, a ``.jsonl`` file line by line, skips anything else with its reason, and
+keys each design by the SHA-256 of its exact bytes, the hash a record's ``design`` item holds.
 """
 
 import hashlib
@@ -55,10 +55,10 @@ def read_document(document: object, what: str) -> dict[str, Any]:
 
 def kind_of(value: dict[str, Any]) -> Literal["record", "design"] | None:
     """``record`` for a JSON object holding a ``log`` list, ``design`` for one holding a
-    ``policy`` and no ``log`` list, else ``None``."""
+    ``rules`` object and no ``log`` list, else ``None``."""
     if isinstance(value.get("log"), list):
         return "record"
-    if "policy" in value:
+    if isinstance(value.get("rules"), dict):
         return "design"
     return None
 

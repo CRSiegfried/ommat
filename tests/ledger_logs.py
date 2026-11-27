@@ -256,7 +256,8 @@ NORMAL_8: list[dict[str, Any]] = [
 ]
 
 ENTRY_CAUSE = {"kind": "Unavailable", "cause": {"code": "invalid-return", "refs": ["t:state"]}}
-# A broken entry: t:state and the policy's ref Unavailable in round 0, and nothing after.
+# A broken entry: t:state and the policy's ref Unavailable in round 0, and nothing after, as
+# formats 8 to 10 write it.
 BROKEN_8: list[dict[str, Any]] = [
     DESIGN_8,
     SETTINGS_8,
@@ -290,6 +291,17 @@ DESIGN_10: dict[str, Any] = {**DESIGN_9, "format": 10}
 NORMAL_10: list[dict[str, Any]] = [DESIGN_10, SETTINGS_9, *NORMAL_8[2:]]
 BROKEN_10: list[dict[str, Any]] = [DESIGN_10, SETTINGS_9, *BROKEN_8[2:]]
 
+# Format 11: the settings item names no policy, its run settings no certificate_cap, and a broken
+# entry ends at t:state. Indices as NORMAL_8's.
+DESIGN_11: dict[str, Any] = {**DESIGN_9, "format": 11}
+SETTINGS_11: dict[str, Any] = {
+    **{k: v for k, v in SETTINGS_9.items() if k != "policy"},
+    "settings": {k: v for k, v in SETTINGS["settings"].items() if k != "certificate_cap"},
+}
+NORMAL_11: list[dict[str, Any]] = [DESIGN_11, SETTINGS_11, *NORMAL_8[2:]]
+BROKEN_11: list[dict[str, Any]] = [DESIGN_11, SETTINGS_11, BROKEN_8[2]]
+CANCELLED_11: list[dict[str, Any]] = [*NORMAL_11[:7], CANCEL]
+
 LOGS = {
     "normal": NORMAL,
     "broken": BROKEN,
@@ -304,6 +316,9 @@ LOGS = {
     "broken-9": BROKEN_9,
     "normal-10": NORMAL_10,
     "broken-10": BROKEN_10,
+    "normal-11": NORMAL_11,
+    "broken-11": BROKEN_11,
+    "cancelled-11": CANCELLED_11,
 }
 
 # Each log's unhashed members by log-index key, written once the keyed item is in a prefix.
@@ -349,6 +364,9 @@ UNHASHED: dict[str, dict[str, dict[str, Any]]] = {
         }
     },
 }
+
+
+UNHASHED["normal-11"] = UNHASHED["normal-10"]
 
 
 def unhashed_of(name: str, n: int) -> dict[str, Any]:
@@ -423,11 +441,21 @@ def classes_of(shape: Any, name: str = "content") -> Any:
     return name
 
 
-def before_shapes(doc: dict[str, Any], fmt: int = 8, name: str = "content") -> dict[str, Any]:
-    """A current record document made format ``fmt``, before format 9: the format number set
-    and the settings item's ``shapes`` written as ``classes``, ``name`` at every leaf. Its
-    ``hash`` is left to recompute."""
+def before_nameless(doc: dict[str, Any], fmt: int = 10) -> dict[str, Any]:
+    """A current record document made format ``fmt``, before format 11: the format number set
+    and the run settings given ``certificate_cap``, null. Its ``hash`` is left to recompute."""
     doc["log"][0]["format"] = fmt
+    for item in doc["log"]:
+        if item["item"] == "settings":
+            item["settings"].setdefault("certificate_cap", None)
+    return doc
+
+
+def before_shapes(doc: dict[str, Any], fmt: int = 8, name: str = "content") -> dict[str, Any]:
+    """A current record document made format ``fmt``, before format 9: ``before_nameless``,
+    then the settings item's ``shapes`` written as ``classes``, ``name`` at every leaf. Its
+    ``hash`` is left to recompute."""
+    before_nameless(doc, fmt)
     for item in doc["log"]:
         if item["item"] == "settings" and "shapes" in item:
             item["classes"] = classes_of(item.pop("shapes"), name)

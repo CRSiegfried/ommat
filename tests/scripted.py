@@ -122,7 +122,6 @@ def settings(
         "timeout": timeout,
         "budget": budget,
         "deadline": deadline,
-        "certificate_cap": None,
     }
 
 

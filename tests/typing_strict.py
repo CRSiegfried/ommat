@@ -9,4 +9,4 @@ rule = Rule("d:x", t.string, function=lambda r: r.read("t:state.subject"), versi
 act = Table("d:act", t.label("send", "hold"), "F", ["d:x"], [["y", "send"], ["-", "hold"]])
 needs = ["t:state"]
 source = Source({"t:y": t.string}, needs=needs, when=when)
-design = Design(t.record(subject=t.string), "d:act", rules={"x": rule, "act": act})
+design = Design(t.record(subject=t.string), rules={"x": rule, "act": act})

@@ -5,7 +5,6 @@
 module = "authoring_rules"
 version = "1"
 state = "record{text: string}"
-policy = "d:pick"
 
 [rules.streets]
 fn         = "streets"

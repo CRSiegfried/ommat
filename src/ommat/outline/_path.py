@@ -62,14 +62,15 @@ def _declared(e: dict[str, Any]) -> list[tuple[str, str]]:
 
 def lineage_of(
     entries: list[dict[str, Any]],
-    policy: str | None,
+    root: str | None,
     design: dict[str, Any] | None,
     providers: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """From the policy's entry back to what it rests on, depth first, each entry once: each
+    """From the entry at ``root``, the ref the caller names (the turn outline names the
+    record's policy), back to what it rests on, depth first, each entry once: each
     ``{ref, holds, via, from, index}``, ``via`` how it was found from the entry at ``from``,
-    both ``None`` for the policy's. A ref no entry holds closes its branch, ``holds`` and
-    ``index`` ``None``. Empty with no entry at the policy's ref.
+    both ``None`` for the root's. A ref no entry holds closes its branch, ``holds`` and
+    ``index`` ``None``. Empty with no ``root`` or no entry at it.
 
     The walk has two phases. The first follows only what the record names (``rested_on``,
     ``refs``, ``row``, ``cause``). The second then follows, from each entry the first found no
@@ -81,7 +82,7 @@ def lineage_of(
     def find(ref: str) -> dict[str, Any] | None:
         return by_ref.get(ref) or by_ref.get(base_of(ref) or "")
 
-    if policy is None or find(policy) is None:
+    if root is None or find(root) is None:
         return []
     lineage: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -113,7 +114,7 @@ def lineage_of(
                         bare.append(e)
                 stack += [(r, how, key) for r, how in reversed(followed)]
 
-    walk([(policy, None, None)], False)
+    walk([(root, None, None)], False)
     for e in bare:
         walk([(r, "declared", str(e["ref"])) for r, _ in reversed(_declared(e))], True)
     return lineage
@@ -212,11 +213,13 @@ def summary_nearest(o: dict[str, Any]) -> dict[str, Any] | None:
 
 def summary_of(o: dict[str, Any]) -> str:
     """One line of fixed columns, two spaces apart: the record hash's first 12 hex digits,
-    status, decision, root, defect, rounds, nearest bound (the nearest of the lineage's first
-    branch, else of the lineage, else of all) and the design hash's 12 digits."""
+    status, decision (``-`` for a record that names no policy), root, defect, rounds, nearest
+    bound (the nearest of the lineage's first branch, else of the lineage, else of all) and the
+    design hash's 12 digits."""
     d = o["decision"]
     if d is None:
-        decided = "no-decision"
+        # A record that names no policy names no decision to miss.
+        decided = "-" if o["policy"] is None else "no-decision"
     elif d["holds"] == "value":
         decided = "decided " + text_of(d["value"]).replace("  ", " \\u0020")
     else:

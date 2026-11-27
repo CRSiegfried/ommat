@@ -56,7 +56,6 @@ DESIGN = Design(
     state=t.record(text=t.string),
     sources={"a": Source({"q:a/yes": Question("noul", Text("Is it so?"))}, oracle="o")},
     rules={"act": Rule("d:act", t.label("inform"), act, version="1", reads=["q:a/yes"])},
-    policy="d:act",
 )
 LOADED = load(DESIGN)
 YES = {"yes": 0.8, "no": 0.2}
@@ -273,7 +272,7 @@ def old_doc_of(record: Record) -> dict[str, Any]:
     doc = doc_of(record)
     doc["log"] = [i for i in doc["log"] if i["item"] != "context"]
     before_shapes(doc, 7)
-    doc["log"][1].pop("policy")
+    doc["log"][1].pop("policy", None)
     return doc
 
 
@@ -440,7 +439,7 @@ def test_a_format_6_record_may_hold_calibrated_and_a_format_7_one_may_not(place:
     format_7 = with_calibrated(old_doc_of(turn(**PROFILE)), place)
     refused(format_7, f"{verb} calibrated, which a format-7 record does not")
     current = with_calibrated(doc_of(turn(**PROFILE)), place)
-    refused(current, f"{verb} calibrated, which a format-10 record does not")
+    refused(current, f"{verb} calibrated, which a format-11 record does not")
 
 
 def test_a_detail_is_missing_only_when_every_sent_request_lacks_it() -> None:
@@ -619,7 +618,7 @@ def test_a_stored_format_4_record_reads_to_its_own_hash_and_keeps_its_snapshot()
 
 
 def test_a_stored_format_4_design_is_refused_and_its_record_replays_as_wrong_design() -> None:
-    with pytest.raises(InvalidDesign, match="the document's format 4 is not 11"):
+    with pytest.raises(InvalidDesign, match="the document's format 4 is not 12"):
         load((FORMAT_4 / "design.json").read_bytes())
     record = read_record((FORMAT_4 / "record.json").read_bytes())
     assert record.log[0]["hash"] == FORMAT_4_DESIGN
