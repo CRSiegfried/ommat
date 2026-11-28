@@ -133,6 +133,14 @@ def ommat(pupil_classes: list[str]) -> str:
     )
 
 
+def provider() -> str:
+    """A cloud, drawn around the origin: whatever service answers the calls."""
+    outline = (
+        "M-44 36 A28 28 0 0 1 -50 -18 A36 36 0 0 1 16 -36 A27 27 0 0 1 58 -6 A22 22 0 0 1 46 36 Z"
+    )
+    return f'<path d="{outline}" fill="{FILL}" stroke="{GREEN}" stroke-width="2.5"/>'
+
+
 def words(
     x: float,
     y: float,
@@ -295,6 +303,28 @@ def draw(turns: list[Turn]) -> str:
     def to(x: float, y: float) -> str:
         return f"translate({n(x)}px,{n(y)}px)"
 
+    beats: list[float] = []
+
+    def choose(t: float, chosen: list[str]) -> None:
+        """The ommat decides what is asked next: it swells, a ripple leaves it, and the rows
+        of the ``chosen`` questions are ringed for a moment."""
+        beats.append(t)
+        seen = d.track("opacity", "0", [(t, "0.8"), (t + 0.3, "0")], 0.3)
+        grown = d.track("transform", "scale(0.95)", [(t, "scale(1.4)")], 0.6)
+        d.body.append(
+            f'<g class="{seen}" transform="translate({OMMAT[0]},{OMMAT[1]})">'
+            f'<path class="{grown}" d="{blob(OMMAT_R)}" fill="none" stroke="{MAUVE}" '
+            f'stroke-width="2"/></g>'
+        )
+        for row in sorted({row_of[ref] for ref in chosen}):
+            xs = [home[ref][0] for ref in chosen if row_of[ref] == row]
+            d.add(
+                d.shown(t + 0.1, t + 0.7),
+                f'<rect x="{n(min(xs) - 27)}" y="{n(ROW_Y + row * ROW_GAP - 26)}" '
+                f'width="{n(max(xs) - min(xs) + 54)}" height="52" rx="16" fill="none" '
+                f'stroke="{MAUVE}" stroke-width="2"/>',
+            )
+
     # The design, on the left: every question an idia, in a row per source.
     d.add(d.shown(0.3), words(175, 152, f"the design: {len(refs)} questions"))
     for row, name in enumerate(sources):
@@ -364,15 +394,16 @@ def draw(turns: list[Turn]) -> str:
                     for i, ref in enumerate(group)
                 }
                 for i, ref in enumerate(group):
-                    place[ref].append((t + 0.3 + 0.12 * i, to(*slots[ref])))
+                    place[ref].append((t + 0.5 + 0.12 * i, to(*slots[ref])))
+                choose(t, group)
                 # An eye on each question, following it from its row into the call.
                 look(t, *(home[ref] for ref in group))
                 halfway = [
                     ((home[ref][0] + slots[ref][0]) / 2, (home[ref][1] + slots[ref][1]) / 2)
                     for ref in group
                 ]
-                look(t + 0.45, *halfway)
-                look(t + 0.75, *(slots[ref] for ref in group))
+                look(t + 0.65, *halfway)
+                look(t + 0.95, *(slots[ref] for ref in group))
                 for ref in skipped:
                     faded[ref].append((t + 0.3, "0.28"))
                 for row in sorted({row_of[ref] for ref in skipped}):
@@ -386,13 +417,15 @@ def draw(turns: list[Turn]) -> str:
                     f'y2="{n(far[1])}" stroke="{LINE}" stroke-width="2"/>'
                 )
                 scene.append((t + 1.0, wire))
-                look(t + 1.4 * pace, MODEL_AT)
-                d.dot(t + 1.5 * pace, near, far, TEXT)
-                d.dot(t + 2.2 * pace, far, near, GREEN)
+                look(t + 1.4 * pace + 0.3, MODEL_AT)
+                d.dot(t + 1.5 * pace + 0.3, near, far, TEXT)
+                d.dot(t + 2.2 * pace + 0.3, far, near, GREEN)
                 for e in rest[:stop]:
                     if e["item"] == "entry" and e["ref"] in slots and "value" in e:
                         colour = AMBER if e["ref"] in unsure else GREEN
-                        scene.append((t + 2.8 * pace, answer(*slots[e["ref"]], e["value"], colour)))
+                        scene.append(
+                            (t + 2.8 * pace + 0.3, answer(*slots[e["ref"]], e["value"], colour))
+                        )
                 round_ = item["round"]
                 if calls == 1:
                     note = f"round {round_}: the {len(group)} questions that are ready go in one"
@@ -401,10 +434,10 @@ def draw(turns: list[Turn]) -> str:
                     note = f"round {round_}: {len(group)} more questions are asked"
                     if skipped:
                         note += f", and the other {len(skipped)} never are"
-                notes.append((t, t + 3.2 * pace, note))
+                notes.append((t, t + 3.2 * pace + 0.3, note))
                 done.update(skipped)
                 flow += BOX_H + 12
-                t += 3.2 * pace
+                t += 3.2 * pace + 0.3
             elif item["item"] == "entry" and item["ref"] in done:
                 continue
             elif item["item"] == "entry" and item["ref"] in home and "marker" in item:
@@ -418,6 +451,7 @@ def draw(turns: list[Turn]) -> str:
                     skipped.append(items[position]["ref"])
                     position += 1
                 rows = sorted({row_of[ref] for ref in skipped})
+                choose(t, [])
                 look(t, *((HOME_X + HOME_GAP / 2, ROW_Y + row * ROW_GAP) for row in rows))
                 for ref in skipped:
                     faded[ref].append((t + 0.2, "0.28"))
@@ -488,16 +522,29 @@ def draw(turns: list[Turn]) -> str:
             f"{idia(17, colour_of[ref], looks[ref])}</g></g>",
         )
     pupils = [d.track("transform", to(0, 0), turns_of, 0.3) for turns_of in gaze]
+    swell = d.track(
+        "transform",
+        "scale(1)",
+        [change for t in beats for change in ((t, "scale(1.12)"), (t + 0.22, "scale(1)"))],
+        0.22,
+    )
+    lit = d.track(
+        "opacity", "0", [change for t in beats for change in ((t, "1"), (t + 0.9, "0"))], 0.3
+    )
     d.add(
         d.shown(0.2),
-        f'<g transform="translate({OMMAT[0]},{OMMAT[1]})">{ommat(pupils)}</g>'
+        f'<g transform="translate({OMMAT[0]},{OMMAT[1]})"><g class="{swell}">{ommat(pupils)}'
+        f"</g></g>"
         + words(OMMAT[0] + 80, OMMAT[1] - 2, "ommat", MAUVE, 16, "start")
-        + words(OMMAT[0] + 80, OMMAT[1] + 17, "decides what to ask next", DIM, 13, "start"),
+        + words(OMMAT[0] + 80, OMMAT[1] + 17, "decides what to ask next", DIM, 13, "start")
+        + f'<g class="{lit}">'
+        + words(OMMAT[0] + 80, OMMAT[1] + 17, "decides what to ask next", TEXT, 13, "start")
+        + "</g>",
     )
     d.add(
         d.shown(0.4),
-        f'<g transform="translate({MODEL_AT[0]},{MODEL_AT[1]})">{idia(58, GREEN, 4)}</g>'
-        + words(MODEL_AT[0], MODEL_AT[1] + 90, "the model"),
+        f'<g transform="translate({MODEL_AT[0]},{MODEL_AT[1]})">{provider()}</g>'
+        + words(MODEL_AT[0], MODEL_AT[1] + 68, "the model"),
     )
     for start, end, what in notes:
         d.add(d.shown(start + 0.1, end - 0.4), words(W / 2, H - 28, what, TEXT, 19))
